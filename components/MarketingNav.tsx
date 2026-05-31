@@ -1,18 +1,16 @@
 import Link from "next/link";
-import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { WizardWordmark } from "@/components/WizardLogo";
 
 export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/80 backdrop-blur">
       <div className="container flex h-16 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <FileText className="h-4 w-4" />
-          </span>
-          Yup
+        <Link href="/" className="text-lg">
+          <WizardWordmark />
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
+          <Link href="/tools" className="hover:text-foreground">Tools</Link>
           <Link href="/#features" className="hover:text-foreground">Features</Link>
           <Link href="/pricing" className="hover:text-foreground">Pricing</Link>
         </nav>

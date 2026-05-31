@@ -167,7 +167,7 @@ export async function applyAnnotations(
   if (options.watermark) {
     for (const page of pages) {
       const { width, height } = page.getSize();
-      page.drawText("Made with Yup", {
+      page.drawText("Made with PDF Wizard", {
         x: width / 2 - 70,
         y: 16,
         size: 9,

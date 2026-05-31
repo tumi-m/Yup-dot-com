@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FileText, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WizardWordmark } from "@/components/WizardLogo";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
@@ -70,11 +71,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-secondary/40 px-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-sm">
-        <Link href="/" className="mb-6 flex items-center justify-center gap-2 font-bold text-lg">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <FileText className="h-4 w-4" />
-          </span>
-          Yup
+        <Link href="/" className="mb-6 flex justify-center text-lg">
+          <WizardWordmark />
         </Link>
         <h1 className="text-center text-2xl font-bold">
           {isSignup ? "Create your account" : "Welcome back"}
