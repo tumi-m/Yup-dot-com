@@ -1,17 +1,10 @@
 "use client";
 
 import * as pdfjsLib from "pdfjs-dist";
+import { configureWorker } from "./worker";
 
-/**
- * Configure the pdf.js worker. We pin to the exact installed version on the
- * jsDelivr CDN so the worker bundle always matches the API. This keeps the
- * Next.js bundle small and avoids worker-loader configuration.
- */
-let configured = false;
 function ensureWorker() {
-  if (configured) return;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-  configured = true;
+  configureWorker(pdfjsLib);
 }
 
 export interface LoadedPdf {

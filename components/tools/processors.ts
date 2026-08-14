@@ -8,6 +8,9 @@ import {
   pageNumbersTool,
   watermarkTool,
   pdfToTextTool,
+  pdfToMarkdownTool,
+  extractTablesTool,
+  pdfToChunksTool,
   type ToolFile,
 } from "@/lib/pdf/toolkit";
 
@@ -172,6 +175,40 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     minFiles: 1,
     fields: [],
     run: (files) => pdfToTextTool(files),
+  },
+  "pdf-to-markdown": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [],
+    run: (files) => pdfToMarkdownTool(files),
+  },
+  "extract-tables": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    zipName: "tables.zip",
+    fields: [],
+    run: (files) => extractTablesTool(files),
+  },
+  "pdf-to-chunks": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "maxChars",
+        label: "Chunk size (characters)",
+        type: "select",
+        default: "1200",
+        options: [
+          { value: "600", label: "Small — 600" },
+          { value: "1200", label: "Medium — 1200" },
+          { value: "2000", label: "Large — 2000" },
+        ],
+      },
+    ],
+    run: (files, o) => pdfToChunksTool(files, { maxChars: o.maxChars }),
   },
   "page-numbers": {
     accept: "application/pdf",

@@ -2,16 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LoadedPdf } from "@/lib/pdf/render";
-import type { Annotation, AnnotationType } from "@/lib/types";
-import { uuid } from "@/lib/utils";
+import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
+import { DRAG_TOOLS } from "@/lib/editor/types";
+import { createAnnotation, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
+import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
-
-export interface ToolSettings {
-  color: string;
-  fontSize: number;
-  strokeWidth: number;
-  highlightOpacity: number;
-}
 
 export function PageView({
   loaded,
@@ -19,36 +14,47 @@ export function PageView({
   scale,
   tool,
   settings,
-  signatureDataUrl,
+  placementImage,
   annotations,
   selectedId,
+  formFields,
+  formValues,
+  onFormChange,
   onSelect,
   onCreate,
   onChange,
+  onCommitStart,
+  onCommitEnd,
   onDelete,
-  onSignaturePlaced,
+  onPlacementUsed,
+  onRendered,
 }: {
   loaded: LoadedPdf;
-  pageIndex: number; // 0-indexed
+  pageIndex: number;
   scale: number;
-  tool: AnnotationType | "select";
+  tool: ToolId;
   settings: ToolSettings;
-  signatureDataUrl: string | null;
+  /** Data URL waiting to be placed by the image/signature tool. */
+  placementImage: string | null;
   annotations: Annotation[];
   selectedId: string | null;
+  formFields: DetectedField[];
+  formValues: Record<string, string>;
+  onFormChange: (name: string, value: string) => void;
   onSelect: (id: string | null) => void;
   onCreate: (ann: Annotation) => void;
   onChange: (ann: Annotation) => void;
+  onCommitStart: () => void;
+  onCommitEnd: () => void;
   onDelete: (id: string) => void;
-  onSignaturePlaced: () => void;
+  onPlacementUsed: () => void;
+  onRendered?: (size: { width: number; height: number }) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-
-  // in-progress drag (highlight / draw)
-  const draft = useRef<Annotation | null>(null);
-  const [, force] = useState(0);
+  const [draft, setDraft] = useState<Annotation | null>(null);
+  const origin = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,11 +64,13 @@ export function PageView({
       setSize({ w: vp.width, h: vp.height });
       if (canvasRef.current) {
         await loaded.renderPage(pageIndex + 1, canvasRef.current, scale);
+        if (!cancelled) onRendered?.({ width: vp.width, height: vp.height });
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, pageIndex, scale]);
 
   function toPoints(e: React.PointerEvent) {
@@ -73,167 +81,199 @@ export function PageView({
     };
   }
 
-  function onLayerPointerDown(e: React.PointerEvent) {
+  function handlePointerDown(e: React.PointerEvent) {
     if (tool === "select") {
       onSelect(null);
       return;
     }
     const { x, y } = toPoints(e);
 
-    if (tool === "text") {
-      onCreate({
-        id: uuid(),
-        type: "text",
-        page: pageIndex,
-        x,
-        y,
-        width: 160,
-        height: settings.fontSize * 1.6,
-        text: "Type here",
-        fontSize: settings.fontSize,
-        color: settings.color,
-      });
+    // Click-to-place tools.
+    if (!DRAG_TOOLS.includes(tool)) {
+      const dataUrl = placementImage ?? undefined;
+      if ((tool === "image" || tool === "signature") && !dataUrl) return;
+      const ann = createAnnotation(tool, settings, x, y, { dataUrl });
+      if (ann) {
+        onCreate({ ...ann, page: pageIndex });
+        if (tool === "image" || tool === "signature") onPlacementUsed();
+      }
       return;
     }
 
-    if (tool === "signature") {
-      if (!signatureDataUrl) return;
-      onCreate({
-        id: uuid(),
-        type: "signature",
-        page: pageIndex,
-        x,
-        y,
-        width: 160,
-        height: 70,
-        dataUrl: signatureDataUrl,
-      });
-      onSignaturePlaced();
-      return;
-    }
-
-    // highlight + draw start a drag
+    // Drag-to-create tools.
     layerRef.current!.setPointerCapture(e.pointerId);
-    if (tool === "highlight") {
-      draft.current = {
-        id: uuid(),
-        type: "highlight",
-        page: pageIndex,
-        x,
-        y,
-        width: 0,
-        height: 0,
-        color: settings.color,
-        opacity: settings.highlightOpacity,
-      };
-    } else if (tool === "draw") {
-      draft.current = {
-        id: uuid(),
-        type: "draw",
-        page: pageIndex,
-        x,
-        y,
-        width: 1,
-        height: 1,
-        points: [{ x: 0, y: 0 }],
-        color: settings.color,
-        strokeWidth: settings.strokeWidth,
-      };
-    }
-    force((n) => n + 1);
+    origin.current = { x, y };
+    const ann = createAnnotation(tool, settings, x, y);
+    if (ann) setDraft({ ...ann, page: pageIndex });
   }
 
-  function onLayerPointerMove(e: React.PointerEvent) {
-    if (!draft.current) return;
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!draft || !origin.current) return;
     const { x, y } = toPoints(e);
-    const d = draft.current;
-
-    if (d.type === "highlight") {
-      draft.current = {
-        ...d,
-        x: Math.min(d.x, x),
-        y: Math.min(d.y, y),
-        width: Math.abs(x - d.x),
-        height: Math.abs(y - d.y),
-      };
-    } else if (d.type === "draw") {
-      const relX = x - d.x;
-      const relY = y - d.y;
-      const points = [...d.points, { x: relX, y: relY }];
-      const maxX = Math.max(...points.map((p) => p.x), 1);
-      const maxY = Math.max(...points.map((p) => p.y), 1);
-      draft.current = { ...d, points, width: maxX, height: maxY };
-    }
-    force((n) => n + 1);
+    setDraft(resizeDraft(draft, origin.current.x, origin.current.y, x, y));
   }
 
-  function onLayerPointerUp(e: React.PointerEvent) {
+  function handlePointerUp(e: React.PointerEvent) {
     try {
-      layerRef.current!.releasePointerCapture(e.pointerId);
+      layerRef.current?.releasePointerCapture(e.pointerId);
     } catch {
-      /* no-op */
+      /* already released */
     }
-    const d = draft.current;
-    draft.current = null;
-    if (!d) return;
-    // Discard accidental zero-size shapes.
-    if (d.type === "highlight" && (d.width < 3 || d.height < 3)) {
-      force((n) => n + 1);
-      return;
-    }
-    if (d.type === "draw" && d.points.length < 2) {
-      force((n) => n + 1);
-      return;
-    }
-    onCreate(d);
-    force((n) => n + 1);
+    const finished = draft;
+    setDraft(null);
+    origin.current = null;
+    if (finished && isDraftUsable(finished)) onCreate(finished);
   }
 
   const editable = tool === "select";
   const cursor =
-    tool === "select"
-      ? "default"
-      : tool === "text"
-        ? "text"
-        : "crosshair";
+    tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
+
+  const pageFields = formFields.filter((f) => f.page === pageIndex);
 
   return (
     <div className="relative inline-block">
       <canvas ref={canvasRef} className="pdf-page-canvas rounded-sm" />
+
       {size && (
         <div
           ref={layerRef}
           className="annotation-layer"
           style={{ width: size.w, height: size.h, cursor, touchAction: "none" }}
-          onPointerDown={onLayerPointerDown}
-          onPointerMove={onLayerPointerMove}
-          onPointerUp={onLayerPointerUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
+          {/* Existing AcroForm fields, rendered as live inputs. */}
+          {pageFields.map((field) => (
+            <FormFieldOverlay
+              key={field.id}
+              field={field}
+              scale={scale}
+              value={formValues[field.name] ?? field.value}
+              onChange={(v) => onFormChange(field.name, v)}
+            />
+          ))}
+
           {annotations.map((ann) => (
             <AnnotationView
               key={ann.id}
               ann={ann}
               scale={scale}
-              editable={editable}
               selected={selectedId === ann.id}
+              interactive={editable}
               onSelect={() => onSelect(ann.id)}
               onChange={onChange}
+              onCommitStart={onCommitStart}
+              onCommitEnd={onCommitEnd}
               onDelete={() => onDelete(ann.id)}
             />
           ))}
-          {draft.current && (
+
+          {draft && (
             <AnnotationView
-              ann={draft.current}
+              ann={draft}
               scale={scale}
-              editable={false}
               selected={false}
+              interactive={false}
               onSelect={() => {}}
               onChange={() => {}}
+              onCommitStart={() => {}}
+              onCommitEnd={() => {}}
               onDelete={() => {}}
             />
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A live input positioned over an existing form field in the PDF. */
+function FormFieldOverlay({
+  field,
+  scale,
+  value,
+  onChange,
+}: {
+  field: DetectedField;
+  scale: number;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const style: React.CSSProperties = {
+    position: "absolute",
+    left: field.x * scale,
+    top: field.y * scale,
+    width: Math.max(8, field.width * scale),
+    height: Math.max(8, field.height * scale),
+  };
+
+  const shared =
+    "border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
+
+  if (field.readOnly) {
+    return <div style={style} className="pointer-events-none rounded-sm border border-dashed border-muted-foreground/40" />;
+  }
+
+  if (field.kind === "checkbox") {
+    return (
+      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => onChange(value === "true" ? "" : "true")}
+          className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
+        >
+          {value === "true" ? "✓" : ""}
+        </button>
+      </div>
+    );
+  }
+
+  if (field.kind === "radio") {
+    const on = value && field.exportValue === value;
+    return (
+      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => onChange(field.exportValue ?? "")}
+          className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
+        >
+          {on ? "●" : ""}
+        </button>
+      </div>
+    );
+  }
+
+  if (field.kind === "dropdown") {
+    return (
+      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-full w-full rounded-sm px-1 ${shared}`}
+          style={{ fontSize: Math.max(8, field.height * scale * 0.6) }}
+        >
+          <option value="">—</option>
+          {field.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`h-full w-full rounded-sm px-1 ${shared}`}
+        style={{ fontSize: Math.max(8, field.height * scale * 0.55) }}
+      />
     </div>
   );
 }

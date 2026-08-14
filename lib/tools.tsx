@@ -8,12 +8,20 @@ import {
   Hash,
   Stamp,
   FileType2,
+  FileCode2,
+  Table2,
+  Boxes,
   PenLine,
   Signature,
   type LucideIcon,
 } from "lucide-react";
 
-export type ToolCategory = "organize" | "optimize" | "convert" | "edit";
+export type ToolCategory =
+  | "organize"
+  | "optimize"
+  | "convert"
+  | "extract"
+  | "edit";
 
 export interface ToolMeta {
   slug: string;
@@ -28,12 +36,15 @@ export interface ToolMeta {
   tint: string;
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
+  /** Optional ribbon shown on the tool card. */
+  badge?: string;
 }
 
 export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   organize: "Organize",
   optimize: "Optimize",
   convert: "Convert",
+  extract: "Extract & Parse",
   edit: "Edit & Sign",
 };
 
@@ -101,12 +112,45 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-text",
     name: "PDF to Text",
-    title: "PDF to Text — extract text from a PDF",
+    title: "PDF to Text — extract text in reading order",
     description:
-      "Pull all selectable text out of a PDF into a clean .txt file in seconds.",
+      "Pull text out of a PDF with layout-aware reading order, so multi-column pages come out correctly.",
     icon: FileType2,
-    category: "convert",
+    category: "extract",
     tint: "bg-sky-100 text-sky-700",
+  },
+  {
+    slug: "pdf-to-markdown",
+    name: "PDF to Markdown",
+    title: "PDF to Markdown — layout-aware conversion",
+    description:
+      "Convert a PDF to clean Markdown, preserving headings, lists, and tables with correct reading order.",
+    icon: FileCode2,
+    category: "extract",
+    tint: "bg-blue-100 text-blue-700",
+    badge: "New",
+  },
+  {
+    slug: "extract-tables",
+    name: "Extract Tables",
+    title: "Extract Tables from PDF to CSV",
+    description:
+      "Detect tables by their column structure and export each one as a ready-to-open CSV file.",
+    icon: Table2,
+    category: "extract",
+    tint: "bg-lime-100 text-lime-700",
+    badge: "New",
+  },
+  {
+    slug: "pdf-to-chunks",
+    name: "PDF to RAG Chunks",
+    title: "PDF to RAG Chunks — JSON for AI pipelines",
+    description:
+      "Split a PDF into retrieval-sized chunks that carry their heading breadcrumbs, ready for embedding.",
+    icon: Boxes,
+    category: "extract",
+    tint: "bg-teal-100 text-teal-700",
+    badge: "New",
   },
   {
     slug: "page-numbers",

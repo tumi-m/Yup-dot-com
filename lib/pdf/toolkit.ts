@@ -1,5 +1,13 @@
 import { PDFDocument, rgb, degrees, StandardFonts } from "pdf-lib";
 import { loadForRender } from "./render";
+import {
+  parseDocument,
+  toMarkdown,
+  toPlainText,
+  toChunks,
+  extractTables,
+  tableToCsv,
+} from "./parse";
 
 /** A processed result ready to hand to the browser for download. */
 export interface ToolFile {
@@ -271,27 +279,65 @@ export async function watermarkTool(
 }
 
 // ---------------------------------------------------------------------------
-// PDF -> text
+// Layout-aware extraction (see lib/pdf/parse.ts)
 // ---------------------------------------------------------------------------
+
+/** PDF -> text, in correct reading order (handles multi-column layouts). */
 export async function pdfToTextTool(files: File[]): Promise<ToolFile> {
-  const bytes = await buf(files[0]);
-  // Use the same pdfjs document, reaching for the text layer.
-  const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-  const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-  let text = "";
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const strings = content.items.map((it) =>
-      "str" in it ? (it as { str: string }).str : ""
-    );
-    text += strings.join(" ") + "\n\n";
-  }
-  doc.destroy();
+  const doc = await parseDocument(await buf(files[0]));
   const base = files[0].name.replace(/\.pdf$/i, "");
   return {
-    blob: new Blob([text], { type: "text/plain" }),
+    blob: new Blob([toPlainText(doc)], { type: "text/plain" }),
     filename: `${base}.txt`,
+  };
+}
+
+/** PDF -> Markdown, preserving headings, lists, and tables. */
+export async function pdfToMarkdownTool(files: File[]): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]));
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return {
+    blob: new Blob([toMarkdown(doc)], { type: "text/markdown" }),
+    filename: `${base}.md`,
+  };
+}
+
+/** Detect tables and export each as CSV. */
+export async function extractTablesTool(files: File[]): Promise<ToolFile[]> {
+  const doc = await parseDocument(await buf(files[0]));
+  const tables = extractTables(doc);
+  if (!tables.length) {
+    throw new Error(
+      doc.likelyScanned
+        ? "No text found — this looks like a scanned PDF, which needs OCR."
+        : "No tables detected in this document."
+    );
+  }
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return tables.map((table, i) => ({
+    blob: new Blob([tableToCsv(table)], { type: "text/csv" }),
+    filename: `${base}-table-${i + 1}-p${table.page}.csv`,
+  }));
+}
+
+/** Split into retrieval-sized chunks with heading breadcrumbs, for RAG. */
+export async function pdfToChunksTool(
+  files: File[],
+  opts: { maxChars: string }
+): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]));
+  const chunks = toChunks(doc, Number(opts.maxChars) || 1200);
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  const payload = {
+    source: files[0].name,
+    pageCount: doc.pageCount,
+    chunkCount: chunks.length,
+    chunks,
+  };
+  return {
+    blob: new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    }),
+    filename: `${base}-chunks.json`,
   };
 }

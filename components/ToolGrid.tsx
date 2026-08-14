@@ -2,7 +2,13 @@ import Link from "next/link";
 import { TOOLS, CATEGORY_LABELS, type ToolCategory } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 
-const ORDER: ToolCategory[] = ["organize", "optimize", "convert", "edit"];
+const ORDER: ToolCategory[] = [
+  "organize",
+  "optimize",
+  "convert",
+  "extract",
+  "edit",
+];
 
 export function ToolGrid({ compact = false }: { compact?: boolean }) {
   return (
@@ -33,8 +39,13 @@ export function ToolGrid({ compact = false }: { compact?: boolean }) {
                     <tool.icon className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-semibold group-hover:text-primary">
+                    <h3 className="flex items-center gap-2 font-semibold group-hover:text-primary">
                       {tool.name}
+                      {tool.badge && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                          {tool.badge}
+                        </span>
+                      )}
                     </h3>
                     <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                       {tool.description}

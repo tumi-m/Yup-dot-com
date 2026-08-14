@@ -7,10 +7,12 @@ import {
   Combine,
   Minimize2,
   Signature,
+  Braces,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarketingNav } from "@/components/MarketingNav";
 import { ToolGrid } from "@/components/ToolGrid";
+import { TOOLS } from "@/lib/tools";
 import { WizardHat } from "@/components/WizardLogo";
 import { createClient } from "@/lib/supabase/server";
 
@@ -43,7 +45,12 @@ const HIGHLIGHTS = [
   {
     icon: Wand2,
     title: "A real editor",
-    body: "Add text, highlights, and freehand drawings, then rearrange pages at will.",
+    body: "Whiteout, shapes, arrows, sticky notes, links, and form fields — then rearrange pages at will.",
+  },
+  {
+    icon: Braces,
+    title: "Layout-aware parsing",
+    body: "Extract to Markdown, CSV, or RAG chunks with headings, tables, and reading order preserved.",
   },
 ];
 
@@ -64,7 +71,8 @@ export default async function HomePage() {
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-primary/10 via-background to-background" />
           <div className="container relative flex flex-col items-center py-24 text-center">
             <span className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-border bg-accent px-4 py-1.5 text-xs font-medium text-accent-foreground animate-fade-in">
-              <WizardHat className="h-3.5 w-3.5" /> 11 PDF spells, zero downloads
+              <WizardHat className="h-3.5 w-3.5" /> {TOOLS.length} PDF spells, zero
+              downloads
             </span>
             <h1 className="max-w-3xl text-balance text-5xl font-bold tracking-tight sm:text-6xl animate-fade-in">
               Cast spells on your{" "}

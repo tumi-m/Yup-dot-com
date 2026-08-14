@@ -23,25 +23,82 @@ work with or without an account.
 | **Compress PDF** | Shrink file size by recompressing pages. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
-| **PDF → Text** | Extract all selectable text to a `.txt` file. |
+| **PDF → Text** | Extract text in true reading order (multi-column aware). |
+| **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
+| **Extract Tables** | Detect tables by column structure, export each as CSV. |
+| **PDF → RAG Chunks** | Retrieval-sized JSON chunks with heading breadcrumbs. |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
-| **Edit PDF** | Full editor: text, highlights, drawings, page ops. |
-| **Fill & Sign** | Fill forms and place a drawn signature. |
+| **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
+| **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
 Each tool has its own SEO-optimised, statically-generated page at
 `/tools/<slug>` and is registered in [`lib/tools.tsx`](lib/tools.tsx).
 
 ---
 
+## Layout-aware parsing
+
+The 2026 generation of PDF parsers (IBM's **Docling**, **Marker**, **MinerU**)
+share one insight: naive extraction concatenates text in stream order, which
+scrambles multi-column pages and destroys tables. What downstream LLM/RAG
+pipelines actually need is a *document tree* — reading order, heading hierarchy,
+paragraphs, lists, and table structure.
+
+Those tools are GPU/Python vision models. [`lib/pdf/parse.ts`](lib/pdf/parse.ts)
+implements the same core idea using pure geometry, entirely in the browser —
+every pdf.js text item carries a position, size, and font, which is enough to
+rebuild structure:
+
+1. **Spans → lines** — cluster glyph runs sharing a baseline.
+2. **Column detection** — find the vertical gutter from a span-occupancy
+   histogram *before* line grouping (columns usually share baselines, so
+   grouping first would fuse them), then read left column fully before right.
+3. **Heading hierarchy** — classify by font size relative to the weighted median
+   body size, plus short bold lines.
+4. **Paragraphs & lists** — group by line gap and indentation; detect bullet and
+   ordered markers.
+5. **Tables** — split lines into cells at wide horizontal gaps, then group
+   consecutive rows whose cell x-positions align.
+
+Serializers emit Markdown, plain text, per-table CSV, and RAG chunks that carry
+their heading breadcrumb (`Report > Q3 > Revenue`) so each chunk stays
+semantically self-contained.
+
+**Honest limits:** this is a deterministic heuristic parser, not a vision model.
+It is strong on digital PDFs and does **not** do OCR — scanned documents are
+detected and reported rather than silently returning nothing.
+
 ## Editor
 
 The editor renders each page to a canvas with **pdf.js**, then overlays an
-annotation layer. Annotations are stored in **PDF points with a top-left
-origin** so they're zoom-independent. On export, `pdf-lib` flattens them into
-the document (text, highlights, freehand strokes, signature images). Structural
-operations (rotate, delete, reorder, merge) bake current annotations first, then
-transform the bytes and re-render.
+annotation layer. Annotations are stored in **PDF points with a top-left origin**
+so they're zoom-independent; the y-axis is flipped once, at bake time.
+
+Cloned from PDFescape and extended: **whiteout**, rectangles, ellipses, lines,
+arrows, highlight/underline/strikeout, sticky notes, images, signatures,
+**links**, and **form field creation** (text, checkbox, radio, dropdown).
+Links become real clickable link annotations and form fields become real
+AcroForm fields, so both stay interactive in the exported PDF. Existing forms in
+an uploaded PDF are detected and overlaid with live inputs for filling.
+
+Usability work: **undo/redo** (one entry per gesture, not per frame), resize
+handles on every annotation, a **thumbnail sidebar** with drag-to-reorder and
+per-page rotate/insert/delete, a contextual **properties panel**, keyboard
+shortcuts, and toasts. Structural operations bake current annotations first,
+then transform the bytes and re-render.
+
+## Tests
+
+```bash
+npm test
+```
+
+Four end-to-end suites run the real pipeline against generated PDFs — structure
+extraction, multi-column reading order, baking every annotation type, and the
+form detect/fill/flatten round-trip. They caught two genuine bugs during
+development (column detection defeated by shared baselines, and text form fields
+silently created with no widget).
 
 ---
 
@@ -82,16 +139,28 @@ pdf-wizard/
 │   │   ├── ToolWorkbench.tsx     ← Dropzone + options + run + download
 │   │   ├── EditorLaunch.tsx      ← Uploads a PDF into the editor
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
-│   ├── editor/                   ← PdfEditor, PageView, AnnotationView, SignaturePad
+│   ├── editor/
+│   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
+│   │   ├── Toolbar.tsx           ← Tool palette + contextual style controls
+│   │   ├── PageView.tsx          ← Page render, creation gestures, form overlays
+│   │   ├── AnnotationView.tsx    ← Draw/drag/resize a single annotation
+│   │   ├── ThumbnailSidebar.tsx  ← Page navigator, drag-reorder, page ops
+│   │   ├── PropertiesPanel.tsx   ← Contextual property editor
+│   │   └── SignaturePad.tsx      ← Draw-your-signature modal
 │   ├── ToolGrid.tsx, WizardLogo.tsx
-│   └── ui/                       ← Button, Input, Dialog
+│   └── ui/                       ← Button, Input, Dialog, Toast
 ├── lib/
+│   ├── pdf/parse.ts              ← Layout-aware parsing + serializers
 │   ├── pdf/toolkit.ts            ← All tool processing (merge/split/compress/…)
-│   ├── pdf/operations.ts         ← pdf-lib page ops + annotation baking
-│   ├── pdf/render.ts             ← pdf.js render helper
+│   ├── pdf/bake.ts               ← Flatten annotations, links, form fields
+│   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
+│   ├── pdf/operations.ts         ← pdf-lib page ops
+│   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
+│   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
 │   ├── supabase/                 ← browser · server · middleware clients
 │   ├── stripe.ts, plans.ts, types.ts
+├── tests/                        ← End-to-end pipeline tests (npm test)
 └── supabase/schema.sql           ← Tables, RLS, storage bucket + policies
 ```
 
@@ -128,10 +197,11 @@ lucide-react
   `next.config.ts`.
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
-- The `pdf.js` worker is loaded from a version-pinned CDN. If your deployment
-  blocks outbound CDN requests, self-host the worker in `/public` instead.
+- The `pdf.js` worker is loaded from a version-pinned CDN by default. Behind a
+  strict CSP, self-host it and set `NEXT_PUBLIC_PDFJS_WORKER_SRC`
+  (e.g. `/pdf.worker.min.mjs`).
 - **Roadmap (needs server-side infra):** Office conversions (PDF↔Word/Excel/PPT),
-  OCR, password protect/unlock, and AI summarise/chat.
+  OCR for scanned documents, password protect/unlock, and AI summarise/chat.
 
 ## Deploy
 
