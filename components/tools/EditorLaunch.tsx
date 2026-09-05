@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { UploadCloud, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { tryCreateClient, NOT_CONFIGURED_MESSAGE } from "@/lib/supabase/client";
 import { getPageCount } from "@/lib/pdf/operations";
 import { uuid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,9 @@ import { Button } from "@/components/ui/button";
  */
 export function EditorLaunch() {
   const router = useRouter();
-  const supabase = createClient();
+  // Null when this deployment has no Supabase credentials — the page must still
+  // render, since every other tool works without an account.
+  const supabase = tryCreateClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,10 @@ export function EditorLaunch() {
     const file = files?.[0];
     if (!file) return;
     setError(null);
+    if (!supabase) {
+      setError(NOT_CONFIGURED_MESSAGE);
+      return;
+    }
     setBusy(true);
     try {
       const {

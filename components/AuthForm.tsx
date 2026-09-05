@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import {
+  createClient,
+  isSupabaseConfigured,
+  NOT_CONFIGURED_MESSAGE,
+} from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
@@ -81,6 +85,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           {isSignup ? "Start editing PDFs for free." : "Log in to your account."}
         </p>
 
+        {!isSupabaseConfigured() && (
+          <p className="mt-6 rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900">
+            {NOT_CONFIGURED_MESSAGE}{" "}
+            <Link href="/tools" className="font-medium underline">
+              Browse the tools
+            </Link>
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {isSignup && (
             <Input
@@ -120,7 +133,11 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             </p>
           )}
 
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || !isSupabaseConfigured()}
+          >
             {loading && <Loader2 className="animate-spin" />}
             {isSignup ? "Sign up" : "Log in"}
           </Button>

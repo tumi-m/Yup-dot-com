@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
+import { siteUrl } from "@/lib/site";
 import { TOOLS } from "@/lib/tools";
 
-const base = process.env.NEXT_PUBLIC_SITE_URL ?? "https://pdfwizard.app";
+const base = siteUrl();
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const staticRoutes = ["", "/tools", "/pricing", "/login", "/signup"].map(

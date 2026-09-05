@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { siteUrl } from "@/lib/site";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://pdfwizard.app"),
+  metadataBase: new URL(siteUrl()),
   title: {
     default: "PDF Wizard — cast spells on your PDFs",
     template: "%s | PDF Wizard",

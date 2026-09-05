@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { MarketingNav } from "@/components/MarketingNav";
 import { ToolGrid } from "@/components/ToolGrid";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "All PDF Tools — PDF Wizard",
@@ -11,10 +11,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ToolsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   return (
     <div className="flex min-h-screen flex-col">

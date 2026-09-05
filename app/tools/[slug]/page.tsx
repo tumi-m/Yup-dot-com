@@ -6,7 +6,7 @@ import { MarketingNav } from "@/components/MarketingNav";
 import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
 import { EditorLaunch } from "@/components/tools/EditorLaunch";
 import { TOOLS, getTool } from "@/lib/tools";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
 export function generateStaticParams() {
@@ -38,10 +38,7 @@ export default async function ToolPage({
   const tool = getTool(slug);
   if (!tool) notFound();
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   return (
     <div className="flex min-h-screen flex-col">

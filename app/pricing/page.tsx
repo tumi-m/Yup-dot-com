@@ -1,16 +1,13 @@
 import { Suspense } from "react";
 import { MarketingNav } from "@/components/MarketingNav";
 import { PricingCards } from "@/components/PricingCards";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 
 export const dynamic = "force-dynamic";
 
 export default async function PricingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   const profile = user ? await getProfile() : null;
 
   return (

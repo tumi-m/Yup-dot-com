@@ -203,7 +203,37 @@ lucide-react
 - **Roadmap (needs server-side infra):** Office conversions (PDF↔Word/Excel/PPT),
   OCR for scanned documents, password protect/unlock, and AI summarise/chat.
 
-## Deploy
+## Deploy to Vercel
 
-Deploys cleanly to Vercel. Add the env vars from `.env.example` and point your
-Stripe webhook at the deployed URL.
+**The app deploys and runs with zero environment variables.** Import the repo
+into Vercel and hit Deploy — the marketing site and all 12 browser-only tools
+work immediately, because they never touch a backend.
+
+Accounts, the cloud document library, the editor, and billing are gated behind
+configuration and degrade cleanly when it is absent: protected routes redirect
+to `/login`, which explains what is missing, and the billing API returns `503`
+rather than crashing.
+
+To enable the full product, add these in **Project → Settings → Environment
+Variables** and redeploy:
+
+| Variable | Needed for |
+| -------- | ---------- |
+| `NEXT_PUBLIC_SUPABASE_URL` | accounts, dashboard, editor |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor |
+| `SUPABASE_SERVICE_ROLE_KEY` | Stripe webhook (plan sync) |
+| `STRIPE_SECRET_KEY` | checkout & billing portal |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
+| `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
+
+Optional:
+
+- `NEXT_PUBLIC_SITE_URL` — canonical URL for metadata, `sitemap.xml`, and
+  Stripe redirects. Falls back to Vercel's deployment URL automatically, so it
+  is only needed for a custom domain.
+- `NEXT_PUBLIC_PDFJS_WORKER_SRC` — self-hosted pdf.js worker path for
+  CSP-restricted deployments.
+
+Then run [`supabase/schema.sql`](supabase/schema.sql) in your Supabase project
+and point a Stripe webhook at `https://<your-domain>/api/stripe/webhook`
+subscribed to `customer.subscription.*`.

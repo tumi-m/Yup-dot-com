@@ -8,13 +8,14 @@ import type { PlanId } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const stripe = getStripe();
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const signature = request.headers.get("stripe-signature");
 
-  if (!secret || !signature) {
+  if (!secret || !signature || !process.env.STRIPE_SECRET_KEY) {
     return NextResponse.json({ error: "Webhook not configured." }, { status: 400 });
   }
+
+  const stripe = getStripe();
 
   const payload = await request.text();
   let event: Stripe.Event;

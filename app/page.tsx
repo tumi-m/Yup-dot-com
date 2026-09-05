@@ -14,7 +14,7 @@ import { MarketingNav } from "@/components/MarketingNav";
 import { ToolGrid } from "@/components/ToolGrid";
 import { TOOLS } from "@/lib/tools";
 import { WizardHat } from "@/components/WizardLogo";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 const HIGHLIGHTS = [
   {
@@ -55,10 +55,7 @@ const HIGHLIGHTS = [
 ];
 
 export default async function HomePage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   return (
     <div className="flex min-h-screen flex-col">

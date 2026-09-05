@@ -1,11 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { Profile } from "@/lib/types";
 
 /**
  * Returns the current user's profile row, creating one on first access.
- * Returns null if there is no authenticated user.
+ * Returns null when there is no authenticated user, or when Supabase has not
+ * been configured for this deployment.
  */
 export async function getProfile(): Promise<Profile | null> {
+  if (!isSupabaseConfigured()) return null;
+
   const supabase = await createClient();
   const {
     data: { user },

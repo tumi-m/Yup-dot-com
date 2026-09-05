@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
+import { siteUrl } from "@/lib/site";
 
-const base = process.env.NEXT_PUBLIC_SITE_URL ?? "https://pdfwizard.app";
+const base = siteUrl();
 
 export default function robots(): MetadataRoute.Robots {
   return {

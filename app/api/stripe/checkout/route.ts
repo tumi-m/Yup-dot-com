@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { siteUrl } from "@/lib/site";
 import { getStripe, priceIdForPlan } from "@/lib/stripe";
 
 const bodySchema = z.object({ plan: z.enum(["pro", "team"]) });
 
 export async function POST(request: Request) {
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Billing is unavailable: this deployment has no Supabase credentials." },
+      { status: 503 }
+    );
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -28,8 +37,7 @@ export async function POST(request: Request) {
   }
 
   const stripe = getStripe();
-  const origin =
-    request.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const origin = request.headers.get("origin") ?? siteUrl();
 
   // Reuse the customer id from the profile, or create one.
   const { data: profile } = await supabase

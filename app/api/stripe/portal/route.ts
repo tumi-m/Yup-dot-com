@@ -1,8 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { siteUrl } from "@/lib/site";
 import { getStripe } from "@/lib/stripe";
 
 export async function POST(request: Request) {
+  if (!isSupabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Billing is unavailable: this deployment has no Supabase credentials." },
+      { status: 503 }
+    );
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -25,8 +34,7 @@ export async function POST(request: Request) {
   }
 
   const stripe = getStripe();
-  const origin =
-    request.headers.get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const origin = request.headers.get("origin") ?? siteUrl();
 
   const session = await stripe.billingPortal.sessions.create({
     customer: profile.stripe_customer_id,
