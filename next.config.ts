@@ -19,15 +19,6 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
-  // pdfjs-dist ships a `canvas` optional dependency meant for Node; we render
-  // in the browser so we stub it out to keep the bundle clean.
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      canvas: false,
-    };
-    return config;
-  },
 };
 
 export default nextConfig;
