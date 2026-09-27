@@ -6,6 +6,8 @@ import { Check, Loader2 } from "lucide-react";
 import { PLAN_LIST } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
+import { Stagger, StaggerItem } from "@/components/motion/primitives";
 import type { PlanId } from "@/lib/types";
 
 export function PricingCards({
@@ -52,19 +54,31 @@ export function PricingCards({
           {error}
         </p>
       )}
-      <div className="grid gap-6 md:grid-cols-3">
+      <Stagger immediate className="grid items-stretch gap-6 md:grid-cols-3">
         {PLAN_LIST.map((plan) => {
           const isCurrent = currentPlan === plan.id;
           return (
-            <div
+            <StaggerItem
               key={plan.id}
+              whileHover={{ y: -6 }}
+              transition={{ type: "spring", stiffness: 380, damping: 28 }}
               className={cn(
-                "flex flex-col rounded-2xl border bg-card p-8",
+                "relative flex flex-col rounded-3xl border bg-card p-8",
                 plan.highlighted
-                  ? "border-primary shadow-lg ring-1 ring-primary"
-                  : "border-border"
+                  ? "border-transparent shadow-2xl shadow-primary/20 md:-my-3 md:py-11"
+                  : "border-border hover:shadow-lg"
               )}
             >
+              {plan.highlighted && (
+                // Slowly rotating gradient ring around the recommended plan.
+                <span aria-hidden className="pointer-events-none absolute -inset-px overflow-hidden rounded-3xl p-px [mask:linear-gradient(#000_0_0)_content-box_exclude,linear-gradient(#000_0_0)]">
+                  <motion.span
+                    className="absolute inset-[-50%] bg-[conic-gradient(from_0deg,hsl(var(--primary)),#e879f9,#fbbf24,hsl(var(--primary)))]"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                  />
+                </span>
+              )}
               {plan.highlighted && (
                 <span className="mb-3 self-start rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">
                   Most popular
@@ -101,10 +115,10 @@ export function PricingCards({
                     ? "Get started"
                     : `Upgrade to ${plan.name}`}
               </Button>
-            </div>
+            </StaggerItem>
           );
         })}
-      </div>
+      </Stagger>
     </div>
   );
 }

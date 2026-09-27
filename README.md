@@ -3,7 +3,7 @@
 > Cast spells on your PDFs. Merge, split, compress, convert, edit, and sign
 > documents right in your browser — free, fast, and private.
 
-**PDF Wizard** is a full-stack PDF toolkit + editor SaaS built with Next.js 15,
+**PDF Wizard** is a full-stack PDF toolkit + editor SaaS built with Next.js 16,
 Supabase, Stripe, and a fully client-side PDF engine (`pdf-lib` + `pdf.js`). It
 combines a grid of focused, instant tools (the model that drives the traffic of
 sites like iLovePDF and Smallpdf) with a full editor and a freemium SaaS layer.
@@ -20,13 +20,19 @@ work with or without an account.
 | **Merge PDF** | Combine multiple PDFs into one (drag to reorder). |
 | **Split PDF** | Extract page ranges, or split every page into its own file. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
-| **Compress PDF** | Shrink file size by recompressing pages. |
+| **Compress PDF** | Shrink file size by recompressing pages (never returns a bigger file). |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
+| **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
+| **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
 | **PDF → Text** | Extract text in true reading order (multi-column aware). |
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
 | **Extract Tables** | Detect tables by column structure, export each as CSV. |
 | **PDF → RAG Chunks** | Retrieval-sized JSON chunks with heading breadcrumbs. |
+| **OCR PDF** | Make scans searchable (invisible text layer) or extract text. 7 languages, on-device. |
+| **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Signed-in users; needs an API key.* |
+| **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
+| **Unlock PDF** | Remove a password you know. |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
@@ -69,6 +75,54 @@ semantically self-contained.
 It is strong on digital PDFs and does **not** do OCR — scanned documents are
 detected and reported rather than silently returning nothing.
 
+## OCR, security, and Office conversion
+
+- **OCR** — pages are rendered with pdf.js and recognised by Tesseract
+  (WebAssembly) on the user's device. The searchable-PDF output lays an
+  invisible text layer (render mode 3) exactly over each scanned word, scaled
+  horizontally to match, so selection and search line up with the image —
+  the same technique as Acrobat's *Recognize Text*.
+- **Protect / Unlock** — upstream pdf-lib cannot write encrypted PDFs, so
+  `lib/pdf/security.ts` isolates the `@cantoo/pdf-lib` fork, which adds the
+  standard security handler.
+- **Word / Excel** — built on the layout-aware parser, so headings map to real
+  Word heading styles and tables to real tables. The `.xlsx` is written
+  directly as SpreadsheetML over JSZip instead of pulling in a ~1 MB library.
+  These target editable *content*, not a pixel-perfect copy of the layout.
+
+## Self-hosted runtime assets
+
+`scripts/copy-vendor.mjs` runs before `dev` and `build` and copies the pdf.js
+worker, the Tesseract engine, and all seven OCR language models from
+`node_modules` into `public/vendor/` under **version-stamped paths**. They are
+served from the app's own origin with `immutable` caching. So:
+
+- the tools keep working behind firewalls, strict CSPs, and CDN outages;
+- the browser tools make **zero third-party requests**;
+- an upgrade can never pair a new pdf.js API with a stale cached worker
+  (pdf.js refuses to run on a mismatch).
+
+`public/vendor` is generated and git-ignored.
+
+## AI Assistant
+
+`/tools/chat-with-pdf` parses the PDF in the browser and sends only its
+page-tagged text to `POST /api/ai/chat`, which streams the answer back as
+NDJSON. The document is placed first behind a prompt-cache breakpoint, so
+follow-up questions reuse it instead of paying for it again. Guard rails:
+signed-in users only, a per-user hourly limit, a clear error for documents too
+long to answer from (never silent truncation), and server-side refusal
+fallbacks. Returns `503` until `ANTHROPIC_API_KEY` is set.
+
+## Motion design
+
+`components/motion/primitives.tsx` holds a small shared vocabulary — one
+easing curve, reveal-on-scroll, stagger, word-by-word headlines, spotlight
+cards, count-ups, and a sparkle burst — all wrapped in `MotionConfig
+reducedMotion="user"`, so visitors who ask their OS for less motion get it.
+The landing hero (floating hat, orbiting tools, cursor parallax, cycling
+before/after examples) lives in `components/landing/`.
+
 ## Editor
 
 The editor renders each page to a canvas with **pdf.js**, then overlays an
@@ -94,13 +148,18 @@ then transform the bytes and re-render.
 npm test
 ```
 
-Four end-to-end suites run the real pipeline against generated PDFs — structure
-extraction, multi-column reading order, baking every annotation type, and the
-form detect/fill/flatten round-trip. They caught two genuine bugs during
-development (column detection defeated by shared baselines, and text form fields
-silently created with no widget).
+Eight end-to-end suites run the real pipeline against generated PDFs:
+structure extraction, multi-column reading order, table-vs-gutter
+disambiguation, baking every annotation type, the form detect/fill/flatten
+round-trip, protect/unlock (verified by pdf.js as an independent reader), the
+OCR text layer, and Word/Excel output (verified with python-docx and
+openpyxl). Every tool has also been driven through the real UI in Chromium,
+with outputs checked by independent readers.
 
----
+Bugs these caught before shipping include: column detection defeated by
+shared baselines; text form fields created with no widget; table columns
+mistaken for a page gutter; and every pdf.js tool failing when the CDN was
+unreachable (which led to self-hosting).
 
 ## SaaS layer
 
@@ -187,7 +246,7 @@ npm install
 
 ## Tech stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Supabase
+Next.js 16 (App Router) · React 19.3 · TypeScript · Tailwind CSS · Supabase
 (Auth + Postgres + Storage) · Stripe · pdf-lib · pdf.js · JSZip · Radix UI ·
 lucide-react
 
@@ -197,16 +256,14 @@ lucide-react
   `next.config.ts`.
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
-- The `pdf.js` worker is loaded from a version-pinned CDN by default. Behind a
-  strict CSP, self-host it and set `NEXT_PUBLIC_PDFJS_WORKER_SRC`
-  (e.g. `/pdf.worker.min.mjs`).
-- **Roadmap (needs server-side infra):** Office conversions (PDF↔Word/Excel/PPT),
-  OCR for scanned documents, password protect/unlock, and AI summarise/chat.
+- **Roadmap:** saved signatures, version history, and team workspaces
+  (listed as *coming soon* on the pricing page); Office → PDF conversion,
+  which needs a server-side renderer such as LibreOffice.
 
 ## Deploy to Vercel
 
 **The app deploys and runs with zero environment variables.** Import the repo
-into Vercel and hit Deploy — the marketing site and all 12 browser-only tools
+into Vercel and hit Deploy — the marketing site and every browser-only tool
 work immediately, because they never touch a backend.
 
 Accounts, the cloud document library, the editor, and billing are gated behind
@@ -225,6 +282,7 @@ Variables** and redeploy:
 | `STRIPE_SECRET_KEY` | checkout & billing portal |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
 | `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
+| `ANTHROPIC_API_KEY` | AI Assistant (Chat with PDF) |
 
 Optional:
 

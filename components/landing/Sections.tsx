@@ -137,7 +137,7 @@ export function Stats() {
   const items = [
     { value: TOOLS.length, suffix: "", label: "PDF tools" },
     { value: OCR_LANGUAGES.length, suffix: "", label: "OCR languages" },
-    { value: 0, suffix: " bytes", label: "uploaded by the tools" },
+    { value: 0, suffix: "", label: "files uploaded to process them" },
     { value: 100, suffix: "%", label: "processed in your browser" },
   ];
   return (

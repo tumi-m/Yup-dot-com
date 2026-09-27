@@ -15,6 +15,11 @@ import { createClient } from "@/lib/supabase/client";
 import { getPageCount } from "@/lib/pdf/operations";
 import { formatBytes, formatDate, uuid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { AnimatePresence, motion } from "motion/react";
+import { getTool } from "@/lib/tools";
+import { cn } from "@/lib/utils";
+
+const QUICK = ["merge-pdf", "compress-pdf", "pdf-to-word", "ocr-pdf", "protect-pdf", "chat-with-pdf", "split-pdf", "pdf-to-excel"];
 import type { DocumentRecord, PlanId } from "@/lib/types";
 
 export function DashboardClient({
@@ -161,11 +166,18 @@ export function DashboardClient({
           <p className="text-sm">Upload a PDF to get started</p>
         </button>
       ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {docs.map((doc) => (
-            <div
+        <motion.div layout className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <AnimatePresence mode="popLayout" initial={true}>
+          {docs.map((doc, i) => (
+            <motion.div
               key={doc.id}
-              className="group flex flex-col rounded-2xl border border-border bg-card p-5 transition-shadow hover:shadow-md"
+              layout
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+              transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay: Math.min(i, 8) * 0.04 }}
+              whileHover={{ y: -4 }}
+              className="group flex flex-col rounded-2xl border border-border bg-card p-5 transition-shadow hover:shadow-lg"
             >
               <div className="flex h-28 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
                 <FileText className="h-10 w-10" />
@@ -195,10 +207,39 @@ export function DashboardClient({
                   <Trash2 />
                 </Button>
               </div>
-            </div>
+            </motion.div>
           ))}
-        </div>
+          </AnimatePresence>
+        </motion.div>
       )}
+
+      <section className="mt-14">
+        <h2 className="mb-4 text-lg font-semibold">Quick spells</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {QUICK.map((slug, i) => {
+            const tool = getTool(slug);
+            if (!tool) return null;
+            return (
+              <motion.div
+                key={slug}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 + i * 0.05 }}
+              >
+                <Link
+                  href={`/tools/${slug}`}
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                >
+                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg", tool.tint)}>
+                    <tool.icon className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-medium">{tool.name}</span>
+                </Link>
+              </motion.div>
+            );
+          })}
+        </div>
+      </section>
     </main>
   );
 }

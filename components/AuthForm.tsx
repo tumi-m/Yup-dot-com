@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
+import { motion } from "motion/react";
+import { Aurora, Starfield } from "@/components/landing/HeroScene";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
@@ -73,8 +75,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-secondary/40 px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-primary/10 via-background to-background px-4">
+      <Aurora />
+      <Starfield />
+      <motion.div
+        initial={{ opacity: 0, y: 24, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        className="relative w-full max-w-sm rounded-3xl border border-border bg-card/90 p-8 shadow-2xl shadow-primary/10 backdrop-blur-xl"
+      >
         <Link href="/" className="mb-6 flex justify-center text-lg">
           <WizardWordmark />
         </Link>
@@ -152,7 +161,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             {isSignup ? "Log in" : "Sign up"}
           </Link>
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }
