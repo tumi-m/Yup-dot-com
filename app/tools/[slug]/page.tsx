@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { MarketingNav } from "@/components/MarketingNav";
 import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
 import { EditorLaunch } from "@/components/tools/EditorLaunch";
+import { PdfAssistant } from "@/components/tools/PdfAssistant";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { ToolHeader, RelatedTools } from "@/components/tools/ToolHeader";
@@ -59,7 +60,13 @@ export default async function ToolPage({
           <div className="mx-auto max-w-2xl">
             <ToolHeader slug={tool.slug} />
             <div className="mt-10">
-              {tool.editor ? <EditorLaunch /> : <ToolWorkbench slug={tool.slug} />}
+              {tool.editor ? (
+                <EditorLaunch />
+              ) : tool.custom === "assistant" ? (
+                <PdfAssistant />
+              ) : (
+                <ToolWorkbench slug={tool.slug} />
+              )}
             </div>
           </div>
 

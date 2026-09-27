@@ -626,3 +626,23 @@ export function toChunks(doc: ParsedDocument, maxChars = 1200): Chunk[] {
   flush();
   return chunks;
 }
+
+/**
+ * Reading-order text with [Page N] markers, so an assistant can cite pages.
+ * Tables are rendered as pipe-separated rows to keep their structure legible.
+ */
+export function toPagedText(doc: ParsedDocument): string {
+  const pages = new Map<number, string[]>();
+  for (const block of doc.blocks) {
+    const out = pages.get(block.page) ?? [];
+    if (block.type === "heading") out.push(`${"#".repeat(Math.min(6, block.level))} ${block.text}`);
+    else if (block.type === "paragraph") out.push(block.text);
+    else if (block.type === "list") out.push(block.items.map((i) => `- ${i}`).join("\n"));
+    else out.push(block.rows.map((r) => r.join(" | ")).join("\n"));
+    pages.set(block.page, out);
+  }
+  return [...pages.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([page, parts]) => `[Page ${page}]\n${parts.join("\n\n")}`)
+    .join("\n\n");
+}

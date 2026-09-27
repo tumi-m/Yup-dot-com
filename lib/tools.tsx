@@ -16,6 +16,7 @@ import {
   ScanText,
   FileText,
   Sheet,
+  MessagesSquare,
   PenLine,
   Signature,
   type LucideIcon,
@@ -42,6 +43,8 @@ export interface ToolMeta {
   tint: string;
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
+  /** Renders a bespoke interface instead of the generic workbench. */
+  custom?: "assistant";
   /** Optional ribbon shown on the tool card. */
   badge?: string;
 }
@@ -180,6 +183,18 @@ export const TOOLS: ToolMeta[] = [
     category: "convert",
     tint: "bg-green-100 text-green-700",
     badge: "New",
+  },
+  {
+    slug: "chat-with-pdf",
+    name: "AI Assistant",
+    title: "Chat with PDF — summarize and ask questions",
+    description:
+      "Get an instant summary of any PDF, then ask questions and get answers with page citations.",
+    icon: MessagesSquare,
+    category: "extract",
+    tint: "bg-gradient-to-br from-violet-100 to-fuchsia-100 text-violet-700",
+    badge: "AI",
+    custom: "assistant",
   },
   {
     slug: "ocr-pdf",
