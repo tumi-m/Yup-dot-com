@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Infinity as InfinityIcon, Sparkles, X, Zap } from "lucide-react";
+import { Cloud, Crown, Film, Infinity as InfinityIcon, Sparkles, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { formatLimitBytes, LIMITS, type Tier } from "@/lib/limits";
 import { PLANS } from "@/lib/plans";
 
-export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge";
+export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "quality" | "downloads";
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -34,6 +34,17 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
         ? `A free account raises it to ${LIMITS.free.aiAnswersPerDay} answers a day. Pro gives you ${LIMITS.pro.aiAnswersPerDay}.`
         : `Pro raises it to ${LIMITS.pro.aiAnswersPerDay} answers a day. Your allowance resets tomorrow.`,
   },
+  quality: {
+    title: "Full HD 1080p is part of Pro",
+    body: () => `Free downloads go up to 720p. Pro unlocks 1080p and ${LIMITS.pro.mediaDownloadsPerDay} downloads a day.`,
+  },
+  downloads: {
+    title: "You've used today's free downloads",
+    body: (t) =>
+      t === "guest"
+        ? `A free account raises it to ${LIMITS.free.mediaDownloadsPerDay} a day. Pro gives you ${LIMITS.pro.mediaDownloadsPerDay} and 1080p.`
+        : `Pro gives you ${LIMITS.pro.mediaDownloadsPerDay} downloads a day and 1080p. Your allowance resets tomorrow.`,
+  },
   save: {
     title: "Keep this document in the cloud",
     body: () =>
@@ -45,6 +56,12 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
       "Create a free account to keep your documents in one place and get more AI answers — still no card needed.",
   },
 };
+
+const MEDIA_BENEFITS = [
+  { icon: Film, text: "Full HD 1080p YouTube downloads" },
+  { icon: InfinityIcon, text: `${LIMITS.pro.mediaDownloadsPerDay} video downloads a day` },
+  { icon: Sparkles, text: "Bigger files and more AI for your PDFs" },
+];
 
 const BENEFITS = [
   { icon: Cloud, text: "Cloud library across devices" },
@@ -72,7 +89,7 @@ export function UpgradeDialog({
   const copy = COPY[reason];
   const guest = tier === "guest";
   // Guests are first offered the free account; account holders see Pro.
-  const offerFreeAccount = guest && reason !== "file-size" && reason !== "batch";
+  const offerFreeAccount = guest && !["file-size", "batch", "quality"].includes(reason);
   const signup = `/signup${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ""}`;
 
   return (
@@ -94,7 +111,7 @@ export function UpgradeDialog({
         </div>
         <div className="space-y-5 px-6 pb-6">
           <ul className="space-y-2.5 text-sm">
-            {BENEFITS.map((b, i) => (
+            {(reason === "quality" || reason === "downloads" ? MEDIA_BENEFITS : BENEFITS).map((b, i) => (
               <motion.li
                 key={b.text}
                 initial={{ opacity: 0, x: -8 }}

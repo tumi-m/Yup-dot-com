@@ -15,6 +15,7 @@ const ORDER: ToolCategory[] = [
   "extract",
   "security",
   "edit",
+  "media",
 ];
 
 function ToolCard({ tool, index }: { tool: ToolMeta; index: number }) {

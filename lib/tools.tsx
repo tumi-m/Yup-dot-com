@@ -17,6 +17,10 @@ import {
   FileText,
   Sheet,
   MessagesSquare,
+  Clapperboard,
+  MonitorPlay,
+  Film,
+  Music2,
   PenLine,
   Signature,
   type LucideIcon,
@@ -28,7 +32,8 @@ export type ToolCategory =
   | "convert"
   | "extract"
   | "security"
-  | "edit";
+  | "edit"
+  | "media";
 
 export interface ToolMeta {
   slug: string;
@@ -44,7 +49,9 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant";
+  custom?: "assistant" | "media";
+  /** Downloader settings for Video & Audio tools. */
+  media?: { platform: "youtube" | "x"; kind: "mp4" | "mp3"; defaultHeight?: number };
   /** Optional ribbon shown on the tool card. */
   badge?: string;
 }
@@ -55,6 +62,7 @@ export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   convert: "Convert",
   extract: "Extract & Parse",
   security: "Security",
+  media: "Video & Audio",
   edit: "Edit & Sign",
 };
 
@@ -270,6 +278,70 @@ export const TOOLS: ToolMeta[] = [
     category: "edit",
     tint: "bg-cyan-100 text-cyan-700",
     editor: true,
+  },
+  {
+    slug: "youtube-to-mp4",
+    name: "YouTube to MP4",
+    title: "YouTube to MP4 — download videos up to 1080p",
+    description:
+      "Save a YouTube video as an MP4 file in 360p, 480p, or 720p HD — or Full HD 1080p with Pro.",
+    icon: Clapperboard,
+    category: "media",
+    tint: "bg-red-100 text-red-700",
+    badge: "New",
+    custom: "media",
+    media: { platform: "youtube", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "youtube-1080p",
+    name: "YouTube 1080p",
+    title: "YouTube 1080p Downloader — Full HD MP4",
+    description:
+      "Download YouTube videos in Full HD 1080p with sound, as an MP4 that plays everywhere.",
+    icon: MonitorPlay,
+    category: "media",
+    tint: "bg-gradient-to-br from-amber-100 to-fuchsia-100 text-fuchsia-700",
+    badge: "Pro",
+    custom: "media",
+    media: { platform: "youtube", kind: "mp4", defaultHeight: 1080 },
+  },
+  {
+    slug: "youtube-720p",
+    name: "YouTube 720p",
+    title: "YouTube 720p Downloader — free HD MP4",
+    description:
+      "Download YouTube videos in 720p HD as an MP4, free with no sign-up.",
+    icon: MonitorPlay,
+    category: "media",
+    tint: "bg-rose-100 text-rose-700",
+    custom: "media",
+    media: { platform: "youtube", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "x-to-mp4",
+    name: "X (Twitter) to MP4",
+    title: "X (Twitter) Video Downloader — save as MP4",
+    description:
+      "Paste an X or Twitter post link and save its video as an MP4 in the best quality available.",
+    icon: Film,
+    category: "media",
+    tint: "bg-zinc-200 text-zinc-800",
+    badge: "New",
+    custom: "media",
+    media: { platform: "x", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "x-to-mp3",
+    name: "X (Twitter) to MP3",
+    title: "X (Twitter) to MP3 — extract the audio",
+    description:
+      "Turn the video in an X or Twitter post into an MP3 audio file.",
+    icon: Music2,
+    category: "media",
+    tint: "bg-sky-100 text-sky-800",
+    badge: "New",
+    custom: "media",
+    media: { platform: "x", kind: "mp3" },
   },
 ];
 

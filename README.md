@@ -33,6 +33,8 @@ work with or without an account.
 | **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
+| **YouTube to MP4** | 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
+| **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. *Needs the media worker.* |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
@@ -74,6 +76,16 @@ limits are enforced in the browser (tools run there); the AI allowance is
 enforced on the server, keyed by user id or, for guests, by IP. A failed AI
 request refunds its slot. Set `AI_GUEST_DAILY_LIMIT=0` to require an account
 for AI.
+
+## Video & Audio downloads
+
+YouTube to MP4 and X (Twitter) to MP4/MP3 run in a separate container
+([`media-worker/`](media-worker/README.md): yt-dlp + ffmpeg), because
+serverless functions can't merge HD video and audio tracks. The web app checks
+the plan (1080p is Pro) and the daily quota (guest 5, free account 10, Pro 200),
+then signs a 10-minute token for exactly one download. The browser takes the file
+straight from the worker. Read the worker README's **Things to know before
+launch** section: YouTube blocks cloud IPs, and there are legal points too.
 
 ## Layout-aware parsing
 
@@ -317,6 +329,7 @@ Variables** and redeploy:
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
 | `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
 | `ANTHROPIC_API_KEY` | AI Assistant (Chat with PDF) |
+| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube and X downloads — see [`media-worker/README.md`](media-worker/README.md) |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 
 Optional:

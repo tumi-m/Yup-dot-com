@@ -13,6 +13,7 @@ export const PLANS: Record<PlanId, PlanFeature> = {
       "Files up to 50 MB, 10 at a time",
       "3 AI answers a day (15 with a free account)",
       "5 cloud documents with a free account",
+      "YouTube & X downloads up to 720p",
     ],
   },
   pro: {
@@ -26,6 +27,7 @@ export const PLANS: Record<PlanId, PlanFeature> = {
       "Everything in Free",
       "Files up to 500 MB, 200 at a time",
       "300 AI answers a day",
+      "YouTube downloads in Full HD 1080p",
       "Unlimited cloud documents",
       "Saved signatures (coming soon)",
     ],

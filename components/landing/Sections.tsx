@@ -127,10 +127,10 @@ export function ToolMarquee() {
 /** Only facts we can stand behind — no invented user counts. */
 export function Stats() {
   const items = [
-    { value: TOOLS.length, suffix: "", label: "PDF tools" },
+    { value: TOOLS.filter((t) => t.category !== "media").length, suffix: "", label: "PDF tools" },
     { value: OCR_LANGUAGES.length, suffix: "", label: "OCR languages" },
-    { value: 0, suffix: "", label: "files uploaded to process them" },
-    { value: 100, suffix: "%", label: "processed in your browser" },
+    { value: 0, suffix: "", label: "PDFs uploaded to process them" },
+    { value: 1080, suffix: "p", label: "YouTube downloads with Pro" },
   ];
   return (
     <section className="container py-16">

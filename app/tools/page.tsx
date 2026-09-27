@@ -10,7 +10,7 @@ import { TOOLS } from "@/lib/tools";
 export const metadata: Metadata = {
   title: "All PDF Tools — PDF Wizard",
   description:
-    "Every PDF spell in one place: merge, split, compress, convert to Word and Excel, OCR, protect, unlock, rotate, watermark, edit, and sign. Free and private.",
+    "Every PDF spell in one place — merge, split, compress, convert, OCR, protect, edit, and sign — plus YouTube to MP4 (up to 1080p) and X (Twitter) to MP4/MP3.",
   alternates: { canonical: "/tools" },
 };
 
@@ -29,7 +29,7 @@ export default async function ToolsPage() {
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-muted-foreground">
               {TOOLS.length} tools to merge, convert, compress, secure, and command your
-              PDFs. Everything runs in your browser.
+              PDFs — all in your browser — plus YouTube and X video downloads.
             </p>
           </div>
         </section>

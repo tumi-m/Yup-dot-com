@@ -6,6 +6,7 @@ import { MarketingNav } from "@/components/MarketingNav";
 import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
 import { EditorLaunch } from "@/components/tools/EditorLaunch";
 import { PdfAssistant } from "@/components/tools/PdfAssistant";
+import { MediaDownloader } from "@/components/tools/MediaDownloader";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
@@ -70,6 +71,8 @@ export default async function ToolPage({
                   <EditorLaunch tier={tier} />
                 ) : tool.custom === "assistant" ? (
                   <PdfAssistant tier={tier} />
+                ) : tool.custom === "media" && tool.media ? (
+                  <MediaDownloader config={tool.media} tier={tier} />
                 ) : (
                   <ToolWorkbench slug={tool.slug} tier={tier} />
                 )}
