@@ -11,6 +11,11 @@ import {
   FileCode2,
   Table2,
   Boxes,
+  Lock,
+  LockOpen,
+  ScanText,
+  FileText,
+  Sheet,
   PenLine,
   Signature,
   type LucideIcon,
@@ -21,6 +26,7 @@ export type ToolCategory =
   | "optimize"
   | "convert"
   | "extract"
+  | "security"
   | "edit";
 
 export interface ToolMeta {
@@ -45,6 +51,7 @@ export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   optimize: "Optimize",
   convert: "Convert",
   extract: "Extract & Parse",
+  security: "Security",
   edit: "Edit & Sign",
 };
 
@@ -150,6 +157,61 @@ export const TOOLS: ToolMeta[] = [
     icon: Boxes,
     category: "extract",
     tint: "bg-teal-100 text-teal-700",
+    badge: "New",
+  },
+  {
+    slug: "pdf-to-word",
+    name: "PDF to Word",
+    title: "PDF to Word — convert PDF to editable DOCX",
+    description:
+      "Turn a PDF into an editable Word document with real headings, lists, and tables — not a wall of text.",
+    icon: FileText,
+    category: "convert",
+    tint: "bg-blue-100 text-blue-700",
+    badge: "New",
+  },
+  {
+    slug: "pdf-to-excel",
+    name: "PDF to Excel",
+    title: "PDF to Excel — pull tables into XLSX",
+    description:
+      "Detect every table in a PDF and export it to Excel, one sheet per table, with numbers you can sum.",
+    icon: Sheet,
+    category: "convert",
+    tint: "bg-green-100 text-green-700",
+    badge: "New",
+  },
+  {
+    slug: "ocr-pdf",
+    name: "OCR PDF",
+    title: "OCR PDF — make scanned PDFs searchable",
+    description:
+      "Recognise text in scanned documents and add an invisible text layer so you can search, select, and copy. Runs on your device.",
+    icon: ScanText,
+    category: "extract",
+    tint: "bg-indigo-100 text-indigo-700",
+    badge: "New",
+  },
+  {
+    slug: "protect-pdf",
+    name: "Protect PDF",
+    title: "Protect PDF — add a password to a PDF",
+    description:
+      "Encrypt a PDF with a password and choose whether readers can print or copy its contents.",
+    icon: Lock,
+    category: "security",
+    tint: "bg-red-100 text-red-700",
+    badge: "New",
+  },
+  {
+    slug: "unlock-pdf",
+    name: "Unlock PDF",
+    title: "Unlock PDF — remove a PDF password",
+    description:
+      "Remove the password from a PDF you have access to, so it opens without prompting.",
+    icon: LockOpen,
+    category: "security",
+    tint: "bg-yellow-100 text-yellow-800",
     badge: "New",
   },
   {

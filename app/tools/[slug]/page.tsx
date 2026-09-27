@@ -7,7 +7,9 @@ import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
 import { EditorLaunch } from "@/components/tools/EditorLaunch";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { cn } from "@/lib/utils";
+import { ToolHeader, RelatedTools } from "@/components/tools/ToolHeader";
+import { SiteFooter } from "@/components/SiteFooter";
+import { Starfield } from "@/components/landing/HeroScene";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -43,33 +45,28 @@ export default async function ToolPage({
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
-      <main className="container flex-1 py-12">
-        <Link
-          href="/tools"
-          className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> All tools
-        </Link>
+      <main className="relative flex-1 overflow-hidden">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-gradient-to-b from-primary/10 to-transparent" />
+        <Starfield className="h-[420px]" />
+        <div className="container relative py-10">
+          <Link
+            href="/tools"
+            className="group mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" /> All tools
+          </Link>
 
-        <div className="mx-auto max-w-xl">
-          <div className="text-center">
-            <div
-              className={cn(
-                "mx-auto flex h-14 w-14 items-center justify-center rounded-2xl",
-                tool.tint
-              )}
-            >
-              <tool.icon className="h-7 w-7" />
+          <div className="mx-auto max-w-2xl">
+            <ToolHeader slug={tool.slug} />
+            <div className="mt-10">
+              {tool.editor ? <EditorLaunch /> : <ToolWorkbench slug={tool.slug} />}
             </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight">{tool.name}</h1>
-            <p className="mt-2 text-muted-foreground">{tool.description}</p>
           </div>
 
-          <div className="mt-10">
-            {tool.editor ? <EditorLaunch /> : <ToolWorkbench slug={tool.slug} />}
-          </div>
+          <RelatedTools slug={tool.slug} />
         </div>
       </main>
+      <SiteFooter />
     </div>
   );
 }

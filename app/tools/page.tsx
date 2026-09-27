@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { MarketingNav } from "@/components/MarketingNav";
+import { SiteFooter } from "@/components/SiteFooter";
 import { ToolGrid } from "@/components/ToolGrid";
+import { Starfield } from "@/components/landing/HeroScene";
+import { WordReveal } from "@/components/motion/primitives";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { TOOLS } from "@/lib/tools";
 
 export const metadata: Metadata = {
   title: "All PDF Tools — PDF Wizard",
   description:
-    "Every PDF spell in one place: merge, split, compress, convert, rotate, watermark, add page numbers, edit, and sign. Free and private.",
+    "Every PDF spell in one place: merge, split, compress, convert to Word and Excel, OCR, protect, unlock, rotate, watermark, edit, and sign. Free and private.",
   alternates: { canonical: "/tools" },
 };
 
@@ -16,20 +20,24 @@ export default async function ToolsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
-      <main className="container flex-1 py-16">
-        <div className="mx-auto max-w-2xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight">
-            Every PDF spell in your spellbook
-          </h1>
-          <p className="mt-3 text-muted-foreground">
-            A complete toolkit to merge, convert, compress, and command your PDFs.
-            Everything runs in your browser.
-          </p>
-        </div>
-        <div className="mt-14">
-          <ToolGrid />
+      <main className="flex-1">
+        <section className="relative overflow-hidden border-b border-border bg-gradient-to-b from-primary/10 to-background">
+          <Starfield />
+          <div className="container relative py-16 text-center">
+            <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
+              <WordReveal text="Every PDF spell in your spellbook" />
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-muted-foreground">
+              {TOOLS.length} tools to merge, convert, compress, secure, and command your
+              PDFs. Everything runs in your browser.
+            </p>
+          </div>
+        </section>
+        <div className="container py-12">
+          <ToolGrid filterable />
         </div>
       </main>
+      <SiteFooter />
     </div>
   );
 }

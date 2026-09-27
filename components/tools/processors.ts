@@ -1,3 +1,4 @@
+import { OCR_LANGUAGES } from "@/lib/pdf/ocr-languages";
 import {
   mergeTool,
   splitTool,
@@ -11,10 +12,16 @@ import {
   pdfToMarkdownTool,
   extractTablesTool,
   pdfToChunksTool,
+  protectTool,
+  unlockTool,
+  ocrTool,
+  pdfToWordTool,
+  pdfToExcelTool,
+  type ToolContext,
   type ToolFile,
 } from "@/lib/pdf/toolkit";
 
-export type FieldType = "select" | "text" | "range" | "color";
+export type FieldType = "select" | "text" | "password" | "range" | "color";
 
 export interface ToolField {
   key: string;
@@ -36,7 +43,18 @@ export interface ToolProcessor {
   /** Bundle multiple outputs into a single zip download. */
   zipName?: string;
   fields: ToolField[];
-  run: (files: File[], options: Record<string, string>) => Promise<ToolFile | ToolFile[]>;
+  /** Shown under the action button, e.g. privacy or accuracy notes. */
+  note?: string;
+  /**
+   * Show a "% smaller" stat on success. Only meaningful when the tool's
+   * purpose is size — comparing a PDF to, say, a .txt would be misleading.
+   */
+  reportsSizeChange?: boolean;
+  run: (
+    files: File[],
+    options: Record<string, string>,
+    ctx: ToolContext
+  ) => Promise<ToolFile | ToolFile[]>;
 }
 
 export const PROCESSORS: Record<string, ToolProcessor> = {
@@ -93,6 +111,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: (files, o) => rotateTool(files, { angle: o.angle }),
   },
   "compress-pdf": {
+    reportsSizeChange: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -209,6 +228,92 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     run: (files, o) => pdfToChunksTool(files, { maxChars: o.maxChars }),
+  },
+  "pdf-to-word": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [],
+    note: "Rebuilds headings, lists, and tables as real Word structure. Complex layouts are simplified.",
+    run: (files) => pdfToWordTool(files),
+  },
+  "pdf-to-excel": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [],
+    run: (files) => pdfToExcelTool(files),
+  },
+  "ocr-pdf": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "lang",
+        label: "Document language",
+        type: "select",
+        default: "eng",
+        options: OCR_LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
+      },
+      {
+        key: "output",
+        label: "Output",
+        type: "select",
+        default: "pdf",
+        options: [
+          { value: "pdf", label: "Searchable PDF" },
+          { value: "text", label: "Plain text (.txt)" },
+        ],
+      },
+    ],
+    note: "Recognition runs on your device. The first run downloads the language model (a few MB).",
+    run: (files, o, ctx) => ocrTool(files, { lang: o.lang, output: o.output }, ctx),
+  },
+  "protect-pdf": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      { key: "password", label: "Password", type: "password", default: "" },
+      { key: "confirm", label: "Confirm password", type: "password", default: "" },
+      {
+        key: "printing",
+        label: "Allow printing",
+        type: "select",
+        default: "yes",
+        options: [
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+        ],
+      },
+      {
+        key: "copying",
+        label: "Allow copying text",
+        type: "select",
+        default: "no",
+        options: [
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+        ],
+      },
+    ],
+    note: "Your password never leaves this browser. Keep it safe — it can't be recovered.",
+    run: (files, o) =>
+      protectTool(files, {
+        password: o.password,
+        confirm: o.confirm,
+        printing: o.printing,
+        copying: o.copying,
+      }),
+  },
+  "unlock-pdf": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [{ key: "password", label: "Current password", type: "password", default: "" }],
+    note: "Only unlock documents you're authorised to open.",
+    run: (files, o) => unlockTool(files, { password: o.password }),
   },
   "page-numbers": {
     accept: "application/pdf",

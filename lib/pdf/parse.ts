@@ -221,10 +221,18 @@ function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
   if (best.length * BIN < MIN_GUTTER_PT) return null;
 
   const gutter = (best.start + best.length / 2) * BIN;
-  const left = spans.filter((s) => s.x + s.width <= gutter).length;
-  const right = spans.filter((s) => s.x >= gutter).length;
+  const left = spans.filter((s) => s.x + s.width <= gutter);
+  const right = spans.filter((s) => s.x >= gutter);
   // Both sides must carry real content for the split to be meaningful.
-  if (left < spans.length * 0.2 || right < spans.length * 0.2) return null;
+  if (left.length < spans.length * 0.2 || right.length < spans.length * 0.2) return null;
+
+  // Text columns are made of wide lines; table columns are made of short
+  // cells. Without this check, the empty space between two columns of a
+  // table reads as a page gutter and the table gets torn apart.
+  const medianWidth = (xs: ParsedSpan[]) => median(xs.map((s) => s.width));
+  const minColumnText = pageWidth * 0.18;
+  if (medianWidth(left) < minColumnText || medianWidth(right) < minColumnText) return null;
+
   return gutter;
 }
 

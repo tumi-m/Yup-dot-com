@@ -87,4 +87,15 @@ console.log("\n===== CHUNKS =====");
 for (const c of toChunks(parsed, 400)) {
   console.log(`[path: "${c.path}" p${c.page}] ${c.text.slice(0, 70).replace(/\n/g, " / ")}...`);
 }
-process.exit(0);
+const md = toMarkdown(parsed);
+const chunkPaths = toChunks(parsed, 400).map((c) => c.path);
+const ok =
+  md.startsWith("# Quarterly Revenue Report") &&
+  md.includes("## Executive Summary") &&
+  md.includes("- Customer churn dropped to 2.1 percent") &&
+  md.includes("| Central | 1,400,000 | 9% |") &&
+  tables.length === 1 && tables[0].rows.length === 4 &&
+  chunkPaths.includes("Quarterly Revenue Report > Revenue by Region") &&
+  !parsed.likelyScanned;
+console.log(ok ? "\nPASS: headings, paragraph, list, table, and chunk breadcrumbs extracted" : "\nFAIL: structure mismatch");
+process.exit(ok ? 0 : 1);

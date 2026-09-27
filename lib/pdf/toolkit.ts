@@ -127,7 +127,12 @@ export async function compressTool(
     page.drawImage(img, { x: 0, y: 0, width: pageW, height: pageH });
   }
   loaded.destroy();
-  return { blob: pdfBlob(await out.save()), filename: "compressed.pdf" };
+  const compressed = await out.save();
+  // Rasterising can inflate text-only PDFs. Never hand back a bigger file.
+  if (compressed.length >= bytes.length) {
+    return { blob: pdfBlob(bytes), filename: files[0].name.replace(/\.pdf$/i, "") + ".pdf" };
+  }
+  return { blob: pdfBlob(compressed), filename: "compressed.pdf" };
 }
 
 // ---------------------------------------------------------------------------
@@ -339,5 +344,115 @@ export async function pdfToChunksTool(
       type: "application/json",
     }),
     filename: `${base}-chunks.json`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Progress reporting for long-running tools (OCR)
+// ---------------------------------------------------------------------------
+
+export interface ToolContext {
+  /** fraction in 0..1, plus a short human label */
+  progress?: (fraction: number, label: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Security
+// ---------------------------------------------------------------------------
+
+export async function protectTool(
+  files: File[],
+  opts: { password: string; confirm: string; printing: string; copying: string }
+): Promise<ToolFile> {
+  if (!opts.password) throw new Error("Please enter a password.");
+  if (opts.password.length < 4) throw new Error("Use at least 4 characters.");
+  if (opts.password !== opts.confirm) throw new Error("The passwords don't match.");
+  const { protectPdf } = await import("./security");
+  const out = await protectPdf(await buf(files[0]), {
+    userPassword: opts.password,
+    allowPrinting: opts.printing === "yes",
+    allowCopying: opts.copying === "yes",
+  });
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return { blob: pdfBlob(out), filename: `${base}-protected.pdf` };
+}
+
+export async function unlockTool(
+  files: File[],
+  opts: { password: string }
+): Promise<ToolFile> {
+  const { unlockPdf, isEncrypted } = await import("./security");
+  const bytes = await buf(files[0]);
+  if (!(await isEncrypted(bytes))) {
+    throw new Error("This PDF isn't password-protected — there's nothing to unlock.");
+  }
+  const out = await unlockPdf(bytes, opts.password);
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return { blob: pdfBlob(out), filename: `${base}-unlocked.pdf` };
+}
+
+// ---------------------------------------------------------------------------
+// OCR
+// ---------------------------------------------------------------------------
+
+export async function ocrTool(
+  files: File[],
+  opts: { lang: string; output: string },
+  ctx: ToolContext = {}
+): Promise<ToolFile> {
+  const { ocrDocument, ocrText } = await import("./ocr");
+  const pages = await ocrDocument(await buf(files[0]), {
+    lang: opts.lang,
+    onProgress: (p) => {
+      const label =
+        p.stage === "loading"
+          ? "Loading the OCR engine…"
+          : `Reading page ${p.page} of ${p.total}…`;
+      ctx.progress?.(((p.page - 1) + p.pageProgress) / p.total, label);
+    },
+  });
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  if (opts.output === "text") {
+    return {
+      blob: new Blob([ocrText(pages)], { type: "text/plain" }),
+      filename: `${base}-ocr.txt`,
+    };
+  }
+  ctx.progress?.(1, "Building searchable PDF…");
+  const { buildSearchablePdf } = await import("./ocr-layer");
+  return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
+}
+
+// ---------------------------------------------------------------------------
+// Office conversions
+// ---------------------------------------------------------------------------
+
+export async function pdfToWordTool(files: File[]): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]));
+  if (doc.likelyScanned) {
+    throw new Error("This looks like a scanned PDF. Run OCR PDF on it first, then convert.");
+  }
+  const { toDocxBlob } = await import("./convert");
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return { blob: await toDocxBlob(doc, base), filename: `${base}.docx` };
+}
+
+export async function pdfToExcelTool(files: File[]): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]));
+  const tables = extractTables(doc);
+  if (!tables.length) {
+    throw new Error(
+      doc.likelyScanned
+        ? "This looks like a scanned PDF. Run OCR PDF on it first."
+        : "No tables were detected in this document."
+    );
+  }
+  const { tablesToXlsx } = await import("./convert");
+  const base = files[0].name.replace(/\.pdf$/i, "");
+  return {
+    blob: new Blob([(await tablesToXlsx(tables)).slice() as unknown as BlobPart], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    filename: `${base}.xlsx`,
   };
 }
