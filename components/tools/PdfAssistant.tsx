@@ -16,6 +16,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { EASE, SPRING } from "@/components/motion/primitives";
 import { cn, formatBytes } from "@/lib/utils";
+import { useSearchParams } from "next/navigation";
+import type { Tier } from "@/lib/limits";
+import { handoffToFile, takeHandoff } from "@/lib/local-store";
+import { UpgradeDialog } from "@/components/upsell/Upsell";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -93,7 +97,10 @@ function Markdown({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-export function PdfAssistant() {
+export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
+  const params = useSearchParams();
+  const [upsell, setUpsell] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -105,6 +112,14 @@ export function PdfAssistant() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<{ message: string; needsLogin?: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (params.get("handoff") !== "1") return;
+    takeHandoff()
+      .then((files) => files[0] && loadFile(handoffToFile(files[0])))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -153,11 +168,18 @@ export function PdfAssistant() {
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
-        setError({ message: data.error ?? "Something went wrong.", needsLogin: res.status === 401 });
         setMessages(history.slice(0, -1));
         setDraft(question);
+        if (data.upgrade && res.status === 429) {
+          setUpsell(true);
+          setRemaining(0);
+          return;
+        }
+        setError({ message: data.error ?? "Something went wrong.", needsLogin: res.status === 401 });
         return;
       }
+      const left = res.headers.get("x-ai-remaining");
+      if (left !== null) setRemaining(Number(left));
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -221,7 +243,7 @@ export function PdfAssistant() {
             </Button>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
-            The PDF is read in your browser. Only its extracted text is sent to the AI to answer your questions.
+            No sign-up needed to try it. The PDF is read in your browser; only its extracted text is sent to the AI to answer your questions.
           </p>
         </motion.div>
         {error && (
@@ -248,6 +270,11 @@ export function PdfAssistant() {
             {doc.pages} page{doc.pages === 1 ? "" : "s"} · {formatBytes(doc.size)}
           </p>
         </div>
+        {remaining !== null && tier !== "pro" && tier !== "team" && (
+          <span className="hidden rounded-full bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline">
+            {remaining} free answer{remaining === 1 ? "" : "s"} left today
+          </span>
+        )}
         <Button variant="ghost" size="sm" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); }}>
           <RotateCcw /> New PDF
         </Button>
@@ -361,6 +388,7 @@ export function PdfAssistant() {
           </motion.div>
         )}
       </form>
+      <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="ai" tier={tier} returnTo="/tools/chat-with-pdf" />
     </motion.div>
   );
 }

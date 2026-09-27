@@ -31,6 +31,7 @@ import {
   WordReveal,
 } from "@/components/motion/primitives";
 import { Aurora, HeroScene, Starfield } from "./HeroScene";
+import { HeroDropzone } from "./HeroDropzone";
 
 export function Hero({ isAuthed }: { isAuthed: boolean }) {
   return (
@@ -46,7 +47,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-background/70 px-4 py-1.5 text-xs font-medium text-accent-foreground shadow-sm backdrop-blur"
           >
             <WizardHat className="h-3.5 w-3.5 text-primary" />
-            {TOOLS.length} PDF spells · nothing to install · files stay on your device
+            Free PDF editor · no sign-up · no watermark
           </motion.span>
 
           <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl">
@@ -75,36 +76,27 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: EASE, delay: 0.7 }}
-            className="mt-10 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start"
+            className="mt-9"
           >
-            <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
-              <Button asChild size="lg" className="h-12 px-7 text-base shadow-xl shadow-primary/30">
-                <Link href="/tools">
-                  <Sparkles /> Explore the tools
-                </Link>
-              </Button>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-              <Button asChild size="lg" variant="outline" className="h-12 bg-background/70 px-7 text-base backdrop-blur">
-                <Link href={isAuthed ? "/dashboard" : "/signup"}>
-                  {isAuthed ? "Open dashboard" : "Create free account"} <ArrowRight />
-                </Link>
-              </Button>
-            </motion.div>
+            <HeroDropzone />
           </motion.div>
 
-          <motion.ul
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.95, duration: 0.6 }}
-            className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground lg:justify-start"
+            className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm lg:justify-start"
           >
-            {["No sign-up for tools", "No uploads", "No watermarks on tools"].map((t) => (
-              <li key={t} className="flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-emerald-500" /> {t}
-              </li>
-            ))}
-          </motion.ul>
+            <Link href="/tools" className="group inline-flex items-center gap-1 font-medium text-primary">
+              <Sparkles className="h-4 w-4" /> Browse all {TOOLS.length} tools
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            {isAuthed && (
+              <Link href="/dashboard" className="font-medium text-muted-foreground hover:text-foreground">
+                Open your library
+              </Link>
+            )}
+          </motion.div>
         </div>
 
         <HeroScene />
@@ -277,7 +269,7 @@ export function FinalCta() {
             Ready to work some magic?
           </h2>
           <p className="mx-auto mt-4 max-w-md text-lg text-muted-foreground">
-            Start free. No credit card, no installs — just results.
+            No account, no credit card, no installs — just results.
           </p>
           <motion.div className="mt-9 inline-block" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}>
             <Button asChild size="lg" className="h-12 px-8 text-base shadow-xl shadow-primary/30">

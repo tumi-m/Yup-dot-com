@@ -8,6 +8,9 @@ import { EditorLaunch } from "@/components/tools/EditorLaunch";
 import { PdfAssistant } from "@/components/tools/PdfAssistant";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/profile";
+import type { Tier } from "@/lib/limits";
+import { Suspense } from "react";
 import { ToolHeader, RelatedTools } from "@/components/tools/ToolHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
@@ -42,6 +45,8 @@ export default async function ToolPage({
   if (!tool) notFound();
 
   const user = await getCurrentUser();
+  const profile = user ? await getProfile().catch(() => null) : null;
+  const tier: Tier = profile?.plan ?? "guest";
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -60,13 +65,15 @@ export default async function ToolPage({
           <div className="mx-auto max-w-2xl">
             <ToolHeader slug={tool.slug} />
             <div className="mt-10">
-              {tool.editor ? (
-                <EditorLaunch />
-              ) : tool.custom === "assistant" ? (
-                <PdfAssistant />
-              ) : (
-                <ToolWorkbench slug={tool.slug} />
-              )}
+              <Suspense>
+                {tool.editor ? (
+                  <EditorLaunch tier={tier} />
+                ) : tool.custom === "assistant" ? (
+                  <PdfAssistant tier={tier} />
+                ) : (
+                  <ToolWorkbench slug={tool.slug} tier={tier} />
+                )}
+              </Suspense>
             </div>
           </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import JSZip from "jszip";
 import { AnimatePresence, motion, Reorder } from "motion/react";
@@ -25,6 +26,21 @@ import { formatBytes, cn } from "@/lib/utils";
 import type { ToolFile } from "@/lib/pdf/toolkit";
 import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { PROCESSORS, type ToolField } from "./processors";
+import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
+import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
+import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
+import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
+import { getTool } from "@/lib/tools";
+
+/** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
+const NEXT_STEPS: Record<string, string[]> = {
+  default: ["compress-pdf", "edit-pdf", "sign-pdf", "protect-pdf"],
+  "compress-pdf": ["edit-pdf", "protect-pdf", "sign-pdf", "pdf-to-word"],
+  "merge-pdf": ["compress-pdf", "page-numbers", "edit-pdf", "protect-pdf"],
+  "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
+  "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
+};
 
 type Status = "idle" | "working" | "done";
 
@@ -35,7 +51,12 @@ interface Entry {
 
 let entrySeq = 0;
 
-export function ToolWorkbench({ slug }: { slug: string }) {
+export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: Tier }) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const limits = limitsFor(tier);
+  const [upsell, setUpsell] = useState<UpsellReason | null>(null);
+  const [showCard, setShowCard] = useState(false);
   const proc = PROCESSORS[slug];
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -55,7 +76,7 @@ export function ToolWorkbench({ slug }: { slug: string }) {
   const inputBytes = files.reduce((n, f) => n + f.size, 0);
   const outputBytes = results.reduce((n, r) => n + r.blob.size, 0);
 
-  function addFiles(list: FileList | null) {
+  function addFiles(list: FileList | File[] | null) {
     if (!list?.length) return;
     const accepted = Array.from(list).filter((f) =>
       proc.accept.split(",").some((type) => {
@@ -67,8 +88,23 @@ export function ToolWorkbench({ slug }: { slug: string }) {
       setError(`That file type isn't supported here.`);
       return;
     }
+    // Limits are an upgrade prompt, never a silent failure.
+    if (accepted.some((f) => f.size > limits.maxFileBytes)) {
+      setUpsell("file-size");
+      setError(`Files up to ${formatLimitBytes(limits.maxFileBytes)} on your plan.`);
+      return;
+    }
     const incoming = accepted.map((file) => ({ id: `f${++entrySeq}`, file }));
-    setEntries((prev) => (proc.multiple ? [...prev, ...incoming] : incoming.slice(0, 1)));
+    let over = false;
+    setEntries((prev) => {
+      const next = proc.multiple ? [...prev, ...incoming] : incoming.slice(0, 1);
+      if (next.length > limits.maxBatchFiles) {
+        over = true;
+        return next.slice(0, limits.maxBatchFiles);
+      }
+      return next;
+    });
+    if (over) setUpsell("batch");
     setStatus("idle");
     setResults([]);
     setError(null);
@@ -99,6 +135,8 @@ export function ToolWorkbench({ slug }: { slug: string }) {
       setResults(Array.isArray(out) ? out : [out]);
       setElapsed((performance.now() - started) / 1000);
       setStatus("done");
+      setShowCard(!upsellCardDismissed());
+      if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setStatus("idle");
@@ -121,6 +159,22 @@ export function ToolWorkbench({ slug }: { slug: string }) {
     }
   }
 
+  /** Hands the result to another tool without a download/re-upload round trip. */
+  async function continueWith(nextSlug: string) {
+    const r = results[0];
+    await setHandoff([await fileToHandoff(r.blob, r.filename)]);
+    router.push(`/tools/${nextSlug}?handoff=1`);
+  }
+
+  // Files handed over from the homepage dropzone or a previous tool.
+  useEffect(() => {
+    if (params.get("handoff") !== "1") return;
+    takeHandoff()
+      .then((handed) => handed.length && addFiles(handed.map(handoffToFile)))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function reset() {
     setEntries([]);
     setResults([]);
@@ -134,6 +188,7 @@ export function ToolWorkbench({ slug }: { slug: string }) {
       : null;
 
   return (
+    <>
     <AnimatePresence mode="wait" initial={false}>
       {status === "done" ? (
         <motion.div
@@ -236,6 +291,49 @@ export function ToolWorkbench({ slug }: { slug: string }) {
               <RotateCcw /> Start over
             </Button>
           </motion.div>
+
+          {results.length === 1 && results[0].filename.toLowerCase().endsWith(".pdf") && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7, duration: 0.5, ease: EASE }}
+              className="relative mt-8"
+            >
+              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Keep going with this file
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {(NEXT_STEPS[slug] ?? NEXT_STEPS.default).map((next) => {
+                  const t = getTool(next);
+                  if (!t) return null;
+                  return (
+                    <motion.button
+                      key={next}
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => continueWith(next)}
+                      className="flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium transition-colors hover:border-primary/50"
+                    >
+                      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", t.tint)}>
+                        <t.icon className="h-3.5 w-3.5" />
+                      </span>
+                      {t.name}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+
+          {showCard && (
+            <UpsellCard
+              tier={tier}
+              onDismiss={() => {
+                dismissUpsellCard();
+                setShowCard(false);
+              }}
+            />
+          )}
         </motion.div>
       ) : (
         <motion.div
@@ -511,5 +609,15 @@ export function ToolWorkbench({ slug }: { slug: string }) {
         </motion.div>
       )}
     </AnimatePresence>
+    {upsell && (
+      <UpgradeDialog
+        open
+        onOpenChange={(open) => !open && setUpsell(null)}
+        reason={upsell}
+        tier={tier}
+        returnTo={`/tools/${slug}`}
+      />
+    )}
+    </>
   );
 }

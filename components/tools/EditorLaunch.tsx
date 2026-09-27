@@ -1,54 +1,74 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { UploadCloud, Loader2 } from "lucide-react";
-import { tryCreateClient, NOT_CONFIGURED_MESSAGE } from "@/lib/supabase/client";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion } from "motion/react";
+import { UploadCloud, Loader2, FilePlus2, ShieldCheck } from "lucide-react";
+import { PDFDocument } from "pdf-lib";
+import { tryCreateClient } from "@/lib/supabase/client";
 import { getPageCount } from "@/lib/pdf/operations";
-import { uuid } from "@/lib/utils";
+import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
+import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
+import { uuid, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { SPRING } from "@/components/motion/primitives";
+import { UpgradeDialog } from "@/components/upsell/Upsell";
 
 /**
- * Sends an uploaded PDF into the full editor. Editing relies on secure cloud
- * storage, so anonymous users are routed to sign up first.
+ * Opens a PDF in the editor with no account required.
+ * Signed-in users get the document in their cloud library; everyone else
+ * edits on-device (IndexedDB), exactly like PDFescape's free online editor.
  */
-export function EditorLaunch() {
+export function EditorLaunch({ tier }: { tier: Tier }) {
   const router = useRouter();
-  // Null when this deployment has no Supabase credentials — the page must still
-  // render, since every other tool works without an account.
-  const supabase = tryCreateClient();
+  const params = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [upsell, setUpsell] = useState(false);
+  const limits = limitsFor(tier);
 
-  async function handleFile(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
+  async function openLocal(bytes: Uint8Array, name: string, pageCount: number) {
+    const id = uuid();
+    await saveLocalDoc({ id, name, bytes, pageCount, updatedAt: Date.now() });
+    router.push(`/edit/${id}`);
+  }
+
+  async function openFile(file: File) {
     setError(null);
-    if (!supabase) {
-      setError(NOT_CONFIGURED_MESSAGE);
+    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+      setError("Please choose a PDF file.");
+      return;
+    }
+    if (file.size > limits.maxFileBytes) {
+      setUpsell(true);
       return;
     }
     setBusy(true);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/signup?redirect=/dashboard");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let pageCount: number;
+      try {
+        pageCount = await getPageCount(bytes);
+      } catch {
+        throw new Error("Couldn't open that PDF. It may be damaged or password-protected — try Unlock PDF first.");
+      }
+
+      const supabase = tryCreateClient();
+      const user = supabase ? (await supabase.auth.getUser()).data.user : null;
+
+      if (!supabase || !user) {
+        await openLocal(bytes, file.name, pageCount);
         return;
       }
 
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const pageCount = await getPageCount(bytes);
       const docId = uuid();
       const storagePath = `${user.id}/${docId}.pdf`;
-
       const { error: upErr } = await supabase.storage
         .from("documents")
         .upload(storagePath, file, { contentType: "application/pdf" });
       if (upErr) throw upErr;
-
       const { error: insErr } = await supabase.from("documents").insert({
         id: docId,
         owner_id: user.id,
@@ -58,7 +78,6 @@ export function EditorLaunch() {
         page_count: pageCount,
       });
       if (insErr) throw insErr;
-
       router.push(`/editor/${docId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open the editor.");
@@ -66,34 +85,81 @@ export function EditorLaunch() {
     }
   }
 
+  async function blankDocument() {
+    setBusy(true);
+    const doc = await PDFDocument.create();
+    doc.addPage([595.28, 841.89]); // A4
+    await openLocal(await doc.save(), "Untitled.pdf", 1);
+  }
+
+  // A file handed over from the homepage or another tool opens immediately.
+  useEffect(() => {
+    if (params.get("handoff") !== "1") return;
+    takeHandoff()
+      .then((files) => files[0] && openFile(handoffToFile(files[0])))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        handleFile(e.dataTransfer.files);
-      }}
-      className="rounded-2xl border-2 border-dashed border-border bg-card p-10 text-center transition-colors hover:border-primary"
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/pdf"
-        className="hidden"
-        onChange={(e) => handleFile(e.target.files)}
-      />
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <UploadCloud className="h-6 w-6" />
-      </div>
-      <p className="mt-3 font-medium">Drop a PDF here to start editing</p>
-      <Button className="mt-3" onClick={() => inputRef.current?.click()} disabled={busy}>
-        {busy ? <Loader2 className="animate-spin" /> : null}
-        Choose file
-      </Button>
-      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-      <p className="mt-3 text-xs text-muted-foreground">
-        The editor saves to your secure library — a free account is required.
-      </p>
+    <div className="space-y-4">
+      <motion.div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const f = e.dataTransfer.files[0];
+          if (f) openFile(f);
+        }}
+        animate={{ scale: dragging ? 1.02 : 1 }}
+        transition={SPRING}
+        className={cn(
+          "rounded-3xl border-2 border-dashed bg-card p-10 text-center transition-colors",
+          dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/60"
+        )}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) openFile(f);
+            e.target.value = "";
+          }}
+        />
+        <motion.div
+          animate={busy ? { rotate: 360 } : { y: [0, -5, 0] }}
+          transition={busy ? { duration: 1.1, repeat: Infinity, ease: "linear" } : { duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+          className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+        >
+          {busy ? <Loader2 className="h-7 w-7" /> : <UploadCloud className="h-7 w-7" />}
+        </motion.div>
+        <p className="mt-4 text-lg font-semibold">{busy ? "Opening the editor…" : "Drop a PDF to start editing"}</p>
+        <div className="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
+          <Button onClick={() => inputRef.current?.click()} disabled={busy}>
+            Choose PDF
+          </Button>
+          <Button variant="outline" onClick={blankDocument} disabled={busy}>
+            <FilePlus2 /> Start with a blank page
+          </Button>
+        </div>
+        <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+          No sign-up, no watermark. Files up to {formatLimitBytes(limits.maxFileBytes)} stay on your device.
+        </p>
+      </motion.div>
+      {error && (
+        <p role="alert" data-testid="tool-error" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="file-size" tier={tier} />
     </div>
   );
 }

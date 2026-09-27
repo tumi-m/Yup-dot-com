@@ -23,12 +23,13 @@ export function PricingCards({
 
   async function choose(plan: PlanId) {
     setError(null);
-    if (!isAuthed) {
-      router.push(`/signup?redirect=/pricing`);
+    // The free plan needs no account at all — send people straight to the tools.
+    if (plan === "free") {
+      router.push(isAuthed ? "/dashboard" : "/tools");
       return;
     }
-    if (plan === "free") {
-      router.push("/dashboard");
+    if (!isAuthed) {
+      router.push(`/signup?redirect=/pricing`);
       return;
     }
     setLoadingPlan(plan);
@@ -112,7 +113,7 @@ export function PricingCards({
                 {isCurrent
                   ? "Current plan"
                   : plan.id === "free"
-                    ? "Get started"
+                    ? "Start free — no sign-up"
                     : `Upgrade to ${plan.name}`}
               </Button>
             </StaggerItem>

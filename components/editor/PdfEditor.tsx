@@ -17,7 +17,10 @@ import {
   ZoomOut,
   Maximize,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { tryCreateClient } from "@/lib/supabase/client";
+import { getLocalDoc, saveLocalDoc } from "@/lib/local-store";
+import type { Tier } from "@/lib/limits";
+import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
 import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake";
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
@@ -29,7 +32,7 @@ import {
   type ToolId,
   type ToolSettings,
 } from "@/lib/editor/types";
-import type { DocumentRecord, PlanId } from "@/lib/types";
+import type { DocumentRecord } from "@/lib/types";
 import { downloadBlob } from "@/lib/download";
 import { Button } from "@/components/ui/button";
 import { useToasts, ToastStack } from "@/components/ui/toast";
@@ -56,14 +59,26 @@ const SHORTCUTS: Record<string, ToolId> = {
   s: "signature",
 };
 
+/**
+ * Where the document lives. Cloud documents belong to a signed-in user's
+ * library; local documents live in this browser only, so anyone can edit
+ * without an account (the PDFescape journey).
+ */
+export type EditorSource =
+  | { kind: "cloud"; doc: DocumentRecord }
+  | { kind: "local"; id: string };
+
 export function PdfEditor({
-  document: doc,
-  plan,
+  source,
+  tier,
 }: {
-  document: DocumentRecord;
-  plan: PlanId;
+  source: EditorSource;
+  tier: Tier;
 }) {
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(() => (source.kind === "cloud" ? tryCreateClient() : null), [source.kind]);
+  const [docName, setDocName] = useState(source.kind === "cloud" ? source.doc.name : "Document");
+  const [upsellOpen, setUpsellOpen] = useState(false);
+  const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const canvasArea = useRef<HTMLDivElement>(null);
@@ -96,9 +111,24 @@ export function PdfEditor({
   useEffect(() => {
     let active = true;
     (async () => {
+      if (source.kind === "local") {
+        const local = await getLocalDoc(source.id).catch(() => undefined);
+        if (!active) return;
+        if (!local) {
+          setLoadError("This document is no longer on this device. Open it again from the Edit PDF tool.");
+          return;
+        }
+        setDocName(local.name.replace(/\.pdf$/i, ""));
+        setBytes(local.bytes);
+        return;
+      }
+      if (!supabase) {
+        setLoadError("Cloud documents are unavailable on this deployment.");
+        return;
+      }
       const { data, error } = await supabase.storage
         .from("documents")
-        .download(doc.storage_path);
+        .download(source.doc.storage_path);
       if (!active) return;
       if (error || !data) {
         setLoadError("Could not load this document.");
@@ -109,7 +139,7 @@ export function PdfEditor({
     return () => {
       active = false;
     };
-  }, [supabase, doc.storage_path]);
+  }, [supabase, source]);
 
   // ---- (re)build render doc + detect form fields whenever bytes change ----
   useEffect(() => {
@@ -253,14 +283,13 @@ export function PdfEditor({
   // ---- export ----
   const buildOutput = useCallback(async () => {
     if (!bytes) throw new Error("Nothing to export.");
-    let out = await bakeAnnotations(bytes, annotations, {
-      watermark: plan === "free",
-    });
+    // No watermark on any plan: like PDFescape, the free editor is the hook.
+    let out = await bakeAnnotations(bytes, annotations);
     if (Object.keys(formValues).length) {
       out = await fillFormFields(out, formValues);
     }
     return out;
-  }, [bytes, annotations, formValues, plan]);
+  }, [bytes, annotations, formValues]);
 
   async function handleDownload() {
     setBusy(true);
@@ -268,7 +297,7 @@ export function PdfEditor({
       const out = await buildOutput();
       downloadBlob(
         new Blob([out.slice() as unknown as BlobPart], { type: "application/pdf" }),
-        `${doc.name}.pdf`
+        `${docName}.pdf`
       );
       toast("Downloaded.", "success");
     } catch (err) {
@@ -286,33 +315,53 @@ export function PdfEditor({
       const blob = new Blob([out.slice() as unknown as BlobPart], {
         type: "application/pdf",
       });
-      const { error } = await supabase.storage
-        .from("documents")
-        .upload(doc.storage_path, blob, {
-          contentType: "application/pdf",
-          upsert: true,
+      if (source.kind === "local") {
+        await saveLocalDoc({
+          id: source.id,
+          name: docName,
+          bytes: new Uint8Array(out),
+          pageCount: numPages,
+          updatedAt: Date.now(),
         });
-      if (error) throw error;
-      await supabase
-        .from("documents")
-        .update({
-          page_count: numPages,
-          size_bytes: blob.size,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", doc.id);
+      } else {
+        if (!supabase) throw new Error("Cloud saving is unavailable.");
+        const { error } = await supabase.storage
+          .from("documents")
+          .upload(source.doc.storage_path, blob, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+        if (error) throw error;
+        await supabase
+          .from("documents")
+          .update({
+            page_count: numPages,
+            size_bytes: blob.size,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", source.doc.id);
+      }
 
       history.reset([]);
       setSelectedId(null);
       setFormValues({});
       setBytes(new Uint8Array(out));
-      toast("Saved to your library.", "success");
+      if (source.kind === "local") {
+        toast("Saved on this device.", "success");
+        // Offer the cloud once, after the user has saved something they value.
+        if (tier === "guest" && !upsellShown.current) {
+          upsellShown.current = true;
+          setTimeout(() => setUpsellOpen(true), 700);
+        }
+      } else {
+        toast("Saved to your library.", "success");
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Save failed.", "error");
     } finally {
       setBusy(false);
     }
-  }, [bytes, buildOutput, supabase, doc, numPages, history, toast]);
+  }, [bytes, buildOutput, supabase, source, docName, numPages, history, toast, tier]);
 
   // ---- tool switching side effects ----
   const handleToolChange = (next: ToolId) => {
@@ -386,13 +435,27 @@ export function PdfEditor({
 
   const dirty = annotations.length > 0 || Object.keys(formValues).length > 0;
 
+  // Don't let a stray tab close throw away unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   return (
     <div className="flex h-screen flex-col bg-secondary/30">
       {/* Top bar */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-3">
         <div className="flex min-w-0 items-center gap-2">
           <Button asChild variant="ghost" size="icon">
-            <Link href="/dashboard" aria-label="Back to dashboard">
+            <Link
+              href={source.kind === "cloud" ? "/dashboard" : "/tools"}
+              aria-label={source.kind === "cloud" ? "Back to dashboard" : "Back to tools"}
+            >
               <ArrowLeft />
             </Link>
           </Button>
@@ -405,7 +468,15 @@ export function PdfEditor({
           >
             <PanelLeft />
           </Button>
-          <span className="truncate font-semibold">{doc.name}</span>
+          <span className="truncate font-semibold">{docName}</span>
+          {source.kind === "local" && (
+            <span
+              title="Stored in this browser only"
+              className="hidden shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800 sm:inline"
+            >
+              On this device
+            </span>
+          )}
           {dirty && (
             <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
               Unsaved
@@ -606,6 +677,14 @@ export function PdfEditor({
       />
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />
+
+      <UpgradeDialog
+        open={upsellOpen}
+        onOpenChange={setUpsellOpen}
+        reason="save"
+        tier={tier}
+        returnTo="/dashboard"
+      />
 
       {busy && (
         <div className={cn("pointer-events-none fixed inset-0 z-50 bg-background/20")} />

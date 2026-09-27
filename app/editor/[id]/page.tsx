@@ -25,9 +25,6 @@ export default async function EditorPage({
   if (!doc) notFound();
 
   return (
-    <PdfEditor
-      document={doc as DocumentRecord}
-      plan={profile.plan}
-    />
+    <PdfEditor source={{ kind: "cloud", doc: doc as DocumentRecord }} tier={profile.plan} />
   );
 }

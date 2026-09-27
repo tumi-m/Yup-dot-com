@@ -30,7 +30,7 @@ work with or without an account.
 | **Extract Tables** | Detect tables by column structure, export each as CSV. |
 | **PDF → RAG Chunks** | Retrieval-sized JSON chunks with heading breadcrumbs. |
 | **OCR PDF** | Make scans searchable (invisible text layer) or extract text. 7 languages, on-device. |
-| **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Signed-in users; needs an API key.* |
+| **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
 | **Page Numbers** | Insert page numbers with position & format options. |
@@ -42,6 +42,38 @@ Each tool has its own SEO-optimised, statically-generated page at
 `/tools/<slug>` and is registered in [`lib/tools.tsx`](lib/tools.tsx).
 
 ---
+
+## User journey: free first, upsell after value
+
+Modelled on how the category leaders convert — [PDFescape](https://www.pdfescape.com/what/premium/)
+(no registration, no watermark, limits as the upsell), iLovePDF (file-size and
+batch caps), and Smallpdf (task-based prompts):
+
+1. **No account wall, anywhere a first task happens.** The homepage hero is a
+   drop zone: drop a file, pick what to do ("Edit", "Compress", "PDF to
+   Word"…), and the file is handed to that tool without a second upload.
+2. **The full editor works as a guest.** Edit PDF and Fill & Sign open
+   instantly in an on-device editor (`/edit/[id]`, IndexedDB) that survives a
+   reload and exports with **no watermark**.
+3. **Keep going.** Every success screen offers the next step for the same file
+   (compress → protect, OCR → Word…) — no download/re-upload round trip.
+4. **Upsell only after value**, always dismissible, never blocking:
+   a quiet card on success screens; one friendly nudge after a guest's third
+   task of the day (at most once a day); an upgrade prompt when a real limit is
+   reached (file size, batch size, AI answers); and a cloud-save offer after a
+   guest saves their first edit.
+
+| Tier | Files | Batch | AI answers/day | Cloud library |
+| ---- | ----- | ----- | -------------- | ------------- |
+| Guest (no account) | 50 MB | 10 | 3 | — (saved on device) |
+| Free account | 50 MB | 10 | 15 | 5 documents |
+| Pro / Team | 500 MB | 200 | 300 | Unlimited |
+
+Limits live in `lib/limits.ts`; the upsell UI in `components/upsell/`. Tool
+limits are enforced in the browser (tools run there); the AI allowance is
+enforced on the server, keyed by user id or, for guests, by IP. A failed AI
+request refunds its slot. Set `AI_GUEST_DAILY_LIMIT=0` to require an account
+for AI.
 
 ## Layout-aware parsing
 
@@ -110,7 +142,7 @@ served from the app's own origin with `immutable` caching. So:
 page-tagged text to `POST /api/ai/chat`, which streams the answer back as
 NDJSON. The document is placed first behind a prompt-cache breakpoint, so
 follow-up questions reuse it instead of paying for it again. Guard rails:
-signed-in users only, a per-user hourly limit, a clear error for documents too
+a daily allowance per tier (guests included), a clear error for documents too
 long to answer from (never silent truncation), and server-side refusal
 fallbacks. Returns `503` until `ANTHROPIC_API_KEY` is set.
 
@@ -170,11 +202,13 @@ unreachable (which led to self-hosting).
 - **Storage** — a private Supabase Storage bucket locked down with row-level
   security per user.
 
-| Plan | Price | Documents | Watermark |
-| ---- | ----- | --------- | --------- |
-| Free | $0    | 5         | Yes       |
-| Pro  | $12   | Unlimited | No        |
-| Team | $39   | Unlimited | No        |
+| Plan | Price | Cloud documents | Limits |
+| ---- | ----- | --------------- | ------ |
+| Free | $0    | 5 (with an account) | 50 MB files, batches of 10, 3–15 AI answers/day |
+| Pro  | $12   | Unlimited | 500 MB files, batches of 200, 300 AI answers/day |
+| Team | $39   | Unlimited | As Pro; team features are *coming soon* |
+
+No plan adds a watermark.
 
 ---
 
@@ -283,6 +317,7 @@ Variables** and redeploy:
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
 | `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
 | `ANTHROPIC_API_KEY` | AI Assistant (Chat with PDF) |
+| `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 
 Optional:
 

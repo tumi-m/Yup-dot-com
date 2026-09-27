@@ -5,14 +5,14 @@ export const PLANS: Record<PlanId, PlanFeature> = {
     id: "free",
     name: "Free",
     priceMonthly: 0,
-    description: "Every tool, free forever. No card needed.",
+    description: "Every tool, free forever. No sign-up, no card.",
     maxDocuments: 5,
     features: [
-      "Every browser tool, unlimited",
-      "OCR, Word & Excel conversion",
-      "Full editor, forms & e-sign",
-      "Up to 5 cloud documents",
-      "Editor exports carry a small watermark",
+      "Every tool — no account needed",
+      "Full editor, forms & e-sign, no watermark",
+      "Files up to 50 MB, 10 at a time",
+      "3 AI answers a day (15 with a free account)",
+      "5 cloud documents with a free account",
     ],
   },
   pro: {
@@ -24,10 +24,10 @@ export const PLANS: Record<PlanId, PlanFeature> = {
     highlighted: true,
     features: [
       "Everything in Free",
+      "Files up to 500 MB, 200 at a time",
+      "300 AI answers a day",
       "Unlimited cloud documents",
-      "No watermark on editor exports",
       "Saved signatures (coming soon)",
-      "Version history (coming soon)",
     ],
   },
   team: {

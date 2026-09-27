@@ -25,8 +25,8 @@ export default async function PricingPage() {
               <WordReveal text="Simple, honest pricing" />
             </h1>
             <p className="mt-4 text-muted-foreground">
-              Every browser tool is free, forever. Upgrade for the cloud library,
-              unlimited documents, and watermark-free editor exports.
+              Every tool is free with no account and no watermark. Upgrade when you
+              need bigger files, bigger batches, and more AI.
             </p>
           </div>
           <div className="mt-16">
@@ -59,15 +59,15 @@ export default async function PricingPage() {
 const FAQ = [
   {
     q: "Are the tools really free?",
-    a: "Yes. Merge, split, compress, convert, OCR, protect, and the rest run in your browser with no account and no watermark. Plans only add cloud features.",
+    a: "Yes. Every tool, the editor, and e-signing work with no account and no watermark. Paid plans raise limits (file size, batch size, AI answers) and add cloud storage.",
   },
   {
     q: "Do my files get uploaded?",
     a: "Not by the tools — they process files on your device. Files only reach our servers if you save them to your cloud library. The AI assistant sends the document's extracted text to answer your questions.",
   },
   {
-    q: "What does the Free plan's watermark apply to?",
-    a: "Only documents exported from the cloud editor. Upgrading to Pro removes it.",
+    q: "Do I need an account?",
+    a: "No. Every tool and the full editor work without one. A free account adds a cloud library and more AI answers; Pro raises the file-size, batch, and AI limits.",
   },
   {
     q: "Can I cancel anytime?",

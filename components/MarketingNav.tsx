@@ -88,7 +88,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
                 <Link href="/login">Log in</Link>
               </Button>
               <Button asChild size="sm" className="shadow-md shadow-primary/25">
-                <Link href="/signup">Get started</Link>
+                <Link href="/tools">Start free</Link>
               </Button>
             </>
           )}
@@ -152,7 +152,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
                       <Link href="/login">Log in</Link>
                     </Button>
                     <Button asChild>
-                      <Link href="/signup">Get started</Link>
+                      <Link href="/tools">Start free</Link>
                     </Button>
                   </>
                 )}
