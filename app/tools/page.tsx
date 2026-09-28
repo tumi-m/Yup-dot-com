@@ -7,9 +7,9 @@ import { WordReveal } from "@/components/motion/primitives";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
-  title: "All PDF Tools — PDF Wizard",
+  title: "All PDF tools",
   description:
-    "Every PDF spell in one place — merge, split, compress, convert, OCR, protect, edit, and sign — plus YouTube to MP4 (up to 1080p) and X (Twitter) to MP4/MP3.",
+    "Merge, split, compress, convert, OCR, protect, edit and sign PDFs. Plus YouTube to MP4 and X to MP4 or MP3.",
   alternates: { canonical: "/tools" },
 };
 

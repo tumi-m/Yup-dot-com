@@ -7,6 +7,8 @@ import { PricingCards } from "@/components/PricingCards";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 
+export const metadata = { title: "Pricing" };
+
 export const dynamic = "force-dynamic";
 
 export default async function PricingPage() {

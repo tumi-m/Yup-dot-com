@@ -75,7 +75,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-primary/10 via-background to-background px-4">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-primary/10 via-background to-background px-4">
       <Aurora />
       <Starfield />
       <motion.div
@@ -159,6 +159,6 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           </Link>
         </p>
       </motion.div>
-    </div>
+    </main>
   );
 }

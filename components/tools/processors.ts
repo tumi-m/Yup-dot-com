@@ -221,9 +221,9 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "1200",
         options: [
-          { value: "600", label: "Small — 600" },
-          { value: "1200", label: "Medium — 1200" },
-          { value: "2000", label: "Large — 2000" },
+          { value: "600", label: "Small (600)" },
+          { value: "1200", label: "Medium (1200)" },
+          { value: "2000", label: "Large (2000)" },
         ],
       },
     ],

@@ -173,25 +173,27 @@ function SpellDemo() {
             className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:ring-emerald-900"
           >
             <p className="truncate text-xs font-semibold text-emerald-800 dark:text-emerald-300">{demo.to}</p>
-            <p className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-400/80">{demo.toMeta}</p>
+            <p className="truncate text-[11px] text-emerald-700 dark:text-emerald-400">{demo.toMeta}</p>
           </motion.div>
         </motion.div>
       </AnimatePresence>
-      <div className="mt-3 flex justify-center gap-1.5">
+      <div className="-mb-3 mt-0 flex justify-center">
         {DEMOS.map((_, i) => (
           <button
             key={i}
             onClick={() => setIndex(i)}
             aria-label={`Show example ${i + 1}`}
-            className="relative h-1.5 w-6 overflow-hidden rounded-full bg-secondary"
+            className="flex h-11 w-11 items-center justify-center"
           >
-            {i === index && (
-              <motion.span
-                layoutId="demo-pip"
-                className="absolute inset-0 rounded-full bg-primary"
-                transition={{ type: "spring", stiffness: 500, damping: 35 }}
-              />
-            )}
+            <span className="relative block h-1.5 w-6 overflow-hidden rounded-full bg-secondary">
+              {i === index && (
+                <motion.span
+                  layoutId="demo-pip"
+                  className="absolute inset-0 rounded-full bg-primary"
+                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                />
+              )}
+            </span>
           </button>
         ))}
       </div>
@@ -312,7 +314,7 @@ export function HeroScene() {
               transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut", delay: c.delay }}
               className="w-24 rounded-xl border border-white/60 bg-background/95 p-2.5 shadow-xl dark:border-white/10"
             >
-              <div className="flex items-center gap-1 text-[9px] font-semibold text-red-500">
+              <div className="flex items-center gap-1 text-[9px] font-semibold text-red-600">
                 <FileIcon className="h-3 w-3" /> PDF
               </div>
               <div className="mt-2 space-y-1">

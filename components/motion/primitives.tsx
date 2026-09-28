@@ -111,7 +111,8 @@ export function WordReveal({
 }) {
   const words = text.split(" ");
   return (
-    <span className={className} aria-label={text}>
+    <span className={className}>
+      <span className="sr-only">{text}</span>
       {words.map((word, i) => (
         <span key={i} className="inline-block overflow-hidden pb-[0.12em] align-bottom" aria-hidden>
           <motion.span

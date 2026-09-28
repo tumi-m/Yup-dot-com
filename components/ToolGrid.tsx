@@ -38,14 +38,14 @@ function ToolCard({ tool, index }: { tool: ToolMeta; index: number }) {
               <tool.icon className="h-5 w-5" />
             </motion.div>
             <div className="min-w-0">
-              <h3 className="flex flex-wrap items-center gap-2 font-semibold transition-colors group-hover:text-primary">
+              <p className="flex flex-wrap items-center gap-2 font-semibold transition-colors group-hover:text-primary">
                 {tool.name}
                 {tool.badge && (
                   <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                     {tool.badge}
                   </span>
                 )}
-              </h3>
+              </p>
               <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{tool.description}</p>
             </div>
           </div>
@@ -92,7 +92,7 @@ export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tools — try “word”, “password”, “scan”…"
+            placeholder="Search tools"
             aria-label="Search tools"
             className="h-12 w-full rounded-full border border-input bg-background pl-10 pr-10 text-sm shadow-sm outline-none transition-shadow focus:ring-2 focus:ring-ring"
           />
@@ -123,7 +123,7 @@ export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
                   aria-selected={active}
                   onClick={() => setCategory(p)}
                   className={cn(
-                    "relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+                    "relative rounded-full px-4 py-3 text-sm font-medium transition-colors sm:py-1.5",
                     active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
                 >

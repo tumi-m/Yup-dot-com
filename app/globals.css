@@ -13,7 +13,7 @@
     --secondary: 264 30% 96%;
     --secondary-foreground: 263 40% 18%;
     --muted: 264 20% 96%;
-    --muted-foreground: 263 12% 46%;
+    --muted-foreground: 263 14% 38%;
     --accent: 262 83% 96%;
     --accent-foreground: 262 70% 42%;
     --destructive: 0 72% 51%;
@@ -51,6 +51,23 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+}
+
+/*
+ * Extends an element's tap area to at least 44x44px without changing how it
+ * looks, for small controls that sit in open space.
+ */
+.tap {
+  position: relative;
+}
+.tap::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
 }
 
 /* Editor canvas helpers */

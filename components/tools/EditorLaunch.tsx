@@ -52,7 +52,7 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       try {
         pageCount = await getPageCount(bytes);
       } catch {
-        throw new Error("Couldn't open that PDF. It may be damaged or password-protected — try Unlock PDF first.");
+        throw new Error("Couldn't open that PDF. It may be damaged or password-protected.");
       }
 
       const supabase = tryCreateClient();

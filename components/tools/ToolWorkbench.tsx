@@ -390,7 +390,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               {dragging ? "Release to add" : `Drop ${proc.multiple ? "files" : "a file"} here`}
             </p>
             <p className="relative text-sm text-muted-foreground">or</p>
-            <Button className="relative mt-3" onClick={() => inputRef.current?.click()}>
+            <Button className="relative mt-3 h-11" onClick={() => inputRef.current?.click()}>
               Choose {proc.multiple ? "files" : "file"}
             </Button>
             <p className="relative mt-4 text-xs text-muted-foreground">

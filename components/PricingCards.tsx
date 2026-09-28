@@ -85,7 +85,7 @@ export function PricingCards({
                   Most popular
                 </span>
               )}
-              <h3 className="text-xl font-semibold">{plan.name}</h3>
+              <h2 className="text-xl font-semibold">{plan.name}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {plan.description}
               </p>
@@ -104,7 +104,7 @@ export function PricingCards({
               </ul>
 
               <Button
-                className="mt-8"
+                className="mt-8 h-11"
                 variant={plan.highlighted ? "default" : "outline"}
                 disabled={isCurrent || loadingPlan === plan.id}
                 onClick={() => choose(plan.id)}
@@ -113,7 +113,7 @@ export function PricingCards({
                 {isCurrent
                   ? "Current plan"
                   : plan.id === "free"
-                    ? "Start free — no sign-up"
+                    ? "Start free"
                     : `Upgrade to ${plan.name}`}
               </Button>
             </StaggerItem>

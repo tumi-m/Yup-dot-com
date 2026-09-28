@@ -16,5 +16,12 @@ export function siteUrl(): string {
     process.env.VERCEL_URL;
   if (vercel) return `https://${vercel.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
 
+  // In a Codespace, localhost isn't what the browser reaches: use the forwarded URL.
+  const codespace = process.env.CODESPACE_NAME;
+  const forwardDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+  if (codespace && forwardDomain) {
+    return `https://${codespace}-${process.env.PORT ?? "3000"}.${forwardDomain}`;
+  }
+
   return "http://localhost:3000";
 }

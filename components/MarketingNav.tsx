@@ -41,7 +41,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
           scrolled ? "h-14" : "h-16"
         )}
       >
-        <Link href="/" className="text-lg" onClick={() => setOpen(false)}>
+        <Link href="/" className="tap text-lg" onClick={() => setOpen(false)}>
           <motion.span whileHover={{ scale: 1.03 }} className="inline-block">
             <WizardWordmark />
           </motion.span>
@@ -94,7 +94,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
         </div>
 
         <button
-          className="rounded-lg p-2 text-foreground hover:bg-accent md:hidden"
+          className="flex h-11 w-11 items-center justify-center rounded-lg text-foreground hover:bg-accent md:hidden"
           onClick={() => setOpen((o) => !o)}
           aria-label={open ? "Close menu" : "Open menu"}
           aria-expanded={open}

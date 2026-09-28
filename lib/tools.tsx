@@ -70,7 +70,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "merge-pdf",
     name: "Merge PDF",
-    title: "Merge PDF — combine PDF files online",
+    title: "Merge PDF: combine PDF files online",
     description: "Combine PDFs into one.",
     icon: Combine,
     category: "organize",
@@ -79,7 +79,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "split-pdf",
     name: "Split PDF",
-    title: "Split PDF — extract pages from a PDF",
+    title: "Split PDF: extract pages from a PDF",
     description: "Split by page ranges or into single pages.",
     icon: Scissors,
     category: "organize",
@@ -88,7 +88,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "rotate-pdf",
     name: "Rotate PDF",
-    title: "Rotate PDF — turn pages the right way up",
+    title: "Rotate PDF: turn pages the right way up",
     description: "Turn pages the right way up.",
     icon: RotateCw,
     category: "organize",
@@ -97,7 +97,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "compress-pdf",
     name: "Compress PDF",
-    title: "Compress PDF — reduce PDF file size",
+    title: "Compress PDF: reduce PDF file size",
     description: "Make a PDF smaller.",
     icon: Minimize2,
     category: "optimize",
@@ -106,7 +106,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-jpg",
     name: "PDF to JPG",
-    title: "PDF to JPG — convert PDF pages to images",
+    title: "PDF to JPG: convert PDF pages to images",
     description: "Each page as an image.",
     icon: ImageIcon,
     category: "convert",
@@ -115,7 +115,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "jpg-to-pdf",
     name: "JPG to PDF",
-    title: "JPG to PDF — convert images to a PDF",
+    title: "JPG to PDF: convert images to a PDF",
     description: "Images into one PDF.",
     icon: FileImage,
     category: "convert",
@@ -124,7 +124,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-text",
     name: "PDF to Text",
-    title: "PDF to Text — extract text in reading order",
+    title: "PDF to Text: extract text in reading order",
     description: "Plain text in reading order.",
     icon: FileType2,
     category: "extract",
@@ -133,7 +133,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-markdown",
     name: "PDF to Markdown",
-    title: "PDF to Markdown — layout-aware conversion",
+    title: "PDF to Markdown: layout-aware conversion",
     description: "Clean Markdown with structure kept.",
     icon: FileCode2,
     category: "extract",
@@ -151,7 +151,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-chunks",
     name: "PDF to RAG Chunks",
-    title: "PDF to RAG Chunks — JSON for AI pipelines",
+    title: "PDF to RAG Chunks: JSON for AI pipelines",
     description: "JSON chunks for AI pipelines.",
     icon: Boxes,
     category: "extract",
@@ -160,7 +160,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-word",
     name: "PDF to Word",
-    title: "PDF to Word — convert PDF to editable DOCX",
+    title: "PDF to Word: convert PDF to editable DOCX",
     description: "Editable DOCX with headings and tables.",
     icon: FileText,
     category: "convert",
@@ -169,7 +169,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "pdf-to-excel",
     name: "PDF to Excel",
-    title: "PDF to Excel — pull tables into XLSX",
+    title: "PDF to Excel: pull tables into XLSX",
     description: "Tables into spreadsheets.",
     icon: Sheet,
     category: "convert",
@@ -178,7 +178,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "chat-with-pdf",
     name: "AI Assistant",
-    title: "Chat with PDF — summarize and ask questions",
+    title: "Chat with PDF: summarize and ask questions",
     description: "Summarise a PDF and ask questions.",
     icon: MessagesSquare,
     category: "extract",
@@ -189,7 +189,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "ocr-pdf",
     name: "OCR PDF",
-    title: "OCR PDF — make scanned PDFs searchable",
+    title: "OCR PDF: make scanned PDFs searchable",
     description: "Make scans searchable.",
     icon: ScanText,
     category: "extract",
@@ -198,7 +198,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "protect-pdf",
     name: "Protect PDF",
-    title: "Protect PDF — add a password to a PDF",
+    title: "Protect PDF: add a password to a PDF",
     description: "Add a password.",
     icon: Lock,
     category: "security",
@@ -207,7 +207,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "unlock-pdf",
     name: "Unlock PDF",
-    title: "Unlock PDF — remove a PDF password",
+    title: "Unlock PDF: remove a PDF password",
     description: "Remove a password.",
     icon: LockOpen,
     category: "security",
@@ -225,7 +225,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "watermark-pdf",
     name: "Watermark",
-    title: "Watermark PDF — stamp text over every page",
+    title: "Watermark PDF: stamp text over every page",
     description: "Stamp text across every page.",
     icon: Stamp,
     category: "edit",
@@ -234,7 +234,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "edit-pdf",
     name: "Edit PDF",
-    title: "Edit PDF — annotate, draw, and add text",
+    title: "Edit PDF: annotate, draw, and add text",
     description: "Add text, shapes, links and form fields.",
     icon: PenLine,
     category: "edit",
@@ -244,7 +244,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "sign-pdf",
     name: "Fill & Sign",
-    title: "Sign PDF — fill forms and add your signature",
+    title: "Sign PDF: fill forms and add your signature",
     description: "Fill in forms and sign.",
     icon: Signature,
     category: "edit",
@@ -254,7 +254,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "youtube-to-mp4",
     name: "YouTube to MP4",
-    title: "YouTube to MP4 — download videos up to 1080p",
+    title: "YouTube to MP4: download videos up to 1080p",
     description: "Save a video as MP4.",
     icon: Clapperboard,
     category: "media",
@@ -265,7 +265,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "youtube-1080p",
     name: "YouTube 1080p",
-    title: "YouTube 1080p Downloader — Full HD MP4",
+    title: "YouTube 1080p Downloader: Full HD MP4",
     description: "Full HD MP4 with sound.",
     icon: MonitorPlay,
     category: "media",
@@ -277,7 +277,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "youtube-720p",
     name: "YouTube 720p",
-    title: "YouTube 720p Downloader — free HD MP4",
+    title: "YouTube 720p Downloader: free HD MP4",
     description: "HD MP4, free.",
     icon: MonitorPlay,
     category: "media",
@@ -288,7 +288,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "x-to-mp4",
     name: "X (Twitter) to MP4",
-    title: "X (Twitter) Video Downloader — save as MP4",
+    title: "X (Twitter) Video Downloader: save as MP4",
     description: "Save an X video as MP4.",
     icon: Film,
     category: "media",
@@ -299,7 +299,7 @@ export const TOOLS: ToolMeta[] = [
   {
     slug: "x-to-mp3",
     name: "X (Twitter) to MP3",
-    title: "X (Twitter) to MP3 — extract the audio",
+    title: "X (Twitter) to MP3: extract the audio",
     description: "Save an X video's audio.",
     icon: Music2,
     category: "media",

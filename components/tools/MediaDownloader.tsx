@@ -105,7 +105,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       const text = await navigator.clipboard.readText();
       if (text) setUrl(text.trim());
     } catch {
-      setError("Your browser blocked clipboard access — paste with Ctrl+V instead.");
+      setError("Clipboard blocked. Paste with Ctrl+V.");
     }
   }
 

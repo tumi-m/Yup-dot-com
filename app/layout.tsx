@@ -9,11 +9,11 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
   title: {
-    default: "PDF Wizard — cast spells on your PDFs",
+    default: "PDF Wizard: cast spells on your PDFs",
     template: "%s | PDF Wizard",
   },
   description:
-    "Merge, split, compress, convert, edit, and sign PDFs right in your browser. A complete PDF toolkit — free, fast, and private.",
+    "Merge, split, compress, convert, edit and sign PDFs in your browser. Free, no sign-up, no watermark.",
   keywords: [
     "PDF editor",
     "merge PDF",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     "watermark PDF",
   ],
   openGraph: {
-    title: "PDF Wizard — cast spells on your PDFs",
+    title: "PDF Wizard: cast spells on your PDFs",
     description:
       "A complete PDF toolkit: merge, split, compress, convert, edit, and sign. Free and private.",
     type: "website",

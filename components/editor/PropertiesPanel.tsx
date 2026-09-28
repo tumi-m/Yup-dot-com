@@ -139,7 +139,7 @@ export function PropertiesPanel({
                 </div>
               </Field>
             )}
-            <Field label={`Opacity — ${Math.round(annotation.opacity * 100)}%`}>
+            <Field label={`Opacity ${Math.round(annotation.opacity * 100)}%`}>
               <input
                 type="range"
                 min={0.1}
@@ -165,7 +165,7 @@ export function PropertiesPanel({
                 className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1"
               />
             </Field>
-            <Field label={`Opacity — ${Math.round(annotation.opacity * 100)}%`}>
+            <Field label={`Opacity ${Math.round(annotation.opacity * 100)}%`}>
               <input
                 type="range"
                 min={0.1}

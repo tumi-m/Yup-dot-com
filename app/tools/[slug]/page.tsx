@@ -27,9 +27,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const tool = getTool(slug);
-  if (!tool) return { title: "Tool not found — PDF Wizard" };
+  if (!tool) return { title: "Tool not found" };
   return {
-    title: `${tool.title} | PDF Wizard`,
+    title: tool.title,
     description: tool.description,
     alternates: { canonical: `/tools/${tool.slug}` },
     openGraph: { title: tool.title, description: tool.description },
@@ -58,7 +58,7 @@ export default async function ToolPage({
         <div className="container relative py-10">
           <Link
             href="/tools"
-            className="group mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            className="tap group mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" /> All tools
           </Link>
