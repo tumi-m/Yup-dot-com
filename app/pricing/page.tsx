@@ -24,10 +24,6 @@ export default async function PricingPage() {
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
               <WordReveal text="Simple, honest pricing" />
             </h1>
-            <p className="mt-4 text-muted-foreground">
-              Every tool is free with no account and no watermark. Upgrade when you
-              need bigger files, bigger batches, and more AI.
-            </p>
           </div>
           <div className="mt-16">
             <Suspense>
@@ -36,7 +32,7 @@ export default async function PricingPage() {
           </div>
 
           <section className="mx-auto mt-24 max-w-2xl">
-            <h2 className="mb-6 text-center text-2xl font-bold tracking-tight">Questions, answered</h2>
+            <h2 className="mb-6 text-center text-2xl font-bold tracking-tight">FAQ</h2>
             <div className="space-y-3">
               {FAQ.map((f) => (
                 <details key={f.q} className="group rounded-2xl border border-border bg-card px-5 py-4 open:shadow-md">
@@ -57,20 +53,7 @@ export default async function PricingPage() {
 }
 
 const FAQ = [
-  {
-    q: "Are the tools really free?",
-    a: "Yes. Every tool, the editor, and e-signing work with no account and no watermark. Paid plans raise limits (file size, batch size, AI answers) and add cloud storage.",
-  },
-  {
-    q: "Do my files get uploaded?",
-    a: "Not by the tools — they process files on your device. Files only reach our servers if you save them to your cloud library. The AI assistant sends the document's extracted text to answer your questions.",
-  },
-  {
-    q: "Do I need an account?",
-    a: "No. Every tool and the full editor work without one. A free account adds a cloud library and more AI answers; Pro raises the file-size, batch, and AI limits.",
-  },
-  {
-    q: "Can I cancel anytime?",
-    a: "Yes. Manage or cancel your subscription from the Billing page at any time — no emails, no calls.",
-  },
+  { q: "Do I need an account?", a: "No. Every tool works without one." },
+  { q: "Are my files uploaded?", a: "No. PDF tools run in your browser." },
+  { q: "Can I cancel anytime?", a: "Yes, from the Billing page." },
 ];

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import JSZip from "jszip";
 import { AnimatePresence, motion, Reorder } from "motion/react";
 import {
@@ -247,7 +246,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             )}
             {sizeDelta !== null && sizeDelta <= 0.01 && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
-                Already optimized — we kept your original
+                Already optimized
               </span>
             )}
           </motion.div>
@@ -300,7 +299,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               className="relative mt-8"
             >
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Keep going with this file
+                Next
               </p>
               <div className="flex flex-wrap justify-center gap-2">
                 {(NEXT_STEPS[slug] ?? NEXT_STEPS.default).map((next) => {
@@ -395,7 +394,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               Choose {proc.multiple ? "files" : "file"}
             </Button>
             <p className="relative mt-4 text-xs text-muted-foreground">
-              Processed in your browser — your files are never uploaded.
+              Stays on your device.
             </p>
           </motion.div>
 
@@ -597,12 +596,6 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 {proc.note && (
                   <p className="max-w-md text-center text-xs text-muted-foreground">{proc.note}</p>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  Want cloud storage and history?{" "}
-                  <Link href="/signup" className="text-primary hover:underline">
-                    Create a free account
-                  </Link>
-                </p>
               </motion.div>
             )}
           </AnimatePresence>

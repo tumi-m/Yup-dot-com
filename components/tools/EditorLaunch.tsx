@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
-import { UploadCloud, Loader2, FilePlus2, ShieldCheck } from "lucide-react";
+import { UploadCloud, Loader2, FilePlus2 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
 import { tryCreateClient } from "@/lib/supabase/client";
 import { getPageCount } from "@/lib/pdf/operations";
 import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
-import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
+import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SPRING } from "@/components/motion/primitives";
@@ -146,13 +146,9 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
             Choose PDF
           </Button>
           <Button variant="outline" onClick={blankDocument} disabled={busy}>
-            <FilePlus2 /> Start with a blank page
+            <FilePlus2 /> Blank page
           </Button>
         </div>
-        <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-          No sign-up, no watermark. Files up to {formatLimitBytes(limits.maxFileBytes)} stay on your device.
-        </p>
       </motion.div>
       {error && (
         <p role="alert" data-testid="tool-error" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">

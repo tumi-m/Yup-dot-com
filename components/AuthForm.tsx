@@ -88,11 +88,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           <WizardWordmark />
         </Link>
         <h1 className="text-center text-2xl font-bold">
-          {isSignup ? "Create your account" : "Welcome back"}
+          {isSignup ? "Create account" : "Log in"}
         </h1>
-        <p className="mt-1 text-center text-sm text-muted-foreground">
-          {isSignup ? "Start editing PDFs for free." : "Log in to your account."}
-        </p>
 
         {!isSupabaseConfigured() && (
           <p className="mt-6 rounded-md bg-amber-100 px-3 py-2 text-sm text-amber-900">

@@ -83,7 +83,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
       {
         key: "ranges",
-        label: "Ranges (e.g. 1-3, 5, 8-10)",
+        label: "Pages (e.g. 1-3, 5)",
         type: "text",
         default: "1-1",
         showIf: { key: "mode", value: "ranges" },
@@ -234,7 +234,6 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: false,
     minFiles: 1,
     fields: [],
-    note: "Rebuilds headings, lists, and tables as real Word structure. Complex layouts are simplified.",
     run: (files) => pdfToWordTool(files),
   },
   "pdf-to-excel": {
@@ -267,7 +266,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    note: "Recognition runs on your device. The first run downloads the language model (a few MB).",
+    note: "Runs on your device.",
     run: (files, o, ctx) => ocrTool(files, { lang: o.lang, output: o.output }, ctx),
   },
   "protect-pdf": {
@@ -298,7 +297,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    note: "Your password never leaves this browser. Keep it safe — it can't be recovered.",
+    note: "Lost passwords can't be recovered.",
     run: (files, o) =>
       protectTool(files, {
         password: o.password,
@@ -312,7 +311,6 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: false,
     minFiles: 1,
     fields: [{ key: "password", label: "Current password", type: "password", default: "" }],
-    note: "Only unlock documents you're authorised to open.",
     run: (files, o) => unlockTool(files, { password: o.password }),
   },
   "page-numbers": {

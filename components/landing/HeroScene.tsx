@@ -20,8 +20,7 @@ import {
   Sheet,
   FileText as FileIcon,
   Sparkles,
-  ArrowRight,
-} from "lucide-react";
+  } from "lucide-react";
 import { EASE } from "@/components/motion/primitives";
 
 /** Deterministic PRNG so server and client render identical particles. */
@@ -336,9 +335,6 @@ export function HeroScene() {
         <div className="flex justify-center">
           <SpellDemo />
         </div>
-        <p className="mt-2 flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-          Example spells <ArrowRight className="h-3 w-3" /> try any of them free
-        </p>
       </motion.div>
     </div>
   );

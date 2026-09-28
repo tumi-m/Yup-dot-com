@@ -34,10 +34,9 @@ interface LoadedDoc {
 }
 
 const SUGGESTIONS = [
-  "Summarize this document",
-  "What are the key numbers and dates?",
-  "List any action items or deadlines",
-  "Explain it like I'm new to the topic",
+  "Summarize",
+  "Key numbers and dates",
+  "Action items",
 ];
 
 /** Minimal, safe Markdown: headings, bullets, numbered lists, bold, inline code. */
@@ -137,7 +136,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       const { parseDocument, toPagedText } = await import("@/lib/pdf/parse");
       const parsed = await parseDocument(new Uint8Array(await file.arrayBuffer()));
       if (parsed.likelyScanned) {
-        setError({ message: "This PDF looks scanned, so it has no readable text yet. Run OCR PDF on it first, then come back." });
+        setError({ message: "This PDF is a scan. Run OCR PDF first." });
         return;
       }
       setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: toPagedText(parsed) });
@@ -243,7 +242,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             </Button>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
-            No sign-up needed to try it. The PDF is read in your browser; only its extracted text is sent to the AI to answer your questions.
+            Only the PDF's text is sent to the AI.
           </p>
         </motion.div>
         {error && (

@@ -53,7 +53,7 @@ export function RelatedTools({ slug }: { slug: string }) {
 
   return (
     <section className="mt-20">
-      <h2 className="mb-5 text-center text-lg font-semibold">Keep the magic going</h2>
+      <h2 className="mb-5 text-center text-lg font-semibold">More tools</h2>
       <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {related.map((t) => (
           <StaggerItem key={t.slug}>

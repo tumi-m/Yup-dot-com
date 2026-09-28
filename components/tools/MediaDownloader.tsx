@@ -434,7 +434,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       </AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">
-        Only download videos you own or have permission to use. Up to 720p is free; 1080p is part of Pro.
+        Only download videos you have permission to use.
       </p>
 
       {upsell && (

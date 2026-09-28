@@ -5,7 +5,6 @@ import { ToolGrid } from "@/components/ToolGrid";
 import { Starfield } from "@/components/landing/HeroScene";
 import { WordReveal } from "@/components/motion/primitives";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { TOOLS } from "@/lib/tools";
 
 export const metadata: Metadata = {
   title: "All PDF Tools — PDF Wizard",
@@ -25,12 +24,8 @@ export default async function ToolsPage() {
           <Starfield />
           <div className="container relative py-16 text-center">
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-              <WordReveal text="Every PDF spell in your spellbook" />
+              <WordReveal text="All tools" />
             </h1>
-            <p className="mx-auto mt-4 max-w-xl text-muted-foreground">
-              {TOOLS.length} tools to merge, convert, compress, secure, and command your
-              PDFs — all in your browser — plus YouTube and X video downloads.
-            </p>
           </div>
         </section>
         <div className="container py-12">

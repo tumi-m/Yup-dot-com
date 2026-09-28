@@ -163,8 +163,7 @@ export function DashboardClient({
         >
           <FileText className="h-10 w-10" />
           <p className="mt-3 font-medium">No documents yet</p>
-          <p className="text-sm">Upload a PDF to get started</p>
-        </button>
+                  </button>
       ) : (
         <motion.div layout className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <AnimatePresence mode="popLayout" initial={true}>
@@ -214,7 +213,7 @@ export function DashboardClient({
       )}
 
       <section className="mt-14">
-        <h2 className="mb-4 text-lg font-semibold">Quick spells</h2>
+        <h2 className="mb-4 text-lg font-semibold">Tools</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {QUICK.map((slug, i) => {
             const tool = getTool(slug);

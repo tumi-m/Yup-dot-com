@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { FileText, ShieldCheck, UploadCloud, X } from "lucide-react";
+import { FileText, UploadCloud, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fileToHandoff, setHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
@@ -100,9 +100,8 @@ export function HeroDropzone() {
                 <UploadCloud className="h-7 w-7" />
               </motion.div>
               <div className="flex-1 text-center sm:text-left">
-                <p className="text-lg font-semibold">{dragging ? "Release to begin" : "Drop a PDF to get started"}</p>
-                <p className="text-sm text-muted-foreground">Edit, sign, convert, or compress — free, no sign-up</p>
-              </div>
+                <p className="text-lg font-semibold">{dragging ? "Release to begin" : "Drop a PDF"}</p>
+                              </div>
               <Button size="lg" className="h-12 px-6 shadow-lg shadow-primary/25" onClick={() => inputRef.current?.click()}>
                 Choose file
               </Button>
@@ -130,7 +129,7 @@ export function HeroDropzone() {
               </button>
             </div>
             <p className="mb-3 mt-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              What would you like to do?
+              Choose a tool
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {actions.map((slug, i) => {
@@ -162,9 +161,6 @@ export function HeroDropzone() {
           </motion.div>
         )}
       </AnimatePresence>
-      <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground lg:justify-start">
-        <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> Files are processed on your device. No account, no watermark.
-      </p>
     </div>
   );
 }

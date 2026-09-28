@@ -18,55 +18,51 @@ export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "qu
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
-    title: "That file is a big one",
-    body: (t) =>
-      `Your plan handles files up to ${formatLimitBytes(LIMITS[t].maxFileBytes)}. Pro goes up to ${formatLimitBytes(LIMITS.pro.maxFileBytes)}.`,
+    title: "File too large",
+    body: (t) => `Free: ${formatLimitBytes(LIMITS[t].maxFileBytes)}. Pro: ${formatLimitBytes(LIMITS.pro.maxFileBytes)}.`,
   },
   batch: {
-    title: "You're working in bulk",
-    body: (t) =>
-      `Your plan processes up to ${LIMITS[t].maxBatchFiles} files at once. Pro handles up to ${LIMITS.pro.maxBatchFiles}.`,
+    title: "Too many files",
+    body: (t) => `Free: ${LIMITS[t].maxBatchFiles} at once. Pro: ${LIMITS.pro.maxBatchFiles}.`,
   },
   ai: {
-    title: "You've used today's free AI answers",
+    title: "Daily AI limit reached",
     body: (t) =>
       t === "guest"
-        ? `A free account raises it to ${LIMITS.free.aiAnswersPerDay} answers a day. Pro gives you ${LIMITS.pro.aiAnswersPerDay}.`
-        : `Pro raises it to ${LIMITS.pro.aiAnswersPerDay} answers a day. Your allowance resets tomorrow.`,
+        ? `${LIMITS.free.aiAnswersPerDay} a day with a free account, ${LIMITS.pro.aiAnswersPerDay} with Pro.`
+        : `${LIMITS.pro.aiAnswersPerDay} a day with Pro.`,
   },
   quality: {
-    title: "Full HD 1080p is part of Pro",
-    body: () => `Free downloads go up to 720p. Pro unlocks 1080p and ${LIMITS.pro.mediaDownloadsPerDay} downloads a day.`,
+    title: "1080p is a Pro feature",
+    body: () => "Free downloads go up to 720p.",
   },
   downloads: {
-    title: "You've used today's free downloads",
+    title: "Daily download limit reached",
     body: (t) =>
       t === "guest"
-        ? `A free account raises it to ${LIMITS.free.mediaDownloadsPerDay} a day. Pro gives you ${LIMITS.pro.mediaDownloadsPerDay} and 1080p.`
-        : `Pro gives you ${LIMITS.pro.mediaDownloadsPerDay} downloads a day and 1080p. Your allowance resets tomorrow.`,
+        ? `${LIMITS.free.mediaDownloadsPerDay} a day with a free account, ${LIMITS.pro.mediaDownloadsPerDay} with Pro.`
+        : `${LIMITS.pro.mediaDownloadsPerDay} a day with Pro.`,
   },
   save: {
-    title: "Keep this document in the cloud",
-    body: () =>
-      "It's saved on this device already. A free account keeps your documents safe and opens them from any device.",
+    title: "Save to the cloud",
+    body: () => "Open your documents on any device.",
   },
   nudge: {
-    title: "You're on a roll",
-    body: () =>
-      "Create a free account to keep your documents in one place and get more AI answers — still no card needed.",
+    title: "Create a free account",
+    body: () => "Keep your documents in one place.",
   },
 };
 
 const MEDIA_BENEFITS = [
-  { icon: Film, text: "Full HD 1080p YouTube downloads" },
-  { icon: InfinityIcon, text: `${LIMITS.pro.mediaDownloadsPerDay} video downloads a day` },
-  { icon: Sparkles, text: "Bigger files and more AI for your PDFs" },
+  { icon: Film, text: "1080p downloads" },
+  { icon: InfinityIcon, text: `${LIMITS.pro.mediaDownloadsPerDay} downloads a day` },
+  { icon: Sparkles, text: "Bigger files, more AI" },
 ];
 
 const BENEFITS = [
-  { icon: Cloud, text: "Cloud library across devices" },
-  { icon: InfinityIcon, text: "Bigger files and bigger batches with Pro" },
-  { icon: Sparkles, text: "More AI answers every day" },
+  { icon: Cloud, text: "Cloud library" },
+  { icon: InfinityIcon, text: "Bigger files and batches" },
+  { icon: Sparkles, text: "More AI answers" },
 ];
 
 /**
@@ -151,7 +147,7 @@ export function UpgradeDialog({
               onClick={() => onOpenChange(false)}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              {reason === "nudge" || reason === "save" ? "Maybe later" : "Continue on the free plan"}
+              "Not now"
             </button>
           </div>
         </div>
@@ -181,7 +177,7 @@ export function UpsellCard({
         {guest ? <Cloud className="h-5 w-5" /> : <Crown className="h-5 w-5" />}
       </div>
       <div className="min-w-0 flex-1 text-sm">
-        <p className="font-semibold">{guest ? "Keep your documents in one place" : "Go bigger with Pro"}</p>
+        <p className="font-semibold">{guest ? "Save your work to the cloud" : "Upgrade to Pro"}</p>
         <p className="text-muted-foreground">
           {guest ? (
             <>
