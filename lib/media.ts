@@ -1,7 +1,8 @@
 /**
- * YouTube and X (Twitter) downloads. The heavy lifting runs in the separate
- * media worker (media-worker/), because yt-dlp and ffmpeg can't run on
- * serverless. This module is shared by the API routes and the UI.
+ * YouTube and X (Twitter) downloads, shared by the API routes and the UI.
+ * X posts are resolved by the web app itself (lib/x-video.ts); YouTube needs
+ * the separate media worker (media-worker/), because yt-dlp and ffmpeg can't
+ * run on serverless.
  */
 
 export type MediaPlatform = "youtube" | "x";
@@ -62,22 +63,3 @@ export const PLATFORM_LABEL: Record<MediaPlatform, string> = {
   youtube: "YouTube",
   x: "X (Twitter)",
 };
-
-export function mediaWorkerUrl(): string | null {
-  const url = process.env.MEDIA_WORKER_URL;
-  return url ? url.replace(/\/$/, "") : null;
-}
-
-/** Signs one download: base64url(json) + "." + base64url(HMAC-SHA256). */
-export async function signMediaToken(
-  payload: { u: string; k: MediaKind; h: number },
-  secret: string,
-  ttlSeconds = 600
-): Promise<string> {
-  const { createHmac } = await import("node:crypto");
-  const body = Buffer.from(
-    JSON.stringify({ ...payload, e: Math.floor(Date.now() / 1000) + ttlSeconds })
-  ).toString("base64url");
-  const sig = createHmac("sha256", secret).update(body).digest("base64url");
-  return `${body}.${sig}`;
-}

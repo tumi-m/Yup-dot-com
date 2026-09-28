@@ -34,7 +34,7 @@ work with or without an account.
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
 | **YouTube to MP4** | 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
-| **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. *Needs the media worker.* |
+| **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
@@ -79,13 +79,21 @@ for AI.
 
 ## Video & Audio downloads
 
-YouTube to MP4 and X (Twitter) to MP4/MP3 run in a separate container
-([`media-worker/`](media-worker/README.md): yt-dlp + ffmpeg), because
-serverless functions can't merge HD video and audio tracks. The web app checks
-the plan (1080p is Pro) and the daily quota (guest 5, free account 10, Pro 200),
-then signs a 10-minute token for exactly one download. The browser takes the file
-straight from the worker. Read the worker README's **Things to know before
-launch** section: YouTube blocks cloud IPs, and there are legal points too.
+**X (Twitter)** works on the web app alone. `/api/media/info` resolves the post
+through X's public embed endpoint (with FxTwitter and vxTwitter as fallbacks),
+`/api/media/file` streams the MP4 from `video.twimg.com` with a proper filename,
+and MP3 is converted in the browser with ffmpeg.wasm (self-hosted under
+`/vendor`). These endpoints are unofficial and can change without notice.
+
+**YouTube** needs a separate container ([`media-worker/`](media-worker/README.md):
+yt-dlp + Deno + ffmpeg), because YouTube's HD tracks must be merged and its
+stream URLs only work from the IP that requested them.
+
+For both, the web app checks the plan (1080p is Pro) and the daily quota
+(guest 5, free account 10, Pro 200), then signs a short-lived token for exactly
+one download. Open `/api/media/health` after deploying to see what's missing.
+Read the worker README's **Things to know before launch** section: YouTube
+blocks cloud IPs, and there are legal points too.
 
 ## Layout-aware parsing
 
@@ -329,7 +337,8 @@ Variables** and redeploy:
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
 | `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
 | `ANTHROPIC_API_KEY` | AI Assistant (Chat with PDF) |
-| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube and X downloads — see [`media-worker/README.md`](media-worker/README.md) |
+| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
+| `MEDIA_SIGNING_SECRET` | Signs X download links. Falls back to `MEDIA_WORKER_SECRET`; set one of them in production |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 
 Optional:

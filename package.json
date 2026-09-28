@@ -10,13 +10,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx tests/parse.test.mts && tsx tests/columns.test.mts && tsx tests/table-not-columns.test.mts && tsx tests/bake.test.mts && tsx tests/forms.test.mts && tsx tests/security.test.mts && tsx tests/ocr-layer.test.mts && tsx tests/convert.test.mts && tsx tests/media-url.test.mts",
+    "test": "tsx tests/parse.test.mts && tsx tests/columns.test.mts && tsx tests/table-not-columns.test.mts && tsx tests/bake.test.mts && tsx tests/forms.test.mts && tsx tests/security.test.mts && tsx tests/ocr-layer.test.mts && tsx tests/convert.test.mts && tsx tests/media-url.test.mts && tsx tests/x-video.test.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:media": "tsx tests/media-worker.test.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
     "@cantoo/pdf-lib": "^2.11.1",
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/ffmpeg": "0.12.15",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.4",
     "@radix-ui/react-slot": "^1.1.2",

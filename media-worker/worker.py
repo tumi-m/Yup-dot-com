@@ -18,6 +18,7 @@ Standard library only, apart from yt-dlp.
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import re
@@ -42,6 +43,11 @@ JOB_TTL = int(os.environ.get("MEDIA_JOB_TTL_SECONDS", "900"))
 COOKIES = os.environ.get("YTDLP_COOKIES_FILE") or None
 PROXY = os.environ.get("YTDLP_PROXY") or None
 FFMPEG = os.environ.get("FFMPEG_LOCATION") or None
+# YouTube needs a JavaScript runtime to solve its player challenges. The
+# Dockerfile installs Deno via yt-dlp's "deno" extra; DENO_PATH overrides it.
+DENO = os.environ.get("DENO_PATH") or shutil.which("deno")
+# Jobs still running after this long are presumed stuck and cleaned up.
+JOB_MAX_RUNTIME = int(os.environ.get("MEDIA_JOB_MAX_RUNTIME_SECONDS", str(2 * 60 * 60)))
 # Extra hosts, for local testing only. Leave unset in production.
 TEST_HOSTS = {h.strip() for h in os.environ.get("MEDIA_TEST_HOSTS", "").split(",") if h.strip()}
 
@@ -98,6 +104,8 @@ def base_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        # X posts can hold several videos; only ever take the first.
+        "playlist_items": "1",
         "restrictfilenames": True,
         "socket_timeout": 20,
         "retries": 3,
@@ -108,27 +116,41 @@ def base_opts() -> dict:
         opts["proxy"] = PROXY
     if FFMPEG:
         opts["ffmpeg_location"] = FFMPEG
+    if DENO:
+        opts["js_runtimes"] = {"deno": {"path": DENO}}
     return opts
 
 
-def extract_info(url: str) -> dict:
-    with yt_dlp.YoutubeDL(base_opts()) as ydl:
-        info = ydl.extract_info(url, download=False)
-    # X posts can carry several videos; take the first.
-    if info.get("_type") == "playlist" and info.get("entries"):
-        info = next(e for e in info["entries"] if e)
-    heights = sorted(
-        {f["height"] for f in info.get("formats") or [] if f.get("height") and f.get("vcodec") not in (None, "none")}
-    )
+def first_entry(info: dict) -> dict:
+    if info.get("_type") == "playlist":
+        entries = [e for e in info.get("entries") or [] if e]
+        if not entries:
+            raise yt_dlp.utils.DownloadError("no video in this post")
+        return entries[0]
+    return info
+
+
+def is_video(f: dict) -> bool:
+    # Some extractors leave vcodec unset (None) on video formats; only "none" means audio-only.
+    return bool(f.get("height")) and f.get("vcodec") != "none"
+
+
+def summarize(info: dict) -> dict:
+    formats = info.get("formats") or []
     return {
         "id": info.get("id"),
         "title": info.get("title") or "Untitled",
         "uploader": info.get("uploader") or info.get("channel"),
         "duration": info.get("duration"),
         "thumbnail": info.get("thumbnail"),
-        "heights": heights,
-        "hasAudio": any(f.get("acodec") not in (None, "none") for f in info.get("formats") or []),
+        "heights": sorted({f["height"] for f in formats if is_video(f)}) or ([info["height"]] if info.get("height") else []),
+        "hasAudio": any(f.get("acodec") != "none" for f in formats) if formats else True,
     }
+
+
+def extract_info(url: str) -> dict:
+    with yt_dlp.YoutubeDL(base_opts()) as ydl:
+        return summarize(first_entry(ydl.extract_info(url, download=False)))
 
 
 def download_opts(kind: str, height: int, out_dir: str, job: dict) -> dict:
@@ -157,7 +179,7 @@ def download_opts(kind: str, height: int, out_dir: str, job: dict) -> dict:
         # Prefer H.264 + AAC so the MP4 plays everywhere (QuickTime, iOS,
         # PowerPoint); fall back to any codec at the requested height.
         opts["format"] = (
-            f"bv*[height<={height}][vcodec^=avc1]+ba[ext=m4a]/"
+            f"bv*[height<={height}][vcodec^=avc1]+(ba[ext=m4a]/ba)/"
             f"bv*[height<={height}]+ba/"
             f"b[height<={height}]/b"
         )
@@ -170,15 +192,16 @@ def run_job(job_id: str, payload: dict):
     out_dir = tempfile.mkdtemp(prefix="pw-media-")
     job["dir"] = out_dir
     if not slots.acquire(timeout=120):
-        job.update(status="error", error="The service is busy. Please try again in a minute.")
+        job.update(status="error", error="The service is busy. Please try again in a minute.", finished=time.time())
         return
     try:
         job["stage"] = "downloading"
-        info = extract_info(payload["u"])
-        if info["duration"] and info["duration"] > MAX_DURATION:
-            raise ValueError(f"Videos up to {MAX_DURATION // 3600} hours are supported.")
+        # One extraction, reused for the download: YouTube rate-limits extractions.
         with yt_dlp.YoutubeDL(download_opts(payload["k"], int(payload.get("h") or 720), out_dir, job)) as ydl:
-            ydl.download([payload["u"]])
+            info = first_entry(ydl.extract_info(payload["u"], download=False))
+            if (info.get("duration") or 0) > MAX_DURATION:
+                raise ValueError(f"Videos up to {MAX_DURATION // 3600} hours are supported.")
+            ydl.process_ie_result(info, download=True)
         files = [os.path.join(out_dir, f) for f in os.listdir(out_dir) if not f.endswith((".part", ".ytdl"))]
         if not files:
             raise ValueError("Nothing was downloaded.")
@@ -186,15 +209,25 @@ def run_job(job_id: str, payload: dict):
         job.update(status="ready", progress=1.0, stage="ready", path=path,
                    filename=os.path.basename(path), size=os.path.getsize(path))
     except yt_dlp.utils.DownloadError as e:
+        print(f"job {job_id[:8]} failed: {e}", flush=True)
         job.update(status="error", error=friendly_error(str(e)))
     except Exception as e:  # noqa: BLE001 — surface a clean message, never a trace
+        print(f"job {job_id[:8]} failed: {type(e).__name__}: {e}", flush=True)
         job.update(status="error", error=str(e) if isinstance(e, ValueError) else "Download failed.")
     finally:
+        job["finished"] = time.time()
         slots.release()
 
 
 def friendly_error(message: str) -> str:
     m = message.lower()
+    if "not a bot" in m or "sign in to confirm" in m:
+        return ("YouTube is blocking this download server as a bot. "
+                "The site owner needs to give it a residential proxy or cookies (see media-worker/README.md).")
+    if "requested format is not available" in m:
+        return "That quality isn't available for this video. Pick another."
+    if "http error 403" in m:
+        return "YouTube refused the download. Try again; if it keeps happening, the server needs a proxy."
     if "private" in m:
         return "This video is private."
     if "sign in" in m or "confirm your age" in m or "bot" in m:
@@ -214,7 +247,13 @@ def reaper():
         time.sleep(30)
         now = time.time()
         with jobs_lock:
-            expired = [k for k, j in jobs.items() if now - j["created"] > JOB_TTL]
+            # Finished jobs live JOB_TTL after finishing, so a long download
+            # isn't deleted while it runs or before the browser fetches it.
+            expired = [
+                k for k, j in jobs.items()
+                if (j.get("finished") and now - j["finished"] > JOB_TTL)
+                or (not j.get("finished") and now - j["created"] > JOB_MAX_RUNTIME)
+            ]
             for k in expired:
                 shutil.rmtree(jobs[k].get("dir") or "", ignore_errors=True)
                 del jobs[k]
@@ -266,7 +305,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
-            return self.json(200, {"ok": True, "ytdlp": yt_dlp.version.__version__})
+            return self.json(200, {
+                "ok": True,
+                "ytdlp": yt_dlp.version.__version__,
+                "jsRuntime": DENO and "deno",
+                "ejs": importlib.util.find_spec("yt_dlp_ejs") is not None,
+                "proxy": bool(PROXY),
+                "cookies": bool(COOKIES),
+            })
         m = re.fullmatch(r"/jobs/([\w-]{16,64})(/file)?", path)
         if not m:
             return self.json(404, {"error": "Not found."})
@@ -278,6 +324,13 @@ class Handler(BaseHTTPRequestHandler):
         if job.get("status") != "ready":
             return self.json(409, {"error": "Not ready yet."})
         self.send_file(job)
+
+    def do_HEAD(self):
+        # Uptime monitors often probe with HEAD.
+        path = urllib.parse.urlparse(self.path).path
+        self.send_response(200 if path == "/health" else 404)
+        self.cors()
+        self.end_headers()
 
     def send_file(self, job: dict):
         path, name = job["path"], job["filename"]
@@ -330,7 +383,8 @@ def main():
     if not SECRET:
         raise SystemExit("MEDIA_WORKER_SECRET must be set.")
     threading.Thread(target=reaper, daemon=True).start()
-    print(f"media worker listening on :{PORT} (yt-dlp {yt_dlp.version.__version__})", flush=True)
+    print(f"media worker listening on :{PORT} (yt-dlp {yt_dlp.version.__version__}, "
+          f"js runtime: {DENO or 'NONE - YouTube downloads will fail'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

@@ -13,7 +13,8 @@ import { createServer } from "node:http";
 import { createReadStream, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, extname } from "node:path";
-import { signMediaToken } from "../lib/media.ts";
+import { signToken } from "../lib/media-server.ts";
+const signMediaToken = async (p: Record<string, unknown>, secret: string, ttl?: number) => signToken(p, secret, ttl);
 
 const FFMPEG = process.env.FFMPEG || "ffmpeg";
 const SECRET = "test-secret-" + Math.random().toString(36).slice(2);
@@ -148,6 +149,9 @@ try {
   }).then((r) => r.json());
   check("/info lists available heights", JSON.stringify(info.heights) === "[360,720,1080]", JSON.stringify(info.heights));
   check("unknown job id → 404", (await fetch(`${W}/jobs/aaaaaaaaaaaaaaaaaaaaaaaa`)).status === 404);
+  const health = await fetch(`${W}/health`).then((r) => r.json());
+  check("/health reports yt-dlp, JS runtime and EJS", typeof health.ytdlp === "string" && "jsRuntime" in health && "ejs" in health, JSON.stringify(health));
+  check("HEAD /health answers (uptime monitors)", (await fetch(`${W}/health`, { method: "HEAD" })).status === 200);
   void body;
 } finally {
   worker.kill();

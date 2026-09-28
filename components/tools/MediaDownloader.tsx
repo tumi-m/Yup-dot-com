@@ -42,8 +42,47 @@ const STAGES: Record<string, string> = {
   queued: "Getting ready…",
   downloading: "Downloading…",
   processing: "Merging audio and video…",
+  fetching: "Fetching the video…",
+  converting: "Converting to MP3…",
   ready: "Ready",
 };
+
+/** Give up on a stuck worker job rather than spinning forever. */
+const POLL_DEADLINE_MS = 20 * 60 * 1000;
+const POLL_MAX_FAILURES = 6;
+
+function saveAs(href: string, name?: string) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  if (name) a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** Reads a same-origin response into memory, reporting progress when the size is known. */
+async function readWithProgress(res: Response, onProgress: (fraction: number) => void): Promise<Uint8Array> {
+  const total = Number(res.headers.get("content-length")) || 0;
+  const reader = res.body?.getReader();
+  if (!reader) return new Uint8Array(await res.arrayBuffer());
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total) onProgress(Math.min(1, received / total));
+  }
+  const out = new Uint8Array(received);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
 
 function duration(s?: number | null) {
   if (!s) return null;
@@ -59,12 +98,32 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [height, setHeight] = useState<number>(config.defaultHeight ?? 720);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ value: number; stage: string }>({ value: 0, stage: "queued" });
-  const [file, setFile] = useState<{ href: string; name: string; size: number } | null>(null);
+  const [file, setFile] = useState<{ href: string; name: string; size?: number | null } | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [upsell, setUpsell] = useState<UpsellReason | null>(null);
   const [wantedLocked, setWantedLocked] = useState(false);
-  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const busy = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const blobUrl = useRef<string | null>(null);
+  const alive = useRef(true);
 
-  useEffect(() => () => { if (poll.current) clearInterval(poll.current); }, []);
+  const stopPolling = () => {
+    if (poll.current) clearTimeout(poll.current);
+    poll.current = null;
+  };
+  const releaseBlob = () => {
+    if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
+    blobUrl.current = null;
+  };
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      stopPolling();
+      releaseBlob();
+    };
+  }, []);
 
   const detected = url ? parseMediaUrl(url) : null;
 
@@ -88,7 +147,12 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       return;
     }
     setInfo(data);
+    setNote(null);
     if (data.platform !== "x") setKind("mp4");
+    else if (kind === "mp3" && data.hasAudio === false) {
+      setKind("mp4");
+      setNote("This is a GIF, so it has no sound. It downloads as MP4.");
+    }
     // Start on the requested quality if possible, else the best unlocked one.
     const usable = (data.qualities as Info["qualities"]).filter((q) => q.available);
     const wanted = config.defaultHeight ?? 720;
@@ -119,61 +183,122 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   }
 
   async function start() {
+    if (busy.current) return;
+    busy.current = true;
+    setStarting(true);
     setError(null);
-    const res = await fetch("/api/media/link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, kind, height: kind === "mp4" ? height : undefined }),
-    }).catch(() => null);
-    const data = await res?.json().catch(() => ({}));
-    if (!res?.ok) {
-      if (data?.upgrade) setUpsell(data.reason === "quality" ? "quality" : "downloads");
-      else setError(data?.error ?? "Couldn't start the download.");
-      return;
+    try {
+      const res = await fetch("/api/media/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, kind, height: kind === "mp4" ? height : undefined }),
+      }).catch(() => null);
+      const data = await res?.json().catch(() => ({}));
+      if (!res?.ok) {
+        if (data?.upgrade) setUpsell(data.reason === "quality" ? "quality" : "downloads");
+        else setError(data?.error ?? (res ? "Couldn't start the download." : "You're offline. Check your connection."));
+        return;
+      }
+      if (data.mode === "direct") return finishDirect(data.href, data.filename);
+      if (data.mode === "convert") return await convertToMp3(data.href, data.filename);
+      await runWorkerJob(data.workerUrl, data.token);
+    } finally {
+      busy.current = false;
+      if (alive.current) setStarting(false);
     }
+  }
 
+  /** X video: our own origin streams it as an attachment. */
+  function finishDirect(href: string, name: string) {
+    setFile({ href, name, size: null });
+    setPhase("ready");
+    saveAs(href);
+  }
+
+  /** X audio: fetch the smallest MP4 and convert it in this tab. */
+  async function convertToMp3(href: string, name: string) {
+    setPhase("working");
+    setProgress({ value: 0, stage: "fetching" });
+    try {
+      const res = await fetch(href);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Couldn't fetch the video.");
+      }
+      const mp4 = await readWithProgress(res, (f) => setProgress({ value: f * 0.4, stage: "fetching" }));
+      setProgress({ value: 0.4, stage: "converting" });
+      const { mp4ToMp3 } = await import("@/lib/mp3");
+      const mp3 = await mp4ToMp3(mp4, (f) => setProgress({ value: 0.4 + f * 0.6, stage: "converting" }));
+      if (!alive.current) return;
+      releaseBlob();
+      blobUrl.current = URL.createObjectURL(new Blob([mp3 as BlobPart], { type: "audio/mpeg" }));
+      setFile({ href: blobUrl.current, name, size: mp3.byteLength });
+      setPhase("ready");
+      saveAs(blobUrl.current, name);
+    } catch (err) {
+      if (!alive.current) return;
+      const message = err instanceof Error && err.message && !/^(Error|RuntimeError|TypeError)\b/.test(err.message)
+        ? err.message
+        : "Converting to MP3 failed in this browser. Download the MP4 instead.";
+      setError(message);
+      setPhase("preview");
+    }
+  }
+
+  /** YouTube: the media worker downloads and merges; we poll until the file is ready. */
+  async function runWorkerJob(workerUrl: string, token: string) {
     setPhase("working");
     setProgress({ value: 0, stage: "queued" });
-    const job = await fetch(`${data.workerUrl}/jobs`, {
+    const job = await fetch(`${workerUrl}/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: data.token }),
+      body: JSON.stringify({ token }),
     }).catch(() => null);
     const created = await job?.json().catch(() => ({}));
-    if (!job?.ok) {
-      setError(created?.error ?? "The download service didn't respond.");
+    if (!job?.ok || !created?.id) {
+      setError(created?.error ?? "The download server isn't responding. Try again in a minute.");
       setPhase("preview");
       return;
     }
 
-    poll.current = setInterval(async () => {
-      const r = await fetch(`${data.workerUrl}/jobs/${created.id}`).catch(() => null);
+    const deadline = Date.now() + POLL_DEADLINE_MS;
+    let failures = 0;
+    const fail = (message: string) => {
+      stopPolling();
+      setError(message);
+      setPhase("preview");
+    };
+    const tick = async () => {
+      poll.current = null;
+      if (!alive.current) return;
+      if (Date.now() > deadline) return fail("This download is taking too long. Try a lower quality.");
+      const r = await fetch(`${workerUrl}/jobs/${created.id}`, { cache: "no-store" }).catch(() => null);
       const s = await r?.json().catch(() => null);
-      if (!s) return;
-      if (s.status === "error" || !r?.ok) {
-        clearInterval(poll.current!);
-        setError(s.error ?? "Download failed.");
-        setPhase("preview");
-        return;
+      if (!alive.current) return;
+      if (!r || !s) {
+        if (++failures >= POLL_MAX_FAILURES) return fail("Lost contact with the download server. Try again.");
+      } else if (!r.ok || s.status === "error") {
+        return fail(s.error ?? "Download failed.");
+      } else {
+        failures = 0;
+        setProgress({ value: s.progress ?? 0, stage: s.stage ?? "downloading" });
+        if (s.status === "ready") {
+          const href = `${workerUrl}/jobs/${created.id}/file`;
+          setFile({ href, name: s.filename, size: s.size });
+          setPhase("ready");
+          saveAs(href);
+          return;
+        }
       }
-      setProgress({ value: s.progress ?? 0, stage: s.stage ?? "downloading" });
-      if (s.status === "ready") {
-        clearInterval(poll.current!);
-        const href = `${data.workerUrl}/jobs/${created.id}/file`;
-        setFile({ href, name: s.filename, size: s.size });
-        setPhase("ready");
-        // Start the download immediately; the button stays as a fallback.
-        const a = document.createElement("a");
-        a.href = href;
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-    }, 1000);
+      poll.current = setTimeout(tick, 1000);
+    };
+    poll.current = setTimeout(tick, 800);
   }
 
   function reset() {
+    stopPolling();
+    releaseBlob();
+    setNote(null);
     setUrl("");
     setInfo(null);
     setFile(null);
@@ -281,7 +406,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                         role="radio"
                         aria-checked={kind === k}
                         disabled={k === "mp3" && info.hasAudio === false}
-                        onClick={() => setKind(k)}
+                        onClick={() => {
+                          setKind(k);
+                          setNote(null);
+                        }}
                         className={cn(
                           "relative flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-40",
                           kind === k ? "text-foreground" : "text-muted-foreground"
@@ -331,6 +459,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   </div>
                 )}
 
+                {note && <p className="text-sm text-muted-foreground">{note}</p>}
+
                 {kind === "mp4" && wantedLocked && (
                   <motion.button
                     initial={{ opacity: 0, y: 6 }}
@@ -346,8 +476,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
 
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="flex-1">
-                    <Button size="lg" className="w-full shadow-lg shadow-primary/25" onClick={start}>
-                      <Download /> Download {kind === "mp3" ? "MP3" : `MP4 · ${height}p`}
+                    <Button size="lg" className="w-full shadow-lg shadow-primary/25" onClick={start} disabled={starting}>
+                      {starting ? <Loader2 className="animate-spin" /> : <Download />} Download {kind === "mp3" ? "MP3" : `MP4 · ${height}p`}
                     </Button>
                   </motion.div>
                   <Button size="lg" variant="outline" onClick={reset}>
@@ -402,11 +532,12 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
             </div>
             <h2 className="mt-5 text-2xl font-bold">Your download has started</h2>
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground">
-              {file.name} · {formatBytes(file.size)}
+              {file.name}
+              {file.size ? ` · ${formatBytes(file.size)}` : ""}
             </p>
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="outline">
-                <a href={file.href} rel="noopener">
+                <a href={file.href} rel="noopener" download={file.href.startsWith("blob:") ? file.name : undefined}>
                   <Download /> Download again
                 </a>
               </Button>

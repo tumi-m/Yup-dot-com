@@ -1,6 +1,8 @@
 import { z } from "zod";
-import { maxHeightFor, mediaWorkerUrl, parseMediaUrl, QUALITIES } from "@/lib/media";
+import { maxHeightFor, parseMediaUrl, QUALITIES } from "@/lib/media";
+import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
+import { resolveXVideo, X_FAILURE_MESSAGE, XResolveError, xAvailableQualities } from "@/lib/x-video";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -9,38 +11,46 @@ const bodySchema = z.object({ url: z.string().min(4).max(2000) });
 
 /** Preview a link: title, thumbnail, duration, and which qualities this tier can take. */
 export async function POST(request: Request) {
-  const worker = mediaWorkerUrl();
-  const secret = process.env.MEDIA_WORKER_SECRET;
-  if (!worker || !secret) {
-    return Response.json({ error: "Video downloads aren't set up on this site yet." }, { status: 503 });
-  }
-
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const media = parsed.success ? parseMediaUrl(parsed.data.url) : null;
   if (!media) {
     return Response.json({ error: "Paste a YouTube or X (Twitter) video link." }, { status: 400 });
   }
-
   const { tier } = await resolveTier();
-  let res: Response;
-  try {
-    res = await fetch(`${worker}/info`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-      body: JSON.stringify({ url: media.canonical }),
-      signal: AbortSignal.timeout(45_000),
-    });
-  } catch {
-    return Response.json({ error: "The download service didn't respond. Try again shortly." }, { status: 502 });
-  }
-  const info = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return Response.json({ error: info.error ?? "Couldn't read that link." }, { status: res.status === 422 ? 422 : 502 });
+  const allowed = maxHeightFor(tier);
+
+  // X: resolved here, no worker needed.
+  if (media.platform === "x") {
+    try {
+      const video = await resolveXVideo(media.id);
+      const available = xAvailableQualities(video, QUALITIES);
+      return Response.json({
+        platform: "x",
+        title: video.title,
+        uploader: video.author ? `@${video.author}` : null,
+        duration: video.duration,
+        thumbnail: video.thumbnail,
+        hasAudio: video.hasAudio,
+        qualities: QUALITIES.map((h) => ({ height: h, available: available.includes(h), locked: h > allowed })),
+      });
+    } catch (err) {
+      const kind = err instanceof XResolveError ? err.kind : "unreachable";
+      if (!(err instanceof XResolveError)) console.error("x resolve failed:", err);
+      return Response.json({ error: X_FAILURE_MESSAGE[kind] }, { status: kind === "unreachable" ? 502 : 422 });
+    }
   }
 
-  const heights: number[] = info.heights ?? [];
+  const config = workerConfig();
+  if (!config.ok) {
+    console.error(`YouTube downloads disabled: ${WORKER_CONFIG_HELP[config.reason]}`);
+    return Response.json({ error: "YouTube downloads aren't switched on for this site yet." }, { status: 503 });
+  }
+  const result = await callWorker(config, "/info", { url: media.canonical });
+  if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+
+  const info = result.body;
+  const heights: number[] = Array.isArray(info.heights) ? info.heights : [];
   const tallest = heights.length ? Math.max(...heights) : 0;
-  const allowed = maxHeightFor(tier);
   return Response.json({
     platform: media.platform,
     title: info.title,
