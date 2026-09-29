@@ -12,6 +12,7 @@ const ORDER: ToolCategory[] = [
   "organize",
   "optimize",
   "convert",
+  "slides",
   "extract",
   "security",
   "edit",
@@ -68,7 +69,7 @@ export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
     return TOOLS.filter(
       (t) =>
         (category === "all" || t.category === category) &&
-        (!q || `${t.name} ${t.description} ${CATEGORY_LABELS[t.category]}`.toLowerCase().includes(q))
+        (!q || `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]}`.toLowerCase().includes(q))
     );
   }, [query, category]);
 

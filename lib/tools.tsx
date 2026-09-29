@@ -23,6 +23,11 @@ import {
   Music2,
   PenLine,
   Signature,
+  Presentation,
+  PencilRuler,
+  GalleryHorizontalEnd,
+  FileDown,
+  FileSliders,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,6 +38,7 @@ export type ToolCategory =
   | "extract"
   | "security"
   | "edit"
+  | "slides"
   | "media";
 
 export interface ToolMeta {
@@ -49,7 +55,9 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media";
+  custom?: "assistant" | "media" | "pptx-to-pdf" | "pptx-editor" | "slides-import";
+  /** Google Slides import settings: which file the deck is fetched as. */
+  slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
   media?: { platform: "youtube" | "x"; kind: "mp4" | "mp3"; defaultHeight?: number };
   /** Optional ribbon shown on the tool card. */
@@ -62,6 +70,7 @@ export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   convert: "Convert",
   extract: "Extract & Parse",
   security: "Security",
+  slides: "Slides",
   media: "Video & Audio",
   edit: "Edit & Sign",
 };
@@ -174,6 +183,57 @@ export const TOOLS: ToolMeta[] = [
     icon: Sheet,
     category: "convert",
     tint: "bg-green-100 text-green-700",
+  },
+  {
+    slug: "pdf-to-pptx",
+    name: "PDF to PPTX",
+    title: "PDF to PPTX: turn a PDF into PowerPoint slides",
+    description: "Each page as a slide.",
+    icon: FileSliders,
+    category: "convert",
+    tint: "bg-orange-100 text-orange-800",
+  },
+  {
+    slug: "pptx-to-pdf",
+    name: "PPTX to PDF",
+    title: "PPTX to PDF: convert PowerPoint to PDF",
+    description: "PowerPoint slides as a PDF.",
+    icon: Presentation,
+    category: "slides",
+    tint: "bg-orange-100 text-orange-700",
+    custom: "pptx-to-pdf",
+  },
+  {
+    slug: "edit-pptx",
+    name: "Edit PPTX",
+    title: "Edit PPTX: change PowerPoint text online",
+    description: "Edit slide text, then save.",
+    icon: PencilRuler,
+    category: "slides",
+    tint: "bg-rose-100 text-rose-700",
+    custom: "pptx-editor",
+  },
+  {
+    slug: "google-slides-to-pdf",
+    name: "Google Slides to PDF",
+    title: "Google Slides to PDF: download a deck as PDF",
+    description: "Save a shared deck as PDF.",
+    icon: FileDown,
+    category: "slides",
+    tint: "bg-yellow-100 text-yellow-800",
+    custom: "slides-import",
+    slides: { format: "pdf" },
+  },
+  {
+    slug: "google-slides-to-pptx",
+    name: "Google Slides to PPTX",
+    title: "Google Slides to PPTX: download as PowerPoint",
+    description: "Save a shared deck as PPTX.",
+    icon: GalleryHorizontalEnd,
+    category: "slides",
+    tint: "bg-amber-100 text-amber-800",
+    custom: "slides-import",
+    slides: { format: "pptx" },
   },
   {
     slug: "chat-with-pdf",

@@ -33,6 +33,10 @@ work with or without an account.
 | **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
+| **PDF → PPTX** | Each page becomes a picture slide (the text isn't editable). |
+| **PPTX → PDF** | Renders PowerPoint slides in the browser as image-based pages with a selectable text layer; hidden slides are skipped and the file is never uploaded. |
+| **Edit PPTX** | Edit slide text, reorder, duplicate or delete slides, then save as PPTX or PDF. In the browser. |
+| **Google Slides → PDF / PPTX** | Download a deck from its link. The deck must be shared as "Anyone with the link"; private decks get a message saying so. PPTX can go straight into Edit PPTX. |
 | **YouTube to MP4** | 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
 | **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
 | **Page Numbers** | Insert page numbers with position & format options. |
@@ -51,9 +55,12 @@ Modelled on how the category leaders convert — [PDFescape](https://www.pdfesca
 (no registration, no watermark, limits as the upsell), iLovePDF (file-size and
 batch caps), and Smallpdf (task-based prompts):
 
-1. **No account wall, anywhere a first task happens.** The homepage hero is a
-   drop zone: drop a file, pick what to do ("Edit", "Compress", "PDF to
-   Word"…), and the file is handed to that tool without a second upload.
+1. **No account wall, anywhere a first task happens.** The homepage hero asks
+   what you're working on: PDF, PowerPoint, Google Slides, or video & audio
+   (`/#pdf`, `/#pptx`, `/#slides`, `/#media` open a branch directly). Drop a
+   file and pick what to do ("Edit", "Compress", "PPTX to PDF"…) and it is
+   handed to that tool without a second upload; paste a Slides, X or YouTube
+   link and pick PDF, PPTX, Edit, MP4 or MP3.
 2. **The full editor works as a guest.** Edit PDF and Fill & Sign open
    instantly in an on-device editor (`/edit/[id]`, IndexedDB) that survives a
    reload and exports with **no watermark**.

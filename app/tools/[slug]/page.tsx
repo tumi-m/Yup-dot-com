@@ -7,6 +7,9 @@ import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
 import { EditorLaunch } from "@/components/tools/EditorLaunch";
 import { PdfAssistant } from "@/components/tools/PdfAssistant";
 import { MediaDownloader } from "@/components/tools/MediaDownloader";
+import { PptxToPdf } from "@/components/tools/PptxToPdf";
+import { PptxEditor } from "@/components/tools/PptxEditor";
+import { SlidesImporter } from "@/components/tools/SlidesImporter";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
@@ -73,6 +76,12 @@ export default async function ToolPage({
                   <PdfAssistant tier={tier} />
                 ) : tool.custom === "media" && tool.media ? (
                   <MediaDownloader config={tool.media} tier={tier} />
+                ) : tool.custom === "pptx-to-pdf" ? (
+                  <PptxToPdf tier={tier} />
+                ) : tool.custom === "pptx-editor" ? (
+                  <PptxEditor tier={tier} />
+                ) : tool.custom === "slides-import" && tool.slides ? (
+                  <SlidesImporter tier={tier} format={tool.slides.format} />
                 ) : (
                   <ToolWorkbench slug={tool.slug} tier={tier} />
                 )}

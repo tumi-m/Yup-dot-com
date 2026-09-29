@@ -2,12 +2,12 @@ import Link from "next/link";
 import { CATEGORY_LABELS, TOOLS, type ToolCategory } from "@/lib/tools";
 import { WizardWordmark } from "@/components/WizardLogo";
 
-const COLUMNS: ToolCategory[] = ["organize", "convert", "extract", "security", "edit", "media"];
+const COLUMNS: ToolCategory[] = ["organize", "convert", "slides", "extract", "security", "edit", "media"];
 
 export function SiteFooter() {
   return (
     <footer className="border-t border-border bg-background">
-      <div className="container grid gap-10 py-14 md:grid-cols-3 lg:grid-cols-[1.2fr_repeat(6,1fr)]">
+      <div className="container grid gap-10 py-14 md:grid-cols-4 xl:grid-cols-[1.2fr_repeat(7,1fr)]">
         <div>
           <Link href="/" className="text-lg">
             <WizardWordmark />

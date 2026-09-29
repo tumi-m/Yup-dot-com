@@ -16,6 +16,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Browsers and crawlers still ask for /favicon.ico; answer with the SVG icon.
+  async rewrites() {
+    return [{ source: "/favicon.ico", destination: "/icon.svg" }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

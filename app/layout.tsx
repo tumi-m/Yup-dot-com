@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     template: "%s | PDF Wizard",
   },
   description:
-    "Merge, split, compress, convert, edit and sign PDFs in your browser. Free, no sign-up, no watermark.",
+    "Edit and convert PDFs and slides in your browser. Save videos as MP4 or MP3. Free, no sign-up, no watermark.",
   keywords: [
     "PDF editor",
     "merge PDF",
@@ -22,6 +22,8 @@ export const metadata: Metadata = {
     "PDF to JPG",
     "sign PDF",
     "watermark PDF",
+    "PPTX to PDF",
+    "Google Slides to PDF",
   ],
   openGraph: {
     title: "PDF Wizard: cast spells on your PDFs",

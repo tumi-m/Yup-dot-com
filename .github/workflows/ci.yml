@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.12"
       # The Word/Excel test opens the output with independent readers.
-      - run: pip install python-docx openpyxl
+      - run: pip install python-docx openpyxl python-pptx XlsxWriter
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

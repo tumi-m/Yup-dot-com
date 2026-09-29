@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   AlertTriangle,
@@ -91,7 +92,8 @@ function duration(s?: number | null) {
 }
 
 export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tier: Tier }) {
-  const [url, setUrl] = useState("");
+  const params = useSearchParams();
+  const [url, setUrl] = useState(() => params.get("url")?.trim() ?? "");
   const [phase, setPhase] = useState<Phase>("input");
   const [info, setInfo] = useState<Info | null>(null);
   const [kind, setKind] = useState<MediaKind>(config.kind);
@@ -126,6 +128,15 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   }, []);
 
   const detected = url ? parseMediaUrl(url) : null;
+
+  // A ?url= link (e.g. from the homepage) looks the video up straight away.
+  const autoLookup = useRef(false);
+  useEffect(() => {
+    if (autoLookup.current) return;
+    autoLookup.current = true;
+    if (detected) void lookup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function lookup(e?: React.FormEvent) {
     e?.preventDefault();
@@ -331,7 +342,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   id="media-url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder={config.platform === "youtube" ? "https://www.youtube.com/watch?v=…" : "https://x.com/user/status/…"}
+                  placeholder={config.platform === "youtube" ? "youtu.be/…" : "x.com/user/status/…"}
                   inputMode="url"
                   autoComplete="off"
                   className="h-12 w-full rounded-xl border border-input bg-background pl-10 pr-24 text-sm outline-none focus:ring-2 focus:ring-ring"

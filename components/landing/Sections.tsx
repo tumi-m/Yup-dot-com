@@ -16,7 +16,11 @@ import {
   WordReveal,
 } from "@/components/motion/primitives";
 import { Aurora, HeroScene, Starfield } from "./HeroScene";
-import { HeroDropzone } from "./HeroDropzone";
+import { HeroJourney } from "./HeroJourney";
+import { RotatingWord } from "./RotatingWord";
+
+const GRADIENT_WORD =
+  "bg-gradient-to-r from-violet-600 via-fuchsia-500 to-amber-400 bg-[length:200%_auto] bg-clip-text text-transparent motion-safe:animate-shimmer";
 
 export function Hero({ isAuthed }: { isAuthed: boolean }) {
   return (
@@ -37,13 +41,15 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
 
           <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl">
             <WordReveal text="Cast spells on" />{" "}
+            <span className="sr-only">your PDFs, slides and videos.</span>
             <motion.span
+              aria-hidden
               initial={{ opacity: 0, scale: 0.8, filter: "blur(10px)" }}
               animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
               transition={{ duration: 0.9, ease: EASE, delay: 0.35 }}
-              className="inline-block bg-gradient-to-r from-violet-600 via-fuchsia-500 to-amber-400 bg-[length:200%_auto] bg-clip-text text-transparent motion-safe:animate-shimmer"
+              className="block"
             >
-              your PDFs.
+              <RotatingWord words={["your PDFs.", "your slides.", "your videos."]} className={GRADIENT_WORD} />
             </motion.span>
           </h1>
 
@@ -53,7 +59,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             transition={{ duration: 0.7, ease: EASE, delay: 0.55 }}
             className="mx-auto mt-6 max-w-xl text-balance text-lg text-foreground/75 lg:mx-0"
           >
-            Edit, convert and sign PDFs in your browser.
+            Edit and convert PDFs and slides. Save videos as MP4 or MP3.
           </motion.p>
 
           <motion.div
@@ -62,7 +68,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             transition={{ duration: 0.7, ease: EASE, delay: 0.7 }}
             className="mt-9"
           >
-            <HeroDropzone />
+            <HeroJourney />
           </motion.div>
 
           <motion.div
@@ -71,7 +77,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             transition={{ delay: 0.95, duration: 0.6 }}
             className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm lg:justify-start"
           >
-            <Link href="/tools" className="tap group inline-flex items-center gap-1 font-medium text-primary">
+            <Link href="/tools" className="tap group inline-flex items-center gap-1 font-medium text-violet-700 dark:text-violet-300">
               <Sparkles className="h-4 w-4" /> Browse all {TOOLS.length} tools
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>

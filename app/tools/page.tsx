@@ -9,7 +9,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 export const metadata: Metadata = {
   title: "All PDF tools",
   description:
-    "Merge, split, compress, convert, OCR, protect, edit and sign PDFs. Plus YouTube to MP4 and X to MP4 or MP3.",
+    "Merge, split, compress, convert, OCR, protect, edit and sign PDFs. PPTX to PDF, Google Slides downloads, YouTube to MP4 and X to MP4 or MP3.",
   alternates: { canonical: "/tools" },
 };
 
