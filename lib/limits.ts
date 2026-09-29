@@ -15,15 +15,17 @@ export interface TierLimits {
   aiDocumentChars: number;
   /** Video/audio downloads (YouTube, X) per day. */
   mediaDownloadsPerDay: number;
+  /** Google Slides link imports per day. */
+  linkImportsPerDay: number;
 }
 
 const MB = 1024 * 1024;
 
 export const LIMITS: Record<Tier, TierLimits> = {
-  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5 },
-  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 15, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10 },
-  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 300, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200 },
-  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 300, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200 },
+  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5, linkImportsPerDay: 20 },
+  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 15, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10, linkImportsPerDay: 50 },
+  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 300, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500 },
+  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 300, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500 },
 };
 
 export function limitsFor(tier: Tier): TierLimits {
