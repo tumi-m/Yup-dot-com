@@ -39,6 +39,7 @@ const NEXT_STEPS: Record<string, string[]> = {
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
+  "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf", "compress-pdf", "pdf-to-word"],
 };
 
 type Status = "idle" | "working" | "done";

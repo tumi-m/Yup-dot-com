@@ -236,6 +236,27 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     fields: [],
     run: (files) => pdfToWordTool(files),
   },
+  "pdf-to-pptx": {
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "quality",
+        label: "Quality",
+        type: "select",
+        default: "standard",
+        options: [
+          { value: "standard", label: "Standard" },
+          { value: "high", label: "High" },
+        ],
+      },
+    ],
+    run: async (files, o, ctx) => {
+      const { pdfToPptxTool } = await import("@/lib/pptx/from-pdf");
+      return pdfToPptxTool(files, { quality: o.quality }, ctx);
+    },
+  },
   "pdf-to-excel": {
     accept: "application/pdf",
     multiple: false,
