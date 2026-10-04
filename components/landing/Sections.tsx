@@ -8,7 +8,6 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { WizardHat } from "@/components/WizardLogo";
 import { TOOLS } from "@/lib/tools";
 import {
   EASE,
@@ -29,16 +28,6 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
       <Starfield />
       <div className="container relative grid grid-cols-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_1fr] lg:py-24">
         <div className="min-w-0 text-center lg:text-left">
-          <motion.span
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.6, ease: EASE }}
-            className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-background/70 px-4 py-1.5 text-xs font-medium text-accent-foreground shadow-sm backdrop-blur"
-          >
-            <WizardHat className="h-3.5 w-3.5 text-primary" />
-            Free · no sign-up · no watermark
-          </motion.span>
-
           <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl">
             <WordReveal text="Cast spells on" />{" "}
             <span className="sr-only">your PDFs, slides and videos.</span>
