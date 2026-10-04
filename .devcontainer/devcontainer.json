@@ -17,7 +17,7 @@
     "SUPABASE_SERVICE_ROLE_KEY": { "description": "Supabase service-role key, used by the Stripe webhook." },
     "STRIPE_SECRET_KEY": { "description": "Stripe secret key (test mode)." },
     "STRIPE_WEBHOOK_SECRET": { "description": "Stripe webhook signing secret." },
-    "ANTHROPIC_API_KEY": { "description": "Enables the Ask a PDF assistant." },
+    "OLLAMA_API_KEY": { "description": "Ollama Cloud key. Enables the PDF assistant." },
     "MEDIA_WORKER_SECRET": { "description": "Shared secret between the web app and the media worker." }
   }
 }

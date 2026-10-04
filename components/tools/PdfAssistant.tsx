@@ -100,6 +100,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   const params = useSearchParams();
   const [upsell, setUpsell] = useState(false);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [pagesRead, setPagesRead] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -179,6 +180,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       }
       const left = res.headers.get("x-ai-remaining");
       if (left !== null) setRemaining(Number(left));
+      setPagesRead(res.headers.get("x-ai-pages"));
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -267,6 +269,9 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           <p className="truncate text-sm font-semibold">{doc.name}</p>
           <p className="text-xs text-muted-foreground">
             {doc.pages} page{doc.pages === 1 ? "" : "s"} · {formatBytes(doc.size)}
+            {pagesRead && (
+              <span className="text-amber-700 dark:text-amber-400"> · reads pages 1–{pagesRead.split("/")[0]}</span>
+            )}
           </p>
         </div>
         {remaining !== null && tier !== "pro" && tier !== "team" && (
@@ -274,7 +279,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {remaining} free answer{remaining === 1 ? "" : "s"} left today
           </span>
         )}
-        <Button variant="ghost" size="sm" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); }}>
+        <Button variant="ghost" size="sm" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
           <RotateCcw /> New PDF
         </Button>
       </div>

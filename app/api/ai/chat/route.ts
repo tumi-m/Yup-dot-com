@@ -1,17 +1,19 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import { limitsFor, type Tier } from "@/lib/limits";
+import { ollamaConfig, streamChat, userMessage, OllamaError, type ChatMessage } from "@/lib/ai/ollama";
+import { fitDocument } from "@/lib/ai/document";
 
 /**
  * Chat with / summarize a PDF. Open to guests with a small daily allowance,
  * so people can try it before being asked to sign up.
  *
  * The browser parses the PDF (lib/pdf/parse.ts) and sends page-tagged text,
- * so the file itself is never uploaded. The document is placed first in the
- * conversation behind a cache breakpoint: follow-up questions reuse it from
- * the prompt cache instead of paying for it again.
+ * so the file itself is never uploaded. The model runs on Ollama (Ollama
+ * Cloud by default; see lib/ai/ollama.ts). The document always comes first
+ * in the conversation, unchanged between turns, so providers that cache
+ * prompt prefixes can reuse it for follow-up questions.
  *
  * Responds with newline-delimited JSON events:
  *   {"type":"text","text":"..."} · {"type":"done","stopReason":"..."} · {"type":"error","message":"..."}
@@ -20,7 +22,6 @@ import { limitsFor, type Tier } from "@/lib/limits";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const MODEL = "claude-opus-5";
 const MAX_TURNS = 40;
 
 const bodySchema = z.object({
@@ -92,7 +93,9 @@ function json(status: number, message: string) {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const config = ollamaConfig();
+  if (!config) {
+    console.error("AI assistant disabled: set OLLAMA_API_KEY (Ollama Cloud) or OLLAMA_HOST (your own server).");
     return json(503, "The AI assistant isn't configured on this deployment yet.");
   }
 
@@ -106,18 +109,13 @@ export async function POST(request: Request) {
   if (!parsed.success) return json(400, "Invalid request.");
   const { documentName, documentText, messages } = parsed.data;
 
-  // Larger documents are rejected clearly rather than silently truncated,
-  // which would produce confidently incomplete answers.
-  const maxChars = limitsFor(tier).aiDocumentChars;
-  if (documentText.length > maxChars) {
-    return Response.json(
-      {
-        error: `This document is too long for your plan's assistant (${Math.round(documentText.length / 1000)}k characters; the limit is ${maxChars / 1000}k).`,
-        upgrade: tier !== "pro" && tier !== "team",
-      },
-      { status: 413 }
-    );
+  if (messages[0].role !== "user" || messages[messages.length - 1].role !== "user") {
+    return json(400, "Conversation must start and end with a user message.");
   }
+
+  // Long documents are cut at a page boundary to the plan's budget, and the
+  // model is told which pages it has, so answers stay honest about coverage.
+  const fitted = fitDocument(documentText, limitsFor(tier).aiDocumentChars);
 
   // Count only requests that will actually reach the model.
   const usageKey = user ? `u:${user.id}` : `ip:${clientIp(request)}`;
@@ -128,29 +126,26 @@ export async function POST(request: Request) {
       { status: 429 }
     );
   }
-  if (messages[0].role !== "user" || messages[messages.length - 1].role !== "user") {
-    return json(400, "Conversation must start and end with a user message.");
-  }
 
-  // Document first (cached), then the first question, then the rest verbatim.
-  const apiMessages: Anthropic.Beta.BetaMessageParam[] = messages.map((m, i) =>
-    i === 0
-      ? {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `<document name="${documentName.replace(/"/g, "'")}">\n${documentText}\n</document>`,
-              cache_control: { type: "ephemeral" },
-            },
-            { type: "text", text: m.content },
-          ],
-        }
-      : { role: m.role, content: m.content }
-  );
+  const coverage = fitted.truncated
+    ? fitted.lastPage && fitted.totalPages
+      ? `\nOnly pages 1-${fitted.lastPage} of ${fitted.totalPages} are included. If the answer may be on a later page, say so.`
+      : "\nOnly the beginning of the document is included. If the answer may be later in it, say so."
+    : "";
+  const apiMessages: ChatMessage[] = [
+    { role: "system", content: SYSTEM + coverage },
+    ...messages.map((m, i): ChatMessage =>
+      i === 0
+        ? {
+            role: "user",
+            content: `<document name="${documentName.replace(/[<>"]/g, "'")}">\n${fitted.text}\n</document>\n\n${m.content}`,
+          }
+        : { role: m.role, content: m.content }
+    ),
+  ];
 
-  const client = new Anthropic();
   const encoder = new TextEncoder();
+  const started = Date.now();
 
   const body = new ReadableStream({
     async start(controller) {
@@ -160,44 +155,36 @@ export async function POST(request: Request) {
         controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
       };
       try {
-        const stream = client.beta.messages.stream({
-          model: MODEL,
-          max_tokens: 16000,
-          // Document Q&A rarely needs the deepest reasoning; medium keeps
-          // answers fast. Raise it if answer quality on hard documents suffers.
-          output_config: { effort: "medium" },
-          // If a safety classifier declines, re-run on Anthropic's
-          // recommended fallback model instead of failing the user.
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
-          system: SYSTEM,
-          messages: apiMessages,
-        });
-
-        request.signal.addEventListener("abort", () => stream.abort());
-
-        for await (const event of stream) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            send({ type: "text", text: event.delta.text });
-          }
+        const stream = streamChat(
+          config,
+          { messages: apiMessages, maxAnswerTokens: 4000 },
+          // Leave time to close the stream cleanly before maxDuration.
+          { signal: request.signal, deadline: started + (maxDuration - 8) * 1000 }
+        );
+        let result = await stream.next();
+        while (!result.done) {
+          send({ type: "text", text: result.value });
+          result = await stream.next();
         }
-
-        const final = await stream.finalMessage();
-        if (final.stop_reason === "refusal") {
-          send({ type: "error", message: "The assistant couldn't help with this request." });
+        if (result.value.doneReason === "length") {
+          send({ type: "error", message: "The answer was cut short. Ask a narrower question." });
         }
-        send({ type: "done", stopReason: final.stop_reason });
+        send({ type: "done", stopReason: result.value.doneReason });
       } catch (error) {
-        let message = "The assistant ran into a problem. Please try again.";
-        if (error instanceof Anthropic.RateLimitError) message = "The assistant is busy right now. Try again in a moment.";
-        else if (error instanceof Anthropic.BadRequestError) message = "The assistant couldn't process this document.";
-        else if (error instanceof Anthropic.APIUserAbortError) message = "Stopped.";
-        else console.error("ai/chat error", error);
+        if (!(error instanceof OllamaError) || (error.kind !== "aborted" && error.kind !== "rate_limit")) {
+          console.error("ai/chat error:", error instanceof Error ? error.message : error);
+        }
         // An answer that never arrived shouldn't cost the user a turn.
         if (!delivered) refund(usageKey);
-        send({ type: "error", message });
+        try {
+          send({ type: "error", message: userMessage(error) });
+        } catch {
+          // The browser already hung up.
+        }
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {}
       }
     },
   });
@@ -207,6 +194,9 @@ export async function POST(request: Request) {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store",
       "x-ai-remaining": String(remaining),
+      ...(fitted.truncated && fitted.lastPage && fitted.totalPages
+        ? { "x-ai-pages": `${fitted.lastPage}/${fitted.totalPages}` }
+        : {}),
     },
   });
 }

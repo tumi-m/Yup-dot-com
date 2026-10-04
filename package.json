@@ -10,12 +10,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx tests/parse.test.mts && tsx tests/columns.test.mts && tsx tests/table-not-columns.test.mts && tsx tests/bake.test.mts && tsx tests/forms.test.mts && tsx tests/security.test.mts && tsx tests/ocr-layer.test.mts && tsx tests/convert.test.mts && tsx tests/media-url.test.mts && tsx tests/x-video.test.mts && tsx tests/pptx-parse.test.mts && tsx tests/pptx-sanitize.test.mts && tsx tests/pptx-ops.test.mts && tsx tests/google-slides.test.mts && tsx tests/pdf-to-pptx.test.mts && tsx tests/journey.test.mts && tsx tests/pptx-editor.test.mts",
+    "test": "tsx tests/parse.test.mts && tsx tests/columns.test.mts && tsx tests/table-not-columns.test.mts && tsx tests/bake.test.mts && tsx tests/forms.test.mts && tsx tests/security.test.mts && tsx tests/ocr-layer.test.mts && tsx tests/convert.test.mts && tsx tests/media-url.test.mts && tsx tests/x-video.test.mts && tsx tests/pptx-parse.test.mts && tsx tests/pptx-sanitize.test.mts && tsx tests/pptx-ops.test.mts && tsx tests/google-slides.test.mts && tsx tests/pdf-to-pptx.test.mts && tsx tests/journey.test.mts && tsx tests/pptx-editor.test.mts && tsx tests/ai-ollama.test.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:media": "tsx tests/media-worker.test.mts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.128.0",
     "@cantoo/pdf-lib": "^2.11.1",
     "@ffmpeg/core": "0.12.10",
     "@ffmpeg/ffmpeg": "0.12.15",

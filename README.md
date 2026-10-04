@@ -167,11 +167,13 @@ served from the app's own origin with `immutable` caching. So:
 
 `/tools/chat-with-pdf` parses the PDF in the browser and sends only its
 page-tagged text to `POST /api/ai/chat`, which streams the answer back as
-NDJSON. The document is placed first behind a prompt-cache breakpoint, so
-follow-up questions reuse it instead of paying for it again. Guard rails:
-a daily allowance per tier (guests included), a clear error for documents too
-long to answer from (never silent truncation), and server-side refusal
-fallbacks. Returns `503` until `ANTHROPIC_API_KEY` is set.
+NDJSON. The model runs on [Ollama](https://ollama.com): Ollama Cloud by
+default (DeepSeek V4.1 Flash), or your own Ollama server. The text is sent to
+that host; the file never is. Guard rails: a daily allowance per tier (guests
+included); long documents are cut at a page boundary to the plan's budget, and
+both the model and the user are told which pages were read; the model's
+reasoning is never shown. Returns `503` until `OLLAMA_API_KEY` (Ollama Cloud)
+or `OLLAMA_HOST` (your own server) is set.
 
 ## Motion design
 
@@ -343,7 +345,10 @@ Variables** and redeploy:
 | `STRIPE_SECRET_KEY` | checkout & billing portal |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
 | `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
-| `ANTHROPIC_API_KEY` | AI Assistant (Chat with PDF) |
+| `OLLAMA_API_KEY` | AI Assistant (Chat with PDF) on Ollama Cloud. Create one at ollama.com/settings/keys |
+| `OLLAMA_HOST` | Optional. Your own Ollama server (HTTPS, behind a proxy that checks the key). Default `https://ollama.com` |
+| `OLLAMA_MODEL` | Optional. Default `deepseek-v4.1-flash` |
+| `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
 | `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
 | `MEDIA_SIGNING_SECRET` | Signs X download links. Falls back to `MEDIA_WORKER_SECRET`; set one of them in production |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
