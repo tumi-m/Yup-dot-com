@@ -5,7 +5,7 @@ import type {
   Fill as PFill,
   Group as PGroup,
 } from "pptxtojson";
-import { analyzeSlide, slideOrder, type ParaInfo, type SlideAnalysis, type TableFlags } from "./ooxml";
+import { analyzeSlide, slideOrder, type ChartInfo, type ParaInfo, type SlideAnalysis, type TableFlags } from "./ooxml";
 
 /**
  * Loads a .pptx into a typed deck model for rendering.
@@ -37,8 +37,17 @@ export interface ElementExtras {
   phType?: string;
   /** Vertical anchor of a placeholder, resolved by type (t, ctr, b). */
   anchor?: string;
+  /** Text rectangle of a custom shape, as fractions of its box. */
+  textRect?: { l: number; t: number; r: number; b: number };
+  /** Text direction (a:bodyPr vert) and columns. */
+  vert?: string;
+  columns?: { count: number; gap: number };
+  /** Picture opacity (0..1) when it isn't opaque. */
+  opacity?: number;
   /** Table style switches, for tables using a built-in style. */
   tableFlags?: TableFlags;
+  /** Legend, title and text size of a chart. */
+  chartInfo?: ChartInfo;
 }
 
 export type DeckElement = PElement & ElementExtras;
@@ -86,7 +95,11 @@ export const PPTX_MESSAGES = {
   empty: "This presentation has no slides.",
 } as const;
 
-const CFB_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+const EMPTY_TABLE_STYLES =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"/>';
+
+const CFB_MAGIC =[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
 function startsWith(bytes: Uint8Array, magic: number[]) {
   return magic.every((b, i) => bytes[i] === b);
@@ -133,11 +146,20 @@ function prepare(elements: PElement[], info: SlideAnalysis | null, zOf?: (el: PE
         out.paragraphs = shape.paragraphs;
         if (shape.phType) out.phType = shape.phType;
         if (shape.anchor) out.anchor = shape.anchor;
+        if (shape.textRect) out.textRect = shape.textRect;
+        if (shape.vert) out.vert = shape.vert;
+        if (shape.columns) out.columns = shape.columns;
       }
+      const styleFill = el.type === "shape" ? info.styleFills[el.id] : undefined;
+      if (styleFill) (out as { fill: unknown }).fill = styleFill;
       const line = info.lineColors[el.id];
       if (line) (out as { borderColor: string }).borderColor = line;
     } else if (info && el.type === "table" && info.tables[el.id]) {
       out.tableFlags = info.tables[el.id];
+    } else if (info && el.type === "image" && info.pictureAlpha[el.id] !== undefined) {
+      out.opacity = info.pictureAlpha[el.id];
+    } else if (info && el.type === "chart" && info.charts[el.id]) {
+      out.chartInfo = info.charts[el.id];
     }
     return out;
   });
@@ -176,6 +198,11 @@ export async function parsePptx(input: ArrayBuffer | Uint8Array): Promise<Deck> 
     throw new PptxError(PPTX_MESSAGES.invalid, "invalid");
   }
   if (!zip.file("ppt/presentation.xml") || !zip.file("[Content_Types].xml")) {
+    // Another app's presentation saved under a .pptx name (OpenDocument, Keynote).
+    const mimetype = zip.file("mimetype") ? (await zip.file("mimetype")!.async("string")).trim() : "";
+    if (mimetype === "application/vnd.oasis.opendocument.presentation" || zip.file(/^Index\/.*\.iwa$/).length || zip.file("index.apxl")) {
+      throw new PptxError(PPTX_MESSAGES.legacy, "legacy");
+    }
     throw new PptxError(PPTX_MESSAGES.invalid, "invalid");
   }
 
@@ -183,7 +210,13 @@ export async function parsePptx(input: ArrayBuffer | Uint8Array): Promise<Deck> 
 
   let json: Awaited<ReturnType<typeof pptxToJson>>;
   try {
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    let buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    // ppt/tableStyles.xml is optional, but pptxtojson throws on any styled
+    // table without it: hand it an empty list instead.
+    if (!zip.file("ppt/tableStyles.xml")) {
+      zip.file("ppt/tableStyles.xml", EMPTY_TABLE_STYLES);
+      buf = await zip.generateAsync({ type: "arraybuffer" });
+    }
     json = await pptxToJson(buf, { imageMode: "base64", videoMode: "none", audioMode: "none", singleLineSpacingFactor: 1.2 });
   } catch {
     throw new PptxError(PPTX_MESSAGES.invalid, "invalid");

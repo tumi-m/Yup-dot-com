@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RotateCw, Trash2, Plus, GripVertical } from "lucide-react";
+import { RotateCw, Trash2, Plus, GripVertical, ArrowUp, ArrowDown } from "lucide-react";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import { cn } from "@/lib/utils";
 
@@ -29,13 +29,26 @@ export function ThumbnailSidebar({
 }) {
   const [dragOver, setDragOver] = useState<number | null>(null);
   const dragFrom = useRef<number | null>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const movedTo = useRef<number | null>(null);
+
+  // Keyboard reordering re-renders the list; keep focus on the moved page.
+  useEffect(() => {
+    if (movedTo.current === null || busy || currentPage !== movedTo.current) return;
+    movedTo.current = null;
+    list.current?.querySelectorAll<HTMLButtonElement>("button[data-thumb]")[currentPage]?.focus();
+  }, [busy, currentPage, numPages]);
 
   return (
-    <aside className="w-44 shrink-0 overflow-y-auto border-r border-border bg-background p-2">
+    // Phones: a drawer over the page. Wider screens: a column beside it.
+    <aside
+      aria-label="Pages"
+      className="absolute inset-y-0 left-0 z-20 w-56 overflow-y-auto border-r border-border bg-background p-2 shadow-2xl md:static md:z-auto md:w-44 md:shrink-0 md:shadow-none"
+    >
       <p className="px-1 pb-2 text-xs font-medium text-muted-foreground">
         {numPages} {numPages === 1 ? "page" : "pages"}
       </p>
-      <ul className="space-y-2">
+      <ul ref={list} className="space-y-2">
         {Array.from({ length: numPages }, (_, i) => (
           <li
             key={`${i}-${numPages}`}
@@ -63,19 +76,53 @@ export function ThumbnailSidebar({
             )}
           >
             <button
+              data-thumb
               onClick={() => onGoTo(i)}
-              className="block w-full"
+              onKeyDown={(e) => {
+                // Alt+↑/↓ moves the page: the keyboard version of dragging.
+                if (!e.altKey || busy) return;
+                const to = e.key === "ArrowUp" ? i - 1 : e.key === "ArrowDown" ? i + 1 : -1;
+                if (to < 0 || to >= numPages) return;
+                e.preventDefault();
+                movedTo.current = to;
+                onReorder(i, to);
+              }}
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              className="block w-full rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`Go to page ${i + 1}`}
             >
               <Thumbnail loaded={loaded} pageIndex={i} />
             </button>
 
-            <div className="mt-1 flex items-center justify-between px-0.5">
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-y-1 px-0.5">
               <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
-                <GripVertical className="h-3 w-3 cursor-grab" />
+                <GripVertical className="h-3 w-3 cursor-grab hover-none:hidden" />
                 {i + 1}
               </span>
-              <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              {/* Touch has no drag and drop: move buttons instead. */}
+              <span className="hidden gap-0.5 hover-none:flex">
+                <IconButton
+                  label="Move up"
+                  onClick={() => {
+                    movedTo.current = i - 1;
+                    onReorder(i, i - 1);
+                  }}
+                  disabled={busy || i === 0}
+                >
+                  <ArrowUp className="h-3 w-3" />
+                </IconButton>
+                <IconButton
+                  label="Move down"
+                  onClick={() => {
+                    movedTo.current = i + 1;
+                    onReorder(i, i + 1);
+                  }}
+                  disabled={busy || i >= numPages - 1}
+                >
+                  <ArrowDown className="h-3 w-3" />
+                </IconButton>
+              </span>
+              <span className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 hover-none:opacity-100">
                 <IconButton label="Rotate" onClick={() => onRotate(i)} disabled={busy}>
                   <RotateCw className="h-3 w-3" />
                 </IconButton>
@@ -119,7 +166,7 @@ function IconButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30 pointer-coarse:h-11 pointer-coarse:w-11"
     >
       {children}
     </button>
@@ -155,7 +202,7 @@ function Thumbnail({ loaded, pageIndex }: { loaded: LoadedPdf; pageIndex: number
   return (
     <canvas
       ref={ref}
-      className="mx-auto block max-w-full rounded border border-border bg-white shadow-sm"
+      className="mx-auto block max-w-full !h-auto rounded border border-border bg-white shadow-sm"
     />
   );
 }

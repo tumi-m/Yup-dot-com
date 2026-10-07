@@ -15,12 +15,13 @@ import {
   GalleryHorizontalEnd,
   Link2,
   Music2,
+  ListVideo,
   PencilRuler,
   Presentation,
   UploadCloud,
   type LucideIcon,
 } from "lucide-react";
-import { EASE } from "@/components/motion/primitives";
+import { DUR, EASE, EASE_IN, EASE_OUT, SPRING_POP, STAGGER } from "@/components/motion/primitives";
 import {
   choiceForFiles,
   choiceFromHash,
@@ -31,7 +32,7 @@ import {
   type JourneyAction,
   type JourneyChoice,
 } from "@/lib/journey";
-import { parseMediaUrl, PLATFORM_LABEL } from "@/lib/media";
+import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
 
@@ -48,6 +49,7 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   Edit: PencilRuler,
   MP4: Film,
   MP3: Music2,
+  Playlist: ListVideo,
 };
 
 function setHash(choice: JourneyChoice | null) {
@@ -72,6 +74,7 @@ export function HeroJourney() {
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const tiles = useRef<Partial<Record<JourneyChoice, HTMLButtonElement | null>>>({});
+  /** The tile to focus when the question comes back. */
   const returnTo = useRef<JourneyChoice | null>(null);
 
   // Deep links, both on load and from in-page anchors.
@@ -84,14 +87,6 @@ export function HeroJourney() {
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
-
-  // Coming back to the question puts focus on the tile that was chosen.
-  useEffect(() => {
-    if (choice === null && returnTo.current) {
-      tiles.current[returnTo.current]?.focus({ preventScroll: true });
-      returnTo.current = null;
-    }
-  }, [choice]);
 
   const choose = useCallback((c: JourneyChoice) => {
     setInteracted(true);
@@ -170,18 +165,20 @@ export function HeroJourney() {
     >
       <motion.div
         animate={{ height }}
-        transition={reduce ? { duration: 0 } : { duration: 0.45, ease: EASE }}
-        className="relative overflow-hidden rounded-3xl border border-primary/20 bg-background/85 text-left shadow-2xl shadow-primary/10 backdrop-blur-xl"
+        transition={reduce ? { duration: 0 } : { duration: DUR.base, ease: EASE_OUT }}
+        className="relative overflow-hidden rounded-3xl border border-primary/20 bg-background/90 text-left shadow-2xl shadow-primary/10"
       >
         <div ref={inner} className="p-3 sm:p-4">
-          <AnimatePresence mode="popLayout" initial={false}>
+          {/* "wait": the old state fades out before the new one enters, so the
+              two never overlap. */}
+          <AnimatePresence mode="wait" initial={false}>
             {choice === null || !active ? (
               <motion.div
                 key="question"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                transition={{ duration: 0.3, ease: EASE }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
+                transition={{ duration: 0.28, ease: EASE_OUT }}
               >
                 <p id="journey-question" className="px-1 pb-3 pt-1 text-sm font-semibold">
                   What are you working on?
@@ -210,23 +207,28 @@ export function HeroJourney() {
                         key={c}
                         ref={(el) => {
                           tiles.current[c] = el;
+                          // Coming back to the question puts focus on the tile that
+                          // was chosen, once it is back on the page (after the exit).
+                          if (el && returnTo.current === c) {
+                            returnTo.current = null;
+                            el.focus({ preventScroll: true });
+                          }
                         }}
                         type="button"
                         data-choice={c}
                         onClick={() => choose(c)}
-                        initial={{ opacity: 0, y: 10 }}
+                        // Server-rendered tiles paint at once; they only rise in
+                        // when the visitor comes back to the question.
+                        initial={interacted ? { opacity: 0, y: 8 } : false}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.4, ease: EASE, delay: 0.04 * i }}
+                        transition={{ duration: DUR.base, ease: EASE_OUT, delay: STAGGER * i }}
                         whileHover={{ y: -3 }}
                         whileTap={{ scale: 0.97 }}
                         className="group flex min-h-[6.5rem] flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
-                        <motion.span
-                          layoutId={`journey-icon-${c}`}
-                          className={cn("flex h-11 w-11 items-center justify-center rounded-xl", tint)}
-                        >
+                        <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", tint)}>
                           <Icon className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
-                        </motion.span>
+                        </span>
                         {label}
                       </motion.button>
                     );
@@ -246,7 +248,8 @@ export function HeroJourney() {
                       <AlertTriangle className="h-3.5 w-3.5" /> {dropError}
                     </motion.p>
                   ) : (
-                    <p className="flex items-center justify-center gap-1.5 pt-3 text-xs text-muted-foreground">
+                    // Nothing to drop on a touch screen.
+                    <p className="flex items-center justify-center gap-1.5 pt-3 text-xs text-muted-foreground pointer-coarse:hidden">
                       <UploadCloud className="h-3.5 w-3.5" /> or drop a file
                     </p>
                   )}
@@ -255,14 +258,16 @@ export function HeroJourney() {
             ) : (
               <motion.div
                 key={choice}
-                initial={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.35, ease: EASE }}
+                exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
+                transition={{ duration: 0.28, ease: EASE_OUT }}
               >
                 <div className="flex items-center gap-3 pb-3">
                   <motion.span
-                    layoutId={`journey-icon-${choice}`}
+                    initial={{ scale: 0.6, rotate: -12 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={SPRING_POP}
                     className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", active.tint)}
                   >
                     <active.icon className="h-5 w-5" />
@@ -316,6 +321,7 @@ export function HeroJourney() {
                     hint="Paste a YouTube or X video link."
                     actionsFor={mediaActions}
                     tag={(url) => {
+                      if (parsePlaylistUrl(url)) return "YouTube playlist";
                       const p = parseMediaUrl(url);
                       return p ? PLATFORM_LABEL[p.platform] : null;
                     }}
@@ -344,9 +350,9 @@ export function HeroJourney() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="pointer-events-none absolute inset-1.5 flex items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed border-primary bg-background/90 text-base font-semibold text-primary backdrop-blur"
+              className="pointer-events-none absolute inset-1.5 flex items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed border-primary bg-background/95 text-base font-semibold text-primary"
             >
-              <UploadCloud className="h-5 w-5" /> Release to begin
+              <UploadCloud className="h-5 w-5" /> Release
             </motion.div>
           )}
         </AnimatePresence>
@@ -434,8 +440,8 @@ function LinkBranch({
       </div>
 
       <div id={`${id}-status`} aria-live="polite" className="min-h-0">
-        {invalid && <p className="px-1 pt-2 text-xs font-medium text-amber-700 dark:text-amber-400">{hint}</p>}
-        {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700 dark:text-amber-400">Clipboard blocked. Paste with Ctrl+V.</p>}
+        {invalid && <p className="px-1 pt-2 text-xs font-medium text-amber-700">{hint}</p>}
+        {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700">Clipboard blocked. Paste with Ctrl+V.</p>}
         {platform && <span className="sr-only">{platform} link</span>}
       </div>
 
@@ -454,7 +460,7 @@ function LinkBranch({
                 {platform}
               </p>
             )}
-            <div className={cn("grid gap-2", actions.length === 3 ? "grid-cols-3" : "grid-cols-2")}>
+            <div className={cn("grid gap-2", actions.length === 3 ? "grid-cols-3" : actions.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
               {actions.map((a, i) => {
                 const Icon = ACTION_ICONS[a.label] ?? FileDown;
                 return (
@@ -465,6 +471,7 @@ function LinkBranch({
                     transition={{ delay: i * 0.05, duration: 0.3, ease: EASE }}
                     whileHover={{ y: -3 }}
                     whileTap={{ scale: 0.97 }}
+                    tabIndex={-1}
                   >
                     <Link
                       href={a.href}

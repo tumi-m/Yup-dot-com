@@ -34,9 +34,12 @@
  *    string; a:fld contributes its current cached text.
  *  - setShapeText leaves a paragraph completely untouched when its text is
  *    unchanged (so fields, line breaks and per-run formatting survive).
- *    An edited paragraph keeps its a:pPr and a:endParaRPr, and all of its new
- *    text takes the a:rPr of its first run (or field); "\n" becomes a:br.
- *    Extra paragraphs copy the last paragraph's pPr/rPr/endParaRPr.
+ *    Paragraphs are matched to the old ones as a diff (inserting or deleting
+ *    a line leaves the others alone). An edited paragraph keeps its a:pPr,
+ *    a:endParaRPr and the runs around the change; the changed text takes the
+ *    a:rPr of the run where the change starts; "\n" becomes a:br. A new
+ *    paragraph copies the pPr/rPr/endParaRPr of the one before it (minus
+ *    any hyperlink).
  */
 import JSZip from "jszip";
 import {
@@ -158,6 +161,9 @@ export interface TextShape {
   /** Present for table cells. */
   row?: number;
   col?: number;
+  /** Merged table cells: how many columns / rows the cell covers (a:tc gridSpan / rowSpan). */
+  colSpan?: number;
+  rowSpan?: number;
   /** Placeholder type (p:ph/@type, "body" when p:ph has no type), else null. */
   placeholder: string | null;
   /** One entry per a:p; a:br is "\n". */
@@ -468,6 +474,9 @@ export interface SaveOptions {
   renumber?: boolean;
 }
 
+/** Media that is already compressed. */
+const PRECOMPRESSED = /\.(jpe?g|png|gif|webp|mp4|m4v|mov|wmv|avi|mpe?g|webm|ogv|mp3|m4a|wma|ogg|oga|aac)$/i;
+
 export async function saveDeck(deck: Deck, options: SaveOptions = {}): Promise<Uint8Array> {
   if (options.renumber !== false) renumberSlideParts(deck);
   const out = new JSZip();
@@ -491,7 +500,9 @@ export async function saveDeck(deck: Deck, options: SaveOptions = {}): Promise<U
     } else {
       throw new PptxError(`No content for ${name}`);
     }
-    out.file(name, data, { compression: "DEFLATE", createFolders: false });
+    // Deflating JPEGs, PNGs and video gains nothing and is most of the save
+    // time on photo-heavy decks: store them as they are.
+    out.file(name, data, { compression: PRECOMPRESSED.test(name) ? "STORE" : "DEFLATE", createFolders: false });
   }
   return out.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
@@ -1076,6 +1087,16 @@ export function paragraphText(p: XmlElement): string {
   return s;
 }
 
+function spansOf(tc: XmlElement): { colSpan?: number; rowSpan?: number } {
+  const n = (v: string | null) => {
+    const k = v ? parseInt(v, 10) : 1;
+    return Number.isFinite(k) && k > 1 ? Math.min(k, 1000) : undefined;
+  };
+  const colSpan = n(getAttr(tc, "gridSpan"));
+  const rowSpan = n(getAttr(tc, "rowSpan"));
+  return { ...(colSpan ? { colSpan } : {}), ...(rowSpan ? { rowSpan } : {}) };
+}
+
 /** All text targets on a slide, in document order (mc:Choice and mc:Fallback both included). */
 function collectTargets(deck: Deck, index: number): TextTarget[] {
   checkIndex(deck, index);
@@ -1133,6 +1154,7 @@ function collectTargets(deck: Deck, index: number): TextTarget[] {
                 kind: "tableCell",
                 row: r,
                 col: c,
+                ...spansOf(tc),
                 placeholder: null,
                 paragraphs: children(tx, NS.a, "p").map(paragraphText),
               },
@@ -1213,6 +1235,202 @@ function normalizeText(s: string): string {
   return stripInvalidXmlChars(String(s ?? "").replace(/\r\n?/g, "\n").replace(/\v/g, "\n"));
 }
 
+/** A run, field or line break of a paragraph and its share of paragraphText(). */
+interface Piece {
+  node: XmlElement;
+  kind: "r" | "fld" | "br";
+  text: string;
+  start: number;
+}
+
+function piecesOf(p: XmlElement): Piece[] {
+  const out: Piece[] = [];
+  let at = 0;
+  for (const c of elementChildren(p)) {
+    if (c.ns !== NS.a) continue;
+    const ln = localName(c.name);
+    if (ln === "r" || ln === "fld") {
+      const t = child(c, NS.a, "t");
+      const text = t ? textContent(t) : "";
+      out.push({ node: c, kind: ln, text, start: at });
+      at += text.length;
+    } else if (ln === "br") {
+      out.push({ node: c, kind: "br", text: "\n", start: at });
+      at += 1;
+    }
+  }
+  return out;
+}
+
+const isHighSurrogate = (c: number) => c >= 0xd800 && c <= 0xdbff;
+const isLowSurrogate = (c: number) => c >= 0xdc00 && c <= 0xdfff;
+
+/** Runs (with a:br between lines) for `text`, formatted like `rPr`. */
+function runsFor(context: XmlElement, rPr: XmlElement | null, text: string): XmlElement[] {
+  const out: XmlElement[] = [];
+  text.split("\n").forEach((line, k) => {
+    if (k > 0) {
+      const br = createElement(context, NS.a, "br");
+      if (rPr) appendChild(br, cloneElement(rPr));
+      out.push(br);
+    }
+    if (!line) return;
+    const r = createElement(context, NS.a, "r");
+    if (rPr) appendChild(r, cloneElement(rPr));
+    const t = createElement(context, NS.a, "t");
+    setTextContent(t, line);
+    appendChild(r, t);
+    out.push(r);
+  });
+  return out;
+}
+
+function replaceWith(node: XmlElement, nodes: XmlElement[]): void {
+  const p = node.parent;
+  if (!p) return;
+  const idx = p.children.indexOf(node);
+  for (const n of nodes) n.parent = p;
+  p.children.splice(idx, 1, ...nodes);
+  if (!nodes.includes(node)) node.parent = null;
+}
+
+/**
+ * Sets one paragraph's text, keeping every run the edit doesn't touch: the
+ * common start and end of the old and new text stay in their own runs, and
+ * the changed middle goes into the run where the change starts (or, for a
+ * pure insertion, the run just before it), so retyping one word keeps the
+ * bold, colour, size or link of the words around it.
+ */
+function editParagraph(p: XmlElement, text: string): void {
+  const pieces = piecesOf(p);
+  const old = pieces.map((x) => x.text).join("");
+  if (old === text) return;
+  const textual = pieces.filter((x) => x.kind !== "br");
+  if (!textual.length) {
+    buildParagraphContent(p, templateOf(p), text);
+    return;
+  }
+  const max = Math.min(old.length, text.length);
+  let pre = 0;
+  while (pre < max && old[pre] === text[pre]) pre++;
+  let suf = 0;
+  while (suf < max - pre && old[old.length - 1 - suf] === text[text.length - 1 - suf]) suf++;
+  // Never split a surrogate pair between kept and replaced text.
+  if (pre > 0 && isHighSurrogate(old.charCodeAt(pre - 1))) pre--;
+  if (suf > 0 && isLowSurrogate(old.charCodeAt(old.length - suf))) suf--;
+  const from = pre;
+  const to = old.length - suf;
+  const middle = text.slice(pre, text.length - suf);
+
+  const within = (x: Piece, i: number) => x.start <= i && i < x.start + x.text.length;
+  let host = from < to ? textual.find((x) => within(x, from)) : undefined;
+  if (!host && from > 0) host = textual.find((x) => within(x, from - 1));
+  host ??= textual.find((x) => within(x, from));
+  // Only line breaks around the change (or an empty run): use the nearest run.
+  host ??= [...textual].reverse().find((x) => x.start <= from) ?? textual[0];
+  const hostTouches = host.start <= from && from <= host.start + host.text.length;
+  let middleDone = !middle;
+
+  for (const x of pieces) {
+    const end = x.start + x.text.length;
+    if (x.kind === "br") {
+      if (from <= x.start && x.start < to) removeNodeTidy(x.node);
+      if (!middleDone && !hostTouches && x.start >= from) {
+        replaceWith(x.node, [...runsFor(p, child(host.node, NS.a, "rPr"), middle), ...(x.node.parent ? [x.node] : [])]);
+        middleDone = true;
+      }
+      continue;
+    }
+    const isHost = x === host && hostTouches;
+    const touched = isHost || (x.start < to && end > from) || (from === to && x.start < from && from < end);
+    if (!touched) {
+      if (!middleDone && !hostTouches && x.start >= from) {
+        replaceWith(x.node, [...runsFor(p, child(host.node, NS.a, "rPr"), middle), x.node]);
+        middleDone = true;
+      }
+      continue;
+    }
+    const left = old.slice(x.start, Math.max(x.start, Math.min(end, from)));
+    const right = old.slice(Math.min(end, Math.max(x.start, to)), end);
+    const value = left + (isHost ? middle : "") + right;
+    if (isHost) middleDone = true;
+    if (x.kind === "r" && !value.includes("\n")) {
+      if (!value) {
+        removeNodeTidy(x.node);
+        continue;
+      }
+      const t = child(x.node, NS.a, "t");
+      if (t) setTextContent(t, value);
+      else {
+        const nt = createElement(x.node, NS.a, "t");
+        setTextContent(nt, value);
+        appendChild(x.node, nt);
+      }
+      continue;
+    }
+    // A field whose text changed is plain text now; new lines become a:br.
+    replaceWith(x.node, runsFor(p, child(x.node, NS.a, "rPr"), value));
+  }
+  if (!middleDone) {
+    const endMark = child(p, NS.a, "endParaRPr");
+    const nodes = runsFor(p, child(host.node, NS.a, "rPr"), middle);
+    if (endMark) {
+      const idx = p.children.indexOf(endMark);
+      for (const n of nodes) n.parent = p;
+      p.children.splice(idx, 0, ...nodes);
+    } else nodes.forEach((n) => appendChild(p, n));
+  }
+  if (!text && !child(p, NS.a, "endParaRPr")) {
+    const rPr = child(host.node, NS.a, "rPr");
+    if (rPr) appendChild(p, renameTo(rPr, "endParaRPr"));
+  }
+}
+
+/** Pairs of equal entries (old index, new index), as a longest common subsequence. */
+function matchLines(a: string[], b: string[]): [number, number][] {
+  const pairs: [number, number][] = [];
+  let lo = 0;
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) pairs.push([lo, lo++]);
+  let ha = a.length;
+  let hb = b.length;
+  const tail: [number, number][] = [];
+  while (ha > lo && hb > lo && a[ha - 1] === b[hb - 1]) tail.unshift([--ha, --hb]);
+  const n = ha - lo;
+  const m = hb - lo;
+  if (n > 0 && m > 0 && n * m <= 1_000_000) {
+    const w = m + 1;
+    const dp = new Uint32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--)
+        dp[i * w + j] = a[lo + i] === b[lo + j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (a[lo + i] === b[lo + j]) pairs.push([lo + i++, lo + j++]);
+      else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) i++;
+      else j++;
+    }
+  }
+  return [...pairs, ...tail];
+}
+
+function stripLinks(rPr: XmlElement | null): XmlElement | null {
+  if (!rPr) return rPr;
+  const copy = cloneElement(rPr);
+  copy.children = copy.children.filter(
+    (c) => !(c.type === "element" && c.ns === NS.a && HLINK_LOCALS.has(localName(c.name)))
+  );
+  copy.rawOpen = null;
+  copy.rawClose = null;
+  return copy;
+}
+
+/**
+ * Sets a text body's paragraphs. Paragraphs are matched to the old ones as a
+ * diff, so inserting or deleting a line keeps every other paragraph (and its
+ * level, bullets and runs) as it was. A new paragraph takes the properties of
+ * the one before it, like pressing Enter at its end.
+ */
 function editTxBody(txBody: XmlElement, paragraphs: string[]): boolean {
   const wanted = (paragraphs.length ? paragraphs : [""]).map(normalizeText);
   const paras = children(txBody, NS.a, "p");
@@ -1223,31 +1441,51 @@ function editTxBody(txBody: XmlElement, paragraphs: string[]): boolean {
     paras.push(p);
     changed = true;
   }
-  const lastTpl = templateOf(paras[paras.length - 1]);
-  // Clone the template so later edits of the last paragraph can't affect it.
-  const extraTpl: ParaTemplate = {
-    pPr: lastTpl.pPr && cloneElement(lastTpl.pPr),
-    rPr: lastTpl.rPr && cloneElement(lastTpl.rPr),
-    endParaRPr: lastTpl.endParaRPr && cloneElement(lastTpl.endParaRPr),
-  };
-  wanted.forEach((text, k) => {
-    if (k < paras.length) {
-      if (paragraphText(paras[k]) === text) return;
-      buildParagraphContent(paras[k], templateOf(paras[k]), text);
-      changed = true;
-    } else {
-      const p = createElement(txBody, NS.a, "p");
-      insertAfter(paras[paras.length - 1], p);
-      buildParagraphContent(p, extraTpl, text);
-      paras.push(p);
-      changed = true;
-    }
+  const before = paras.map(paragraphText);
+  if (!changed && before.length === wanted.length && before.every((t, k) => t === wanted[k])) return false;
+  // Templates for new paragraphs, taken before anything is edited.
+  const templates: ParaTemplate[] = paras.map((p) => {
+    const t = templateOf(p);
+    return {
+      pPr: t.pPr && cloneElement(t.pPr),
+      rPr: stripLinks(t.rPr),
+      endParaRPr: t.endParaRPr && cloneElement(t.endParaRPr),
+    };
   });
-  for (let k = wanted.length; k < paras.length; k++) {
-    removeNodeTidy(paras[k]);
-    changed = true;
+  const matches = [...matchLines(before, wanted), [paras.length, wanted.length] as [number, number]];
+  let i = 0;
+  let j = 0;
+  let last: XmlElement | null = null;
+  let lastOld = -1;
+  for (const [mi, mj] of matches) {
+    const common = Math.min(mi - i, mj - j);
+    for (let k = 0; k < common; k++) {
+      editParagraph(paras[i + k], wanted[j + k]);
+      last = paras[i + k];
+      lastOld = i + k;
+    }
+    for (let k = common; k < mj - j; k++) {
+      const tplIndex = lastOld >= 0 ? lastOld : Math.min(i + common, paras.length - 1);
+      const p = createElement(txBody, NS.a, "p");
+      if (last) insertAfter(last, p);
+      else {
+        const first = paras[0];
+        const idx = txBody.children.indexOf(first);
+        p.parent = txBody;
+        txBody.children.splice(idx, 0, p);
+      }
+      buildParagraphContent(p, templates[tplIndex], wanted[j + k]);
+      last = p;
+    }
+    for (let k = common; k < mi - i; k++) removeNodeTidy(paras[i + k]);
+    if (mi < paras.length) {
+      last = paras[mi];
+      lastOld = mi;
+    }
+    i = mi + 1;
+    j = mj + 1;
   }
-  return changed;
+  return true;
 }
 
 function alternateContentOf(el: XmlElement): XmlElement | null {
@@ -1283,4 +1521,63 @@ export function getNotesText(deck: Deck, index: number): string[] | null {
     if (tx) return children(tx, NS.a, "p").map(paragraphText);
   }
   return [];
+}
+
+/* ------------------------------------------------------------------ */
+/* Watermark                                                           */
+/* ------------------------------------------------------------------ */
+
+/** p:cNvPr name of the "Made with PDF Wizard" text box (Free edits). */
+export const WATERMARK_SHAPE_NAME = "PDF Wizard Watermark";
+
+/**
+ * Adds a small text box, bottom-right, to every slide that doesn't have one
+ * yet: 8pt grey text at 60% opacity, 10pt from the edges, on top of the
+ * slide's own shapes. Nothing else in the slide changes.
+ */
+export function addWatermark(deck: Deck, text: string): number {
+  const { cx, cy } = deck.slideSize;
+  const EMU_PT = 12700;
+  const margin = 10 * EMU_PT;
+  const w = Math.min(cx - 2 * margin, 160 * EMU_PT);
+  const h = 14 * EMU_PT;
+  const x = Math.max(0, cx - margin - w);
+  const y = Math.max(0, cy - margin - h);
+  const safe = stripInvalidXmlChars(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  let added = 0;
+  for (const info of listSlides(deck)) {
+    const root = deck.doc(info.part).root;
+    const cSld = child(root, NS.p, "cSld");
+    const tree = cSld && child(cSld, NS.p, "spTree");
+    if (!tree) continue;
+    let maxId = 0;
+    let present = false;
+    for (const c of descendants(root, NS.p, "cNvPr")) {
+      maxId = Math.max(maxId, Number(getAttr(c, "id")) || 0);
+      if (getAttr(c, "name") === WATERMARK_SHAPE_NAME) present = true;
+    }
+    if (present) continue;
+    const sp = parseXml(
+      `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}">` +
+        `<p:nvSpPr><p:cNvPr id="${maxId + 1}" name="${WATERMARK_SHAPE_NAME}" descr="${safe}"/>` +
+        `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
+        `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm>` +
+        `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
+        `<p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="b"><a:noAutofit/></a:bodyPr><a:lstStyle/>` +
+        `<a:p><a:pPr algn="r"/><a:r><a:rPr lang="en-US" sz="800" b="0" i="0" u="none" dirty="0">` +
+        `<a:solidFill><a:srgbClr val="737373"><a:alpha val="60000"/></a:srgbClr></a:solidFill>` +
+        `<a:latin typeface="Arial"/></a:rPr><a:t>${safe}</a:t></a:r></a:p></p:txBody></p:sp>`
+    ).root;
+    const ext = child(tree, NS.p, "extLst");
+    if (ext) {
+      const idx = tree.children.indexOf(ext);
+      sp.parent = tree;
+      tree.children.splice(idx, 0, sp);
+    } else {
+      appendChild(tree, sp);
+    }
+    deck.edit(info.part);
+    added++;
+  }
+  return added;
 }

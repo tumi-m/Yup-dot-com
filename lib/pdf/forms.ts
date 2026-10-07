@@ -8,6 +8,19 @@ import {
   PDFTextField,
   StandardFonts,
 } from "pdf-lib";
+import { pageFrame, type PageFrame } from "./page-frame";
+
+/** A user-space rectangle as a top-left-origin box on the displayed page. */
+function displayRect(frame: PageFrame, r: { x: number; y: number; width: number; height: number }) {
+  const a = frame.toDisplay(r.x, r.y);
+  const b = frame.toDisplay(r.x + r.width, r.y + r.height);
+  return {
+    x: Math.min(a.u, b.u),
+    y: frame.height - Math.max(a.v, b.v), // bottom-left -> top-left origin
+    width: Math.abs(b.u - a.u),
+    height: Math.abs(b.v - a.v),
+  };
+}
 
 export type DetectedFieldKind =
   | "text"
@@ -117,8 +130,8 @@ export async function detectFormFields(
     widgets.forEach((widget, i) => {
       const pageIndex = pageOfDict.get(widget.dict);
       if (pageIndex === undefined) return;
-      const page = pages[pageIndex];
-      const ph = page.getSize().height;
+      // Positions are reported on the page as displayed (crop box, /Rotate).
+      const frame = pageFrame(pages[pageIndex]);
 
       let rect;
       try {
@@ -136,10 +149,7 @@ export async function detectFormFields(
         name,
         kind,
         page: pageIndex,
-        x: rect.x,
-        y: ph - rect.y - rect.height, // bottom-left -> top-left origin
-        width: rect.width,
-        height: rect.height,
+        ...displayRect(frame, rect),
         value,
         options,
         exportValue,

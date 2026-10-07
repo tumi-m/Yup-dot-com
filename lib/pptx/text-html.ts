@@ -1,5 +1,5 @@
 import { mapFontFamily, fontStack } from "./fonts";
-import { bulletChar, autoNumberLabel, numberParagraphs, type ParaInfo } from "./ooxml";
+import { bulletChar, autoNumberLabel, numberParagraphs, type ParaInfo, type RunInfo } from "./ooxml";
 import { sanitizeToFragment } from "./sanitize";
 
 /**
@@ -72,8 +72,9 @@ export function prepareTextHtml(html: string, opts: TextOptions = {}): string {
   const numbers = info ? numberParagraphs(info) : [];
 
   paras.forEach((p, i) => {
-    const spans = Array.from(p.querySelectorAll("span")) as HTMLElement[];
     const pi = info?.[i];
+    if (pi?.runs) applyRunStyles(p, pi.runs, doc);
+    const spans = Array.from(p.querySelectorAll("span")) as HTMLElement[];
 
     // Placeholders: pptxtojson can inherit size and colour from the wrong
     // master placeholder (and sizes subtitles from the title style), so runs
@@ -85,7 +86,16 @@ export function prepareTextHtml(html: string, opts: TextOptions = {}): string {
     const align = pi?.algn ? ALIGN[pi.algn] : undefined;
     if (align && !p.style.textAlign.startsWith(align)) p.style.textAlign = align;
 
-    const sizes = spans.map(pxOf).filter((n): n is number => n !== null);
+    // Superscript and subscript are drawn smaller, as in PowerPoint.
+    for (const s of spans) {
+      const va = s.style.verticalAlign;
+      const px = pxOf(s);
+      if ((va === "super" || va === "sub") && px) {
+        s.style.fontSize = `${+((px * 2) / 3).toFixed(3)}px`;
+        s.style.lineHeight = "0";
+      }
+    }
+    const sizes = spans.filter((s) => !s.style.verticalAlign).map(pxOf).filter((n): n is number => n !== null);
     const size = sizes.length ? Math.max(...sizes) : 18 * scale;
     // The paragraph's own size sets the height of its line box (and empty lines).
     p.style.fontSize = `${size}px`;
@@ -100,7 +110,12 @@ export function prepareTextHtml(html: string, opts: TextOptions = {}): string {
     // PowerPoint ignores space before the first paragraph of a text box.
     p.style.marginTop = i === 0 ? "0" : spacing(pi.spcBef);
     p.style.marginBottom = spacing(pi.spcAft);
-    p.style.marginLeft = `${pi.marL}px`;
+    if (pi.rtl) {
+      // The margin and indent are on the paragraph's start side.
+      p.setAttribute("dir", "rtl");
+      p.style.marginLeft = "0";
+      p.style.marginRight = `${pi.marL}px`;
+    } else p.style.marginLeft = `${pi.marL}px`;
     p.style.textIndent = `${pi.indent}px`;
 
     const empty = !(p.textContent ?? "").trim();
@@ -127,7 +142,7 @@ export function prepareTextHtml(html: string, opts: TextOptions = {}): string {
     bs.setProperty("font-family", b.font && !symbolFont ? fontStack(b.font) : first?.style.fontFamily || "inherit");
     if (b.type === "num") bs.setProperty("font-weight", first?.style.fontWeight || "inherit");
     if (pi.indent < 0) bs.setProperty("min-width", `${-pi.indent}px`);
-    else bs.setProperty("padding-right", "0.4em");
+    else bs.setProperty(pi.rtl ? "padding-left" : "padding-right", "0.4em");
     p.insertBefore(bullet, p.firstChild);
   });
 
@@ -155,6 +170,53 @@ export function prepareTextHtml(html: string, opts: TextOptions = {}): string {
     }
   }
   return root.innerHTML;
+}
+
+/**
+ * Applies capitals and highlight from the XML runs by character position
+ * (pptxtojson merges runs and puts fields last, so its spans don't line up
+ * with runs one to one). Skipped when the texts don't match.
+ */
+function applyRunStyles(p: HTMLElement, runs: RunInfo[], doc: Document) {
+  const norm = (t: string) => t.replace(/\u00a0/g, " ");
+  const want = runs.map((r) => r.text).join("");
+  if (norm(p.textContent ?? "") !== norm(want)) return;
+  const bounds: { end: number; run: RunInfo }[] = [];
+  let at = 0;
+  for (const run of runs) bounds.push({ end: (at += run.text.length), run });
+  const walker = doc.createTreeWalker(p, 4 /* NodeFilter.SHOW_TEXT */);
+  const nodes: Text[] = [];
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) nodes.push(t as Text);
+  let pos = 0;
+  for (const node of nodes) {
+    const text = node.nodeValue ?? "";
+    const start = pos;
+    pos += text.length;
+    const parts: { text: string; run: RunInfo }[] = [];
+    let k = start;
+    while (k < pos) {
+      const b = bounds.find((x) => x.end > k);
+      if (!b) break;
+      const end = Math.min(pos, b.end);
+      parts.push({ text: text.slice(k - start, end - start), run: b.run });
+      k = end;
+    }
+    if (!parts.some((x) => x.run.cap || x.run.highlight)) continue;
+    const frag = doc.createDocumentFragment();
+    for (const part of parts) {
+      if (!part.run.cap && !part.run.highlight) {
+        frag.appendChild(doc.createTextNode(part.text));
+        continue;
+      }
+      const span = doc.createElement("span");
+      if (part.run.cap === "all") span.style.textTransform = "uppercase";
+      if (part.run.cap === "small") span.style.fontVariant = "small-caps";
+      if (part.run.highlight) span.style.backgroundColor = part.run.highlight;
+      span.textContent = part.text;
+      frag.appendChild(span);
+    }
+    node.replaceWith(frag);
+  }
 }
 
 /** Sanitised table-cell HTML (no paragraph metadata for cells). */

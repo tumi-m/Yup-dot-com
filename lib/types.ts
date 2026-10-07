@@ -1,12 +1,15 @@
+import type { BillingSummary } from "./billing";
+
 export type PlanId = "free" | "pro" | "team";
 
 export interface Profile {
   id: string;
   email: string;
   full_name: string | null;
+  /** The effective plan, resolved at read time (see lib/billing.ts). */
   plan: PlanId;
-  stripe_customer_id: string | null;
   created_at: string;
+  billing: BillingSummary;
 }
 
 export interface DocumentRecord {
@@ -20,19 +23,12 @@ export interface DocumentRecord {
   created_at: string;
 }
 
-export interface Subscription {
-  id: string;
-  user_id: string;
-  status: string;
-  plan: PlanId;
-  stripe_subscription_id: string | null;
-  current_period_end: string | null;
-}
-
 export interface PlanFeature {
   id: PlanId;
   name: string;
+  /** Whole units of `currency` per month. */
   priceMonthly: number;
+  currency: string;
   description: string;
   features: string[];
   maxDocuments: number; // -1 = unlimited

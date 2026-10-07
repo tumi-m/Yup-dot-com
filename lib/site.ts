@@ -1,5 +1,5 @@
 /**
- * Canonical site URL, used for metadata, sitemap, robots, and Stripe redirects.
+ * Canonical site URL, used for metadata, sitemap, robots, and the Paystack return URL.
  *
  * Prefers an explicit NEXT_PUBLIC_SITE_URL, then falls back to the deployment
  * URL Vercel injects, so a fresh deploy produces correct absolute URLs with no

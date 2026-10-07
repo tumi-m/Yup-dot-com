@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { EASE } from "@/components/motion/primitives";
+import { DUR, EASE_OUT } from "@/components/motion/primitives";
 
 /**
  * Cycles through `words` in place, easing its width so a centred headline
@@ -54,7 +54,7 @@ export function RotatingWord({
             ref={(el) => {
               measure.current[i] = el;
             }}
-            className={`absolute left-0 top-0 ${className ?? ""}`}
+            className={`absolute left-0 top-0 !animate-none ${className ?? ""}`}
           >
             {w}
           </span>
@@ -64,7 +64,7 @@ export function RotatingWord({
         className="relative inline-grid overflow-hidden whitespace-nowrap pb-[0.12em] text-left align-bottom"
         initial={false}
         animate={width ? { width } : undefined}
-        transition={reduce ? { duration: 0 } : { duration: 0.55, ease: EASE }}
+        transition={reduce ? { duration: 0 } : { duration: DUR.slow, ease: EASE_OUT }}
       >
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span
@@ -73,7 +73,7 @@ export function RotatingWord({
             initial={{ y: "80%", opacity: 0 }}
             animate={{ y: "0%", opacity: 1 }}
             exit={{ y: "-80%", opacity: 0 }}
-            transition={{ duration: 0.55, ease: EASE }}
+            transition={{ duration: DUR.slow, ease: EASE_OUT }}
           >
             {words[index]}
           </motion.span>

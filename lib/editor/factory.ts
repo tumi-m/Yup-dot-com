@@ -8,6 +8,9 @@ import type {
   FieldKind,
 } from "./types";
 
+/** Placeholder of a freshly placed text box. */
+export const NEW_TEXT = "Type here";
+
 const SHAPES: ShapeKind[] = ["rect", "ellipse", "line", "arrow", "whiteout"];
 const MARKUPS: MarkupKind[] = ["highlight", "underline", "strikeout"];
 
@@ -91,7 +94,7 @@ export function createAnnotation(
         y,
         width: 180,
         height: settings.fontSize * 1.6,
-        text: "Type here",
+        text: NEW_TEXT,
         fontSize: settings.fontSize,
         color: settings.color,
         bold: settings.bold,

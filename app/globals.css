@@ -16,32 +16,12 @@
     --muted-foreground: 263 14% 38%;
     --accent: 262 83% 96%;
     --accent-foreground: 262 70% 42%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 72% 44%;
     --destructive-foreground: 0 0% 100%;
     --border: 263 25% 91%;
     --input: 263 25% 91%;
     --ring: 262 83% 58%;
     --radius: 0.75rem;
-  }
-
-  .dark {
-    --background: 222 47% 7%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 10%;
-    --card-foreground: 210 40% 98%;
-    --primary: 262 83% 67%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 263 30% 17%;
-    --secondary-foreground: 264 40% 98%;
-    --muted: 263 30% 17%;
-    --muted-foreground: 264 18% 65%;
-    --accent: 262 40% 22%;
-    --accent-foreground: 264 40% 98%;
-    --destructive: 0 63% 45%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 263 30% 22%;
-    --input: 263 30% 22%;
-    --ring: 262 83% 67%;
   }
 
   * {
@@ -50,6 +30,133 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+  }
+
+  /* The skip link focuses <main>; it needs no ring of its own. */
+  main:focus {
+    outline: none;
+  }
+
+  /* Focused controls never land under the sticky header. */
+  html {
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: 4rem;
+  }
+
+  /*
+   * Touch screens: 16px text in form controls, or iOS zooms the page on
+   * focus. Boxes drawn at the page's scale (data-fit-text) keep that size.
+   */
+  @media (pointer: coarse) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [data-fit-text]),
+    select:not([data-fit-text]),
+    textarea:not([data-fit-text]) {
+      font-size: max(16px, 1em) !important;
+    }
+  }
+
+  /* One focus style everywhere; components with their own ring keep it. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Smoothly open <details> where the browser can animate to auto height. */
+  :root {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition: block-size 0.25s cubic-bezier(0.22, 1, 0.36, 1), content-visibility 0.25s allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    details::details-content {
+      transition: none;
+    }
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The recommended plan's turning gradient border (PricingCards). */
+@property --ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes ring-turn {
+  to {
+    --ring-angle: 360deg;
+  }
+}
+.pricing-ring {
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(from var(--ring-angle), hsl(var(--primary)), #e879f9, #fbbf24, hsl(var(--primary)));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pricing-ring {
+    animation: ring-turn 9s linear infinite;
+  }
+}
+
+/* Reveal (components/motion/primitives.tsx): held back only after hydration. */
+[data-reveal="pending"] {
+  opacity: 0;
+  transform: translateY(16px);
+}
+[data-reveal="shown"] {
+  animation: reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0s) backwards;
+}
+@media print {
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* Ambient loops stop while their section is offscreen (see useAmbient). */
+[data-paused="true"],
+[data-paused="true"] * {
+  animation-play-state: paused !important;
+}
+
+/*
+ * Client navigations fade the new page's content in. Only the <main> moves,
+ * so the header stays put. "backwards" fill leaves no transform behind.
+ */
+@keyframes route-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .route-enter main {
+    animation: route-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   }
 }
 

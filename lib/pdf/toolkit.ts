@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb, degrees, StandardFonts, type PDFImage } from "pdf-lib";
 import { loadForRender } from "./render";
 import {
   parseDocument,
@@ -8,6 +8,9 @@ import {
   extractTables,
   tableToCsv,
 } from "./parse";
+import { friendlyPdfError } from "./errors";
+import { pageFrame } from "./page-frame";
+import { drawOrientedImage, jpegOrientation, orientedSize, sniffImage } from "./images";
 
 /** A processed result ready to hand to the browser for download. */
 export interface ToolFile {
@@ -30,20 +33,37 @@ function pdfBlob(bytes: Uint8Array): Blob {
   });
 }
 
+async function canvasBytes(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Uint8Array> {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
+  if (!blob) throw new Error("This page is too large to render on this device.");
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** "report.pdf" → "report-rotated.pdf", so results don't all share one name. */
+function suffixed(file: File, suffix: string): string {
+  return `${file.name.replace(/\.pdf$/i, "") || "document"}-${suffix}.pdf`;
+}
+
 async function buf(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
 }
 
-/** Parse "1-3, 5, 8-10" into a list of 0-indexed page arrays (one per range). */
+/**
+ * Parse "1-3, 5, 8-10" into a list of 0-indexed page arrays (one per range).
+ * Reversed ranges ("5-3") are read as 3-5, open ones ("4-") run to the end,
+ * and pages beyond the document are dropped.
+ */
 export function parseRanges(input: string, pageCount: number): number[][] {
   const ranges: number[][] = [];
   for (const part of input.split(",")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
-    const m = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+    const m = trimmed.match(/^(\d+)\s*[-–]\s*(\d*)$/);
     if (m) {
-      const start = Math.max(1, parseInt(m[1], 10));
-      const end = Math.min(pageCount, parseInt(m[2], 10));
+      const a = parseInt(m[1], 10);
+      const b = m[2] ? parseInt(m[2], 10) : pageCount;
+      const start = Math.max(1, Math.min(a, b));
+      const end = Math.min(pageCount, Math.max(a, b));
       const pages: number[] = [];
       for (let i = start; i <= end; i++) pages.push(i - 1);
       if (pages.length) ranges.push(pages);
@@ -61,11 +81,22 @@ export function parseRanges(input: string, pageCount: number): number[][] {
 export async function mergeTool(files: File[]): Promise<ToolFile> {
   const out = await PDFDocument.create();
   for (const file of files) {
-    const src = await PDFDocument.load(await buf(file));
+    let src: PDFDocument;
+    try {
+      src = await PDFDocument.load(await buf(file));
+    } catch (err) {
+      throw friendlyPdfError(err, file.name);
+    }
     const copied = await out.copyPages(src, src.getPageIndices());
     copied.forEach((p) => out.addPage(p));
   }
   return { blob: pdfBlob(await out.save()), filename: "merged.pdf" };
+}
+
+function pageLabel(pages: number[]): string {
+  const first = pages[0] + 1;
+  const last = pages[pages.length - 1] + 1;
+  return first === last ? `page-${first}` : `pages-${first}-${last}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,23 +108,32 @@ export async function splitTool(
 ): Promise<ToolFile | ToolFile[]> {
   const src = await PDFDocument.load(await buf(files[0]));
   const count = src.getPageCount();
+  const base = files[0].name.replace(/\.pdf$/i, "");
 
   let groups: number[][];
   if (opts.mode === "every") {
     groups = src.getPageIndices().map((i) => [i]);
   } else {
-    groups = parseRanges(opts.ranges || `1-${count}`, count);
-    if (!groups.length) groups = [src.getPageIndices()];
+    groups = parseRanges(opts.ranges ?? "", count);
+    // Never hand back the whole document as if it were the requested split.
+    if (!groups.length) {
+      throw new Error(count === 1 ? "This PDF has only 1 page." : `Pick pages between 1 and ${count}.`);
+    }
   }
 
   const results: ToolFile[] = [];
+  const used = new Map<string, number>();
   for (let g = 0; g < groups.length; g++) {
     const out = await PDFDocument.create();
     const copied = await out.copyPages(src, groups[g]);
     copied.forEach((p) => out.addPage(p));
+    // Repeated ranges ("1, 1") must not overwrite each other in the zip.
+    const label = pageLabel(groups[g]);
+    const n = (used.get(label) ?? 0) + 1;
+    used.set(label, n);
     results.push({
       blob: pdfBlob(await out.save()),
-      filename: `split-${g + 1}.pdf`,
+      filename: `${base}-${label}${n > 1 ? `-${n}` : ""}.pdf`,
     });
   }
   return results.length === 1 ? results[0] : results;
@@ -105,7 +145,8 @@ export async function splitTool(
 // ---------------------------------------------------------------------------
 export async function compressTool(
   files: File[],
-  opts: { quality: string }
+  opts: { quality: string },
+  ctx: ToolContext = {}
 ): Promise<ToolFile> {
   const quality = Number(opts.quality) || 0.6;
   const bytes = await buf(files[0]);
@@ -115,11 +156,12 @@ export async function compressTool(
   const scale = 1.5;
 
   for (let i = 1; i <= loaded.numPages; i++) {
+    ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
     const vp = await loaded.getPageViewport(i, scale);
     const canvas = document.createElement("canvas");
-    await loaded.renderPage(i, canvas, scale);
-    const dataUrl = canvas.toDataURL("image/jpeg", quality);
-    const img = await out.embedJpg(dataUrl);
+    await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
+    const img = await out.embedJpg(await canvasBytes(canvas, "image/jpeg", quality));
+    canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
     // Place at the page's true point size (vp at scale 1).
     const pageW = vp.baseWidth;
     const pageH = vp.baseHeight;
@@ -132,7 +174,7 @@ export async function compressTool(
   if (compressed.length >= bytes.length) {
     return { blob: pdfBlob(bytes), filename: files[0].name.replace(/\.pdf$/i, "") + ".pdf" };
   }
-  return { blob: pdfBlob(compressed), filename: "compressed.pdf" };
+  return { blob: pdfBlob(compressed), filename: suffixed(files[0], "compressed") };
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +182,8 @@ export async function compressTool(
 // ---------------------------------------------------------------------------
 export async function pdfToImagesTool(
   files: File[],
-  opts: { format: string; quality: string }
+  opts: { format: string; quality: string },
+  ctx: ToolContext = {}
 ): Promise<ToolFile[]> {
   const format = opts.format === "png" ? "png" : "jpeg";
   const quality = Number(opts.quality) || 0.92;
@@ -148,19 +191,21 @@ export async function pdfToImagesTool(
   const loaded = await loadForRender(bytes);
   const base = files[0].name.replace(/\.pdf$/i, "");
   const results: ToolFile[] = [];
+  // Zero-pad to the page count so files sort in page order (…-099, …-100).
+  const digits = Math.max(2, String(loaded.numPages).length);
 
   for (let i = 1; i <= loaded.numPages; i++) {
+    ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
     const canvas = document.createElement("canvas");
-    await loaded.renderPage(i, canvas, 2);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, `image/${format}`, quality)
-    );
-    if (blob) {
-      results.push({
-        blob,
-        filename: `${base}-page-${String(i).padStart(2, "0")}.${format === "jpeg" ? "jpg" : "png"}`,
-      });
-    }
+    await loaded.renderPage(i, canvas, 2, { pixelRatio: 1 });
+    const blob = new Blob([(await canvasBytes(canvas, `image/${format}`, quality)) as unknown as BlobPart], {
+      type: `image/${format}`,
+    });
+    canvas.width = canvas.height = 0;
+    results.push({
+      blob,
+      filename: `${base}-page-${String(i).padStart(digits, "0")}.${format === "jpeg" ? "jpg" : "png"}`,
+    });
   }
   loaded.destroy();
   return results;
@@ -170,6 +215,7 @@ export async function pdfToImagesTool(
 // Images -> PDF
 // ---------------------------------------------------------------------------
 const A4 = { w: 595.28, h: 841.89 };
+const MAX_PAGE_PT = 14400;
 
 export async function imagesToPdfTool(
   files: File[],
@@ -180,20 +226,32 @@ export async function imagesToPdfTool(
 
   for (const file of files) {
     const data = await buf(file);
-    const isPng = file.type.includes("png") || file.name.toLowerCase().endsWith(".png");
-    const img = isPng ? await out.embedPng(data) : await out.embedJpg(data);
+    const kind = sniffImage(data);
+    if (!kind) throw new Error(`${file.name}: use a JPG or PNG image.`);
+    let img: PDFImage;
+    try {
+      img = kind === "png" ? await out.embedPng(data) : await out.embedJpg(data);
+    } catch {
+      throw new Error(`${file.name}: this image looks damaged.`);
+    }
+    const orientation = kind === "jpeg" ? jpegOrientation(data) : 1;
+    const shown = orientedSize(img, orientation);
 
     if (opts.pageSize === "fit") {
-      const page = out.addPage([img.width + margin * 2, img.height + margin * 2]);
-      page.drawImage(img, { x: margin, y: margin, width: img.width, height: img.height });
+      // 1 px = 1 pt, capped at the 200-inch page limit PDF viewers enforce.
+      const scale = Math.min(1, (MAX_PAGE_PT - margin * 2) / Math.max(shown.width, shown.height));
+      const w = shown.width * scale;
+      const h = shown.height * scale;
+      const page = out.addPage([w + margin * 2, h + margin * 2]);
+      drawOrientedImage(page, img, orientation, { x: margin, y: margin, width: w, height: h });
     } else {
       const page = out.addPage([A4.w, A4.h]);
       const maxW = A4.w - margin * 2;
       const maxH = A4.h - margin * 2;
-      const ratio = Math.min(maxW / img.width, maxH / img.height);
-      const w = img.width * ratio;
-      const h = img.height * ratio;
-      page.drawImage(img, {
+      const ratio = Math.min(maxW / shown.width, maxH / shown.height);
+      const w = shown.width * ratio;
+      const h = shown.height * ratio;
+      drawOrientedImage(page, img, orientation, {
         x: (A4.w - w) / 2,
         y: (A4.h - h) / 2,
         width: w,
@@ -217,7 +275,7 @@ export async function rotateTool(
     const current = page.getRotation().angle;
     page.setRotation(degrees((current + delta + 360) % 360));
   });
-  return { blob: pdfBlob(await doc.save()), filename: "rotated.pdf" };
+  return { blob: pdfBlob(await doc.save()), filename: suffixed(files[0], "rotated") };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,80 +294,142 @@ export async function pageNumbersTool(
   pages.forEach((page, i) => {
     const label =
       opts.format === "n_of_N" ? `${i + 1} of ${total}` : `${i + 1}`;
-    const { width } = page.getSize();
+    const frame = pageFrame(page);
     const textWidth = font.widthOfTextAtSize(label, size);
-    const margin = 28;
-    let x = width / 2 - textWidth / 2;
-    if (opts.position === "bottom-right") x = width - textWidth - margin;
-    else if (opts.position === "bottom-left") x = margin;
+    const margin = Math.min(28, frame.width / 10, frame.height / 10);
+    let u = frame.width / 2 - textWidth / 2;
+    if (opts.position === "bottom-right") u = frame.width - textWidth - margin;
+    else if (opts.position === "bottom-left") u = margin;
+    const { x, y } = frame.toPdf(u, Math.max(2, margin - size / 2));
     page.drawText(label, {
       x,
-      y: margin - size / 2,
+      y,
       size,
       font,
       color: rgb(0.2, 0.2, 0.2),
+      rotate: degrees(frame.angle(0)),
     });
   });
-  return { blob: pdfBlob(await doc.save()), filename: "numbered.pdf" };
+  return { blob: pdfBlob(await doc.save()), filename: suffixed(files[0], "numbered") };
 }
 
 // ---------------------------------------------------------------------------
 // Watermark
 // ---------------------------------------------------------------------------
+
+/** Renders one line of text to a tightly cropped transparent PNG (browser only). */
+async function renderTextPng(text: string, color: string): Promise<Uint8Array> {
+  if (typeof document === "undefined") throw new Error("Use Latin letters for the watermark.");
+  const px = 160;
+  const fontSpec = `bold ${px}px system-ui, "Segoe UI", "Noto Sans", Arial, sans-serif`;
+  const canvas = document.createElement("canvas");
+  let ctx = canvas.getContext("2d")!;
+  ctx.font = fontSpec;
+  const m = ctx.measureText(text);
+  const ascent = Math.ceil(m.actualBoundingBoxAscent || px * 0.8);
+  const descent = Math.ceil(m.actualBoundingBoxDescent || px * 0.2);
+  canvas.width = Math.max(1, Math.ceil(m.width));
+  canvas.height = ascent + descent;
+  ctx = canvas.getContext("2d")!;
+  ctx.font = fontSpec;
+  ctx.fillStyle = color;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(text, 0, ascent);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("Couldn't draw that watermark.");
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 export async function watermarkTool(
   files: File[],
   opts: { text: string; opacity: string; color: string; fontSize: string }
 ): Promise<ToolFile> {
   const doc = await PDFDocument.load(await buf(files[0]));
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
-  const text = opts.text || "CONFIDENTIAL";
+  const text = (opts.text ?? "").trim();
+  if (!text) throw new Error("Type the watermark text.");
   const size = Number(opts.fontSize) || 60;
   const opacity = Number(opts.opacity) || 0.25;
-  const color = hexToRgb(opts.color || "#6d28d9");
+  const hex = /^#[0-9a-f]{6}$/i.test(opts.color) ? opts.color : "#6d28d9";
+  const color = hexToRgb(hex);
 
-  for (const page of doc.getPages()) {
-    const { width, height } = page.getSize();
-    const textWidth = font.widthOfTextAtSize(text, size);
-    page.drawText(text, {
-      x: width / 2 - textWidth / 2,
-      y: height / 2,
-      size,
-      font,
-      color,
-      opacity,
-      rotate: degrees(45),
-    });
+  // The standard fonts only cover Latin-1. Anything else (Cyrillic, Greek,
+  // CJK, emoji…) is drawn by the browser into an image instead.
+  let latin = true;
+  try {
+    font.encodeText(text);
+  } catch {
+    latin = false;
   }
-  return { blob: pdfBlob(await doc.save()), filename: "watermarked.pdf" };
+  const image = latin ? null : await doc.embedPng(await renderTextPng(text, hex));
+  // Text box at size 1: width per point of font size, and the visual height.
+  const unitWidth = image ? image.width / image.height : font.widthOfTextAtSize(text, 1);
+  const unitHeight = image ? 1 : 0.72; // Helvetica cap height
+
+  const theta = Math.PI / 4;
+  for (const page of doc.getPages()) {
+    const frame = pageFrame(page);
+    // Shrink long text so the diagonal stays on the page.
+    const room = (0.9 * Math.min(frame.width, frame.height)) / Math.cos(theta);
+    const s = Math.min(size, room / (unitWidth + unitHeight));
+    const w = unitWidth * s;
+    const h = unitHeight * s;
+    // Start point that centres the rotated box on the page.
+    const u = frame.width / 2 - (w / 2) * Math.cos(theta) + (h / 2) * Math.sin(theta);
+    const v = frame.height / 2 - (w / 2) * Math.sin(theta) - (h / 2) * Math.cos(theta);
+    const { x, y } = frame.toPdf(u, v);
+    const rotate = degrees(frame.angle(45));
+    if (image) {
+      page.drawImage(image, { x, y, width: w, height: h, opacity, rotate });
+    } else {
+      page.drawText(text, { x, y, size: s, font, color, opacity, rotate });
+    }
+  }
+  return { blob: pdfBlob(await doc.save()), filename: suffixed(files[0], "watermarked") };
 }
 
 // ---------------------------------------------------------------------------
 // Layout-aware extraction (see lib/pdf/parse.ts)
 // ---------------------------------------------------------------------------
 
+/** Per-page progress for long documents; silent for short ones. */
+function pageProgress(ctx: ToolContext) {
+  return (page: number, total: number) => {
+    if (total >= 10) ctx.progress?.(page / total, `Page ${page} of ${total}`);
+  };
+}
+
+const NO_TEXT = "No text found. This looks like a scanned PDF: run OCR PDF on it first.";
+
+/** Fails instead of handing back an empty file when a PDF has no text layer. */
+function requireText(out: string): string {
+  if (!out.trim()) throw new Error(NO_TEXT);
+  return out;
+}
+
 /** PDF -> text, in correct reading order (handles multi-column layouts). */
-export async function pdfToTextTool(files: File[]): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]));
+export async function pdfToTextTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   const base = files[0].name.replace(/\.pdf$/i, "");
   return {
-    blob: new Blob([toPlainText(doc)], { type: "text/plain" }),
+    blob: new Blob([requireText(toPlainText(doc))], { type: "text/plain" }),
     filename: `${base}.txt`,
   };
 }
 
 /** PDF -> Markdown, preserving headings, lists, and tables. */
-export async function pdfToMarkdownTool(files: File[]): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]));
+export async function pdfToMarkdownTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   const base = files[0].name.replace(/\.pdf$/i, "");
   return {
-    blob: new Blob([toMarkdown(doc)], { type: "text/markdown" }),
+    blob: new Blob([requireText(toMarkdown(doc))], { type: "text/markdown" }),
     filename: `${base}.md`,
   };
 }
 
 /** Detect tables and export each as CSV. */
-export async function extractTablesTool(files: File[]): Promise<ToolFile[]> {
-  const doc = await parseDocument(await buf(files[0]));
+export async function extractTablesTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile[]> {
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   const tables = extractTables(doc);
   if (!tables.length) {
     throw new Error(
@@ -328,10 +448,12 @@ export async function extractTablesTool(files: File[]): Promise<ToolFile[]> {
 /** Split into retrieval-sized chunks with heading breadcrumbs, for RAG. */
 export async function pdfToChunksTool(
   files: File[],
-  opts: { maxChars: string }
+  opts: { maxChars: string },
+  ctx: ToolContext = {}
 ): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   const chunks = toChunks(doc, Number(opts.maxChars) || 1200);
+  if (!chunks.length) throw new Error(NO_TEXT);
   const base = files[0].name.replace(/\.pdf$/i, "");
   const payload = {
     source: files[0].name,
@@ -427,8 +549,8 @@ export async function ocrTool(
 // Office conversions
 // ---------------------------------------------------------------------------
 
-export async function pdfToWordTool(files: File[]): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]));
+export async function pdfToWordTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   if (doc.likelyScanned) {
     throw new Error("This looks like a scanned PDF. Run OCR PDF on it first, then convert.");
   }
@@ -437,8 +559,8 @@ export async function pdfToWordTool(files: File[]): Promise<ToolFile> {
   return { blob: await toDocxBlob(doc, base), filename: `${base}.docx` };
 }
 
-export async function pdfToExcelTool(files: File[]): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]));
+export async function pdfToExcelTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
   const tables = extractTables(doc);
   if (!tables.length) {
     throw new Error(

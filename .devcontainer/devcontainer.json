@@ -5,7 +5,7 @@
     "ghcr.io/devcontainers/features/python:1": { "version": "3.12" }
   },
   // Prebuilds run onCreateCommand, so heavy installs live here.
-  "onCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg && pip install --user -r media-worker/requirements.txt python-docx openpyxl && npm ci",
+  "onCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg && pip install --user -r media-worker/requirements.txt python-docx openpyxl python-pptx XlsxWriter && npm ci",
   "forwardPorts": [3000, 8080],
   "portsAttributes": {
     "3000": { "label": "Web app", "onAutoForward": "openBrowser" },
@@ -14,9 +14,10 @@
   "secrets": {
     "NEXT_PUBLIC_SUPABASE_URL": { "description": "Supabase project URL. Accounts, library and billing need it; the tools do not." },
     "NEXT_PUBLIC_SUPABASE_ANON_KEY": { "description": "Supabase anon key." },
-    "SUPABASE_SERVICE_ROLE_KEY": { "description": "Supabase service-role key, used by the Stripe webhook." },
-    "STRIPE_SECRET_KEY": { "description": "Stripe secret key (test mode)." },
-    "STRIPE_WEBHOOK_SECRET": { "description": "Stripe webhook signing secret." },
+    "SUPABASE_SERVICE_ROLE_KEY": { "description": "Supabase service-role key, used by billing." },
+    "PAYSTACK_SECRET_KEY": { "description": "Paystack secret key (test mode, sk_test_…)." },
+    "PAYSTACK_PLAN_PRO": { "description": "Paystack plan code for Pro (PLN_…)." },
+    "PAYSTACK_PLAN_TEAM": { "description": "Paystack plan code for Team (PLN_…)." },
     "OLLAMA_API_KEY": { "description": "Ollama Cloud key. Enables the PDF assistant." },
     "MEDIA_WORKER_SECRET": { "description": "Shared secret between the web app and the media worker." }
   }

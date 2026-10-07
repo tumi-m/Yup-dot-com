@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { maxHeightFor, parseMediaUrl, QUALITIES } from "@/lib/media";
+import { cleanTitle, maxHeightFor, parseMediaUrl, QUALITIES } from "@/lib/media";
 import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
 import { resolveXVideo, X_FAILURE_MESSAGE, XResolveError, xAvailableQualities } from "@/lib/x-video";
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   // X: resolved here, no worker needed.
   if (media.platform === "x") {
     try {
-      const video = await resolveXVideo(media.id);
+      const video = await resolveXVideo(media.id, undefined, media.index);
       const available = xAvailableQualities(video, QUALITIES);
       return Response.json({
         platform: "x",
@@ -53,8 +53,8 @@ export async function POST(request: Request) {
   const tallest = heights.length ? Math.max(...heights) : 0;
   return Response.json({
     platform: media.platform,
-    title: info.title,
-    uploader: info.uploader,
+    title: cleanTitle(info.title) || "Untitled",
+    uploader: cleanTitle(info.uploader) || null,
     duration: info.duration,
     thumbnail: info.thumbnail,
     hasAudio: info.hasAudio,

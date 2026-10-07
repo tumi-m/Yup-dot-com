@@ -251,8 +251,8 @@ function deps(fetcher: ReturnType<typeof fakeFetch>["f"], opts: { tier?: "guest"
     d: {
       fetcher,
       resolveTier: async () => ({ user: opts.user ? { id: opts.user } : null, tier: opts.tier ?? "guest" }),
-      consumeDaily: (key: string, limit: number) => { consumed.push({ key, limit }); return left-- > 0 ? left : -1; },
-      clientIp: () => "203.0.113.9",
+      consumeDaily: async (subject: string, bucket: string, limit: number) => { consumed.push({ key: `${bucket}:${subject}`, limit }); return left-- > 0 ? left : -1; },
+      usageSubject: (_r: Request, user: { id: string } | null) => (user ? `u:${user.id}` : "ip:203.0.113.9"),
     },
   };
 }

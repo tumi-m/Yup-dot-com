@@ -3,7 +3,7 @@
  * which branch a dropped file or a URL hash belongs to, and where each
  * pasted link can go. Kept free of React so it can be unit tested.
  */
-import { parseMediaUrl } from "./media";
+import { parseMediaUrl, parsePlaylistUrl } from "./media";
 
 export type JourneyChoice = "pdf" | "pptx" | "slides" | "media";
 
@@ -62,11 +62,26 @@ export function slidesActions(input: string): JourneyAction[] {
   ];
 }
 
+/**
+ * A playlist link goes to the playlist tool; one that also names a video
+ * (watch?v=…&list=…) offers that single video too.
+ */
 export function mediaActions(input: string): JourneyAction[] {
-  const parsed = parseMediaUrl(input);
-  if (!parsed) return [];
-  const url = encodeURIComponent(input.trim());
-  if (parsed.platform === "youtube") return [{ label: "MP4", href: `/tools/youtube-to-mp4?url=${url}` }];
+  const playlist = parsePlaylistUrl(input);
+  const parsed = playlist ? playlist.video : parseMediaUrl(input);
+  const actions: JourneyAction[] = playlist
+    ? [{ label: "Playlist", href: `/tools/youtube-playlist?url=${encodeURIComponent(playlist.canonical)}` }]
+    : [];
+  if (!parsed) return actions;
+  // Single videos are passed on as their canonical link, without the list.
+  const url = encodeURIComponent(playlist ? parsed.canonical : input.trim());
+  if (parsed.platform === "youtube") {
+    return [
+      ...actions,
+      { label: "MP4", href: `/tools/youtube-to-mp4?url=${url}` },
+      { label: "MP3", href: `/tools/youtube-to-mp3?url=${url}` },
+    ];
+  }
   return [
     { label: "MP4", href: `/tools/x-to-mp4?url=${url}` },
     { label: "MP3", href: `/tools/x-to-mp3?url=${url}` },

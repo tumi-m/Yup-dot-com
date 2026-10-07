@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { getCurrentUser } from "@/lib/supabase/server";
-import { getProfile } from "@/lib/profile";
-import { limitsFor, type Tier } from "@/lib/limits";
+import { limitsFor } from "@/lib/limits";
+import { resolveTier } from "@/lib/tier";
+import { aiRemaining, claimAiAnswer, usageSubject } from "@/lib/usage";
 import { ollamaConfig, streamChat, userMessage, OllamaError, type ChatMessage } from "@/lib/ai/ollama";
 import { fitDocument } from "@/lib/ai/document";
 
@@ -46,47 +46,11 @@ Answer only from the document. When you state a fact from it, cite the page like
 Be direct and concise. Use short paragraphs and bullet lists where they help; use Markdown.`;
 
 /**
- * Daily answer allowance per tier. Guests are keyed by IP, account holders
- * by user id. In-memory, so it is per server instance — a cost backstop and
- * an upgrade moment, not a billing system. AI_GUEST_DAILY_LIMIT overrides
- * the guest allowance; set it to 0 to require an account for AI.
+ * Allowances (lib/usage.ts, env-overridable): answers per day per tier, a
+ * monthly cap on Pro, a per-minute burst and a site-wide daily cap. Counted
+ * in Supabase, so every server instance sees the same numbers. Guests are
+ * keyed by a salted hash of their IP, account holders by user id.
  */
-const DAY_MS = 24 * 60 * 60 * 1000;
-const usage = new Map<string, number[]>();
-
-function dailyLimit(tier: Tier) {
-  if (tier === "guest" && process.env.AI_GUEST_DAILY_LIMIT !== undefined) {
-    return Math.max(0, Number(process.env.AI_GUEST_DAILY_LIMIT) || 0);
-  }
-  return limitsFor(tier).aiAnswersPerDay;
-}
-
-/** Returns answers remaining after this one, or -1 when the allowance is spent. */
-function consume(key: string, limit: number) {
-  const now = Date.now();
-  const recent = (usage.get(key) ?? []).filter((t) => now - t < DAY_MS);
-  if (recent.length >= limit) {
-    usage.set(key, recent);
-    return -1;
-  }
-  recent.push(now);
-  usage.set(key, recent);
-  return limit - recent.length;
-}
-
-/** Gives back a slot when a request failed before any answer was delivered. */
-function refund(key: string) {
-  const recent = usage.get(key);
-  if (recent?.length) recent.pop();
-}
-
-function clientIp(request: Request) {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 function json(status: number, message: string) {
   return Response.json({ error: message }, { status });
@@ -99,11 +63,7 @@ export async function POST(request: Request) {
     return json(503, "The AI assistant isn't configured on this deployment yet.");
   }
 
-  const user = await getCurrentUser();
-  const profile = user ? await getProfile().catch(() => null) : null;
-  const tier: Tier = user ? (profile?.plan ?? "free") : "guest";
-  const limit = dailyLimit(tier);
-  if (tier === "guest" && limit === 0) return json(401, "Sign in to use the AI assistant.");
+  const { user, tier } = await resolveTier();
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return json(400, "Invalid request.");
@@ -118,14 +78,14 @@ export async function POST(request: Request) {
   const fitted = fitDocument(documentText, limitsFor(tier).aiDocumentChars);
 
   // Count only requests that will actually reach the model.
-  const usageKey = user ? `u:${user.id}` : `ip:${clientIp(request)}`;
-  const remaining = consume(usageKey, limit);
-  if (remaining < 0) {
+  const claim = await claimAiAnswer(usageSubject(request, user), tier);
+  if (!claim.ok) {
     return Response.json(
-      { error: "You've used today's AI answers.", upgrade: tier !== "pro" && tier !== "team" },
-      { status: 429 }
+      { error: claim.error, upgrade: !!claim.upgrade, reason: claim.reason },
+      { status: claim.status, headers: { "Cache-Control": "no-store" } }
     );
   }
+  const remaining = claim.remaining;
 
   const coverage = fitted.truncated
     ? fitted.lastPage && fitted.totalPages
@@ -175,7 +135,7 @@ export async function POST(request: Request) {
           console.error("ai/chat error:", error instanceof Error ? error.message : error);
         }
         // An answer that never arrived shouldn't cost the user a turn.
-        if (!delivered) refund(usageKey);
+        if (!delivered) await claim.refund().catch(() => {});
         try {
           send({ type: "error", message: userMessage(error) });
         } catch {
@@ -199,4 +159,12 @@ export async function POST(request: Request) {
         : {}),
     },
   });
+}
+
+/** Answers left today, for the "N left today" label before the first question. */
+export async function GET(request: Request) {
+  if (!ollamaConfig()) return Response.json({ remaining: null }, { headers: { "Cache-Control": "no-store" } });
+  const { user, tier } = await resolveTier();
+  const remaining = await aiRemaining(usageSubject(request, user), tier).catch(() => null);
+  return Response.json({ remaining }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -3,30 +3,31 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { NavSkeleton } from "@/components/ui/skeleton";
+import { LostPage } from "@/components/ui/lost-page";
 
 export default function Error({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   useEffect(() => {
     console.error(error);
   }, [error]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-center">
-      <h1 className="text-2xl font-semibold">A spell misfired</h1>
-      <p className="max-w-sm text-muted-foreground">
-        Something went wrong. Try again, or head back home.
-      </p>
-      <div className="flex gap-3">
-        <Button onClick={reset}>Try again</Button>
-        <Button asChild variant="outline">
+    <div className="flex min-h-screen flex-col">
+      <NavSkeleton bare />
+      <LostPage title="A spell misfired">
+        <Button size="lg" onClick={() => retry()}>
+          Try again
+        </Button>
+        <Button asChild size="lg" variant="outline">
           <Link href="/">Back home</Link>
         </Button>
-      </div>
+      </LostPage>
     </div>
   );
 }

@@ -1,37 +1,53 @@
-import Link from "next/link";
+"use client";
+
 import { Button } from "@/components/ui/button";
-import { WizardWordmark } from "@/components/WizardLogo";
+import { NavShell, type NavLink } from "@/components/MarketingNav";
+import { PLANS } from "@/lib/plans";
 import type { PlanId } from "@/lib/types";
 
+const LINKS: NavLink[] = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/tools", label: "Tools" },
+  { href: "/settings/billing", label: "Billing" },
+];
+
+function PlanBadge({ plan }: { plan: PlanId }) {
+  return (
+    <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+      {PLANS[plan]?.name ?? plan}
+    </span>
+  );
+}
+
+function SignOut({ className }: { className?: string }) {
+  return (
+    <form action="/auth/signout" method="post">
+      <Button type="submit" variant="outline" size="sm" className={className}>
+        Sign out
+      </Button>
+    </form>
+  );
+}
+
+/** The signed-in header: same chrome as the marketing pages. */
 export function AppNav({ plan, email }: { plan: PlanId; email: string }) {
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur">
-      <div className="container flex h-16 items-center justify-between">
-        <Link href="/dashboard" className="text-lg">
-          <WizardWordmark />
-        </Link>
-
-        <div className="flex items-center gap-3 text-sm">
-          <Link href="/tools" className="hidden text-muted-foreground hover:text-foreground sm:inline">
-            Tools
-          </Link>
-          <span className="hidden rounded-full bg-accent px-3 py-1 text-xs font-medium uppercase tracking-wide text-accent-foreground sm:inline">
-            {plan}
-          </span>
-          <Link
-            href="/settings/billing"
-            className="hidden text-muted-foreground hover:text-foreground sm:inline"
-          >
-            Billing
-          </Link>
-          <span className="hidden text-muted-foreground md:inline">{email}</span>
-          <form action="/auth/signout" method="post">
-            <Button type="submit" variant="outline" size="sm">
-              Sign out
-            </Button>
-          </form>
+    <NavShell
+      homeHref="/dashboard"
+      links={LINKS}
+      actions={
+        <>
+          <PlanBadge plan={plan} />
+          <SignOut />
+        </>
+      }
+      mobileTop={
+        <div className="flex items-center justify-between gap-3 px-3 pb-2">
+          <span className="min-w-0 truncate text-sm text-muted-foreground">{email}</span>
+          <PlanBadge plan={plan} />
         </div>
-      </div>
-    </header>
+      }
+      mobileActions={<SignOut className="h-11 w-full" />}
+    />
   );
 }

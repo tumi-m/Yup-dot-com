@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import JSZip from "jszip";
-import { AnimatePresence, motion, Reorder } from "motion/react";
+import { AnimatePresence, motion, Reorder, useDragControls } from "motion/react";
 import {
   UploadCloud,
   File as FileIcon,
@@ -30,6 +29,7 @@ import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/loc
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
 import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
 import { getTool } from "@/lib/tools";
+import { friendlyPdfError } from "@/lib/pdf/errors";
 
 /** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
 const NEXT_STEPS: Record<string, string[]> = {
@@ -39,8 +39,21 @@ const NEXT_STEPS: Record<string, string[]> = {
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
-  "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf", "compress-pdf", "pdf-to-word"],
+  "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
+  // An encrypted result can't be opened by the other tools.
+  "protect-pdf": [],
 };
+
+/** Chips only offer tools that take the result's file type. */
+function nextSteps(slug: string, filename: string): string[] {
+  const name = filename.toLowerCase();
+  if (name.endsWith(".pdf")) {
+    if (slug === "pdf-to-pptx") return [];
+    return (NEXT_STEPS[slug] ?? NEXT_STEPS.default).filter((next) => next !== slug);
+  }
+  if (name.endsWith(".pptx")) return NEXT_STEPS["pdf-to-pptx"];
+  return [];
+}
 
 type Status = "idle" | "working" | "done";
 
@@ -72,6 +85,15 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [dragging, setDragging] = useState(false);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
+  /** Where focus goes once the next state has rendered, so it never drops to the page. */
+  const focusNext = useRef<"progress" | "done" | "run" | null>(null);
+  const focusRef = (key: NonNullable<typeof focusNext.current>) => (el: HTMLElement | null) => {
+    if (el && focusNext.current === key) {
+      focusNext.current = null;
+      el.focus();
+    }
+  };
+
   const files = entries.map((e) => e.file);
   const inputBytes = files.reduce((n, f) => n + f.size, 0);
   const outputBytes = results.reduce((n, r) => n + r.blob.size, 0);
@@ -81,7 +103,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     const accepted = Array.from(list).filter((f) =>
       proc.accept.split(",").some((type) => {
         const t = type.trim();
-        return f.type === t || (t === "application/pdf" && f.name.toLowerCase().endsWith(".pdf"));
+        const name = f.name.toLowerCase();
+        // Some browsers and OS share sheets leave `type` empty: fall back to the extension.
+        return (
+          f.type === t ||
+          (t === "application/pdf" && name.endsWith(".pdf")) ||
+          (!f.type && t === "image/jpeg" && /\.jpe?g$/.test(name)) ||
+          (!f.type && t === "image/png" && name.endsWith(".png"))
+        );
       })
     );
     if (!accepted.length) {
@@ -95,19 +124,15 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     const incoming = accepted.map((file) => ({ id: `f${++entrySeq}`, file }));
-    let over = false;
-    setEntries((prev) => {
-      const next = proc.multiple ? [...prev, ...incoming] : incoming.slice(0, 1);
-      if (next.length > limits.maxBatchFiles) {
-        over = true;
-        return next.slice(0, limits.maxBatchFiles);
-      }
-      return next;
-    });
-    if (over) setUpsell("batch");
+    // Decide from the current list, not inside the state updater: React may
+    // run updaters later, so a flag set there is still false when read here.
+    const next = proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1);
+    if (next.length > limits.maxBatchFiles) setUpsell("batch");
+    setEntries(next.slice(0, limits.maxBatchFiles));
     setStatus("idle");
     setResults([]);
-    setError(null);
+    const skipped = list.length - accepted.length;
+    setError(skipped ? `Skipped ${skipped} unsupported file${skipped === 1 ? "" : "s"}.` : null);
   }
 
   function setOption(key: string, value: string) {
@@ -123,6 +148,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       setError(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
       return;
     }
+    if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
     setStatus("working");
     setError(null);
     setProgress(null);
@@ -134,11 +160,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       });
       setResults(Array.isArray(out) ? out : [out]);
       setElapsed((performance.now() - started) / 1000);
+      if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "done";
       setStatus("done");
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(friendlyPdfError(err).message);
+      if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
       setStatus("idle");
     } finally {
       setProgress(null);
@@ -151,6 +179,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     if (proc.zipName) {
+      const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
       for (const r of results) zip.file(r.filename, r.blob);
       downloadBlob(await zip.generateAsync({ type: "blob" }), proc.zipName);
@@ -220,10 +249,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           </div>
 
           <motion.h2
+            ref={focusRef("done")}
+            tabIndex={-1}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.5, ease: EASE }}
-            className="relative mt-5 text-2xl font-bold"
+            className="relative mt-5 text-2xl font-bold outline-none"
           >
             Spell complete
           </motion.h2>
@@ -263,14 +294,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 >
                   <FileIcon className="h-4 w-4 shrink-0 text-primary" />
-                  <span className="min-w-0 flex-1 truncate">{r.filename}</span>
+                  {/* Truncate in the middle: the end ("…-page-12.jpg") tells files apart. */}
+                  <span className="flex min-w-0 flex-1" title={r.filename}>
+                    <span className="truncate">{r.filename.slice(0, -12)}</span>
+                    <span className="shrink-0">{r.filename.slice(-12)}</span>
+                  </span>
                   <span className="text-xs text-muted-foreground">{formatBytes(r.blob.size)}</span>
                   <button
                     onClick={() => downloadBlob(r.blob, r.filename)}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                     aria-label={`Download ${r.filename}`}
                   >
-                    <Download className="h-3.5 w-3.5" />
+                    <Download className="h-4 w-4" />
                   </button>
                 </motion.li>
               ))}
@@ -292,7 +327,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             </Button>
           </motion.div>
 
-          {results.length === 1 && results[0].filename.toLowerCase().endsWith(".pdf") && (
+          {results.length === 1 && nextSteps(slug, results[0].filename).length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -303,7 +338,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 Next
               </p>
               <div className="flex flex-wrap justify-center gap-2">
-                {(NEXT_STEPS[slug] ?? NEXT_STEPS.default).map((next) => {
+                {nextSteps(slug, results[0].filename).map((next) => {
                   const t = getTool(next);
                   if (!t) return null;
                   return (
@@ -312,7 +347,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.97 }}
                       onClick={() => continueWith(next)}
-                      className="flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium transition-colors hover:border-primary/50"
+                      className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-background px-3.5 py-2 text-sm font-medium transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", t.tint)}>
                         <t.icon className="h-3.5 w-3.5" />
@@ -409,33 +444,22 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             >
               <AnimatePresence initial={false}>
                 {entries.map((entry) => (
-                  <Reorder.Item
+                  <FileRow
                     key={entry.id}
-                    value={entry}
-                    dragListener={proc.multiple}
-                    initial={{ opacity: 0, height: 0, y: -6 }}
-                    animate={{ opacity: 1, height: "auto", y: 0 }}
-                    exit={{ opacity: 0, height: 0, x: 30 }}
-                    transition={{ duration: 0.3, ease: EASE }}
-                    whileDrag={{ scale: 1.02, boxShadow: "0 12px 30px -10px rgba(0,0,0,0.25)" }}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-                  >
-                    {proc.multiple && (
-                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
-                    )}
-                    <FileIcon className="h-5 w-5 shrink-0 text-primary" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{entry.file.name}</p>
-                      <p className="text-xs text-muted-foreground">{formatBytes(entry.file.size)}</p>
-                    </div>
-                    <button
-                      onClick={() => setEntries((prev) => prev.filter((e) => e.id !== entry.id))}
-                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      aria-label={`Remove ${entry.file.name}`}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </Reorder.Item>
+                    entry={entry}
+                    movable={proc.multiple}
+                    onMove={(delta) =>
+                      setEntries((prev) => {
+                        const from = prev.findIndex((x) => x.id === entry.id);
+                        const to = from + delta;
+                        if (from < 0 || to < 0 || to >= prev.length) return prev;
+                        const next = [...prev];
+                        [next[from], next[to]] = [next[to], next[from]];
+                        return next;
+                      })
+                    }
+                    onRemove={() => setEntries((prev) => prev.filter((e) => e.id !== entry.id))}
+                  />
                 ))}
               </AnimatePresence>
             </Reorder.Group>
@@ -461,7 +485,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base sm:text-sm"
                       >
                         {field.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -490,7 +514,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         <button
                           type="button"
                           onClick={() => setRevealed((r) => ({ ...r, [field.key]: !r[field.key] }))}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                          className="absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
                           aria-label={revealed[field.key] ? "Hide password" : "Show password"}
                         >
                           {revealed[field.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -516,7 +540,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           step={field.step}
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="flex-1 accent-[hsl(var(--primary))]"
+                          className="h-6 flex-1 accent-[hsl(var(--primary))]"
                         />
                         <span className="w-12 text-right text-sm tabular-nums text-muted-foreground">
                           {Math.round(Number(options[field.key]) * 100)}%
@@ -556,10 +580,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 className="flex flex-col items-center gap-3"
               >
                 {status === "working" ? (
-                  <div className="w-full max-w-md" aria-live="polite">
-                    <div className="relative h-3 overflow-hidden rounded-full bg-secondary">
+                  <div ref={focusRef("progress")} tabIndex={-1} data-progress className="w-full max-w-md outline-none">
+                    <div
+                      className="relative h-3 overflow-hidden rounded-full bg-secondary"
+                      role="progressbar"
+                      aria-label="Progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={progress ? Math.round(progress.fraction * 100) : undefined}
+                    >
                       {progress ? (
                         <motion.div
+                          key="determinate"
                           className="h-full rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400"
                           animate={{ width: `${Math.max(4, progress.fraction * 100)}%` }}
                           transition={{ ease: "easeOut", duration: 0.3 }}
@@ -567,13 +599,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       ) : (
                         // Indeterminate: a comet sweeping across the track.
                         <motion.div
+                          key="indeterminate"
                           className="absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
                           animate={{ x: ["-100%", "300%"] }}
                           transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
                         />
                       )}
                     </div>
-                    <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+                    <p aria-hidden className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       <motion.span
                         animate={{ rotate: 360 }}
                         transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
@@ -586,10 +619,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         <span className="tabular-nums">{Math.round(progress.fraction * 100)}%</span>
                       )}
                     </p>
+                    {/* Announces the stage, not every percent. */}
+                    <p className="sr-only" aria-live="polite">
+                      {progress?.label ?? "Casting…"}
+                    </p>
                   </div>
                 ) : (
-                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={SPRING}>
-                    <Button size="lg" onClick={run} className="min-w-52 shadow-lg shadow-primary/25">
+                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={SPRING} tabIndex={-1} data-cast>
+                    <Button ref={focusRef("run")} size="lg" onClick={run} className="min-w-52 shadow-lg shadow-primary/25">
                       <Sparkles /> Cast spell
                     </Button>
                   </motion.div>
@@ -613,5 +650,68 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       />
     )}
     </>
+  );
+}
+
+/**
+ * One chosen file. Only the grip starts a drag, so a swipe on the row
+ * scrolls the page instead of reordering the list.
+ */
+function FileRow({
+  entry,
+  movable,
+  onMove,
+  onRemove,
+}: {
+  entry: Entry;
+  movable: boolean;
+  onMove: (delta: number) => void;
+  onRemove: () => void;
+}) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      value={entry}
+      dragListener={false}
+      dragControls={controls}
+      initial={{ opacity: 0, height: 0, y: -6 }}
+      animate={{ opacity: 1, height: "auto", y: 0 }}
+      exit={{ opacity: 0, height: 0, x: 30 }}
+      transition={{ duration: 0.3, ease: EASE }}
+      whileDrag={{ scale: 1.02, boxShadow: "0 12px 30px -10px rgba(0,0,0,0.25)" }}
+      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
+    >
+      {movable && (
+        // Drag handle that also reorders from the keyboard (↑/↓).
+        <button
+          type="button"
+          aria-label={`Move ${entry.file.name} (up/down arrows)`}
+          onPointerDown={(e) => controls.start(e)}
+          onKeyDown={(e) => {
+            const delta = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+            if (!delta) return;
+            e.preventDefault();
+            const btn = e.currentTarget;
+            onMove(delta);
+            requestAnimationFrame(() => btn.focus());
+          }}
+          className="-my-1.5 -ml-3 flex h-11 w-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      )}
+      <FileIcon className="h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{entry.file.name}</p>
+        <p className="text-xs text-muted-foreground">{formatBytes(entry.file.size)}</p>
+      </div>
+      <button
+        onClick={onRemove}
+        className="-my-1.5 -mr-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label={`Remove ${entry.file.name}`}
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </Reorder.Item>
   );
 }

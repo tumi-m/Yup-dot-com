@@ -266,22 +266,30 @@ function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine
 interface Cell {
   text: string;
   x: number;
+  right: number;
 }
+
+/**
+ * A gap wider than this (in ems) separates cells. Word spaces are ~0.25em;
+ * tightly padded tables (HTML/Word exports) leave well under 1em between
+ * columns, so a larger threshold fuses neighbouring cells.
+ */
+const CELL_GAP_EM = 0.6;
 
 /** Split a line into cells wherever an unusually wide horizontal gap appears. */
 function splitCells(line: ParsedLine): Cell[] {
   const cells: Cell[] = [];
   let buffer = "";
   let startX = line.spans[0]?.x ?? line.x;
+  let right = startX;
 
   for (let i = 0; i < line.spans.length; i++) {
     const span = line.spans[i];
     if (i > 0) {
       const prev = line.spans[i - 1];
       const gap = span.x - (prev.x + prev.width);
-      // A gap wider than ~1.5em reads as a column separator, not a word space.
-      if (gap > prev.fontSize * 1.5) {
-        cells.push({ text: buffer.trim(), x: startX });
+      if (gap > prev.fontSize * CELL_GAP_EM) {
+        cells.push({ text: buffer.trim(), x: startX, right });
         buffer = "";
         startX = span.x;
       } else if (gap > prev.fontSize * 0.18 && !/\s$/.test(buffer)) {
@@ -289,19 +297,24 @@ function splitCells(line: ParsedLine): Cell[] {
       }
     }
     buffer += span.text;
+    right = span.x + span.width;
   }
-  if (buffer.trim()) cells.push({ text: buffer.trim(), x: startX });
+  if (buffer.trim()) cells.push({ text: buffer.trim(), x: startX, right });
   return cells;
 }
 
 /**
- * Groups consecutive lines whose cell x-positions align into a table.
- * Returns index ranges that should be treated as tables.
+ * Groups consecutive lines whose cells line up into a table. Cells align when
+ * their horizontal extents overlap, which also matches centred headers over
+ * left- or right-aligned values. Returns index ranges to treat as tables.
  */
 function findTables(lines: ParsedLine[]): { start: number; end: number; rows: string[][] }[] {
   const cellRows = lines.map(splitCells);
   const tables: { start: number; end: number; rows: string[][] }[] = [];
   let i = 0;
+
+  const overlaps = (c: Cell, anchor: Cell[], slack: number) =>
+    anchor.some((a) => c.x <= a.right + slack && c.right >= a.x - slack);
 
   while (i < lines.length) {
     if (cellRows[i].length < 2) {
@@ -310,13 +323,14 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
     }
     // Extend while subsequent rows have a comparable number of aligned columns.
     let j = i + 1;
-    const anchor = cellRows[i].map((c) => c.x);
+    const anchor = cellRows[i];
     while (j < lines.length && cellRows[j].length >= 2) {
-      const xs = cellRows[j].map((c) => c.x);
-      const aligned = xs.filter((x) =>
-        anchor.some((ax) => Math.abs(ax - x) <= Math.max(6, lines[j].fontSize))
-      ).length;
-      if (aligned < Math.min(2, xs.length)) break;
+      const slack = Math.max(2, lines[j].fontSize * 0.25);
+      const aligned = cellRows[j].filter((c) => overlaps(c, anchor, slack)).length;
+      // Each anchor column may only be claimed once, or one wide cell could
+      // "align" with everything.
+      const claimed = anchor.filter((a) => cellRows[j].some((c) => overlaps(c, [a], slack))).length;
+      if (Math.min(aligned, claimed) < Math.min(2, cellRows[j].length)) break;
       j++;
     }
     // Require at least two rows to call it a table.

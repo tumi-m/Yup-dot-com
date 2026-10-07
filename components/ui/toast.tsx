@@ -46,7 +46,7 @@ export function ToastStack({
   onDismiss: (id: number) => void;
 }) {
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-[60] flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 sm:bottom-6 sm:right-6">
       {toasts.map((t) => {
         const Icon = ICONS[t.tone];
         return (
@@ -70,8 +70,9 @@ export function ToastStack({
             />
             <p className="flex-1 text-sm">{t.message}</p>
             <button
+              type="button"
               onClick={() => onDismiss(t.id)}
-              className="text-muted-foreground hover:text-foreground"
+              className="-my-3 -mr-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="Dismiss"
             >
               <X className="h-3.5 w-3.5" />

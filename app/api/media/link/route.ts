@@ -3,7 +3,8 @@ import { maxHeightFor, parseMediaUrl, QUALITIES } from "@/lib/media";
 import { signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
-import { clientIp, consumeDaily } from "@/lib/quota";
+import { MEDIA_BUCKET, newGrantRef } from "@/lib/media-refund";
+import { consumeDaily, usageSubject } from "@/lib/usage";
 import {
   audioSourceVariant,
   pickXVariant,
@@ -30,6 +31,9 @@ const bodySchema = z.object({
  *
  * X: the token names one video.twimg.com file, streamed by /api/media/file.
  * YouTube: the token goes to the media worker, which verifies it itself.
+ *
+ * Each grant records who it was counted against and a random reference, so
+ * a download that fails is given back (lib/media-refund.ts).
  */
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -37,10 +41,8 @@ export async function POST(request: Request) {
   const media = parseMediaUrl(parsed.data.url);
   if (!media) return Response.json({ error: "Paste a YouTube or X (Twitter) video link." }, { status: 400 });
 
+  // YouTube MP3s are extracted by the worker (ffmpeg); X MP3s in the browser.
   const { kind } = parsed.data;
-  if (media.platform === "youtube" && kind === "mp3") {
-    return Response.json({ error: "Audio-only downloads are available for X posts." }, { status: 400 });
-  }
 
   const { user, tier } = await resolveTier();
   const height = kind === "mp3" ? 0 : (parsed.data.height ?? 720);
@@ -55,11 +57,11 @@ export async function POST(request: Request) {
   }
 
   // Resolve (X) or check configuration (YouTube) before spending the quota.
-  let grant: Record<string, unknown>;
+  let grant: (ref: { s: string; c: string }) => Record<string, unknown>;
   if (media.platform === "x") {
     let video;
     try {
-      video = await resolveXVideo(media.id);
+      video = await resolveXVideo(media.id, undefined, media.index);
     } catch (err) {
       const k = err instanceof XResolveError ? err.kind : "unreachable";
       return Response.json({ error: X_FAILURE_MESSAGE[k] }, { status: k === "unreachable" ? 502 : 422 });
@@ -71,37 +73,35 @@ export async function POST(request: Request) {
     const quality = variantQuality(variant);
     // Never hand a free user a file above their plan, whatever was asked for.
     if (kind === "mp4" && quality > maxHeightFor(tier) * 1.15) {
-      return Response.json({ error: `${height}p downloads are part of Pro.`, upgrade: true, reason: "quality" }, { status: 403 });
+      return Response.json({ error: `${quality}p downloads are part of Pro.`, upgrade: true, reason: "quality" }, { status: 403 });
     }
     const mp4Name = xFilename(video, "mp4", kind === "mp4" ? quality : null);
-    const token = signToken({ u: variant.url, n: mp4Name }, signingSecret(), 30 * 60);
-    grant = {
+    grant = (ref) => ({
       mode: kind === "mp3" ? "convert" : "direct",
-      href: `/api/media/file?t=${encodeURIComponent(token)}`,
+      href: `/api/media/file?t=${encodeURIComponent(signToken({ u: variant.url, n: mp4Name, ...ref }, signingSecret(), 30 * 60))}`,
       filename: kind === "mp3" ? xFilename(video, "mp3") : mp4Name,
-    };
+    });
   } else {
     const config = workerConfig();
     if (!config.ok) {
       console.error(`YouTube downloads disabled: ${WORKER_CONFIG_HELP[config.reason]}`);
       return Response.json({ error: "YouTube downloads aren't switched on for this site yet." }, { status: 503 });
     }
-    grant = {
+    grant = (ref) => ({
       mode: "worker",
       workerUrl: config.url,
-      token: signToken({ u: media.canonical, k: kind, h: height }, config.secret),
-    };
+      token: signToken({ u: media.canonical, k: kind, h: height, ...ref }, config.secret),
+    });
   }
 
-  const remaining = consumeDaily(
-    `media:${user ? `u:${user.id}` : `ip:${clientIp(request)}`}`,
-    limitsFor(tier).mediaDownloadsPerDay
-  );
+  const subject = usageSubject(request, user);
+  const remaining = await consumeDaily(subject, MEDIA_BUCKET, limitsFor(tier).mediaDownloadsPerDay);
   if (remaining < 0) {
+    const paid = tier === "pro" || tier === "team";
     return Response.json(
-      { error: "You've used today's free downloads.", upgrade: tier !== "pro" && tier !== "team", reason: "quota" },
+      { error: paid ? "You've used today's downloads." : "You've used today's free downloads.", upgrade: !paid, reason: "quota" },
       { status: 429 }
     );
   }
-  return Response.json({ ...grant, remaining });
+  return Response.json({ ...grant({ s: subject, c: newGrantRef() }), remaining });
 }

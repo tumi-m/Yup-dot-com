@@ -4,7 +4,7 @@
 > documents right in your browser — free, fast, and private.
 
 **PDF Wizard** is a full-stack PDF toolkit + editor SaaS built with Next.js 16,
-Supabase, Stripe, and a fully client-side PDF engine (`pdf-lib` + `pdf.js`). It
+Supabase, Paystack, and a fully client-side PDF engine (`pdf-lib` + `pdf.js`). It
 combines a grid of focused, instant tools (the model that drives the traffic of
 sites like iLovePDF and Smallpdf) with a full editor and a freemium SaaS layer.
 
@@ -38,6 +38,8 @@ work with or without an account.
 | **Edit PPTX** | Edit slide text, reorder, duplicate or delete slides, then save as PPTX or PDF. In the browser. |
 | **Google Slides → PDF / PPTX** | Download a deck from its link. The deck must be shared as "Anyone with the link"; private decks get a message saying so. PPTX can go straight into Edit PPTX. |
 | **YouTube to MP4** | 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
+| **YouTube to MP3** | Audio only, extracted by the worker's ffmpeg. *Needs the media worker.* |
+| **YouTube Playlist** | Lists a playlist (up to 200), downloads the picked videos as MP4 or MP3 two at a time (each counts toward the daily quota), and exports the list as CSV or TXT. *Needs the media worker.* |
 | **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
@@ -63,26 +65,36 @@ batch caps), and Smallpdf (task-based prompts):
    link and pick PDF, PPTX, Edit, MP4 or MP3.
 2. **The full editor works as a guest.** Edit PDF and Fill & Sign open
    instantly in an on-device editor (`/edit/[id]`, IndexedDB) that survives a
-   reload and exports with **no watermark**.
+   reload. Opening, editing and previewing are unlimited; saving or
+   downloading the result is one edit (guests and Free: 1 a day, with a small
+   "Made with PDF Wizard" mark; Pro and Team: unlimited, no mark). The same
+   for Edit PPTX.
 3. **Keep going.** Every success screen offers the next step for the same file
    (compress → protect, OCR → Word…) — no download/re-upload round trip.
 4. **Upsell only after value**, always dismissible, never blocking:
    a quiet card on success screens; one friendly nudge after a guest's third
    task of the day (at most once a day); an upgrade prompt when a real limit is
-   reached (file size, batch size, AI answers); and a cloud-save offer after a
+   reached (file size, batch size, AI answers, edits); and a cloud-save offer after a
    guest saves their first edit.
 
-| Tier | Files | Batch | AI answers/day | Cloud library |
-| ---- | ----- | ----- | -------------- | ------------- |
-| Guest (no account) | 50 MB | 10 | 3 | — (saved on device) |
-| Free account | 50 MB | 10 | 15 | 5 documents |
-| Pro / Team | 500 MB | 200 | 300 | Unlimited |
+| Tier | Files | Batch | Edits/day | AI answers | Cloud library |
+| ---- | ----- | ----- | --------- | ---------- | ------------- |
+| Guest (no account) | 50 MB | 10 | 1, marked | 3 a day | — (saved on device) |
+| Free account | 50 MB | 10 | 1, marked | 10 a day | 5 documents |
+| Pro | 500 MB | 200 | Unlimited | 40 a day, 600 a month | Unlimited |
+| Team | 500 MB | 200 | Unlimited | 40 a day per member | Unlimited |
 
-Limits live in `lib/limits.ts`; the upsell UI in `components/upsell/`. Tool
-limits are enforced in the browser (tools run there); the AI allowance is
-enforced on the server, keyed by user id or, for guests, by IP. A failed AI
-request refunds its slot. Set `AI_GUEST_DAILY_LIMIT=0` to require an account
-for AI.
+Limits live in `lib/limits.ts` and `lib/usage.ts`; the upsell UI in
+`components/upsell/`. File and batch limits are enforced in the browser (tools
+run there). Daily allowances (AI answers, edits, video downloads, Slides
+imports) are counted on the server in Supabase (`usage_counters`, through
+functions only the service role can call), keyed by user id or, for guests,
+by a salted SHA-256 of their IP (raw IPs are never stored). Without
+`SUPABASE_SERVICE_ROLE_KEY` they are counted in server memory instead (fine for
+local dev, not for Vercel). AI also has a burst limit (6 a minute) and a
+site-wide daily cap; an answer that never arrives is given back. An edit is
+one distinct document saved or downloaded per UTC day; the same unchanged
+document again is free.
 
 ## Video & Audio downloads
 
@@ -209,12 +221,14 @@ then transform the bytes and re-render.
 npm test
 ```
 
-Eight end-to-end suites run the real pipeline against generated PDFs:
+The suites in `tests/` run the real pipeline against generated files. For PDFs:
 structure extraction, multi-column reading order, table-vs-gutter
 disambiguation, baking every annotation type, the form detect/fill/flatten
 round-trip, protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, and Word/Excel output (verified with python-docx and
-openpyxl). Every tool has also been driven through the real UI in Chromium,
+openpyxl). Others cover PPTX parsing, editing and rendering, Google Slides
+and video links, usage limits, the watermark, billing and the AI client.
+Every tool has also been driven through the real UI in Chromium,
 with outputs checked by independent readers.
 
 Bugs these caught before shipping include: column detection defeated by
@@ -226,18 +240,27 @@ unreachable (which led to self-hosting).
 
 - **Auth** — Supabase email/password with session middleware + route guards.
 - **Dashboard** — upload / list / delete documents, with per-plan limits.
-- **Billing** — Stripe subscriptions (Free / Pro / Team): checkout, customer
-  portal, and a webhook that syncs plan changes.
+- **Billing** — Paystack, in rand (Free / Pro / Team). Monthly card
+  subscriptions, or pay once for a month or a year (card, Apple Pay, Instant
+  EFT, Capitec Pay, Scan to Pay). Team owners add up to 4 members by email.
+  Plans are resolved from paid-until dates on every request, so expiry needs no
+  scheduled job. Only the server (service role) can write plan or billing data.
 - **Storage** — a private Supabase Storage bucket locked down with row-level
   security per user.
 
 | Plan | Price | Cloud documents | Limits |
 | ---- | ----- | --------------- | ------ |
-| Free | $0    | 5 (with an account) | 50 MB files, batches of 10, 3–15 AI answers/day |
-| Pro  | $12   | Unlimited | 500 MB files, batches of 200, 300 AI answers/day |
-| Team | $39   | Unlimited | As Pro; team features are *coming soon* |
+| Free | R0    | 5 (with an account) | 50 MB files, batches of 10, 1 edit a day (marked), AI answers: 3 a day as a guest, 10 with an account |
+| Pro  | R49/mo  | Unlimited | 500 MB files, batches of 200, unlimited edits, 40 AI answers a day (600 a month) |
+| Team | R199/mo | Unlimited | As Pro, for 5 people (owner + 4 seats) |
 
-No plan adds a watermark.
+Paying for a year up front costs 10 months.
+
+Prices are charged in rand. Visitors elsewhere see an estimate in their own
+currency (from Vercel's `x-vercel-ip-country` header and daily exchange rates
+from open.er-api.com, with a built-in fallback table) plus the rand amount
+billed. Add `?currency=EUR` (any supported code) to a page to preview another
+currency.
 
 ---
 
@@ -252,8 +275,8 @@ pdf-wizard/
 │   ├── login, signup, auth/     ← Auth screens + callbacks
 │   ├── dashboard/               ← Document library (auth-gated)
 │   ├── editor/[id]/             ← The PDF editor
-│   ├── settings/billing/        ← Plan management + Stripe portal
-│   ├── api/stripe/              ← checkout · portal · webhook
+│   ├── settings/billing/        ← Plan, renewal, team seats
+│   ├── api/billing/             ← checkout · verify · webhook · manage · team
 │   ├── sitemap.ts, robots.ts    ← SEO
 │   └── icon.svg, error, loading ← Polish
 ├── components/
@@ -281,9 +304,11 @@ pdf-wizard/
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
 │   ├── supabase/                 ← browser · server · middleware clients
-│   ├── stripe.ts, plans.ts, types.ts
+│   ├── billing.ts                ← Plan resolution + Paystack event handling
+│   ├── paystack.ts, plans.ts, types.ts
 ├── tests/                        ← End-to-end pipeline tests (npm test)
 └── supabase/schema.sql           ← Tables, RLS, storage bucket + policies
+    supabase/migrations/          ← Upgrades for existing projects
 ```
 
 ---
@@ -295,13 +320,12 @@ npm install
 ```
 
 1. **Supabase** — create a project, run [`supabase/schema.sql`](supabase/schema.sql)
-   in the SQL editor (creates tables, RLS, and the private `documents` bucket),
-   and enable Email auth.
-2. **Stripe** — create recurring Pro and Team prices, and a webhook pointing at
-   `/api/stripe/webhook` subscribed to `customer.subscription.*` events. Locally:
-   ```bash
-   stripe listen --forward-to localhost:3000/api/stripe/webhook
-   ```
+   in the SQL editor (creates tables, RLS, the private `documents` bucket and
+   the usage counters), and enable Email auth. Under Authentication → URL
+   Configuration set the Site URL to your domain and add
+   `https://<your-domain>/**` to the Redirect URLs (sign-up emails link to
+   `/auth/callback`).
+2. **Paystack** — see [Billing setup](#billing-setup-paystack).
 3. **Env** — copy `.env.example` to `.env.local` and fill in the values.
 4. **Run** — `npm run dev`, then open <http://localhost:3000>.
 
@@ -310,8 +334,8 @@ npm install
 ## Tech stack
 
 Next.js 16 (App Router) · React 19.3 · TypeScript · Tailwind CSS · Supabase
-(Auth + Postgres + Storage) · Stripe · pdf-lib · pdf.js · JSZip · Radix UI ·
-lucide-react
+(Auth + Postgres + Storage) · Paystack · Ollama · pdf-lib · pdf.js · Tesseract.js ·
+ffmpeg.wasm · JSZip · Radix UI · lucide-react · yt-dlp (media worker)
 
 ## Production notes
 
@@ -319,9 +343,8 @@ lucide-react
   `next.config.ts`.
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
-- **Roadmap:** saved signatures, version history, and team workspaces
-  (listed as *coming soon* on the pricing page); Office → PDF conversion,
-  which needs a server-side renderer such as LibreOffice.
+- **Roadmap:** saved signatures, version history, shared team workspaces;
+  Word → PDF, which needs a server-side renderer such as LibreOffice.
 
 ## Deploy to Vercel
 
@@ -341,26 +364,51 @@ Variables** and redeploy:
 | -------- | ---------- |
 | `NEXT_PUBLIC_SUPABASE_URL` | accounts, dashboard, editor |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor |
-| `SUPABASE_SERVICE_ROLE_KEY` | Stripe webhook (plan sync) |
-| `STRIPE_SECRET_KEY` | checkout & billing portal |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook |
-| `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM` | paid plans |
+| `SUPABASE_SERVICE_ROLE_KEY` | billing (records payments, plans, team seats) and usage counters shared by every server instance |
+| `PAYSTACK_SECRET_KEY` | checkout, subscription management, webhook signatures |
+| `PAYSTACK_PLAN_PRO`, `PAYSTACK_PLAN_TEAM` | monthly subscriptions (`PLN_…` codes) |
 | `OLLAMA_API_KEY` | AI Assistant (Chat with PDF) on Ollama Cloud. Create one at ollama.com/settings/keys |
 | `OLLAMA_HOST` | Optional. Your own Ollama server (HTTPS, behind a proxy that checks the key). Default `https://ollama.com` |
-| `OLLAMA_MODEL` | Optional. Default `deepseek-v4.1-flash` |
+| `OLLAMA_MODEL` | Optional. Default `deepseek-v4.1-flash` on Ollama Cloud, `deepseek-v4.1-flash:cloud` on your own server |
 | `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
+| `OLLAMA_CONTEXT_TOKENS` | Optional. Context window to ask the model for (`num_ctx`, at least 8192). Unset: the model's default |
 | `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
 | `MEDIA_SIGNING_SECRET` | Signs X download links. Falls back to `MEDIA_WORKER_SECRET`; set one of them in production |
+| `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
+| `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |
+| `AI_BURST_PER_MINUTE` | Optional. AI requests per minute per user or guest (default 6) |
+| `AI_GLOBAL_DAILY_LIMIT` | Optional. AI answers per day across the whole site (default 3000) |
 
 Optional:
 
 - `NEXT_PUBLIC_SITE_URL` — canonical URL for metadata, `sitemap.xml`, and
-  Stripe redirects. Falls back to Vercel's deployment URL automatically, so it
+  the Paystack return URL. Falls back to Vercel's deployment URL automatically, so it
   is only needed for a custom domain.
 - `NEXT_PUBLIC_PDFJS_WORKER_SRC` — self-hosted pdf.js worker path for
   CSP-restricted deployments.
 
 Then run [`supabase/schema.sql`](supabase/schema.sql) in your Supabase project
-and point a Stripe webhook at `https://<your-domain>/api/stripe/webhook`
-subscribed to `customer.subscription.*`.
+(on an existing project, run the files in [`supabase/migrations/`](supabase/migrations))
+and set up Paystack as below.
+
+## Billing setup (Paystack)
+
+Paystack accounts in South Africa charge in ZAR only.
+
+1. **Plans** — Paystack → Products → Plans → Create plan:
+   *Pro*, R49, interval Monthly; *Team*, R199, interval Monthly. Copy each
+   plan code (`PLN_…`) into `PAYSTACK_PLAN_PRO` and `PAYSTACK_PLAN_TEAM`.
+2. **Keys** — Settings → API Keys & Webhooks: copy the secret key into
+   `PAYSTACK_SECRET_KEY` (test key `sk_test_…` first, live key when you go
+   live). No public key is needed: checkout runs on Paystack's hosted page.
+3. **Webhook** — on the same page set the Webhook URL to
+   `https://<your-domain>/api/billing/webhook` (test and live each have one).
+   Requests are verified with the secret key; there is no separate webhook secret.
+4. **Channels** — Settings → Preferences → Payment channels: enable Card, plus
+   any of Apple Pay, EFT, Capitec Pay and Scan to Pay (QR) for once-off
+   payments. Subscriptions are card-only.
+
+The webhook handles `charge.success`, `subscription.create`,
+`subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
+`invoice.update`. Each delivery is applied once (`billing_events` records them).

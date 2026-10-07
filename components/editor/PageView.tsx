@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
@@ -55,6 +56,8 @@ export function PageView({
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [draft, setDraft] = useState<Annotation | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
+  /** A tap waiting to place a box when the finger lifts. */
+  const tap = useRef<{ x: number; y: number; pointerId: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,13 +93,16 @@ export function PageView({
 
     // Click-to-place tools.
     if (!DRAG_TOOLS.includes(tool)) {
-      const dataUrl = placementImage ?? undefined;
-      if ((tool === "image" || tool === "signature") && !dataUrl) return;
-      const ann = createAnnotation(tool, settings, x, y, { dataUrl });
-      if (ann) {
-        onCreate({ ...ann, page: pageIndex });
-        if (tool === "image" || tool === "signature") onPlacementUsed();
+      if (e.pointerType !== "mouse") {
+        // Touch: place on lift, inside the gesture, so the keyboard can open.
+        // No emulated mousedown afterwards to pull focus off the new box.
+        e.preventDefault();
+        tap.current = { x, y, pointerId: e.pointerId };
+        return;
       }
+      // Keep the mousedown that follows from taking focus off the new box.
+      e.preventDefault();
+      place(x, y);
       return;
     }
 
@@ -107,6 +113,20 @@ export function PageView({
     if (ann) setDraft({ ...ann, page: pageIndex });
   }
 
+  function place(x: number, y: number) {
+    const dataUrl = placementImage ?? undefined;
+    if ((tool === "image" || tool === "signature") && !dataUrl) return;
+    const ann = createAnnotation(tool, settings, x, y, { dataUrl });
+    if (!ann) return;
+    flushSync(() => onCreate({ ...ann, page: pageIndex }));
+    if (tool === "image" || tool === "signature") onPlacementUsed();
+    const box = layerRef.current?.querySelector<HTMLTextAreaElement>(`[data-ann-id="${CSS.escape(ann.id)}"] textarea`);
+    if (box && document.activeElement !== box) {
+      box.focus({ preventScroll: true });
+      box.select();
+    }
+  }
+
   function handlePointerMove(e: React.PointerEvent) {
     if (!draft || !origin.current) return;
     const { x, y } = toPoints(e);
@@ -114,6 +134,12 @@ export function PageView({
   }
 
   function handlePointerUp(e: React.PointerEvent) {
+    const pending = tap.current;
+    if (pending && pending.pointerId === e.pointerId) {
+      tap.current = null;
+      if (e.type === "pointerup") place(pending.x, pending.y);
+      return;
+    }
     try {
       layerRef.current?.releasePointerCapture(e.pointerId);
     } catch {
@@ -222,6 +248,9 @@ function FormFieldOverlay({
       <div style={style} onPointerDown={(e) => e.stopPropagation()}>
         <button
           type="button"
+          role="checkbox"
+          aria-checked={value === "true"}
+          aria-label={field.name}
           onClick={() => onChange(value === "true" ? "" : "true")}
           className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
         >
@@ -237,6 +266,9 @@ function FormFieldOverlay({
       <div style={style} onPointerDown={(e) => e.stopPropagation()}>
         <button
           type="button"
+          role="radio"
+          aria-checked={!!on}
+          aria-label={`${field.name}: ${field.exportValue ?? ""}`}
           onClick={() => onChange(field.exportValue ?? "")}
           className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
         >
@@ -250,9 +282,11 @@ function FormFieldOverlay({
     return (
       <div style={style} onPointerDown={(e) => e.stopPropagation()}>
         <select
+          aria-label={field.name}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
+          data-fit-text
           style={{ fontSize: Math.max(8, field.height * scale * 0.6) }}
         >
           <option value="">—</option>
@@ -269,9 +303,11 @@ function FormFieldOverlay({
   return (
     <div style={style} onPointerDown={(e) => e.stopPropagation()}>
       <input
+        aria-label={field.name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={`h-full w-full rounded-sm px-1 ${shared}`}
+        data-fit-text
         style={{ fontSize: Math.max(8, field.height * scale * 0.55) }}
       />
     </div>

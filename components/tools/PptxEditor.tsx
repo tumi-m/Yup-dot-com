@@ -27,6 +27,7 @@ import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
+import { documentFingerprint, EditCheckError, requestEdit, WATERMARK_TEXT } from "@/lib/edit-usage";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
@@ -153,6 +154,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const limits = limitsFor(tier);
   const wide = useWide();
   const inputRef = useRef<HTMLInputElement>(null);
+  /** Resolved module cache for synchronous use after the first load. */
+  const resolved = useRef<Libs | null>(null);
   const libs = useRef<Promise<Libs> | null>(null);
   const pkg = useRef<PkgDeck | null>(null);
   const history = useRef<History<Snap> | null>(null);
@@ -185,7 +188,11 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const [stageRef, stageWidth, stageNode] = useWidth<HTMLDivElement>();
   const barRef = useRef<HTMLDivElement>(null);
 
-  const getLibs = () => (libs.current ??= loadLibs());
+  const getLibs = () =>
+    (libs.current ??= loadLibs().then((l) => {
+      resolved.current = l;
+      return l;
+    }));
   const dirty = !!snap && snap.bytes !== savedBytes.current;
   const index = snap?.index ?? 0;
   const slide = snap?.slides[index];
@@ -200,8 +207,25 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       e.preventDefault();
       e.returnValue = "";
     };
+    // In-app links navigate without unloading the page, so ask here too.
+    const onLink = (e: MouseEvent) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+      const to = new URL(a.href, window.location.href);
+      if (to.origin !== window.location.origin) return; // a full navigation: beforeunload asks
+      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
+      if (!window.confirm("Discard changes and leave?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    window.addEventListener("click", onLink, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      window.removeEventListener("click", onLink, true);
+    };
   }, [dirty]);
 
   useEffect(() => {
@@ -215,7 +239,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     if (!picked) return;
     setError(null);
     if (!sniffed && !isPptxName(picked.name) && picked.type !== PPTX_MIME) {
-      setError(/\.ppt$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
+      setError(/\.(ppt|pps|pot|odp|key)$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
       return;
     }
     if (picked.size > limits.maxFileBytes) {
@@ -356,9 +380,26 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     }
   }, [snap]);
 
+  // Focus follows a slide by its key once the strip has re-rendered: by
+  // index, a frame could land before the render and focus the neighbour (a
+  // following Delete would then remove the wrong slide).
+  const pendingFocus = useRef<string | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   function focusThumb(k: number) {
-    requestAnimationFrame(() => stripRef.current?.querySelector<HTMLElement>(`[data-slide-index="${k}"]`)?.focus());
+    const key = history.current?.current.keys[k];
+    if (!key) return;
+    pendingFocus.current = key;
+    setFocusTick((t) => t + 1);
   }
+  useEffect(() => {
+    const key = pendingFocus.current;
+    if (!key) return;
+    // A new slide's thumbnail appears once `order` catches up with the snapshot.
+    const el = stripRef.current?.querySelector<HTMLElement>(`[data-slide-key="${key}"]`);
+    if (!el) return;
+    pendingFocus.current = null;
+    el.focus();
+  }, [snap, order, focusTick]);
 
   async function duplicate(i: number) {
     const ok = await commit(
@@ -499,15 +540,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     });
   }
 
-  // Resolved module cache for synchronous use after the first load.
-  const resolved = useRef<Libs | null>(null);
   function getLibsSync() {
     return resolved.current;
   }
-  useEffect(() => {
-    getLibs().then((l) => (resolved.current = l));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function closeEditor(refocus: boolean) {
     const id = edit?.elementId;
@@ -541,39 +576,100 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       true
     );
     if (ok) {
+      const id = edit.elementId;
       closeEditor(true);
+      // A short glow on the shape that changed (a fade, so no motion).
+      requestAnimationFrame(() => {
+        const node = stageNode?.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(id)}"]`);
+        const s = stageScale || 1;
+        node?.animate(
+          [{ boxShadow: `0 0 0 ${6 / s}px hsl(262 83% 58% / 0.45)` }, { boxShadow: `0 0 0 ${6 / s}px hsl(262 83% 58% / 0)` }],
+          { duration: 900, easing: "ease-out" }
+        );
+      });
     }
   }
 
   /* ------------------------------------------------------------ output */
 
+  /**
+   * One edit a day on Free: asked right before a file is built. The same
+   * unchanged deck again today (PPTX or PDF) is free; the answer says
+   * whether the file gets the "Made with PDF Wizard" mark.
+   */
+  async function authorizeEdit(bytes: Uint8Array) {
+    try {
+      const grant = await requestEdit(await documentFingerprint(bytes));
+      if (!grant.allowed) {
+        setUpsell("edits");
+        return null;
+      }
+      return grant;
+    } catch (err) {
+      setError(err instanceof EditCheckError ? err.message : "Couldn't save right now. Try again.");
+      return null;
+    }
+  }
+
   async function downloadPptx() {
-    const deck = pkg.current;
-    if (!deck || !file || !snap || busyRef.current) return;
-    const blob = new Blob([snap.bytes.slice().buffer as ArrayBuffer], { type: PPTX_MIME });
-    downloadBlob(blob, `${baseName(file.name)}.pptx`);
-    savedBytes.current = snap.bytes;
-    setTick((t) => t + 1);
-    if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
+    const current = snap;
+    if (!pkg.current || !file || !current || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const grant = await authorizeEdit(current.bytes);
+      if (!grant) return;
+      let out = current.bytes;
+      if (grant.watermark) {
+        // On a copy: the deck being edited stays unmarked.
+        const { pkg: P } = await getLibs();
+        const copy = await P.openDeck(current.bytes.slice());
+        P.addWatermark(copy, WATERMARK_TEXT);
+        out = await P.saveDeck(copy);
+      }
+      downloadBlob(new Blob([out.slice().buffer as ArrayBuffer], { type: PPTX_MIME }), `${baseName(file.name)}.pptx`);
+      savedBytes.current = current.bytes;
+      setTick((t) => t + 1);
+      if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
+    } catch {
+      setError("Couldn't save this deck.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
 
   async function exportPdf() {
     if (!snap || !meta || busyRef.current) return;
+    const current = snap;
     setEdit(null);
     setError(null);
+    busyRef.current = true;
+    setBusy(true);
+    const grant = await authorizeEdit(current.bytes).finally(() => {
+      busyRef.current = false;
+      setBusy(false);
+    });
+    if (!grant) return;
     setStatus("exporting");
-    const visible = snap.slides.filter((s) => !s.hidden).length;
-    setProgress({ done: 0, total: visible || snap.slides.length });
+    const visible = current.slides.filter((s) => !s.hidden).length;
+    setProgress({ done: 0, total: visible || current.slides.length });
     const controller = new AbortController();
     abort.current = controller;
     try {
       const { deckToPdf } = await import("@/lib/pptx/to-pdf");
-      const deck: RenderDeck = { ...meta, slides: snap.slides };
-      const bytes = await deckToPdf(deck, {
+      const deck: RenderDeck = { ...meta, slides: current.slides };
+      let bytes = await deckToPdf(deck, {
         signal: controller.signal,
         onProgress: (done, total) => setProgress({ done, total }),
       });
       if (controller.signal.aborted) return;
+      if (grant.watermark) {
+        const { watermarkPdf } = await import("@/lib/pdf/watermark");
+        bytes = await watermarkPdf(bytes);
+        if (controller.signal.aborted) return;
+      }
       setPdf(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       setStatus("done");
       setShowCard(!upsellCardDismissed());
@@ -785,6 +881,10 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                   setDropping(false);
                   open(e.dataTransfer.files?.[0] ?? null);
                 }}
+                // The parser loads once a file is on its way, not with the page.
+                onPointerEnter={() => void getLibs()}
+                onFocusCapture={() => void getLibs()}
+                onDragEnter={() => void getLibs()}
                 animate={{ scale: dropping ? 1.02 : 1 }}
                 transition={SPRING}
                 data-testid="dropzone"
@@ -970,6 +1070,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                         <button
                           type="button"
                           data-slide-index={k}
+                          data-slide-key={key}
                           data-testid="slide-thumb"
                           onClick={() => !dragging.current && select(k)}
                           onKeyDown={(e) => onThumbKey(e, k)}
@@ -1146,6 +1247,13 @@ function newKey() {
 
 /* ------------------------------------------------------------------ text editor */
 
+/** Grows a table cell's textarea to its wrapped text (capped by max-height). */
+function fitHeight(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
 function TextEditor({
   edit,
   floating,
@@ -1186,7 +1294,7 @@ function TextEditor({
   };
 
   const table = edit.kind === "table";
-  const cols = table ? Math.max(...edit.targets.map((t) => (t.col ?? 0) + 1)) : 1;
+  const cols = table ? Math.max(...edit.targets.map((t) => (t.col ?? 0) + (t.colSpan ?? 1))) : 1;
   const width = floating ? Math.min(stageWidth, Math.max(edit.rect.width, table ? Math.min(cols * 150, 640) : 300)) : undefined;
   const left = floating ? Math.max(0, Math.min(edit.rect.left, stageWidth - (width ?? 0))) : undefined;
 
@@ -1213,12 +1321,19 @@ function TextEditor({
             {edit.targets.map((t, k) => (
               <textarea
                 key={t.id}
+                ref={fitHeight}
                 value={edit.values[k]}
-                onChange={(e) => onChange(k, e.target.value)}
+                onChange={(e) => {
+                  fitHeight(e.target);
+                  onChange(k, e.target.value);
+                }}
                 aria-label={`Row ${(t.row ?? 0) + 1}, column ${(t.col ?? 0) + 1}`}
-                rows={Math.max(1, edit.values[k].split("\n").length)}
-                style={{ gridColumn: (t.col ?? 0) + 1, gridRow: (t.row ?? 0) + 1 }}
-                className="w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                rows={1}
+                style={{
+                  gridColumn: `${(t.col ?? 0) + 1} / span ${t.colSpan ?? 1}`,
+                  gridRow: `${(t.row ?? 0) + 1} / span ${t.rowSpan ?? 1}`,
+                }}
+                className="max-h-40 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             ))}
           </div>

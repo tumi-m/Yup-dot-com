@@ -59,7 +59,27 @@ check("slides invalid → none", slidesActions("hello").length === 0);
 
 // Media links
 const yt = mediaActions("https://youtu.be/dQw4w9WgXcQ");
-check("youtube → mp4 only", yt.length === 1 && yt[0].href.startsWith("/tools/youtube-to-mp4?url=https%3A%2F%2Fyoutu.be"), yt);
+check(
+  "youtube → mp4 + mp3",
+  yt.length === 2 && yt[0].href.startsWith("/tools/youtube-to-mp4?url=https%3A%2F%2Fyoutu.be") && yt[1].href.startsWith("/tools/youtube-to-mp3?url="),
+  yt
+);
+const PL = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf";
+const plOnly = mediaActions(`https://www.youtube.com/playlist?list=${PL}`);
+check(
+  "playlist → playlist tool",
+  plOnly.length === 1 && plOnly[0].label === "Playlist" &&
+    plOnly[0].href === `/tools/youtube-playlist?url=${encodeURIComponent(`https://www.youtube.com/playlist?list=${PL}`)}`,
+  plOnly
+);
+const plVideo = mediaActions(`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${PL}&index=2`);
+check(
+  "video in playlist → playlist, or this video alone",
+  plVideo.length === 3 && plVideo[0].label === "Playlist" &&
+    plVideo[1].href === `/tools/youtube-to-mp4?url=${encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}` &&
+    plVideo[2].href.startsWith("/tools/youtube-to-mp3?url="),
+  plVideo
+);
 const x = mediaActions("https://x.com/NASA/status/1790866466429911046");
 check(
   "x → mp4 + mp3",

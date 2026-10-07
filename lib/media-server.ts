@@ -63,7 +63,8 @@ export function signToken(payload: Record<string, unknown>, secret: string, ttlS
   return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
 }
 
-export function verifyToken<T extends Record<string, unknown>>(token: string, secret: string): T | null {
+/** `graceSeconds`: still accept a token this long after it expired (refunds). */
+export function verifyToken<T extends Record<string, unknown>>(token: string, secret: string, graceSeconds = 0): T | null {
   const dot = token.lastIndexOf(".");
   if (dot <= 0) return null;
   const body = token.slice(0, dot);
@@ -72,7 +73,7 @@ export function verifyToken<T extends Record<string, unknown>>(token: string, se
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as T & { e?: number };
-    if (typeof payload.e !== "number" || payload.e < Date.now() / 1000) return null;
+    if (typeof payload.e !== "number" || payload.e + graceSeconds < Date.now() / 1000) return null;
     return payload;
   } catch {
     return null;
@@ -122,9 +123,21 @@ export async function callWorker(
   }
   if (res.ok && body) return { ok: true, body };
 
+  // Bot check: visitors get a short line; the fix is for the site owner.
+  if (body?.code === "bot" || (typeof body?.error === "string" && /residential proxy|README/i.test(body.error))) {
+    console.error(
+      `media worker ${path}: YouTube's bot check. Give the worker a residential proxy (YTDLP_PROXY) or cookies (YTDLP_COOKIES_FILE); see media-worker/README.md.`
+    );
+    return { ok: false, status: 422, error: "YouTube is blocking downloads right now. Try again later." };
+  }
+
   if (res.status === 401) {
     console.error(`media worker ${path}: 401 — MEDIA_WORKER_SECRET differs between the web app and the worker.`);
     return { ok: false, status: 503, error: "The download server rejected this site. Its key needs updating." };
+  }
+  if (res.status === 404 && body) {
+    console.error(`media worker ${path}: 404 — the worker predates this endpoint. Redeploy media-worker/.`);
+    return { ok: false, status: 502, error: "The download server needs an update. Try again later." };
   }
   if (!body) {
     console.error(`media worker ${path}: HTTP ${res.status}, non-JSON reply from ${config.url}: ${text.slice(0, 200)}`);

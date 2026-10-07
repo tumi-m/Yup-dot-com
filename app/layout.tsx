@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { siteUrl } from "@/lib/site";
 import { MotionProvider } from "@/components/motion/primitives";
+import { SkipLink } from "@/components/SkipLink";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
     template: "%s | PDF Wizard",
   },
   description:
-    "Edit and convert PDFs and slides in your browser. Save videos as MP4 or MP3. Free, no sign-up, no watermark.",
+    "Edit and convert PDFs and slides in your browser. Save videos as MP4 or MP3. Free, no sign-up.",
   keywords: [
     "PDF editor",
     "merge PDF",
@@ -39,6 +40,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen font-sans">
+        <SkipLink />
         <MotionProvider>{children}</MotionProvider>
       </body>
     </html>

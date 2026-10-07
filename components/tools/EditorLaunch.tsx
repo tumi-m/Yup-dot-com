@@ -4,9 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import { UploadCloud, Loader2, FilePlus2 } from "lucide-react";
-import { PDFDocument } from "pdf-lib";
-import { tryCreateClient } from "@/lib/supabase/client";
-import { getPageCount } from "@/lib/pdf/operations";
 import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid, cn } from "@/lib/utils";
@@ -50,11 +47,13 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       let pageCount: number;
       try {
+        const { getPageCount } = await import("@/lib/pdf/operations");
         pageCount = await getPageCount(bytes);
       } catch {
         throw new Error("Couldn't open that PDF. It may be damaged or password-protected.");
       }
 
+      const { tryCreateClient } = await import("@/lib/supabase/client");
       const supabase = tryCreateClient();
       const user = supabase ? (await supabase.auth.getUser()).data.user : null;
 
@@ -65,10 +64,8 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
 
       const docId = uuid();
       const storagePath = `${user.id}/${docId}.pdf`;
-      const { error: upErr } = await supabase.storage
-        .from("documents")
-        .upload(storagePath, file, { contentType: "application/pdf" });
-      if (upErr) throw upErr;
+      // The row comes first: storage only accepts files that belong to a
+      // document. If the cloud library is full (Free keeps 5), edit on-device.
       const { error: insErr } = await supabase.from("documents").insert({
         id: docId,
         owner_id: user.id,
@@ -77,7 +74,17 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
         size_bytes: file.size,
         page_count: pageCount,
       });
-      if (insErr) throw insErr;
+      if (insErr) {
+        await openLocal(bytes, file.name, pageCount);
+        return;
+      }
+      const { error: upErr } = await supabase.storage
+        .from("documents")
+        .upload(storagePath, file, { contentType: "application/pdf" });
+      if (upErr) {
+        await supabase.from("documents").delete().eq("id", docId);
+        throw upErr;
+      }
       router.push(`/editor/${docId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open the editor.");
@@ -87,6 +94,7 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
 
   async function blankDocument() {
     setBusy(true);
+    const { PDFDocument } = await import("pdf-lib");
     const doc = await PDFDocument.create();
     doc.addPage([595.28, 841.89]); // A4
     await openLocal(await doc.save(), "Untitled.pdf", 1);
@@ -142,10 +150,10 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
         </motion.div>
         <p className="mt-4 text-lg font-semibold">{busy ? "Opening the editor…" : "Drop a PDF to start editing"}</p>
         <div className="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
-          <Button onClick={() => inputRef.current?.click()} disabled={busy}>
+          <Button className="h-11" onClick={() => inputRef.current?.click()} disabled={busy}>
             Choose PDF
           </Button>
-          <Button variant="outline" onClick={blankDocument} disabled={busy}>
+          <Button variant="outline" className="h-11" onClick={blankDocument} disabled={busy}>
             <FilePlus2 /> Blank page
           </Button>
         </div>

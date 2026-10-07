@@ -146,6 +146,50 @@ check("filename", xFilename({ id: ID, author: "NASA" } as never, "mp4", 720) ===
   check("odd sizes still offer the nearest quality", xAvailableQualities(odd, Q).join(",") === "480");
 }
 
+// 8b. A /video/N link picks that media item (N counts photos too, as on X); titles can't spoof.
+{
+  const vid = (h: number, w: number, name: string) => ({
+    type: "video", media_url_https: `https://pbs.twimg.com/${name}.jpg`,
+    video_info: { duration_millis: 3000, variants: [V(w, h, h * 1000)].map((x) => ({ ...x, url: x.url.replace(`abc${h}`, name) })) },
+  });
+  const post = {
+    __typename: "Tweet", text: "Two videos", user: { screen_name: "tester" },
+    mediaDetails: [{ type: "photo", media_url_https: "https://pbs.twimg.com/p.jpg" }, vid(360, 640, "first"), vid(1080, 1920, "second")],
+  };
+  const { f } = fakeFetch(() => ({ status: 200, body: post }));
+  const pick = async (n?: number) => resolveXVideo("33333", f as never, n);
+  const third = await pick(3);
+  check("/video/3 → the second video", third.variants[0].url.includes("second") && third.index === 2, third.variants[0].url);
+  check("/video/2 → the first video", (await pick(2)).variants[0].url.includes("first"));
+  check("/photo/1 (not a video) and no index → the first video",
+    (await pick(1)).variants[0].url.includes("first") && (await pick()).variants[0].url.includes("first"));
+  check("out-of-range index → the first video", (await pick(9)).variants[0].url.includes("first"));
+  check("file name says which video", xFilename(third, "mp4", 1080) === "tester-33333-2-1080p.mp4" && xFilename(await pick(2), "mp4", 360) === "tester-33333-1-360p.mp4", xFilename(third, "mp4", 1080));
+  const single = await resolveXVideo(ID, fakeFetch(() => ({ status: 200, body: SYNDICATION_VIDEO })).f as never, 1);
+  check("single-video post: no index in the name", single.index === null && xFilename(single, "mp4", 720) === `NASA-${ID}-720p.mp4`);
+
+  // FxTwitter lists every media item in media.all.
+  const fx = {
+    code: 200,
+    status: {
+      text: "fx", author: { screen_name: "fx" },
+      media: {
+        all: [{ type: "photo", url: "https://pbs.twimg.com/p.jpg" },
+          { type: "video", url: "https://video.twimg.com/a/vid/640x360/one.mp4", width: 640, height: 360 },
+          { type: "video", url: "https://video.twimg.com/a/vid/1280x720/two.mp4", width: 1280, height: 720 }],
+        videos: [{ type: "video", url: "https://video.twimg.com/a/vid/640x360/one.mp4", width: 640, height: 360 },
+          { type: "video", url: "https://video.twimg.com/a/vid/1280x720/two.mp4", width: 1280, height: 720 }],
+      },
+    },
+  };
+  const fxf = fakeFetch((u) => (u.includes("fxtwitter") ? { status: 200, body: fx } : { status: 200, body: {} })).f;
+  check("fxtwitter: /video/3 → the second video", (await resolveXVideo("33333", fxf as never, 3)).variants[0].url.includes("two.mp4"));
+
+  const spoof = { ...SYNDICATION_VIDEO, text: "\u202Egnp.exe\u202C and \u2066more\u2069 \u200Bhere 🧙\u200D\u2642\uFE0F" };
+  const t2 = (await resolveXVideo(ID, fakeFetch(() => ({ status: 200, body: spoof })).f as never)).title;
+  check("bidi and zero-width characters stripped from titles; emoji kept", t2 === "gnp.exe and more here 🧙\u200D\u2642\uFE0F", JSON.stringify(t2));
+}
+
 // 9. The browser loads ffmpeg.wasm from paths stamped with these versions.
 {
   const installed = (name: string) => JSON.parse(readFileSync(`node_modules/${name}/package.json`, "utf8")).version;
@@ -160,6 +204,7 @@ check("filename", xFilename({ id: ID, author: "NASA" } as never, "mp4", 720) ===
   check("wrong key rejected", verifyToken(tok, "k2") === null);
   check("tampered body rejected", verifyToken("e30" + tok.slice(3), "k") === null);
   check("expired token rejected", verifyToken(signToken({ u: "x" }, "k", -5), "k") === null);
+  check("grace period accepts a recently expired token (refunds)", verifyToken(signToken({ u: "x" }, "k", -5), "k", 60)?.u === "x");
   const env = (url?: string, secret?: string) => {
     if (url === undefined) delete process.env.MEDIA_WORKER_URL; else process.env.MEDIA_WORKER_URL = url;
     if (secret === undefined) delete process.env.MEDIA_WORKER_SECRET; else process.env.MEDIA_WORKER_SECRET = secret;

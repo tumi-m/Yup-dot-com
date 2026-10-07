@@ -110,6 +110,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
+  /** The finished answer, read out once instead of word by word. */
+  const [announce, setAnnounce] = useState("");
   const [error, setError] = useState<{ message: string; needsLogin?: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -120,6 +122,22 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Answers left today, shown before the first question.
+  const docLoaded = !!doc;
+  useEffect(() => {
+    if (!docLoaded) return;
+    let live = true;
+    fetch("/api/ai/chat", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (live && typeof d?.remaining === "number") setRemaining(d.remaining);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [docLoaded]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -158,6 +176,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    setAnnounce("");
+    let answer = "";
 
     try {
       const res = await fetch("/api/ai/chat", {
@@ -170,10 +190,12 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         const data = await res.json().catch(() => ({}));
         setMessages(history.slice(0, -1));
         setDraft(question);
-        if (data.upgrade && res.status === 429) {
-          setUpsell(true);
+        if (res.status === 429 && data.reason === "ai") {
           setRemaining(0);
-          return;
+          if (data.upgrade) {
+            setUpsell(true);
+            return;
+          }
         }
         setError({ message: data.error ?? "Something went wrong.", needsLogin: res.status === 401 });
         return;
@@ -195,6 +217,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           if (!line) continue;
           const event = JSON.parse(line) as { type: string; text?: string; message?: string };
           if (event.type === "text" && event.text) {
+            answer += event.text;
             setMessages((m) => {
               const next = [...m];
               next[next.length - 1] = { role: "assistant", content: next[next.length - 1].content + event.text };
@@ -209,6 +232,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       if ((e as Error).name !== "AbortError") setError({ message: "Connection lost. Please try again." });
     } finally {
       setStreaming(false);
+      if (answer) setAnnounce(answer.replace(/[*_`#>]+/g, ""));
       abortRef.current = null;
       // Drop an assistant bubble that never received text.
       setMessages((m) => (m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m));
@@ -274,17 +298,25 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             )}
           </p>
         </div>
-        {remaining !== null && tier !== "pro" && tier !== "team" && (
-          <span className="hidden rounded-full bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline">
-            {remaining} free answer{remaining === 1 ? "" : "s"} left today
+        {remaining !== null && (
+          <span data-testid="ai-remaining" className="shrink-0 rounded-full bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
+            {remaining} left today
           </span>
         )}
-        <Button variant="ghost" size="sm" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
+        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
           <RotateCcw /> New PDF
         </Button>
       </div>
 
-      <div ref={scrollRef} className="h-[460px] space-y-4 overflow-y-auto px-5 py-5" aria-live="polite">
+      <p className="sr-only" aria-live="polite">{announce}</p>
+      <div
+        ref={scrollRef}
+        // Focusable so the conversation scrolls from the keyboard too.
+        tabIndex={0}
+        role="region"
+        aria-label="Conversation"
+        className="h-[460px] space-y-4 overflow-y-auto px-5 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <p className="font-semibold">What would you like to know?</p>
@@ -322,6 +354,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
                   m.role === "user" ? "rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-secondary"
                 )}
               >
+                <span className="sr-only">{m.role === "user" ? "You: " : "Assistant: "}</span>
                 {m.role === "assistant" ? (
                   m.content ? (
                     <Markdown text={m.content} />
@@ -385,7 +418,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             <Square className="h-4 w-4" />
           </Button>
         ) : (
-          <motion.div whileTap={{ scale: 0.9 }}>
+          <motion.div whileTap={{ scale: 0.9 }} tabIndex={-1}>
             <Button type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
               <ArrowUp />
             </Button>

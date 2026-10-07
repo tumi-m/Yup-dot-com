@@ -98,7 +98,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
     if (!picked) return;
     setError(null);
     if (!isPptxName(picked.name) && picked.type !== PPTX_MIME) {
-      setError(/\.ppt$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
+      setError(/\.(ppt|pps|pot|odp|key)$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
       return;
     }
     if (picked.size > limits.maxFileBytes) {
@@ -138,8 +138,9 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       const { deckToPdf } = await import("@/lib/pptx/to-pdf");
       const bytes = await deckToPdf(deck, {
         signal: controller.signal,
-        onProgress: (done, total) => setProgress({ done, total }),
+        onProgress: (done, total) => !controller.signal.aborted && setProgress({ done, total }),
       });
+      if (controller.signal.aborted) return;
       setResult(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       setElapsed((performance.now() - started) / 1000);
       setStatus("done");
@@ -150,9 +151,19 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       setError("Couldn't convert this file.");
       setStatus("ready");
     } finally {
-      setProgress(null);
-      abort.current = null;
+      // A cancelled run must not clear the state of one started after it.
+      if (abort.current === controller) {
+        setProgress(null);
+        abort.current = null;
+      }
     }
+  }
+
+  function cancelConvert() {
+    abort.current?.abort();
+    abort.current = null;
+    setProgress(null);
+    setStatus("ready");
   }
 
   function reset() {
@@ -401,7 +412,9 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                 transition={{ duration: 0.4, ease: EASE }}
                 aria-label="Slides"
                 data-testid="slide-thumbs"
-                className="grid max-h-[28rem] grid-cols-2 gap-3 overflow-y-auto rounded-2xl border border-border bg-secondary/40 p-3 sm:grid-cols-3"
+                // Scrollable with nothing focusable inside: keyboard users scroll it directly.
+                tabIndex={0}
+                className="grid max-h-[28rem] grid-cols-2 gap-3 overflow-y-auto rounded-2xl border border-border bg-secondary/40 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-3"
               >
                 {deck.slides.map((slide) => (
                   <li key={slide.part} className="relative" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 120px" }}>
@@ -448,7 +461,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                 className="flex flex-col items-center gap-3"
               >
                 {status === "working" ? (
-                  <div className="w-full max-w-md" aria-live="polite">
+                  <div className="w-full max-w-md">
                     <div
                       className="relative h-3 overflow-hidden rounded-full bg-secondary"
                       role="progressbar"
@@ -471,8 +484,13 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                       >
                         <Sparkles className="h-3.5 w-3.5 text-primary" />
                       </motion.span>
-                      {progress ? `Slide ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : "Casting…"}
-                      <span className="tabular-nums">{Math.round(fraction * 100)}%</span>
+                      <span aria-live="polite" className="inline-flex gap-1.5">
+                        {progress ? `Slide ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : "Casting…"}
+                        <span className="tabular-nums">{Math.round(fraction * 100)}%</span>
+                      </span>
+                      <Button variant="ghost" size="sm" className="tap ml-1" onClick={cancelConvert} data-testid="cancel-convert">
+                        Cancel
+                      </Button>
                     </p>
                   </div>
                 ) : (

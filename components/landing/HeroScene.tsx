@@ -18,10 +18,9 @@ import {
   Signature,
   Scissors,
   Sheet,
-  FileText as FileIcon,
   Sparkles,
-  } from "lucide-react";
-import { EASE } from "@/components/motion/primitives";
+} from "lucide-react";
+import { DUR, EASE_IN, EASE_OUT, SPRING_LAYOUT, useAmbient } from "@/components/motion/primitives";
 
 /** Deterministic PRNG so server and client render identical particles. */
 function seeded(seed: number) {
@@ -33,10 +32,10 @@ function seeded(seed: number) {
 }
 
 const rand = seeded(42);
-const STARS = Array.from({ length: 46 }, () => ({
+const STARS = Array.from({ length: 24 }, () => ({
   left: rand() * 100,
   top: rand() * 100,
-  size: 1 + rand() * 2.4,
+  size: 1.2 + rand() * 2.2,
   delay: rand() * 4,
   duration: 2.5 + rand() * 3.5,
 }));
@@ -51,11 +50,50 @@ const ORBIT = [
   { icon: Scissors, tint: "#d946ef" },
   { icon: Sheet, tint: "#22c55e" },
 ];
+const ORBIT_START = Math.PI / 8;
 
-/** Twinkling background stars. Pure CSS animation — cheap on every device. */
-export function Starfield({ className = "" }: { className?: string }) {
+/**
+ * The ring of tool icons. Drawn twice, each copy clipped to one half, so the
+ * near half passes in front of the hat and the far half behind it.
+ */
+function Orbit({ half }: { half: "front" | "back" }) {
   return (
-    <div aria-hidden className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}>
+    <div
+      aria-hidden
+      className="absolute inset-0 hidden md:block"
+      style={{ clipPath: half === "front" ? "inset(50% -20% -20% -20%)" : "inset(-20% -20% 50% -20%)" }}
+    >
+      <div className="absolute inset-0 motion-safe:animate-spin-slow">
+        {ORBIT.map(({ icon: Icon, tint }, i) => {
+          const angle = ORBIT_START + (i / ORBIT.length) * Math.PI * 2;
+          const r = 44; // % of container
+          return (
+            <div
+              key={i}
+              className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${50 + Math.cos(angle) * r}%`, top: `${50 + Math.sin(angle) * r * 0.42}%` }}
+            >
+              <div className="motion-safe:animate-spin-slow-reverse">
+                <div
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-background/95 shadow-lg motion-safe:animate-pop"
+                  style={{ color: tint, animationDelay: `${0.3 + i * 0.05}s` }}
+                >
+                  <Icon className="h-5 w-5" />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Twinkling background stars. CSS opacity only; paused offscreen. */
+export function Starfield({ className = "" }: { className?: string }) {
+  const ref = useAmbient<HTMLDivElement>();
+  return (
+    <div ref={ref} aria-hidden className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}>
       {STARS.map((s, i) => (
         <span
           key={i}
@@ -74,20 +112,25 @@ export function Starfield({ className = "" }: { className?: string }) {
   );
 }
 
-/** Slow-drifting colour blobs behind the hero. */
+/**
+ * Slow-drifting colour blobs. Soft radial gradients rather than blur filters,
+ * so moving them costs a composite, not a re-blur.
+ */
 export function Aurora() {
+  const ref = useAmbient<HTMLDivElement>();
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full bg-violet-500/25 blur-3xl motion-safe:animate-aurora-1" />
-      <div className="absolute -right-32 top-10 h-[460px] w-[460px] rounded-full bg-fuchsia-500/20 blur-3xl motion-safe:animate-aurora-2" />
-      <div className="absolute bottom-[-180px] left-1/3 h-[420px] w-[420px] rounded-full bg-amber-400/15 blur-3xl motion-safe:animate-aurora-3" />
+    <div ref={ref} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute -left-56 -top-56 h-[760px] w-[760px] rounded-full bg-[radial-gradient(closest-side,rgb(139_92_246/0.28),transparent)] motion-safe:animate-aurora-1" />
+      <div className="absolute -right-48 -top-6 h-[680px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgb(217_70_239/0.22),transparent)] motion-safe:animate-aurora-2" />
+      <div className="absolute bottom-[-280px] left-1/3 h-[620px] w-[620px] rounded-full bg-[radial-gradient(closest-side,rgb(251_191_36/0.18),transparent)] motion-safe:animate-aurora-3" />
     </div>
   );
 }
 
-function WizardHatArt() {
+/** The large hat illustration. */
+export function WizardHatArt({ className = "h-full w-full" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 200 200" className="h-full w-full drop-shadow-[0_20px_40px_rgba(124,58,237,0.45)]">
+    <svg viewBox="0 0 200 200" className={className} aria-hidden>
       <defs>
         <linearGradient id="hat" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#a78bfa" />
@@ -119,6 +162,16 @@ function WizardHatArt() {
   );
 }
 
+/** A soft static shadow under the hat; replaces a per-frame drop-shadow filter. */
+export function HatShadow({ className = "" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`pointer-events-none absolute bg-[radial-gradient(closest-side,rgb(124_58_237/0.35),transparent)] ${className}`}
+    />
+  );
+}
+
 const DEMOS = [
   { from: "annual-report.pdf", fromMeta: "12.4 MB", to: "annual-report.pdf", toMeta: "2.1 MB · 83% smaller", spell: "Compress" },
   { from: "scanned-invoice.pdf", fromMeta: "image only · no text", to: "scanned-invoice.pdf", toMeta: "searchable · 214 words", spell: "OCR" },
@@ -127,71 +180,77 @@ const DEMOS = [
   { from: "offer-letter.pdf", fromMeta: "unsigned", to: "offer-letter.pdf", toMeta: "signed · fields filled", spell: "Fill & Sign" },
 ];
 
-/** Cycles through real before → after transformations. */
+/**
+ * Cycles through real before → after transformations once, then rests on the
+ * first. Hover, focus or picking an example stops it.
+ */
 function SpellDemo() {
   const [index, setIndex] = useState(0);
+  const [step, setStep] = useState(0);
+  const [held, setHeld] = useState(false);
+  const [stopped, setStopped] = useState(false);
   const reduce = useReducedMotion();
 
   useEffect(() => {
-    if (reduce) return;
-    const id = setInterval(() => setIndex((i) => (i + 1) % DEMOS.length), 3800);
-    return () => clearInterval(id);
-  }, [reduce]);
+    if (reduce || held || stopped || step >= DEMOS.length) return;
+    const id = setTimeout(() => {
+      setStep((s) => s + 1);
+      setIndex((i) => (i + 1) % DEMOS.length);
+    }, 3800);
+    return () => clearTimeout(id);
+  }, [reduce, held, stopped, step]);
 
   const demo = DEMOS[index];
 
   return (
-    <div className="relative w-full max-w-sm rounded-2xl border border-white/40 bg-background/80 p-4 shadow-2xl shadow-primary/15 backdrop-blur-xl dark:border-white/10">
-      <AnimatePresence mode="wait">
+    <div
+      className="relative w-full max-w-sm rounded-2xl border border-white/60 bg-background/95 p-4 shadow-2xl shadow-primary/15"
+      onPointerEnter={() => setHeld(true)}
+      onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={() => setHeld(false)}
+    >
+      <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={index}
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.4, ease: EASE }}
+          exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
+          transition={{ duration: DUR.base, ease: EASE_OUT }}
           className="flex items-center gap-3"
         >
           <div className="min-w-0 flex-1 rounded-xl bg-secondary px-3 py-2 text-left">
-            <p className="truncate text-xs font-semibold">{demo.from}</p>
-            <p className="truncate text-[11px] text-muted-foreground">{demo.fromMeta}</p>
+            <p className="text-xs font-semibold [overflow-wrap:anywhere]">{demo.from}</p>
+            <p className="text-[11px] text-muted-foreground">{demo.fromMeta}</p>
           </div>
           <div className="flex shrink-0 flex-col items-center gap-0.5">
-            <motion.div
-              initial={{ scale: 0.6, rotate: -30 }}
-              animate={{ scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 400, damping: 18, delay: 0.15 }}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground"
-            >
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground motion-safe:animate-pop [animation-delay:0.1s]">
               <Sparkles className="h-3.5 w-3.5" />
-            </motion.div>
+            </div>
             <span className="text-[9px] font-semibold uppercase tracking-wide text-primary">{demo.spell}</span>
           </div>
-          <motion.div
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3, duration: 0.4, ease: EASE }}
-            className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:ring-emerald-900"
-          >
-            <p className="truncate text-xs font-semibold text-emerald-800 dark:text-emerald-300">{demo.to}</p>
-            <p className="truncate text-[11px] text-emerald-700 dark:text-emerald-400">{demo.toMeta}</p>
-          </motion.div>
+          <div className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 motion-safe:animate-fade [animation-delay:0.2s]">
+            <p className="text-xs font-semibold text-emerald-800 [overflow-wrap:anywhere]">{demo.to}</p>
+            <p className="text-[11px] text-emerald-700">{demo.toMeta}</p>
+          </div>
         </motion.div>
       </AnimatePresence>
       <div className="-mb-3 mt-0 flex justify-center">
         {DEMOS.map((_, i) => (
           <button
             key={i}
-            onClick={() => setIndex(i)}
+            type="button"
+            onClick={() => {
+              setStopped(true);
+              setIndex(i);
+            }}
             aria-label={`Show example ${i + 1}`}
-            className="flex h-11 w-11 items-center justify-center"
+            aria-pressed={i === index}
+            className="flex h-11 w-11 items-center justify-center rounded-full"
           >
             <span className="relative block h-1.5 w-6 overflow-hidden rounded-full bg-secondary">
               {i === index && (
-                <motion.span
-                  layoutId="demo-pip"
-                  className="absolute inset-0 rounded-full bg-primary"
-                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                />
+                <motion.span layoutId="demo-pip" className="absolute inset-0 rounded-full bg-primary" transition={SPRING_LAYOUT} />
               )}
             </span>
           </button>
@@ -203,10 +262,12 @@ function SpellDemo() {
 
 /**
  * The hero illustration: floating hat, orbiting tools, and a live demo card,
- * all gently tilting toward the cursor.
+ * gently tilting toward the cursor. Loops are CSS and pause offscreen. Below md
+ * only the hat and the demo show.
  */
 export function HeroScene() {
   const reduce = useReducedMotion();
+  const ambient = useAmbient<HTMLDivElement>();
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
   const sx = useSpring(mx, { stiffness: 60, damping: 18 });
@@ -218,9 +279,10 @@ export function HeroScene() {
 
   return (
     <div
+      ref={ambient}
       className="relative mx-auto flex w-full min-w-0 max-w-xl flex-col items-center"
       onPointerMove={(e) => {
-        if (reduce) return;
+        if (reduce || e.pointerType !== "mouse") return;
         const rect = e.currentTarget.getBoundingClientRect();
         mx.set(((e.clientX - rect.left) / rect.width) * 2 - 1);
         my.set(((e.clientY - rect.top) / rect.height) * 2 - 1);
@@ -231,113 +293,67 @@ export function HeroScene() {
       }}
       style={{ perspective: 1000 }}
     >
-      <motion.div
-        style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
-        className="relative aspect-square w-full max-w-[420px]"
-      >
-        {/* halo */}
-        <div aria-hidden className="absolute inset-[18%] rounded-full bg-primary/25 blur-3xl motion-safe:animate-pulse-slow" />
+      <motion.div style={{ rotateX, rotateY }} className="relative aspect-square w-full max-w-[220px] md:max-w-[420px]">
+        {/* halo: a gradient, pulsing in opacity only */}
+        <div
+          aria-hidden
+          className="absolute inset-[10%] rounded-full bg-[radial-gradient(closest-side,hsl(var(--primary)/0.3),transparent)] motion-safe:animate-pulse-slow"
+        />
 
         {/* orbit ring */}
-        <div aria-hidden className="absolute inset-[6%] rounded-full border border-dashed border-primary/25" style={{ transform: "rotateX(62deg)" }} />
-
-        {/* orbiting tools */}
-        <motion.div
+        <div
           aria-hidden
-          className="absolute inset-0"
-          animate={reduce ? undefined : { rotate: 360 }}
-          transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
-        >
-          {ORBIT.map(({ icon: Icon, tint }, i) => {
-            const angle = (i / ORBIT.length) * Math.PI * 2;
-            const r = 44; // % of container
-            return (
-              <motion.div
-                key={i}
-                className="absolute"
-                style={{
-                  left: `${50 + Math.cos(angle) * r}%`,
-                  top: `${50 + Math.sin(angle) * r * 0.42}%`,
-                  translateX: "-50%",
-                  translateY: "-50%",
-                }}
-                animate={reduce ? undefined : { rotate: -360 }}
-                transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
-              >
-                <motion.div
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.5 + i * 0.08, type: "spring", stiffness: 300, damping: 18 }}
-                  whileHover={{ scale: 1.2 }}
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/60 bg-background/90 shadow-lg backdrop-blur dark:border-white/10"
-                  style={{ color: tint }}
-                >
-                  <Icon className="h-5 w-5" />
-                </motion.div>
-              </motion.div>
-            );
-          })}
-        </motion.div>
+          className="absolute inset-[6%] hidden rounded-full border border-dashed border-primary/25 md:block"
+          style={{ transform: "rotateX(62deg)" }}
+        />
+
+        {/* orbiting tools, back half (behind the hat) */}
+        <Orbit half="back" />
 
         {/* the hat */}
-        <motion.div
-          style={{ x: hatX, y: hatY }}
-          className="absolute inset-[22%]"
-          initial={{ opacity: 0, scale: 0.6, y: 30 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: 1, ease: EASE, delay: 0.2 }}
-        >
-          <motion.div
-            className="h-full w-full"
-            animate={reduce ? undefined : { y: [0, -12, 0], rotate: [-2, 2, -2] }}
-            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <WizardHatArt />
+        <div className="absolute inset-[22%] motion-safe:animate-pop [animation-delay:0.1s]">
+          <HatShadow className="-bottom-[8%] left-[6%] h-[22%] w-[88%]" />
+          <motion.div style={{ x: hatX, y: hatY }} className="h-full w-full">
+            <div className="h-full w-full motion-safe:animate-float">
+              <WizardHatArt />
+            </div>
           </motion.div>
-        </motion.div>
+        </div>
+
+        {/* front half of the orbit passes in front of the hat */}
+        <Orbit half="front" />
 
         {/* floating document cards */}
         {[
-          { cls: "left-[2%] top-[14%]", rot: -12, delay: 0.9, label: "report.pdf" },
-          { cls: "right-[0%] bottom-[20%]", rot: 10, delay: 1.1, label: "invoice.pdf" },
+          { cls: "left-[2%] top-[14%]", rot: -12, delay: 0.4, label: "report.pdf" },
+          { cls: "right-[0%] bottom-[20%]", rot: 10, delay: 0.5, label: "invoice.pdf" },
         ].map((c) => (
-          <motion.div
-            key={c.label}
-            aria-hidden
-            className={`absolute ${c.cls}`}
-            initial={{ opacity: 0, y: 20, rotate: c.rot }}
-            animate={{ opacity: 1, y: 0, rotate: c.rot }}
-            transition={{ delay: c.delay, duration: 0.8, ease: EASE }}
-          >
-            <motion.div
-              animate={reduce ? undefined : { y: [0, -8, 0] }}
-              transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut", delay: c.delay }}
-              className="w-24 rounded-xl border border-white/60 bg-background/95 p-2.5 shadow-xl dark:border-white/10"
-            >
-              <div className="flex items-center gap-1 text-[9px] font-semibold text-red-600">
-                <FileIcon className="h-3 w-3" /> PDF
+          <div key={c.label} aria-hidden className={`absolute hidden md:block ${c.cls}`} style={{ transform: `rotate(${c.rot}deg)` }}>
+            <div className="motion-safe:animate-rise" style={{ animationDelay: `${c.delay}s` }}>
+              <div
+                className="w-24 rounded-xl border border-white/60 bg-background/95 p-2.5 shadow-xl motion-safe:animate-bob"
+                style={{ animationDelay: `${c.delay}s` }}
+              >
+                <div className="flex items-center gap-1 text-[9px] font-semibold text-red-600">
+                  <FileText className="h-3 w-3" /> PDF
+                </div>
+                <div className="mt-2 space-y-1">
+                  <div className="h-1 w-full rounded bg-secondary" />
+                  <div className="h-1 w-4/5 rounded bg-secondary" />
+                  <div className="h-1 w-3/5 rounded bg-secondary" />
+                </div>
+                <p className="mt-2 truncate text-[9px] text-muted-foreground">{c.label}</p>
               </div>
-              <div className="mt-2 space-y-1">
-                <div className="h-1 w-full rounded bg-secondary" />
-                <div className="h-1 w-4/5 rounded bg-secondary" />
-                <div className="h-1 w-3/5 rounded bg-secondary" />
-              </div>
-              <p className="mt-2 truncate text-[9px] text-muted-foreground">{c.label}</p>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         ))}
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2, duration: 0.7, ease: EASE }}
-        className="-mt-6 w-full px-4"
-      >
+      <div className="mt-2 w-full motion-safe:animate-rise [animation-delay:0.3s] md:-mt-6 md:px-4">
         <div className="flex justify-center">
           <SpellDemo />
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

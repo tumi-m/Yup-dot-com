@@ -275,8 +275,10 @@ function slidesQuerySchema() {
 export interface SlidesExportDeps {
   fetcher?: Fetcher;
   resolveTier: () => Promise<{ user: { id: string } | null; tier: Tier }>;
-  consumeDaily: (key: string, limit: number) => number;
-  clientIp: (request: Request) => string;
+  /** Spends one of today's allowance; uses left, or -1 when spent (lib/usage.ts). */
+  consumeDaily: (subject: string, bucket: string, limit: number) => Promise<number> | number;
+  /** Who the request counts against (lib/usage.ts usageSubject). */
+  usageSubject: (request: Request, user: { id: string } | null) => string;
 }
 
 const noStore = { "Cache-Control": "private, no-store" };
@@ -312,10 +314,13 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
     return fail(err instanceof SlidesError ? err.kind : "unreachable");
   }
 
-  const remaining = deps.consumeDaily(
-    `slides:${user ? `u:${user.id}` : `ip:${deps.clientIp(request)}`}`,
-    limitsFor(tier).linkImportsPerDay
-  );
+  let remaining: number;
+  try {
+    remaining = await deps.consumeDaily(deps.usageSubject(request, user), "slides", limitsFor(tier).linkImportsPerDay);
+  } catch (err) {
+    await file.cancel();
+    throw err;
+  }
   if (remaining < 0) {
     await file.cancel();
     return Response.json(

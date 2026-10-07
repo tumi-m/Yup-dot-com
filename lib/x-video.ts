@@ -20,8 +20,12 @@ export interface XVariant {
   height: number | null;
 }
 
+import { cleanTitle } from "./media";
+
 export interface XVideo {
   id: string;
+  /** Which video of a post with several (1-based among its videos); null if it has one. */
+  index: number | null;
   title: string;
   author: string | null;
   thumbnail: string | null;
@@ -76,21 +80,34 @@ function finish(variants: XVariant[]): XVariant[] {
 }
 
 function titleFrom(text: unknown, author: string | null): string {
-  const clean = typeof text === "string" ? text.replace(/https?:\/\/t\.co\/\S+/g, "").replace(/\s+/g, " ").trim() : "";
+  const clean = cleanTitle(typeof text === "string" ? text.replace(/https?:\/\/t\.co\/\S+/g, "") : "");
   if (clean) return clean.length > 90 ? `${clean.slice(0, 87)}…` : clean;
   return author ? `Video by @${author}` : "X video";
 }
 
 type Json = Record<string, any>;
 
+/**
+ * The media item a /video/N link means. As on X (and in yt-dlp), N counts
+ * every media item of the post, photos included. A position that isn't a
+ * video falls back to the first video.
+ */
+function pickMedia(all: Json[], index: number | null | undefined, isVideo: (m: Json) => boolean) {
+  const videos = all.filter((m) => m && isVideo(m));
+  const wanted = index ? all[index - 1] : undefined;
+  const item = wanted && isVideo(wanted) ? wanted : videos[0];
+  return { item, index: videos.length > 1 && item ? videos.indexOf(item) + 1 : null };
+}
+
 /** Parse a syndication tweet-result payload. Throws XResolveError for known dead ends. */
-export function parseSyndication(id: string, json: Json | null): XVideo | null {
+export function parseSyndication(id: string, json: Json | null, index?: number | null): XVideo | null {
   // Empty means "not found" — but X also returns {} to some cloud IPs, so
   // treat it as inconclusive and let the next source decide.
   if (!json || Object.keys(json).length === 0) return null;
   if (json.__typename === "TweetTombstone") throw new XResolveError("unavailable");
   const media: Json[] = [...(json.mediaDetails ?? []), ...(json.quoted_tweet?.mediaDetails ?? [])];
-  const item = media.find((m) => m?.type === "video" || m?.type === "animated_gif");
+  const picked = pickMedia(media, index, (m) => m?.type === "video" || m?.type === "animated_gif");
+  const item = picked.item;
   if (!item) throw new XResolveError("no-video");
   const author = json.user?.screen_name ?? null;
   const variants = finish(
@@ -101,6 +118,7 @@ export function parseSyndication(id: string, json: Json | null): XVideo | null {
   if (!variants.length) return null;
   return {
     id,
+    index: picked.index,
     title: titleFrom(json.text, author),
     author,
     thumbnail: item.media_url_https ?? null,
@@ -111,13 +129,16 @@ export function parseSyndication(id: string, json: Json | null): XVideo | null {
 }
 
 /** Parse an FxTwitter v2 (`status`) or v1 (`tweet`) payload. */
-export function parseFxTwitter(id: string, json: Json | null): XVideo | null {
+export function parseFxTwitter(id: string, json: Json | null, index?: number | null): XVideo | null {
   if (!json) return null;
   if (json.code === 404) throw new XResolveError("not-found");
   if (json.code === 401 || json.code === 403) throw new XResolveError("login-required");
   const status = json.status ?? json.tweet;
   if (!status) return null;
-  const video: Json | undefined = (status.media?.videos ?? [])[0];
+  // media.all lists photos and videos in post order; older payloads only have videos.
+  const all: Json[] = status.media?.all ?? status.media?.videos ?? [];
+  const picked = pickMedia(all, status.media?.all ? index : null, (m) => m?.type === "video" || m?.type === "gif");
+  const video: Json | undefined = picked.item ?? (status.media?.videos ?? [])[0];
   if (!video) throw new XResolveError("no-video");
   const author = status.author?.screen_name ?? null;
   const formats: Json[] = video.formats ?? video.variants ?? [];
@@ -132,6 +153,7 @@ export function parseFxTwitter(id: string, json: Json | null): XVideo | null {
   if (!variants.length) return null;
   return {
     id,
+    index: picked.item ? picked.index : null,
     title: titleFrom(status.text, author),
     author,
     thumbnail: video.thumbnail_url ?? null,
@@ -142,9 +164,10 @@ export function parseFxTwitter(id: string, json: Json | null): XVideo | null {
 }
 
 /** Parse a vxTwitter payload (shape unverified against live data; last resort). */
-export function parseVxTwitter(id: string, json: Json | null): XVideo | null {
+export function parseVxTwitter(id: string, json: Json | null, index?: number | null): XVideo | null {
   const media: Json[] = json?.media_extended ?? [];
-  const item = media.find((m) => m?.type === "video" || m?.type === "gif");
+  const picked = pickMedia(media, index, (m) => m?.type === "video" || m?.type === "gif");
+  const item = picked.item;
   if (!item || typeof item.url !== "string") return null;
   const author = json?.user_screen_name ?? null;
   const variants = finish([
@@ -153,6 +176,7 @@ export function parseVxTwitter(id: string, json: Json | null): XVideo | null {
   if (!variants.length) return null;
   return {
     id,
+    index: picked.index,
     title: titleFrom(json?.text, author),
     author,
     thumbnail: item.thumbnail_url ?? null,
@@ -172,18 +196,19 @@ async function getJson(fetcher: Fetcher, url: string, headers: Record<string, st
   return text.trim() ? JSON.parse(text) : {};
 }
 
-export async function resolveXVideo(id: string, fetcher: Fetcher = fetch): Promise<XVideo> {
+/** `index`: the media position from a /video/N link, if any. */
+export async function resolveXVideo(id: string, fetcher: Fetcher = fetch, index?: number | null): Promise<XVideo> {
   if (!/^\d{1,25}$/.test(id)) throw new XResolveError("not-found");
   const UA = "Mozilla/5.0 (compatible; PDFWizard/1.0; +https://github.com/tumi-m/Yup-dot-com)";
   const sources: [string, () => Promise<XVideo | null>][] = [
     ["syndication", async () =>
       parseSyndication(id, await getJson(fetcher,
         `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=${syndicationToken(id)}`,
-        { "User-Agent": "Googlebot" }))],
+        { "User-Agent": "Googlebot" }), index)],
     ["fxtwitter", async () =>
-      parseFxTwitter(id, await getJson(fetcher, `https://api.fxtwitter.com/2/status/${id}`, { "User-Agent": UA }))],
+      parseFxTwitter(id, await getJson(fetcher, `https://api.fxtwitter.com/2/status/${id}`, { "User-Agent": UA }), index)],
     ["vxtwitter", async () =>
-      parseVxTwitter(id, await getJson(fetcher, `https://api.vxtwitter.com/i/status/${id}`, { "User-Agent": UA }))],
+      parseVxTwitter(id, await getJson(fetcher, `https://api.vxtwitter.com/i/status/${id}`, { "User-Agent": UA }), index)],
   ];
 
   // A definitive answer from any source ("no video", "deleted") beats "unreachable",
@@ -201,7 +226,8 @@ export async function resolveXVideo(id: string, fetcher: Fetcher = fetch): Promi
 }
 
 export function xFilename(video: XVideo, ext: "mp4" | "mp3", height?: number | null): string {
-  const base = (video.author ? `${video.author}-${video.id}` : `x-${video.id}`).replace(/[^\w.-]+/g, "_");
+  const post = video.index ? `${video.id}-${video.index}` : video.id;
+  const base = (video.author ? `${video.author}-${post}` : `x-${post}`).replace(/[^\w.-]+/g, "_");
   return `${base}${ext === "mp4" && height ? `-${height}p` : ""}.${ext}`;
 }
 

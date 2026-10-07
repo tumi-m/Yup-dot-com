@@ -1,15 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, ResolvingMetadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { MarketingNav } from "@/components/MarketingNav";
-import { ToolWorkbench } from "@/components/tools/ToolWorkbench";
-import { EditorLaunch } from "@/components/tools/EditorLaunch";
-import { PdfAssistant } from "@/components/tools/PdfAssistant";
-import { MediaDownloader } from "@/components/tools/MediaDownloader";
-import { PptxToPdf } from "@/components/tools/PptxToPdf";
-import { PptxEditor } from "@/components/tools/PptxEditor";
-import { SlidesImporter } from "@/components/tools/SlidesImporter";
+import { ToolPanel } from "@/components/tools/ToolPanel";
+import { panelSpec, placeholderSize, ToolPlaceholder } from "@/components/tools/panel-spec";
 import { TOOLS, getTool } from "@/lib/tools";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
@@ -23,19 +18,24 @@ export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
 }
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}): Promise<Metadata> {
+export async function generateMetadata(
+  {
+    params,
+  }: {
+    params: Promise<{ slug: string }>;
+  },
+  parent: ResolvingMetadata
+): Promise<Metadata> {
   const { slug } = await params;
   const tool = getTool(slug);
   if (!tool) return { title: "Tool not found" };
+  // Keep the site's shared-link image, which a page's own openGraph replaces.
+  const images = (await parent).openGraph?.images ?? [];
   return {
     title: tool.title,
     description: tool.description,
     alternates: { canonical: `/tools/${tool.slug}` },
-    openGraph: { title: tool.title, description: tool.description },
+    openGraph: { title: tool.title, description: tool.description, images },
   };
 }
 
@@ -51,11 +51,12 @@ export default async function ToolPage({
   const user = await getCurrentUser();
   const profile = user ? await getProfile().catch(() => null) : null;
   const tier: Tier = profile?.plan ?? "guest";
+  const spec = panelSpec(tool);
 
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
-      <main className="relative flex-1 overflow-hidden">
+      <main id="main" className="relative flex-1 overflow-hidden">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-gradient-to-b from-primary/10 to-transparent" />
         <Starfield className="h-[420px]" />
         <div className="container relative py-10">
@@ -69,22 +70,10 @@ export default async function ToolPage({
           <div className="mx-auto max-w-2xl">
             <ToolHeader slug={tool.slug} />
             <div className="mt-10">
-              <Suspense>
-                {tool.editor ? (
-                  <EditorLaunch tier={tier} />
-                ) : tool.custom === "assistant" ? (
-                  <PdfAssistant tier={tier} />
-                ) : tool.custom === "media" && tool.media ? (
-                  <MediaDownloader config={tool.media} tier={tier} />
-                ) : tool.custom === "pptx-to-pdf" ? (
-                  <PptxToPdf tier={tier} />
-                ) : tool.custom === "pptx-editor" ? (
-                  <PptxEditor tier={tier} />
-                ) : tool.custom === "slides-import" && tool.slides ? (
-                  <SlidesImporter tier={tier} format={tool.slides.format} />
-                ) : (
-                  <ToolWorkbench slug={tool.slug} tier={tier} />
-                )}
+              {/* The tool reads search params, so it renders after hydration;
+                  a placeholder of its usual size keeps the page from jumping. */}
+              <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind)} />}>
+                <ToolPanel spec={spec} tier={tier} />
               </Suspense>
             </div>
           </div>

@@ -21,6 +21,7 @@ import { tryCreateClient } from "@/lib/supabase/client";
 import { getLocalDoc, saveLocalDoc } from "@/lib/local-store";
 import type { Tier } from "@/lib/limits";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
+import { documentFingerprint, EditCheckError, requestEdit } from "@/lib/edit-usage";
 import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
 import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake";
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
@@ -34,6 +35,7 @@ import {
 } from "@/lib/editor/types";
 import type { DocumentRecord } from "@/lib/types";
 import { downloadBlob } from "@/lib/download";
+import { friendlyPdfError } from "@/lib/pdf/errors";
 import { Button } from "@/components/ui/button";
 import { useToasts, ToastStack } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -68,6 +70,9 @@ export type EditorSource =
   | { kind: "cloud"; doc: DocumentRecord }
   | { kind: "local"; id: string };
 
+/** Phone-width layout, where side panels become overlays. */
+const narrow = () => window.matchMedia("(max-width: 767px)").matches;
+
 export function PdfEditor({
   source,
   tier,
@@ -78,10 +83,15 @@ export function PdfEditor({
   const supabase = useMemo(() => (source.kind === "cloud" ? tryCreateClient() : null), [source.kind]);
   const [docName, setDocName] = useState(source.kind === "cloud" ? source.doc.name : "Document");
   const [upsellOpen, setUpsellOpen] = useState(false);
+  const [editsOpen, setEditsOpen] = useState(false);
+  /** The bytes last loaded or saved, and the fingerprint they were saved under. */
+  const savedRef = useRef<{ bytes: Uint8Array | null; fp: string | null }>({ bytes: null, fp: null });
   const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const canvasArea = useRef<HTMLDivElement>(null);
+  const fitted = useRef(false);
+  const showSidebarRef = useRef(true);
 
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [loaded, setLoaded] = useState<LoadedPdf | null>(null);
@@ -115,10 +125,11 @@ export function PdfEditor({
         const local = await getLocalDoc(source.id).catch(() => undefined);
         if (!active) return;
         if (!local) {
-          setLoadError("This document is no longer on this device. Open it again from the Edit PDF tool.");
+          setLoadError("This document is no longer on this device.");
           return;
         }
         setDocName(local.name.replace(/\.pdf$/i, ""));
+        savedRef.current = { bytes: local.bytes, fp: null };
         setBytes(local.bytes);
         return;
       }
@@ -134,7 +145,9 @@ export function PdfEditor({
         setLoadError("Could not load this document.");
         return;
       }
-      setBytes(new Uint8Array(await data.arrayBuffer()));
+      const loadedBytes = new Uint8Array(await data.arrayBuffer());
+      savedRef.current = { bytes: loadedBytes, fp: null };
+      setBytes(loadedBytes);
     })();
     return () => {
       active = false;
@@ -152,6 +165,20 @@ export function PdfEditor({
         if (!active) {
           local.destroy();
           return;
+        }
+        // Size the first page to the screen before it renders, so it doesn't jump.
+        if (!fitted.current && canvasArea.current) {
+          fitted.current = true;
+          const vp = await local.getPageViewport(1, 1);
+          if (!active) return;
+          const wide = window.matchMedia("(min-width: 768px)").matches;
+          const available =
+            canvasArea.current.clientWidth -
+            (wide && showSidebarRef.current ? 176 : 0) -
+            (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
+          if (available > 0 && vp.width * 1.3 > available) {
+            setScale(Math.max(0.4, Math.min(1.3, available / vp.width)));
+          }
         }
         setLoaded(local);
         setNumPages(local.numPages);
@@ -224,21 +251,23 @@ export function PdfEditor({
       if (!bytes) return;
       setBusy(true);
       try {
-        const baked = annotations.length
-          ? await bakeAnnotations(bytes, annotations)
-          : bytes;
+        // Bake pending edits — including typed form values — first, or the
+        // page operation would silently throw them away.
+        let baked = annotations.length ? await bakeAnnotations(bytes, annotations) : bytes;
+        if (Object.keys(formValues).length) baked = await fillFormFields(baked, formValues);
         const result = await transform(new Uint8Array(baked));
         history.reset([]);
         setSelectedId(null);
+        setFormValues({});
         setBytes(new Uint8Array(result));
         toast(message, "success");
       } catch (err) {
-        toast(err instanceof Error ? err.message : "Operation failed.", "error");
+        toast(friendlyPdfError(err).message || "Operation failed.", "error");
       } finally {
         setBusy(false);
       }
     },
-    [bytes, annotations, history, toast]
+    [bytes, annotations, formValues, history, toast]
   );
 
   const handleReorder = (from: number, to: number) => {
@@ -281,27 +310,57 @@ export function PdfEditor({
   }
 
   // ---- export ----
-  const buildOutput = useCallback(async () => {
-    if (!bytes) throw new Error("Nothing to export.");
-    // No watermark on any plan: like PDFescape, the free editor is the hook.
-    let out = await bakeAnnotations(bytes, annotations);
-    if (Object.keys(formValues).length) {
-      out = await fillFormFields(out, formValues);
+  const pristine = !!bytes && bytes === savedRef.current.bytes && !annotations.length && !Object.keys(formValues).length;
+
+  /**
+   * One edit a day on Free: asks the server right before building a file.
+   * The same unchanged document again today is free, and the answer says
+   * whether the file gets the "Made with PDF Wizard" mark.
+   */
+  const authorize = useCallback(async () => {
+    if (!bytes) return null;
+    const fp =
+      pristine && savedRef.current.fp
+        ? savedRef.current.fp
+        : await documentFingerprint(bytes, JSON.stringify(annotations), JSON.stringify(formValues));
+    try {
+      const grant = await requestEdit(fp);
+      if (!grant.allowed) {
+        setEditsOpen(true);
+        return null;
+      }
+      return { fp, watermark: grant.watermark };
+    } catch (err) {
+      toast(err instanceof EditCheckError ? err.message : "Couldn't save right now. Try again.", "error");
+      return null;
     }
-    return out;
-  }, [bytes, annotations, formValues]);
+  }, [bytes, pristine, annotations, formValues, toast]);
+
+  const buildOutput = useCallback(
+    async (watermark: boolean) => {
+      if (!bytes) throw new Error("Nothing to export.");
+      let out = await bakeAnnotations(bytes, annotations, { watermark });
+      if (Object.keys(formValues).length) {
+        out = await fillFormFields(out, formValues);
+      }
+      return out;
+    },
+    [bytes, annotations, formValues]
+  );
 
   async function handleDownload() {
     setBusy(true);
     try {
-      const out = await buildOutput();
+      const grant = await authorize();
+      if (!grant) return;
+      const out = await buildOutput(grant.watermark);
       downloadBlob(
         new Blob([out.slice() as unknown as BlobPart], { type: "application/pdf" }),
         `${docName}.pdf`
       );
       toast("Downloaded.", "success");
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Export failed.", "error");
+      toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
       setBusy(false);
     }
@@ -309,9 +368,15 @@ export function PdfEditor({
 
   const handleSave = useCallback(async () => {
     if (!bytes) return;
+    if (pristine) {
+      toast(source.kind === "local" ? "Saved on this device." : "Saved to your library.", "success");
+      return;
+    }
     setBusy(true);
     try {
-      const out = await buildOutput();
+      const grant = await authorize();
+      if (!grant) return;
+      const out = await buildOutput(grant.watermark);
       const blob = new Blob([out.slice() as unknown as BlobPart], {
         type: "application/pdf",
       });
@@ -342,10 +407,13 @@ export function PdfEditor({
           .eq("id", source.doc.id);
       }
 
+      const saved = new Uint8Array(out);
+      // Downloading what was just saved is the same edit.
+      savedRef.current = { bytes: saved, fp: grant.fp };
       history.reset([]);
       setSelectedId(null);
       setFormValues({});
-      setBytes(new Uint8Array(out));
+      setBytes(saved);
       if (source.kind === "local") {
         toast("Saved on this device.", "success");
         // Offer the cloud once, after the user has saved something they value.
@@ -357,11 +425,11 @@ export function PdfEditor({
         toast("Saved to your library.", "success");
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Save failed.", "error");
+      toast(friendlyPdfError(err).message || "Save failed.", "error");
     } finally {
       setBusy(false);
     }
-  }, [bytes, buildOutput, supabase, source, docName, numPages, history, toast, tier]);
+  }, [bytes, pristine, authorize, buildOutput, supabase, source, docName, numPages, history, toast, tier]);
 
   // ---- tool switching side effects ----
   const handleToolChange = (next: ToolId) => {
@@ -382,9 +450,22 @@ export function PdfEditor({
   const fitWidth = useCallback(async () => {
     if (!loaded || !canvasArea.current) return;
     const vp = await loaded.getPageViewport(page + 1, 1);
-    const available = canvasArea.current.clientWidth - 64;
+    const available =
+      canvasArea.current.clientWidth - (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
     setScale(Math.max(0.4, Math.min(3, available / vp.baseWidth)));
   }, [loaded, page]);
+
+  // Phones: start without the page panel. The page panel and the properties
+  // sheet cover the page there, so only one is open at a time.
+  useEffect(() => {
+    if (narrow()) setShowSidebar(false);
+  }, []);
+  useEffect(() => {
+    showSidebarRef.current = showSidebar;
+  }, [showSidebar]);
+  useEffect(() => {
+    if (selectedId && narrow()) setShowSidebar(false);
+  }, [selectedId]);
 
   // ---- keyboard shortcuts ----
   useEffect(() => {
@@ -399,18 +480,26 @@ export function PdfEditor({
 
       const mod = e.metaKey || e.ctrlKey;
 
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) history.redo();
-        else history.undo();
-        return;
-      }
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
         handleSave();
         return;
       }
-      if (typing) return;
+      // Inside a text box, keys type (Ctrl+Z undoes typing, not the last
+      // annotation); Escape leaves the box so shortcuts work again.
+      if (typing) {
+        if (e.key === "Escape") {
+          target.blur();
+          setSelectedId(null);
+        }
+        return;
+      }
+      if (mod && (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        if (e.shiftKey || e.key.toLowerCase() === "y") history.redo();
+        else history.undo();
+        return;
+      }
 
       if (e.key === "Escape") {
         setTool("select");
@@ -447,11 +536,11 @@ export function PdfEditor({
   }, [dirty]);
 
   return (
-    <div className="flex h-screen flex-col bg-secondary/30">
+    <div className="flex h-dvh flex-col bg-secondary/30">
       {/* Top bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Button asChild variant="ghost" size="icon">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 sm:gap-3 sm:px-3">
+        <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+          <Button asChild variant="ghost" size="icon" className="shrink-0">
             <Link
               href={source.kind === "cloud" ? "/dashboard" : "/tools"}
               aria-label={source.kind === "cloud" ? "Back to dashboard" : "Back to tools"}
@@ -459,16 +548,22 @@ export function PdfEditor({
               <ArrowLeft />
             </Link>
           </Button>
+          {!loadError && (
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowSidebar((s) => !s)}
+            className="shrink-0"
+            onClick={() => {
+              if (!showSidebar && narrow()) setSelectedId(null);
+              setShowSidebar((s) => !s);
+            }}
             aria-label="Toggle page panel"
             aria-pressed={showSidebar}
           >
             <PanelLeft />
           </Button>
-          <span className="truncate font-semibold">{docName}</span>
+          )}
+          <h1 className="min-w-0 truncate text-base font-semibold">{docName}</h1>
           {source.kind === "local" && (
             <span
               title="Stored in this browser only"
@@ -478,13 +573,18 @@ export function PdfEditor({
             </span>
           )}
           {dirty && (
-            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-              Unsaved
+            // A dot on phones, so the document name keeps its room.
+            <span
+              title="Unsaved"
+              className="h-2 w-2 shrink-0 rounded-full bg-amber-500 sm:h-auto sm:w-auto sm:bg-amber-100 sm:px-2 sm:py-0.5 sm:text-[11px] sm:font-medium sm:text-amber-700"
+            >
+              <span className="sr-only sm:not-sr-only">Unsaved</span>
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1">
+        {!loadError && (
+        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
           <Button
             variant="ghost"
             size="icon"
@@ -511,37 +611,44 @@ export function PdfEditor({
             onClick={() => mergeInput.current?.click()}
             disabled={busy}
             title="Merge another PDF"
+            aria-label="Merge another PDF"
           >
             <FilePlus2 />
             <span className="hidden lg:inline">Merge</span>
           </Button>
-          <div className="mx-1 h-6 w-px bg-border" />
-          <Button variant="outline" onClick={handleDownload} disabled={busy || !bytes}>
+          <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
+          <Button variant="outline" onClick={handleDownload} disabled={busy || !bytes} aria-label="Download">
             <Download />
             <span className="hidden sm:inline">Download</span>
           </Button>
-          <Button onClick={handleSave} disabled={busy || !bytes}>
+          <Button onClick={handleSave} disabled={busy || !bytes} aria-label="Save">
             {busy ? <Loader2 className="animate-spin" /> : <Save />}
             <span className="hidden sm:inline">Save</span>
           </Button>
         </div>
+        )}
       </header>
 
-      <Toolbar
-        tool={tool}
-        onToolChange={handleToolChange}
-        settings={settings}
-        onSettingsChange={setSettings}
-      />
+      {!loadError && (
+        <Toolbar
+          tool={tool}
+          onToolChange={handleToolChange}
+          settings={settings}
+          onSettingsChange={setSettings}
+        />
+      )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {showSidebar && loaded && (
           <ThumbnailSidebar
             loaded={loaded}
             numPages={numPages}
             currentPage={page}
             busy={busy}
-            onGoTo={setPage}
+            onGoTo={(i) => {
+              setPage(i);
+              if (narrow()) setShowSidebar(false);
+            }}
             onReorder={handleReorder}
             onRotate={(i) => runStructural((b) => rotatePagesBy(b, [i], 90), "Page rotated.")}
             onDelete={handleDeletePage}
@@ -551,17 +658,20 @@ export function PdfEditor({
           />
         )}
 
-        <div ref={canvasArea} className="relative min-w-0 flex-1 overflow-auto">
+        <main id="main" ref={canvasArea} className="relative min-w-0 flex-1 overflow-auto">
           {loadError ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              {loadError}
+            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-muted-foreground">
+              <p>{loadError}</p>
+              <Button asChild>
+                <Link href="/tools/edit-pdf">Edit PDF</Link>
+              </Button>
             </div>
           ) : !loaded ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Loader2 className="mr-2 animate-spin" /> Loading document…
             </div>
           ) : (
-            <div className="flex justify-center p-8">
+            <div className="flex justify-center p-4 sm:p-8">
               <PageView
                 key={`${page}-${numPages}`}
                 loaded={loaded}
@@ -638,7 +748,7 @@ export function PdfEditor({
               </div>
             </div>
           )}
-        </div>
+        </main>
 
         {selected && (
           <PropertiesPanel
@@ -685,6 +795,7 @@ export function PdfEditor({
         tier={tier}
         returnTo="/dashboard"
       />
+      <UpgradeDialog open={editsOpen} onOpenChange={setEditsOpen} reason="edits" tier={tier} />
 
       {busy && (
         <div className={cn("pointer-events-none fixed inset-0 z-50 bg-background/20")} />

@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
+import { NEW_TEXT } from "@/lib/editor/factory";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "p1" | "p2";
 
@@ -179,6 +180,7 @@ export function AnnotationView({
 
   return (
     <div
+      data-ann-id={ann.id}
       style={style}
       onPointerDown={(e) => begin(e, "move")}
       onPointerMove={move}
@@ -257,22 +259,7 @@ function Content({
 }) {
   switch (ann.type) {
     case "text":
-      return (
-        <textarea
-          value={ann.text}
-          onChange={(e) => onChange({ ...ann, text: e.target.value })}
-          onPointerDown={(e) => selected && e.stopPropagation()}
-          readOnly={!interactive}
-          spellCheck={false}
-          className="h-full w-full resize-none overflow-hidden border-none bg-transparent p-0 leading-tight outline-none"
-          style={{
-            fontSize: ann.fontSize * scale,
-            color: ann.color,
-            fontWeight: ann.bold ? 700 : 400,
-            fontFamily: "Helvetica, Arial, sans-serif",
-          }}
-        />
-      );
+      return <TextBody ann={ann} scale={scale} selected={selected} interactive={interactive} onChange={onChange} />;
 
     case "draw":
       return (
@@ -443,4 +430,68 @@ function Content({
       );
     }
   }
+}
+
+/**
+ * A text box. A newly placed one takes focus with its placeholder selected,
+ * so typing replaces it instead of firing tool shortcuts.
+ */
+function TextBody({
+  ann,
+  scale,
+  selected,
+  interactive,
+  onChange,
+}: {
+  ann: Extract<Annotation, { type: "text" }>;
+  scale: number;
+  selected: boolean;
+  interactive: boolean;
+  onChange: (next: Annotation) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  // Type at 16px or more and scale down to the page, so phones don't zoom in on focus.
+  const px = ann.fontSize * scale;
+  const k = px < 16 ? 16 / px : 1;
+  useEffect(() => {
+    if (selected && interactive && ann.text === NEW_TEXT) {
+      ref.current?.focus({ preventScroll: true });
+      ref.current?.select();
+    }
+    // Only when the box first appears.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      value={ann.text}
+      // The click that placed the box ends on it; keep the placeholder selected.
+      onMouseUp={(e) => {
+        if (ann.text === NEW_TEXT && interactive) {
+          e.preventDefault();
+          e.currentTarget.select();
+        }
+      }}
+      onChange={(e) => {
+        // Grow the box as lines wrap, so earlier lines don't scroll out of view.
+        const needed = Math.ceil(e.target.scrollHeight / k / scale);
+        onChange({ ...ann, text: e.target.value, height: Math.max(ann.height, needed) });
+      }}
+      onPointerDown={(e) => selected && e.stopPropagation()}
+      readOnly={!interactive}
+      spellCheck={false}
+      data-fit-text
+      className="block resize-none overflow-hidden border-none bg-transparent p-0 leading-tight outline-none"
+      style={{
+        width: `${100 * k}%`,
+        height: `${100 * k}%`,
+        transform: k === 1 ? undefined : `scale(${1 / k})`,
+        transformOrigin: "0 0",
+        fontSize: px * k,
+        color: ann.color,
+        fontWeight: ann.bold ? 700 : 400,
+        fontFamily: "Helvetica, Arial, sans-serif",
+      }}
+    />
+  );
 }

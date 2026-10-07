@@ -21,6 +21,8 @@ import {
   MonitorPlay,
   Film,
   Music2,
+  AudioLines,
+  ListVideo,
   PenLine,
   Signature,
   Presentation,
@@ -55,7 +57,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "pptx-to-pdf" | "pptx-editor" | "slides-import";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import";
   /** Google Slides import settings: which file the deck is fetched as. */
   slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
@@ -344,6 +346,27 @@ export const TOOLS: ToolMeta[] = [
     tint: "bg-rose-100 text-rose-700",
     custom: "media",
     media: { platform: "youtube", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "youtube-to-mp3",
+    name: "YouTube to MP3",
+    title: "YouTube to MP3: save the audio",
+    description: "Save a video's audio as MP3.",
+    icon: AudioLines,
+    category: "media",
+    tint: "bg-orange-100 text-orange-700",
+    custom: "media",
+    media: { platform: "youtube", kind: "mp3" },
+  },
+  {
+    slug: "youtube-playlist",
+    name: "YouTube Playlist",
+    title: "YouTube Playlist Downloader: MP4, MP3 and CSV",
+    description: "Download a whole playlist, or export its list.",
+    icon: ListVideo,
+    category: "media",
+    tint: "bg-violet-100 text-violet-700",
+    custom: "playlist",
   },
   {
     slug: "x-to-mp4",

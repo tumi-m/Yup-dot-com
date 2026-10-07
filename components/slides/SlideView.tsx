@@ -276,39 +276,74 @@ function shadowFilter(shadow: PShape["shadow"]) {
 }
 
 /**
- * Offsets of the text rectangle inside common preset shapes, from
- * PowerPoint's preset definitions (e.g. text in an ellipse sits in the
- * inscribed rectangle, text in a triangle in its lower half).
+ * Offsets of the text rectangle inside a shape: the custom geometry's own
+ * rectangle (LibreOffice's custom shapes), or common presets' from
+ * PowerPoint's definitions (e.g. text in an ellipse sits in the inscribed
+ * rectangle, in an arrow in its shaft). Flips mirror the rectangle.
  */
-function textRect(el: PShape): { l: number; t: number; r: number; b: number } | null {
+function textRect(el: WithExtras<PShape>): { l: number; t: number; r: number; b: number } | null {
   const w = el.width;
   const h = el.height;
-  switch (el.shapType) {
-    case "ellipse":
-    case "flowChartConnector": {
-      const k = (1 - Math.SQRT1_2) / 2;
-      return { l: w * k, t: h * k, r: w * k, b: h * k };
+  const k = (name: string, def: number) => (el.keypoints?.[name] !== undefined ? el.keypoints[name] * 50000 : def);
+  let rect: { l: number; t: number; r: number; b: number } | null = null;
+  if (el.textRect) {
+    const f = el.textRect;
+    rect = { l: w * f.l, t: h * f.t, r: w * (1 - f.r), b: h * (1 - f.b) };
+  } else {
+    switch (el.shapType) {
+      case "ellipse":
+      case "flowChartConnector": {
+        const q = (1 - Math.SQRT1_2) / 2;
+        rect = { l: w * q, t: h * q, r: w * q, b: h * q };
+        break;
+      }
+      case "triangle": {
+        const adj = el.keypoints?.adj !== undefined ? el.keypoints.adj / 2 : 0.5;
+        rect = { l: (w * adj) / 2, t: h / 2, r: w - ((w * adj) / 2 + w / 2), b: 0 };
+        break;
+      }
+      case "rtTriangle":
+        rect = { l: w / 12, t: (h * 7) / 12, r: (w * 5) / 12, b: h / 12 };
+        break;
+      case "diamond":
+      case "flowChartDecision":
+        rect = { l: w / 4, t: h / 4, r: w / 4, b: h / 4 };
+        break;
+      case "roundRect": {
+        const adj = el.keypoints?.adj !== undefined ? el.keypoints.adj / 2 : 0.16667;
+        const d = Math.min(w, h) * adj * (1 - Math.SQRT1_2);
+        rect = { l: d, t: d, r: d, b: d };
+        break;
+      }
+      case "rightArrow":
+      case "leftArrow": {
+        const ss = Math.min(w, h);
+        const a1 = Math.min(100000, Math.max(0, k("adj1", 50000)));
+        const a2 = Math.min((100000 * w) / ss, Math.max(0, k("adj2", 50000)));
+        const dx1 = (ss * a2) / 100000;
+        const y1 = h / 2 - (h * a1) / 200000;
+        const head = dx1 - (y1 * dx1) / (h / 2 || 1);
+        rect = el.shapType === "rightArrow" ? { l: 0, t: y1, r: head, b: y1 } : { l: head, t: y1, r: 0, b: y1 };
+        break;
+      }
+      default:
+        return null;
     }
-    case "triangle": {
-      const adj = el.keypoints?.adj !== undefined ? el.keypoints.adj / 2 : 0.5;
-      return { l: (w * adj) / 2, t: h / 2, r: w - ((w * adj) / 2 + w / 2), b: 0 };
-    }
-    case "diamond":
-    case "flowChartDecision":
-      return { l: w / 4, t: h / 4, r: w / 4, b: h / 4 };
-    case "roundRect": {
-      const adj = el.keypoints?.adj !== undefined ? el.keypoints.adj / 2 : 0.16667;
-      const d = Math.min(w, h) * adj * (1 - Math.SQRT1_2);
-      return { l: d, t: d, r: d, b: d };
-    }
-    default:
-      return null;
   }
+  if (el.isFlipH) rect = { ...rect, l: rect.r, r: rect.l };
+  if (el.isFlipV) rect = { ...rect, t: rect.b, b: rect.t };
+  // The text layer of a vertically flipped shape is turned 180°, which
+  // swaps both pairs again.
+  if (el.isFlipV) rect = { l: rect.r, r: rect.l, t: rect.b, b: rect.t };
+  return rect;
 }
 
 function TextLayer({ el, flipV, linkColor }: { el: WithExtras<PText | PShape>; flipV?: boolean; linkColor?: string }) {
   const html = textHtml(el, linkColor);
-  const vertical = "isVertical" in el && el.isVertical;
+  const vert = el.vert ?? ("isVertical" in el && el.isVertical ? "eaVert" : undefined);
+  // vert270 reads bottom to top: vertical text turned half a turn.
+  const vertical = !!vert && vert !== "horz";
+  const turned = !!flipV !== (vert === "vert270");
   if (!html) return null;
   const base = el.textInset ?? { l: 7.2, t: 3.6, r: 7.2, b: 3.6 };
   const geo = el.type === "shape" ? textRect(el as PShape) : null;
@@ -319,7 +354,7 @@ function TextLayer({ el, flipV, linkColor }: { el: WithExtras<PText | PShape>; f
   const justify = anchor === "ctr" ? "center" : anchor === "b" ? "flex-end" : "flex-start";
   return (
     <div
-      data-rotated={flipV || vertical ? "" : undefined}
+      data-rotated={turned || vertical ? "" : undefined}
       style={{
         position: "absolute",
         inset: 0,
@@ -327,7 +362,7 @@ function TextLayer({ el, flipV, linkColor }: { el: WithExtras<PText | PShape>; f
         flexDirection: "column",
         justifyContent: justify,
         padding: `${inset.t}px ${inset.r}px ${inset.b}px ${inset.l}px`,
-        transform: flipV ? "rotate(180deg)" : undefined,
+        transform: turned ? "rotate(180deg)" : undefined,
         writingMode: vertical ? "vertical-rl" : undefined,
         pointerEvents: "none",
       }}
@@ -339,11 +374,100 @@ function TextLayer({ el, flipV, linkColor }: { el: WithExtras<PText | PShape>; f
           whiteSpace: el.wrap === false ? "pre" : "pre-wrap",
           overflowWrap: el.wrap === false ? "normal" : "break-word",
           flexShrink: 0,
+          // Columns fill one after the other, like PowerPoint's.
+          ...(el.columns
+            ? { columnCount: el.columns.count, columnGap: el.columns.gap, columnFill: "auto" as const, flexGrow: 1, minHeight: 0 }
+            : {}),
         }}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
   );
+}
+
+/**
+ * Presets pptxtojson gets wrong, from PowerPoint's preset definitions:
+ * bentConnector2's corner, bentConnector4/5 and curvedConnector2-5 (drawn
+ * as a straight diagonal), and the left/right arrows' head (half the
+ * width instead of the short side's half).
+ */
+export function connectorPath(el: { shapType?: string; width: number; height: number; keypoints?: Record<string, number> }): string | null {
+  const w = el.width;
+  const h = el.height;
+  const adj = (name: string) => (el.keypoints?.[name] !== undefined ? el.keypoints[name] / 2 : 0.5);
+  const f = (n: number) => +n.toFixed(3);
+  const P = (x: number, y: number) => `${f(x)} ${f(y)}`;
+  switch (el.shapType) {
+    case "rightArrow":
+    case "leftArrow": {
+      const ss = Math.min(w, h);
+      if (!(ss > 0)) return null;
+      const raw = (name: string) => (el.keypoints?.[name] !== undefined ? el.keypoints[name] * 50000 : 50000);
+      const a1 = Math.min(100000, Math.max(0, raw("adj1")));
+      const a2 = Math.min((100000 * w) / ss, Math.max(0, raw("adj2")));
+      const dx1 = (ss * a2) / 100000;
+      const y1 = h / 2 - (h * a1) / 200000;
+      const y2 = h / 2 + (h * a1) / 200000;
+      if (el.shapType === "rightArrow") {
+        const x1 = w - dx1;
+        return `M ${P(0, y1)} L ${P(x1, y1)} L ${P(x1, 0)} L ${P(w, h / 2)} L ${P(x1, h)} L ${P(x1, y2)} L ${P(0, y2)} Z`;
+      }
+      return `M ${P(0, h / 2)} L ${P(dx1, 0)} L ${P(dx1, y1)} L ${P(w, y1)} L ${P(w, y2)} L ${P(dx1, y2)} L ${P(dx1, h)} Z`;
+    }
+    case "bentConnector2":
+      return `M ${P(0, 0)} L ${P(w, 0)} L ${P(w, h)}`;
+    case "bentConnector4": {
+      const x1 = w * adj("adj1");
+      const y2 = h * adj("adj2");
+      return `M ${P(0, 0)} L ${P(x1, 0)} L ${P(x1, y2)} L ${P(w, y2)} L ${P(w, h)}`;
+    }
+    case "bentConnector5": {
+      const x1 = w * adj("adj1");
+      const y2 = h * adj("adj2");
+      const x3 = w * adj("adj3");
+      return `M ${P(0, 0)} L ${P(x1, 0)} L ${P(x1, y2)} L ${P(x3, y2)} L ${P(x3, h)} L ${P(w, h)}`;
+    }
+    case "curvedConnector2":
+      return `M ${P(0, 0)} C ${P(w / 2, 0)} ${P(w, h / 2)} ${P(w, h)}`;
+    case "curvedConnector3": {
+      const x2 = w * adj("adj1");
+      const x1 = x2 / 2;
+      const x3 = (w + x2) / 2;
+      return `M ${P(0, 0)} C ${P(x1, 0)} ${P(x2, h / 4)} ${P(x2, h / 2)} C ${P(x2, (h * 3) / 4)} ${P(x3, h)} ${P(w, h)}`;
+    }
+    case "curvedConnector4": {
+      const x2 = w * adj("adj1");
+      const x1 = x2 / 2;
+      const x3 = (w + x2) / 2;
+      const x4 = (x2 + x3) / 2;
+      const x5 = (x3 + w) / 2;
+      const y4 = h * adj("adj2");
+      const y1 = y4 / 2;
+      const y2 = y1 / 2;
+      const y3 = (y1 + y4) / 2;
+      const y5 = (h + y4) / 2;
+      return `M ${P(0, 0)} C ${P(x1, 0)} ${P(x2, y2)} ${P(x2, y1)} C ${P(x2, y3)} ${P(x4, y4)} ${P(x3, y4)} C ${P(x5, y4)} ${P(w, y5)} ${P(w, h)}`;
+    }
+    case "curvedConnector5": {
+      const x3 = w * adj("adj1");
+      const x6 = w * adj("adj3");
+      const x1 = (x3 + x6) / 2;
+      const x2 = x3 / 2;
+      const x4 = (x3 + x1) / 2;
+      const x5 = (x6 + x1) / 2;
+      const x7 = (x6 + w) / 2;
+      const y4 = h * adj("adj2");
+      const y1 = y4 / 2;
+      const y2 = y1 / 2;
+      const y3 = (y1 + y4) / 2;
+      const y5 = (h + y4) / 2;
+      const y6 = (y5 + y4) / 2;
+      const y7 = (y5 + h) / 2;
+      return `M ${P(0, 0)} C ${P(x2, 0)} ${P(x3, y2)} ${P(x3, y1)} C ${P(x3, y3)} ${P(x4, y4)} ${P(x1, y4)} C ${P(x5, y4)} ${P(x6, y6)} ${P(x6, y5)} C ${P(x6, y7)} ${P(x7, h)} ${P(w, h)}`;
+    }
+    default:
+      return null;
+  }
 }
 
 function rectPath(w: number, h: number) {
@@ -355,7 +479,7 @@ function ShapeBody({ el, id, linkColor }: { el: WithExtras<PShape | PText>; id: 
   const h = el.height;
   const isShape = el.type === "shape";
   const lineLike = isShape && ((el as PShape).strokeOnly || LINE_SHAPES.test((el as PShape).shapType ?? ""));
-  const d = isShape && (el as PShape).path ? (el as PShape).path! : rectPath(w, h);
+  const d = (isShape && connectorPath(el as PShape)) || (isShape && (el as PShape).path ? (el as PShape).path! : rectPath(w, h));
   const vb = (isShape && (el as PShape).pathViewBox) || { x: 0, y: 0, width: w, height: h };
   const { paint, defs, opacity } = lineLike ? { paint: "none" } as ReturnType<typeof svgPaint> : svgPaint(el.fill, `${id}-f`);
   const stroke = el.borderWidth > 0 && el.borderColor ? el.borderColor : "none";
@@ -448,6 +572,7 @@ function ImageBody({ el }: { el: PImage }) {
             maxHeight: "none",
             transform: flipTransform(el.isFlipH, el.isFlipV),
             filter,
+            opacity: (el as WithExtras<PImage>).opacity,
           }}
         />
       ) : (
@@ -470,8 +595,10 @@ function ImageBody({ el }: { el: PImage }) {
 function TableBody({ el, ctx }: { el: WithExtras<PTable>; ctx: Ctx }) {
   const rows = el.data ?? [];
   const cols = el.colWidths?.length ? el.colWidths : [el.width];
-  const hasOwnFill = rows.some((r) => r.some((c) => c.fillColor));
-  const look = hasOwnFill ? null : builtInTableLook(el.tableFlags, ctx.accents, rows.length, cols.length);
+  // Styles defined in the file are applied by pptxtojson; built-in ones (only
+  // referenced by GUID) are ours, under any fill a cell sets itself.
+  const flags = el.tableFlags;
+  const look = flags?.styleInFile ? null : builtInTableLook(flags, ctx.accents, rows.length, cols.length);
   const border = (b?: { borderColor: string; borderWidth: number; borderType: string }) =>
     b && b.borderWidth > 0 ? `${b.borderWidth}px ${b.borderType === "solid" ? "solid" : b.borderType} ${b.borderColor}` : undefined;
   return (
@@ -497,6 +624,7 @@ function TableBody({ el, ctx }: { el: WithExtras<PTable>; ctx: Ctx }) {
             {row.map((cell, ci) => {
               if (cell.hMerge || cell.vMerge) return null;
               const lk = look?.(ri, ci);
+              const ownFill = flags?.ownFill?.[ri]?.[ci] ?? !!cell.fillColor;
               const cb = cell.borders ?? {};
               const fallbackBorder = lk?.border ? `${lk.border.width}px solid ${lk.border.color}` : undefined;
               return (
@@ -507,7 +635,7 @@ function TableBody({ el, ctx }: { el: WithExtras<PTable>; ctx: Ctx }) {
                   style={{
                     padding: "3.6px 7.2px",
                     verticalAlign: cell.vAlign === "mid" ? "middle" : cell.vAlign === "down" ? "bottom" : "top",
-                    backgroundColor: cell.fillColor || lk?.fill,
+                    backgroundColor: ownFill ? cell.fillColor : cell.fillColor || lk?.fill,
                     color: cell.fontColor || lk?.color,
                     fontWeight: cell.fontBold || lk?.bold ? 700 : undefined,
                     borderTop: border(cb.top) ?? fallbackBorder,
@@ -548,6 +676,35 @@ function label(el: DeckElement): string {
   return text ? `${name}: ${text.slice(0, 60)}` : name;
 }
 
+const flippedKids = new WeakMap<object, DeckElement[]>();
+
+/**
+ * A flipped group's children, with the flip composed into each child (its
+ * place mirrored in the group, its own flip toggled, its rotation reversed)
+ * as PowerPoint does, so text stays readable instead of being mirrored.
+ */
+function groupChildren(g: DeckGroup): DeckElement[] {
+  const kids = g.elements as DeckElement[];
+  const fh = !!g.isFlipH;
+  const fv = !!g.isFlipV;
+  if (!fh && !fv) return kids;
+  const hit = flippedKids.get(g);
+  if (hit) return hit;
+  const out = kids.map((c) => {
+    const k = c as DeckElement & { isFlipH?: boolean; isFlipV?: boolean; rotate?: number };
+    return {
+      ...k,
+      left: fh ? g.width - k.left - k.width : k.left,
+      top: fv ? g.height - k.top - k.height : k.top,
+      isFlipH: fh ? !k.isFlipH : k.isFlipH,
+      isFlipV: fv ? !k.isFlipV : k.isFlipV,
+      rotate: fh !== fv && k.rotate ? -k.rotate : k.rotate,
+    } as DeckElement;
+  });
+  flippedKids.set(g, out);
+  return out;
+}
+
 function renderElement(el: DeckElement, ctx: Ctx, key: string): ReactNode {
   const id = `${ctx.prefix}-${key}`;
   let body: ReactNode;
@@ -564,7 +721,7 @@ function renderElement(el: DeckElement, ctx: Ctx, key: string): ReactNode {
         body = <TableBody el={el} ctx={ctx} />;
         break;
       case "chart":
-        body = <ChartView chart={el as Chart} />;
+        body = <ChartView chart={el as Chart} info={el.chartInfo} accents={ctx.accents} />;
         break;
       case "diagram": {
         const dg = el as Diagram;
@@ -593,7 +750,7 @@ function renderElement(el: DeckElement, ctx: Ctx, key: string): ReactNode {
         break;
       case "group": {
         const g = el as DeckGroup;
-        body = (g.elements as DeckElement[]).map((child, i) => renderElement(child, ctx, `${key}.${i}`));
+        body = groupChildren(g).map((child, i) => renderElement(child, ctx, `${key}.${i}`));
         break;
       }
       default:
@@ -604,8 +761,7 @@ function renderElement(el: DeckElement, ctx: Ctx, key: string): ReactNode {
   }
 
   const rotate = "rotate" in el && el.rotate ? el.rotate : 0;
-  const groupFlip = el.type === "group" ? flipTransform((el as DeckGroup).isFlipH, (el as DeckGroup).isFlipV) : undefined;
-  const transform = [rotate ? `rotate(${rotate}deg)` : "", groupFlip ?? ""].filter(Boolean).join(" ") || undefined;
+  const transform = rotate ? `rotate(${rotate}deg)` : undefined;
   const selectable = ctx.interactive && ctx.layer === "slide" && el.type !== "group";
   const selected = selectable && ctx.selectedId === el.id;
 

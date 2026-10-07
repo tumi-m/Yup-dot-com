@@ -1,43 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "motion/react";
 import { ArrowRight } from "lucide-react";
 import { getTool, TOOLS } from "@/lib/tools";
-import { EASE, Stagger, StaggerItem } from "@/components/motion/primitives";
+import { Reveal } from "@/components/motion/primitives";
 import { cn } from "@/lib/utils";
 
 export function ToolHeader({ slug }: { slug: string }) {
   const tool = getTool(slug)!;
+  // CSS entrances: the title is the page's largest text and must paint
+  // without waiting for hydration.
   return (
     <div className="text-center">
-      <motion.div
-        initial={{ scale: 0.4, rotate: -25, opacity: 0 }}
-        animate={{ scale: 1, rotate: 0, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 300, damping: 16 }}
-        className="relative mx-auto h-16 w-16"
-      >
+      <div className="relative mx-auto h-16 w-16 motion-safe:animate-pop">
         <span aria-hidden className={cn("absolute inset-0 rounded-2xl opacity-60 blur-xl motion-safe:animate-pulse-slow", tool.tint)} />
         <span className={cn("relative flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg", tool.tint)}>
           <tool.icon className="h-8 w-8" />
         </span>
-      </motion.div>
-      <motion.h1
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: EASE, delay: 0.1 }}
-        className="mt-5 text-4xl font-extrabold tracking-tight"
-      >
+      </div>
+      <h1 className="mt-5 text-4xl font-extrabold tracking-tight motion-safe:animate-rise [animation-delay:0.05s]">
         {tool.name}
-      </motion.h1>
-      <motion.p
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: EASE, delay: 0.2 }}
-        className="mx-auto mt-3 max-w-lg text-muted-foreground"
-      >
+      </h1>
+      <p className="mx-auto mt-3 max-w-lg text-muted-foreground motion-safe:animate-rise [animation-delay:0.1s]">
         {tool.description}
-      </motion.p>
+      </p>
     </div>
   );
 }
@@ -54,12 +40,12 @@ export function RelatedTools({ slug }: { slug: string }) {
   return (
     <section className="mt-20">
       <h2 className="mb-5 text-center text-lg font-semibold">More tools</h2>
-      <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {related.map((t) => (
-          <StaggerItem key={t.slug}>
+          <Reveal key={t.slug}>
             <Link
               href={`/tools/${t.slug}`}
-              className="group flex items-center gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+              className="group flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:-translate-y-[3px] hover:border-primary/40 hover:shadow-md"
             >
               <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", t.tint)}>
                 <t.icon className="h-4 w-4" />
@@ -67,9 +53,9 @@ export function RelatedTools({ slug }: { slug: string }) {
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
               <ArrowRight className="h-4 w-4 -translate-x-1 text-muted-foreground opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
             </Link>
-          </StaggerItem>
+          </Reveal>
         ))}
-      </Stagger>
+      </div>
     </section>
   );
 }

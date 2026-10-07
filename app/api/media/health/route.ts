@@ -25,7 +25,9 @@ export async function GET() {
       body.jsRuntime === null || body.jsRuntime === false
         ? "The worker has no JavaScript runtime (Deno), so YouTube will fail. Rebuild it from the current Dockerfile."
         : null;
-    return Response.json({ x: "ready", youtube: { ready: !problem, worker: config.url, problem, ...body } });
+    // Single videos still work on an older worker; only playlists need the update.
+    const playlists = body.playlists === true ? "ready" : "Redeploy the worker from media-worker/ to list playlists.";
+    return Response.json({ x: "ready", youtube: { ready: !problem, worker: config.url, problem, ...body, playlists } });
   } catch {
     return Response.json({
       x: "ready",

@@ -19,7 +19,7 @@ export default async function ToolsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
-      <main className="flex-1">
+      <main id="main" className="flex-1">
         <section className="relative overflow-hidden border-b border-border bg-gradient-to-b from-primary/10 to-background">
           <Starfield />
           <div className="container relative py-16 text-center">

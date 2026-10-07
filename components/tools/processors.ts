@@ -1,25 +1,8 @@
 import { OCR_LANGUAGES } from "@/lib/pdf/ocr-languages";
-import {
-  mergeTool,
-  splitTool,
-  compressTool,
-  pdfToImagesTool,
-  imagesToPdfTool,
-  rotateTool,
-  pageNumbersTool,
-  watermarkTool,
-  pdfToTextTool,
-  pdfToMarkdownTool,
-  extractTablesTool,
-  pdfToChunksTool,
-  protectTool,
-  unlockTool,
-  ocrTool,
-  pdfToWordTool,
-  pdfToExcelTool,
-  type ToolContext,
-  type ToolFile,
-} from "@/lib/pdf/toolkit";
+import type { ToolContext, ToolFile } from "@/lib/pdf/toolkit";
+
+/** pdf-lib and pdf.js load when a spell is cast, not with the page. */
+const kit = () => import("@/lib/pdf/toolkit");
 
 export type FieldType = "select" | "text" | "password" | "range" | "color";
 
@@ -63,7 +46,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: true,
     minFiles: 2,
     fields: [],
-    run: (files) => mergeTool(files),
+    run: async (files) => (await kit()).mergeTool(files),
   },
   "split-pdf": {
     accept: "application/pdf",
@@ -89,7 +72,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         showIf: { key: "mode", value: "ranges" },
       },
     ],
-    run: (files, o) => splitTool(files, { mode: o.mode, ranges: o.ranges }),
+    run: async (files, o) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }),
   },
   "rotate-pdf": {
     accept: "application/pdf",
@@ -108,7 +91,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: (files, o) => rotateTool(files, { angle: o.angle }),
+    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
   },
   "compress-pdf": {
     reportsSizeChange: true,
@@ -128,7 +111,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: (files, o) => compressTool(files, { quality: o.quality }),
+    run: async (files, o, ctx) => (await kit()).compressTool(files, { quality: o.quality }, ctx),
   },
   "pdf-to-jpg": {
     accept: "application/pdf",
@@ -157,7 +140,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         showIf: { key: "format", value: "jpeg" },
       },
     ],
-    run: (files, o) => pdfToImagesTool(files, { format: o.format, quality: o.quality }),
+    run: async (files, o, ctx) => (await kit()).pdfToImagesTool(files, { format: o.format, quality: o.quality }, ctx),
   },
   "jpg-to-pdf": {
     accept: "image/jpeg,image/png",
@@ -186,21 +169,21 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: (files, o) => imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }),
+    run: async (files, o) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }),
   },
   "pdf-to-text": {
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
-    run: (files) => pdfToTextTool(files),
+    run: async (files, _o, ctx) => (await kit()).pdfToTextTool(files, ctx),
   },
   "pdf-to-markdown": {
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
-    run: (files) => pdfToMarkdownTool(files),
+    run: async (files, _o, ctx) => (await kit()).pdfToMarkdownTool(files, ctx),
   },
   "extract-tables": {
     accept: "application/pdf",
@@ -208,7 +191,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     minFiles: 1,
     zipName: "tables.zip",
     fields: [],
-    run: (files) => extractTablesTool(files),
+    run: async (files, _o, ctx) => (await kit()).extractTablesTool(files, ctx),
   },
   "pdf-to-chunks": {
     accept: "application/pdf",
@@ -227,14 +210,14 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: (files, o) => pdfToChunksTool(files, { maxChars: o.maxChars }),
+    run: async (files, o, ctx) => (await kit()).pdfToChunksTool(files, { maxChars: o.maxChars }, ctx),
   },
   "pdf-to-word": {
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
-    run: (files) => pdfToWordTool(files),
+    run: async (files, _o, ctx) => (await kit()).pdfToWordTool(files, ctx),
   },
   "pdf-to-pptx": {
     accept: "application/pdf",
@@ -262,7 +245,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: false,
     minFiles: 1,
     fields: [],
-    run: (files) => pdfToExcelTool(files),
+    run: async (files, _o, ctx) => (await kit()).pdfToExcelTool(files, ctx),
   },
   "ocr-pdf": {
     accept: "application/pdf",
@@ -288,7 +271,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     note: "Runs on your device.",
-    run: (files, o, ctx) => ocrTool(files, { lang: o.lang, output: o.output }, ctx),
+    run: async (files, o, ctx) => (await kit()).ocrTool(files, { lang: o.lang, output: o.output }, ctx),
   },
   "protect-pdf": {
     accept: "application/pdf",
@@ -319,8 +302,8 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     note: "Lost passwords can't be recovered.",
-    run: (files, o) =>
-      protectTool(files, {
+    run: async (files, o) =>
+      (await kit()).protectTool(files, {
         password: o.password,
         confirm: o.confirm,
         printing: o.printing,
@@ -332,7 +315,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: false,
     minFiles: 1,
     fields: [{ key: "password", label: "Current password", type: "password", default: "" }],
-    run: (files, o) => unlockTool(files, { password: o.password }),
+    run: async (files, o) => (await kit()).unlockTool(files, { password: o.password }),
   },
   "page-numbers": {
     accept: "application/pdf",
@@ -372,8 +355,8 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: (files, o) =>
-      pageNumbersTool(files, {
+    run: async (files, o) =>
+      (await kit()).pageNumbersTool(files, {
         position: o.position,
         format: o.format,
         fontSize: o.fontSize,
@@ -407,8 +390,8 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         step: 0.05,
       },
     ],
-    run: (files, o) =>
-      watermarkTool(files, {
+    run: async (files, o) =>
+      (await kit()).watermarkTool(files, {
         text: o.text,
         fontSize: o.fontSize,
         color: o.color,

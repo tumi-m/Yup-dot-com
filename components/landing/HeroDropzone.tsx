@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowRight, FileText, Presentation, UploadCloud, X } fro
 import { Button } from "@/components/ui/button";
 import { fileToHandoff, setHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
-import { EASE, SPRING } from "@/components/motion/primitives";
+import { EASE, SPRING, SPRING_POP } from "@/components/motion/primitives";
 import { cn, formatBytes } from "@/lib/utils";
 
 const PDF_ACTIONS = [
@@ -114,15 +114,19 @@ export function HeroDropzone({
               }}
             />
             <div className="flex flex-col items-center gap-4 sm:flex-row">
-              <motion.div
-                animate={dragging ? { scale: 1.15, y: -4 } : { y: [0, -5, 0] }}
-                transition={dragging ? SPRING : { duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30"
-              >
-                <UploadCloud className="h-6 w-6" />
+              {/* Same treatment as the shared Dropzone: bob at rest, pop on drag. */}
+              <motion.div animate={{ scale: dragging ? 1.12 : 1 }} transition={SPRING_POP} className="shrink-0">
+                <div
+                  className={cn(
+                    "flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30",
+                    !dragging && "motion-safe:animate-bob"
+                  )}
+                >
+                  <UploadCloud className="h-6 w-6" />
+                </div>
               </motion.div>
               <p className="flex-1 text-center text-lg font-semibold sm:text-left">
-                {dragging ? "Release to begin" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
+                {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
               </p>
               <Button
                 ref={chooseRef}

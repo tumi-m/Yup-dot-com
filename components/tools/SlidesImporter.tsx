@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
-import type { Tier } from "@/lib/limits";
+import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { formatBytes } from "@/lib/utils";
 
 type Phase = "input" | "fetching" | "ready";
@@ -21,6 +21,8 @@ interface Fetched {
   size: number;
   blob: Blob;
   format: SlidesFormat;
+  /** Saved to the device (not when it was fetched for the editor). */
+  saved?: boolean;
 }
 
 function saveAs(href: string, name: string) {
@@ -59,6 +61,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   const alive = useRef(true);
   const blobUrl = useRef<string | null>(null);
   const autoRan = useRef(false);
+  const abort = useRef<AbortController | null>(null);
+  const current = useRef<object | null>(null);
 
   const releaseBlob = () => {
     if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
@@ -68,7 +72,13 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     alive.current = true;
     return () => {
       alive.current = false;
-      releaseBlob();
+      // Only when the unmount is real: StrictMode remounts at once, and the
+      // import started from ?url= must survive that.
+      setTimeout(() => {
+        if (alive.current) return;
+        abort.current?.abort();
+        releaseBlob();
+      }, 0);
     };
   }, []);
 
@@ -78,7 +88,12 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   async function fetchDeck(link: string): Promise<Fetched | null> {
     setProgress({ received: 0, total: 0 });
     setPhase("fetching");
-    const res = await fetch(`/api/slides/export?url=${encodeURIComponent(link)}&format=${format}`).catch(() => null);
+    const controller = new AbortController();
+    abort.current = controller;
+    const res = await fetch(`/api/slides/export?url=${encodeURIComponent(link)}&format=${format}`, {
+      signal: controller.signal,
+    }).catch(() => null);
+    if (controller.signal.aborted) return null;
     if (!res?.ok) {
       const data = await res?.json().catch(() => null);
       setError({
@@ -101,10 +116,12 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         if (alive.current) setProgress({ received, total });
       }
     } catch {
+      if (controller.signal.aborted) return null;
       setError({ message: "The download was interrupted. Try again." });
       setPhase("input");
       return null;
     }
+    if (controller.signal.aborted) return null;
     const blob = new Blob(chunks as BlobPart[], { type: SLIDES_MIME[format] });
     releaseBlob();
     blobUrl.current = URL.createObjectURL(blob);
@@ -128,15 +145,25 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
       return;
     }
     busy.current = true;
+    const mine = {};
+    current.current = mine;
     setAction(which);
     try {
       const f = await fetchDeck(link.trim());
-      if (!f || !alive.current) return;
+      if (!f || !alive.current || current.current !== mine) return;
       setFile(f);
       if (which === "edit") {
-        await edit(f, auto);
+        const max = limitsFor(tier).maxFileBytes;
+        if (f.size <= max) {
+          await edit(f, auto);
+          return;
+        }
+        // Too big to edit on this plan: keep the file, say why.
+        setError({ message: `Editing takes files up to ${formatLimitBytes(max)} on your plan.`, upgrade: true });
+        setPhase("ready");
         return;
       }
+      setFile({ ...f, saved: true });
       setPhase("ready");
       saveAs(f.href, f.name);
     } catch {
@@ -145,7 +172,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         setPhase("input");
       }
     } finally {
-      busy.current = false;
+      // A cancelled run has already handed the form back.
+      if (current.current === mine) busy.current = false;
     }
   }
 
@@ -161,6 +189,15 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     void run(format === "pptx" && params.get("then") === "edit" ? "edit" : "download", link, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function cancel() {
+    abort.current?.abort();
+    abort.current = null;
+    current.current = null;
+    busy.current = false;
+    setError(null);
+    setPhase("input");
+  }
 
   async function paste() {
     try {
@@ -245,35 +282,42 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
             </AnimatePresence>
 
             {phase === "fetching" ? (
-              <div className="mt-4" aria-live="polite" role="status">
+              <div className="mt-4">
                 <div className="relative h-3 overflow-hidden rounded-full bg-secondary">
                   {fraction > 0.02 ? (
                     <motion.div
+                      key="bar"
                       className="h-full rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400"
                       animate={{ width: `${Math.max(4, fraction * 100)}%` }}
                       transition={{ ease: "easeOut", duration: 0.4 }}
                     />
                   ) : (
                     <motion.div
+                      key="shimmer"
                       className="absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
                       animate={{ x: ["-100%", "300%"] }}
                       transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
                     />
                   )}
                 </div>
-                <p className="mt-2 text-center text-sm text-muted-foreground">
-                  {progress.received ? "Downloading…" : "Exporting from Google…"}
-                  {progress.received > 0 && (
-                    <span className="ml-1 tabular-nums">
-                      {formatBytes(progress.received)}
-                      {progress.total ? ` / ${formatBytes(progress.total)}` : ""}
-                    </span>
-                  )}
-                </p>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <p className="text-sm text-muted-foreground" aria-live="polite" role="status">
+                    {progress.received ? "Downloading…" : "Exporting from Google…"}
+                    {progress.received > 0 && (
+                      <span className="ml-1 tabular-nums">
+                        {formatBytes(progress.received)}
+                        {progress.total ? ` / ${formatBytes(progress.total)}` : ""}
+                      </span>
+                    )}
+                  </p>
+                  <Button type="button" variant="ghost" size="sm" className="tap" onClick={cancel} data-testid="cancel-import">
+                    Cancel
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="flex-1">
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} tabIndex={-1} className="flex-1">
                   <Button type="submit" size="lg" className="h-12 w-full shadow-lg shadow-primary/25" disabled={!url.trim()}>
                     <Download /> Download {ext}
                   </Button>
@@ -308,17 +352,17 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
                 <Presentation className="h-8 w-8" />
               </motion.div>
             </div>
-            <h2 className="mt-5 text-2xl font-bold">Downloaded</h2>
+            <h2 className="mt-5 text-2xl font-bold">{file.saved ? "Downloaded" : "Ready"}</h2>
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground" data-testid="slides-file">
               {file.name} · {formatBytes(file.size)}
             </p>
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="outline">
                 <a href={file.href} download={file.name} rel="noopener">
-                  <Download /> Download again
+                  <Download /> {file.saved ? "Download again" : "Download"}
                 </a>
               </Button>
-              {file.format === "pptx" && (
+              {file.format === "pptx" && file.size <= limitsFor(tier).maxFileBytes && (
                 <Button size="lg" variant="outline" onClick={() => edit(file).catch(() => setError({ message: "Couldn't open this deck for editing. Try again." }))}>
                   <PenLine /> Edit
                 </Button>
