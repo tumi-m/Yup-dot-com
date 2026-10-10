@@ -169,7 +169,8 @@ worker, the Tesseract engine, and all seven OCR language models from
 served from the app's own origin with `immutable` caching. So:
 
 - the tools keep working behind firewalls, strict CSPs, and CDN outages;
-- the browser tools make **zero third-party requests**;
+- the browser tools make **zero third-party requests** (Google Analytics, when
+  configured, loads only after a visitor accepts cookies);
 - an upgrade can never pair a new pdf.js API with a stale cached worker
   (pdf.js refuses to run on a mismatch).
 
@@ -227,7 +228,8 @@ disambiguation, baking every annotation type, the form detect/fill/flatten
 round-trip, protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, and Word/Excel output (verified with python-docx and
 openpyxl). Others cover PPTX parsing, editing and rendering, Google Slides
-and video links, usage limits, the watermark, billing and the AI client.
+and video links, usage limits, the watermark, billing, the AI client, the
+legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
 with outputs checked by independent readers.
 
@@ -272,6 +274,7 @@ pdf-wizard/
 │   ├── page.tsx                 ← Marketing landing (wizard themed)
 │   ├── tools/                   ← Tools hub + dynamic /tools/[slug] pages
 │   ├── pricing/                 ← Public pricing
+│   ├── privacy, terms, refunds, contact/ ← Legal pages (details from env)
 │   ├── login, signup, auth/     ← Auth screens + callbacks
 │   ├── dashboard/               ← Document library (auth-gated)
 │   ├── editor/[id]/             ← The PDF editor
@@ -379,6 +382,14 @@ Variables** and redeploy:
 | `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |
 | `AI_BURST_PER_MINUTE` | Optional. AI requests per minute per user or guest (default 6) |
 | `AI_GLOBAL_DAILY_LIMIT` | Optional. AI answers per day across the whole site (default 3000) |
+| `NEXT_PUBLIC_LEGAL_NAME` | Legal pages: the person or company responsible (POPIA "responsible party", shown as the Information Officer) |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | Legal and contact pages: where privacy, refund and copyright requests go |
+| `NEXT_PUBLIC_BUSINESS_ADDRESS` | Legal and contact pages: physical address (Paystack and POPIA expect one) |
+| `NEXT_PUBLIC_CONTACT_PHONE` | Optional. Contact page phone number |
+| `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
+| `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Optional. Search Console HTML-tag token, if you don't verify by DNS |
+| `NEXT_PUBLIC_BING_SITE_VERIFICATION` | Optional. Bing Webmaster Tools `msvalidate.01` token |
 
 Optional:
 
@@ -391,6 +402,59 @@ Optional:
 Then run [`supabase/schema.sql`](supabase/schema.sql) in your Supabase project
 (on an existing project, run the files in [`supabase/migrations/`](supabase/migrations))
 and set up Paystack as below.
+
+## Legal pages, analytics and search
+
+`/privacy`, `/terms`, `/refunds` and `/contact` are written for this product
+and read the business details from the `NEXT_PUBLIC_*` variables above
+(`lib/business.ts`). In development a missing detail shows as a yellow
+placeholder; in production it is simply left out, so set them before
+applying to Paystack. Change `LEGAL_UPDATED` in `lib/business.ts` whenever you
+change a policy.
+
+**Before relying on them, have a South African attorney review the pages.**
+They are a careful starting point, not legal advice. Check in particular:
+
+- the promises they make on your behalf, and change any you don't want: reply
+  within 2 working days; delete accounts within 30 days of closing; a full
+  refund within 7 days of a first payment if no paid feature was used;
+  refunds sent within 5 working days; 30 days' notice of price changes;
+  liability capped at 12 months' fees;
+- the Information Regulator's contact details on `/privacy`
+  (inforegulator.org.za, POPIAComplaints@inforegulator.org.za);
+- that you have accepted each provider's data processing terms (Vercel,
+  Supabase, Paystack, Ollama, Google, the media worker host, your email
+  sender): the privacy policy relies on them for transfers outside South
+  Africa;
+- the ECT Act asks for your legal status too; while unregistered you can set
+  `NEXT_PUBLIC_LEGAL_NAME="Your Name (sole proprietor)"`.
+
+**Google Analytics 4.** Set `NEXT_PUBLIC_GA_MEASUREMENT_ID` (Production
+only) and redeploy. Consent Mode v2 defaults (all denied) are set in `<head>`;
+a small banner asks, and `gtag.js` loads only after **Accept** (Consent Mode
+"basic"). The choice is kept in the browser; **Cookie settings** in the footer
+reopens the banner, and declining later deletes the `_ga` cookies. In GA:
+
+- keep Enhanced measurement → Page views → **Page changes based on browser
+  history events** on (the default): client-side navigations are counted by
+  it, and the app sends no page views of its own, so each is counted once;
+- set Data retention to 14 months, leave Google signals off, add
+  `paystack.com` and `checkout.paystack.com` to *List unwanted referrals*, and
+  mark `sign_up` and `purchase` as key events.
+
+Events: `sign_up`, `begin_checkout` and `purchase` (ZAR; `transaction_id` is
+the Paystack reference, sent once per reference from the return page), and
+`tool_used` (`tool`) and `file_download` (`file_extension`, `tool`; never the
+file name). Nothing is sent without consent. Renewals happen without the
+visitor on the site, so they are not reported (that would need the GA
+Measurement Protocol from the webhook).
+
+**Search Console.** Prefer a Domain property verified by a DNS TXT record.
+For a URL-prefix property, set `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` to the
+token from the HTML-tag method. Then submit `sitemap.xml` (it uses
+`NEXT_PUBLIC_SITE_URL`, so set that to the custom domain first). Bing can
+import the site from Search Console, or use
+`NEXT_PUBLIC_BING_SITE_VERIFICATION`.
 
 ## Billing setup (Paystack)
 
