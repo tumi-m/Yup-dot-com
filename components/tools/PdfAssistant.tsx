@@ -20,6 +20,7 @@ import { useSearchParams } from "next/navigation";
 import type { Tier } from "@/lib/limits";
 import { handoffToFile, takeHandoff } from "@/lib/local-store";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
+import { trackToolUsed } from "@/lib/analytics";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -232,7 +233,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       if ((e as Error).name !== "AbortError") setError({ message: "Connection lost. Please try again." });
     } finally {
       setStreaming(false);
-      if (answer) setAnnounce(answer.replace(/[*_`#>]+/g, ""));
+      if (answer) {
+        setAnnounce(answer.replace(/[*_`#>]+/g, ""));
+        trackToolUsed("chat-with-pdf");
+      }
       abortRef.current = null;
       // Drop an assistant bubble that never received text.
       setMessages((m) => (m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m));

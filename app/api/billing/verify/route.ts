@@ -2,6 +2,7 @@ import { applyCharge, parseMetadata } from "@/lib/billing";
 import { supabaseBillingStore } from "@/lib/billing-store";
 import { billingContext, json } from "@/lib/billing-route";
 import { isOurReference, planForCode, verifyTransaction } from "@/lib/paystack";
+import { isPaidPlan, isPrepaidMonths } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +40,26 @@ export async function GET(request: Request) {
       console.error("payment not applied", reference, result.reason);
       return json({ status: "failed" }, 422);
     }
-    return json({ status: "success" });
+    return json({ status: "success", purchase: purchaseSummary(tx) });
   } catch (err) {
     console.error("apply payment failed", err);
     return json({ status: "pending" }, 202);
   }
+}
+
+/**
+ * What was bought, for the analytics purchase event on the return page:
+ * plan, monthly or prepaid term, and the rand amount charged. Null when the
+ * metadata isn't ours.
+ */
+function purchaseSummary(tx: Record<string, unknown>) {
+  const meta = parseMetadata(tx.metadata);
+  if (!isPaidPlan(meta.plan)) return null;
+  const amount = Number(tx.amount) / 100;
+  const base = { plan: meta.plan, amount: Number.isFinite(amount) ? amount : undefined };
+  if (meta.mode === "once") {
+    const months = Number(meta.months);
+    return isPrepaidMonths(months) ? { ...base, mode: "once" as const, months } : null;
+  }
+  return { ...base, mode: "subscription" as const };
 }

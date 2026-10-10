@@ -35,6 +35,7 @@ import {
 } from "@/lib/editor/types";
 import type { DocumentRecord } from "@/lib/types";
 import { downloadBlob } from "@/lib/download";
+import { trackToolUsed } from "@/lib/analytics";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { Button } from "@/components/ui/button";
 import { useToasts, ToastStack } from "@/components/ui/toast";
@@ -358,6 +359,7 @@ export function PdfEditor({
         new Blob([out.slice() as unknown as BlobPart], { type: "application/pdf" }),
         `${docName}.pdf`
       );
+      trackToolUsed();
       toast("Downloaded.", "success");
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
@@ -414,6 +416,7 @@ export function PdfEditor({
       setSelectedId(null);
       setFormValues({});
       setBytes(saved);
+      trackToolUsed();
       if (source.kind === "local") {
         toast("Saved on this device.", "success");
         // Offer the cloud once, after the user has saved something they value.

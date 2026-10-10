@@ -23,6 +23,7 @@ import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, type MediaKind, type MediaPlatform } from "@/lib/media";
 import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
+import { trackDownload, trackToolUsed } from "@/lib/analytics";
 
 export interface MediaToolConfig {
   platform: MediaPlatform;
@@ -362,6 +363,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     focusNext.current = "ready";
     setPhase("ready");
     saveAs(next.href, sameOrigin(next.href) ? next.name : undefined);
+    trackToolUsed();
+    trackDownload(next.name);
   }
 
   /** Fetches one of our own file links; a JSON error body becomes the message. */
@@ -519,11 +522,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   /** Saves the file again; a link that has expired starts a fresh download instead. */
   async function saveAgain() {
     if (!file) return;
-    if (file.source === "blob") return saveAs(file.href, file.name);
+    if (file.source === "blob") {
+      trackDownload(file.name);
+      return saveAs(file.href, file.name);
+    }
     const ok = await fetch(file.href, { method: "HEAD", cache: "no-store" })
       .then((r) => r.ok)
       .catch(() => false);
-    if (ok) return saveAs(file.href, sameOrigin(file.href) ? file.name : undefined);
+    if (ok) {
+      trackDownload(file.name);
+      return saveAs(file.href, sameOrigin(file.href) ? file.name : undefined);
+    }
     focusNext.current = "progress";
     await start();
   }

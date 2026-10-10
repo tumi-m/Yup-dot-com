@@ -11,6 +11,7 @@ import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { formatBytes } from "@/lib/utils";
+import { trackDownload, trackToolUsed } from "@/lib/analytics";
 
 type Phase = "input" | "fetching" | "ready";
 type Action = "download" | "edit";
@@ -152,6 +153,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
       const f = await fetchDeck(link.trim());
       if (!f || !alive.current || current.current !== mine) return;
       setFile(f);
+      trackToolUsed();
       if (which === "edit") {
         const max = limitsFor(tier).maxFileBytes;
         if (f.size <= max) {
@@ -166,6 +168,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
       setFile({ ...f, saved: true });
       setPhase("ready");
       saveAs(f.href, f.name);
+      trackDownload(f.name);
     } catch {
       if (alive.current) {
         setError({ message: "Couldn't open this deck for editing. Try again." });
@@ -358,7 +361,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
             </p>
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" variant="outline">
-                <a href={file.href} download={file.name} rel="noopener">
+                <a href={file.href} download={file.name} rel="noopener" onClick={() => trackDownload(file.name)}>
                   <Download /> {file.saved ? "Download again" : "Download"}
                 </a>
               </Button>

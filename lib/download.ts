@@ -1,5 +1,8 @@
+import { trackDownload } from "@/lib/analytics";
+
 /** Trigger a browser download for a blob. */
 export function downloadBlob(blob: Blob, filename: string) {
+  trackDownload(filename);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

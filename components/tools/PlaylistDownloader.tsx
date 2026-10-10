@@ -28,6 +28,7 @@ import { parseMediaUrl, parsePlaylistUrl, type MediaKind } from "@/lib/media";
 import { exportName, formatDuration, playlistCsv, playlistTxt, type PlaylistEntry } from "@/lib/playlist";
 import type { Tier } from "@/lib/limits";
 import { cn } from "@/lib/utils";
+import { trackDownload, trackToolUsed } from "@/lib/analytics";
 
 interface Playlist {
   id: string;
@@ -99,6 +100,7 @@ function queueSave(href: string) {
 }
 
 function saveText(text: string, name: string, type: string) {
+  trackDownload(name);
   const href = URL.createObjectURL(new Blob([text], { type }));
   saveAs(href, name);
   setTimeout(() => URL.revokeObjectURL(href), 10_000);
@@ -316,6 +318,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
       delete before.current[id];
       update({ status: "ready", progress: 1, href: file.href, filename: file.name });
       queueSave(file.href);
+      trackToolUsed("youtube-playlist");
+      trackDownload(file.name);
     } catch (err) {
       if (!live()) return;
       if (err instanceof Halt) {

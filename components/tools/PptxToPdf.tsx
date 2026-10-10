@@ -20,6 +20,7 @@ import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
+import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
@@ -144,6 +145,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       setResult(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       setElapsed((performance.now() - started) / 1000);
       setStatus("done");
+      trackToolUsed("pptx-to-pdf");
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch {

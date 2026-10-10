@@ -291,8 +291,10 @@ export function toolFromPath(pathname: string): string | undefined {
   return undefined;
 }
 
-export function trackToolUsed(tool: string): boolean {
-  return track("tool_used", { tool });
+/** tool_used after a successful result. Without a slug, the page's own tool. */
+export function trackToolUsed(tool?: string): boolean {
+  const slug = tool ?? (typeof location !== "undefined" ? toolFromPath(location.pathname) : undefined);
+  return track("tool_used", { tool: slug });
 }
 
 /** Our downloads are blob: links, which enhanced measurement can't see. */

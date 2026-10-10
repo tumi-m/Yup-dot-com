@@ -30,6 +30,7 @@ import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge"
 import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
 import { getTool } from "@/lib/tools";
 import { friendlyPdfError } from "@/lib/pdf/errors";
+import { trackToolUsed } from "@/lib/analytics";
 
 /** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
 const NEXT_STEPS: Record<string, string[]> = {
@@ -162,6 +163,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       setElapsed((performance.now() - started) / 1000);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "done";
       setStatus("done");
+      trackToolUsed(slug);
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch (err) {

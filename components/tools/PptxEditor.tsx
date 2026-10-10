@@ -27,6 +27,7 @@ import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { UpgradeDialog, UpsellCard, type UpsellReason } from "@/components/upsell/Upsell";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
+import { trackToolUsed } from "@/lib/analytics";
 import { documentFingerprint, EditCheckError, requestEdit, WATERMARK_TEXT } from "@/lib/edit-usage";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
@@ -631,6 +632,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       downloadBlob(new Blob([out.slice().buffer as ArrayBuffer], { type: PPTX_MIME }), `${baseName(file.name)}.pptx`);
       savedBytes.current = current.bytes;
       setTick((t) => t + 1);
+      trackToolUsed();
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch {
       setError("Couldn't save this deck.");
@@ -672,6 +674,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       }
       setPdf(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       setStatus("done");
+      trackToolUsed();
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch {

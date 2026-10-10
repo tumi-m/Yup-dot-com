@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
+import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
@@ -16,6 +17,7 @@ export type CheckoutRequest =
 
 /** Sends the browser to Paystack checkout. Resolves with an error message on failure. */
 export async function startCheckout(body: CheckoutRequest): Promise<string | null> {
+  trackBeginCheckout(body);
   try {
     const res = await fetch("/api/billing/checkout", {
       method: "POST",
@@ -119,6 +121,7 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
           const res = await fetch(`/api/billing/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" });
           const data = await res.json().catch(() => ({}));
           if (data.status === "success") {
+            if (data.purchase) trackPurchase(reference, data.purchase as CheckoutChoice, data.purchase.amount);
             setState("success");
             router.refresh();
             return;

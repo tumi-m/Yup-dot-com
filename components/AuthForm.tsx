@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
 import { safeRedirect } from "@/components/auth-redirect";
+import { track } from "@/lib/analytics";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
@@ -47,6 +48,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           },
         });
         if (error) throw error;
+        track("sign_up", { method: "email" });
         // If email confirmation is disabled the session exists immediately.
         const { data } = await supabase.auth.getSession();
         if (data.session) {
