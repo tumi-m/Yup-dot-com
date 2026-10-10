@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, Loader2 } from "lucide-react";
 import { PLAN_LIST, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
@@ -150,6 +151,12 @@ export function PricingCards({
           );
         })}
       </div>
+      <p className="mt-6 text-center text-xs text-muted-foreground">
+        Monthly plans renew until cancelled.{" "}
+        <Link href="/refunds" className="inline-flex min-h-11 items-center rounded font-medium text-foreground underline underline-offset-2 hover:text-primary">
+          Refund policy
+        </Link>
+      </p>
     </div>
   );
 }

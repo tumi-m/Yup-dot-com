@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { siteUrl } from "@/lib/site";
 import { TOOLS } from "@/lib/tools";
+import { LEGAL_UPDATED } from "@/lib/business";
 
 const base = siteUrl();
 
@@ -14,6 +15,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })
   );
 
+  const legalRoutes = ["/privacy", "/terms", "/refunds", "/contact"].map((path) => ({
+    url: `${base}${path}`,
+    lastModified: new Date(`${LEGAL_UPDATED}T12:00:00Z`),
+    changeFrequency: "yearly" as const,
+    priority: 0.3,
+  }));
+
   const toolRoutes = TOOLS.map((t) => ({
     url: `${base}/tools/${t.slug}`,
     lastModified: new Date(),
@@ -21,5 +29,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
-  return [...staticRoutes, ...toolRoutes];
+  return [...staticRoutes, ...toolRoutes, ...legalRoutes];
 }

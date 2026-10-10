@@ -153,6 +153,19 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             {loading && <Loader2 className="animate-spin" />}
             {isSignup ? "Sign up" : "Log in"}
           </Button>
+          {isSignup && (
+            <p className="text-center text-xs leading-5 text-muted-foreground">
+              By creating an account you agree to the{" "}
+              <Link href="/terms" className="tap whitespace-nowrap font-medium text-foreground underline underline-offset-2 hover:text-primary">
+                Terms
+              </Link>{" "}
+              and{" "}
+              <Link href="/privacy" className="tap whitespace-nowrap font-medium text-foreground underline underline-offset-2 hover:text-primary">
+                Privacy Policy
+              </Link>
+              .
+            </p>
+          )}
         </form>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">

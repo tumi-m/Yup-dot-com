@@ -2,8 +2,21 @@ import Link from "next/link";
 import { CATEGORY_LABELS, TOOLS } from "@/lib/tools";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { groupOf, TOOL_GROUPS } from "@/components/tool-filter";
+import { CookieSettingsButton } from "@/components/analytics/CookieSettingsButton";
+import { BUSINESS } from "@/lib/business";
+import { GA_ID } from "@/lib/analytics";
 
 const LINK = "rounded transition-colors hover:text-foreground";
+
+const BOTTOM_LINKS = [
+  { href: "/tools", label: "All tools" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/login", label: "Log in" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+  { href: "/refunds", label: "Refunds" },
+  { href: "/contact", label: "Contact" },
+];
 
 /**
  * Below md the footer lists categories (each opens the filtered catalogue)
@@ -47,13 +60,24 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-border">
-        <div className="container flex flex-col items-center justify-between gap-2 py-4 text-sm text-muted-foreground sm:flex-row">
-          <p>© {new Date().getFullYear()} PDF Wizard</p>
-          <div className="flex gap-2">
-            <Link href="/tools" className={`flex h-11 items-center px-2 ${LINK}`}>All tools</Link>
-            <Link href="/pricing" className={`flex h-11 items-center px-2 ${LINK}`}>Pricing</Link>
-            <Link href="/login" className={`flex h-11 items-center px-2 ${LINK}`}>Log in</Link>
-          </div>
+        <div className="container flex flex-col items-center justify-between gap-2 py-4 text-sm text-muted-foreground lg:flex-row">
+          <p>© {new Date().getFullYear()} {BUSINESS.name}</p>
+          <nav aria-label="Footer">
+            <ul className="flex flex-wrap justify-center">
+              {BOTTOM_LINKS.map((l) => (
+                <li key={l.href}>
+                  <Link href={l.href} className={`flex h-11 items-center px-2 ${LINK}`}>
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+              {GA_ID && (
+                <li>
+                  <CookieSettingsButton className={`flex h-11 items-center px-2 ${LINK}`} />
+                </li>
+              )}
+            </ul>
+          </nav>
         </div>
       </div>
     </footer>
