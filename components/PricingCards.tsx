@@ -152,7 +152,7 @@ export function PricingCards({
         })}
       </div>
       <p className="mt-6 text-center text-xs text-muted-foreground">
-        Monthly plans renew until cancelled.{" "}
+        Monthly plans renew by card until cancelled.{" "}
         <Link href="/refunds" className="inline-flex min-h-11 items-center rounded font-medium text-foreground underline underline-offset-2 hover:text-primary">
           Refund policy
         </Link>

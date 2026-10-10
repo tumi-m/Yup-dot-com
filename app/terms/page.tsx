@@ -103,8 +103,9 @@ export default function TermsPage() {
 
       <Section id="files" title={S.files}>
         <p>
-          Your files stay yours. Files you open in the browser tools never reach us. For files you save to your library
-          or send to the AI assistant, you let us store and process them only to provide the service to you. Keep your
+          Your files stay yours. Files you open in the browser tools never reach us. For files in your cloud library
+          (including PDFs you open in the editor while signed in) and text you send to the AI assistant, you let us
+          store and process them only to provide the service to you. Keep your
           own copies: don&apos;t treat the library as your only backup. Our{" "}
           <Link href="/privacy">Privacy policy</Link> explains how we handle personal information.
         </p>

@@ -65,6 +65,6 @@ export default async function PricingPage({
 
 const FAQ = [
   { q: "Do I need an account?", a: "No. Every tool works without one." },
-  { q: "Are my files uploaded?", a: "No. PDF tools run in your browser." },
+  { q: "Are my files uploaded?", a: "No. PDF tools run in your browser. Signed in, the editor saves to your private library." },
   { q: "Can I cancel anytime?", a: "Yes, from the Billing page." },
 ];

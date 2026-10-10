@@ -45,7 +45,7 @@ export default function PrivacyPage() {
       <Section id="summary" title={S.summary}>
         <ul>
           <li>Most tools run in your browser. Those files never reach us.</li>
-          <li>We store files only when you save them to your cloud library, which needs an account.</li>
+          <li>We store files only in your cloud library, which needs an account.</li>
           <li>The AI assistant sends a document&apos;s text, not the file, to our AI provider.</li>
           <li>Paystack handles payments. We never see your card number.</li>
           <li>Analytics cookies stay off unless you accept them.</li>
@@ -80,16 +80,17 @@ export default function PrivacyPage() {
 
         <h3>Your cloud library</h3>
         <p>
-          PDFs you choose to save to your library, with their name, size and page count, so you can open them again on
-          any device. Each library is private to its account.
+          When you&apos;re signed in, PDFs you upload to your dashboard or open in the editor are saved to your library,
+          with their name, size and page count, so you can open them again on any device. Each library is private to its
+          account.
         </p>
 
         <h3>Payments</h3>
         <p>
-          Paystack collects your card or bank details on its own checkout page. We receive and keep your Paystack
-          customer and subscription codes, the plan, the amount, the payment reference, dates and whether the payment
-          succeeded. We use these to give you what you paid for, handle renewals, cancellations and refunds, and keep
-          the records South African tax law requires.
+          Paystack collects your card or bank details on its own checkout page. We keep your Paystack customer and
+          subscription codes, your plan, its status and renewal or end date, and payment references. Paystack keeps the
+          full payment record. We use these to give you what you paid for, handle renewals, cancellations and refunds,
+          and keep the records South African tax law requires.
         </p>
 
         <h3>Team seats</h3>
@@ -97,10 +98,10 @@ export default function PrivacyPage() {
 
         <h3>The AI assistant</h3>
         <p>
-          When you use Chat with PDF, your browser extracts the document&apos;s text and sends it, with your question, to
-          our server, which passes it to Ollama, our AI provider, to write the answer. We don&apos;t store the text, your
-          questions or the answers. Ollama says it does not use them to train models. Don&apos;t use the assistant on
-          documents you aren&apos;t allowed to share with a third party.
+          When you use Chat with PDF, your browser extracts the document&apos;s text and sends it, with the file name and
+          your questions, to our server, which passes them to Ollama, our AI provider, to write the answer. We don&apos;t
+          store the text, your questions or the answers. Don&apos;t use the assistant on documents you aren&apos;t
+          allowed to share with a third party.
         </p>
 
         <h3>Video and Slides links</h3>
@@ -109,14 +110,15 @@ export default function PrivacyPage() {
           download server fetches the video and deletes the file automatically soon after you download it. For X
           (Twitter), our server looks the post up through X&apos;s public embed service and, if that fails, the public
           FxTwitter or vxTwitter services. For Google Slides, our server downloads the deck from Google. We don&apos;t
-          store the links, apart from short-lived technical logs.
+          store the links, apart from short-lived technical logs. Video previews load their thumbnail straight from
+          YouTube or X.
         </p>
 
         <h3>Daily limits</h3>
         <p>
           To apply daily limits (for example AI answers and downloads), we count uses per account or, for visitors
-          without an account, per salted one-way hash of the IP address. The counters never hold a raw IP address and
-          are deleted within 40 days.
+          without an account, per salted one-way hash of the IP address. The counters never hold a raw IP address. Old
+          counters are cleared automatically, usually within 40 days.
         </p>
 
         <h3>Prices in your currency</h3>
@@ -144,9 +146,10 @@ export default function PrivacyPage() {
 
       <Section id="browser" title={S.browser}>
         <p>
-          The PDF and PowerPoint tools (merge, compress, convert, OCR, edit, sign and the rest) run on your device. Files
-          you open in them are not uploaded to us. Without an account, the editor keeps your work in your browser&apos;s
-          storage so it survives a reload; clearing your browser data removes it.
+          The PDF and PowerPoint tools (merge, compress, convert, OCR, sign and the rest) run on your device. Files you
+          open in them are not uploaded to us. The editor does the same when you&apos;re signed out, keeping your work in
+          your browser&apos;s storage so it survives a reload (clearing your browser data removes it). When you&apos;re
+          signed in, it saves to your cloud library.
         </p>
       </Section>
 
@@ -224,13 +227,14 @@ export default function PrivacyPage() {
             <strong>Library files</strong>: until you delete them or your account is closed.
           </li>
           <li>
-            <strong>Payment records</strong>: five years after the payment, as South African tax law requires.
+            <strong>Payment records</strong>: five years after the payment (in Paystack and our accounts), as South
+            African tax law requires.
           </li>
           <li>
             <strong>Team seat emails</strong>: until the owner removes them or the account is closed.
           </li>
           <li>
-            <strong>Daily limit counters</strong>: up to 40 days.
+            <strong>Daily limit counters</strong>: usually up to 40 days.
           </li>
           <li>
             <strong>Messages to us</strong>: as long as we need them to help you, and no more than two years.
