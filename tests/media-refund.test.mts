@@ -4,7 +4,18 @@
  * the grant (failed, never used, or worker unreachable), never a download
  * that finished or is still running.
  */
-import { askWorker, grantRef, newGrantRef, REFUNDABLE, refundGrant, wasRefunded, MEDIA_BUCKET } from "../lib/media-refund.ts";
+import {
+  askWorker,
+  grantRef,
+  newGrantRef,
+  REFUNDABLE,
+  refundGrant,
+  refundUnserved,
+  startServing,
+  wasRefunded,
+  MEDIA_BUCKET,
+} from "../lib/media-refund.ts";
+import { signingSecret, signToken, verifyToken } from "../lib/media-server.ts";
 import { consumeDaily, memoryUsageStore } from "../lib/usage.ts";
 
 const results: boolean[] = [];
@@ -63,6 +74,61 @@ const check = (name: string, ok: boolean, extra = "") => {
   check("sleeping host (HTML) → refund", (await ask(503, "<html>waking up</html>")).v === "unreachable");
   check("worker rejects our secret (so it rejected the job too) → refund", (await ask(401, { error: "Unauthorized." })).v === "unreachable");
   check("anything else → no refund", !REFUNDABLE.includes((await ask(500, { error: "x" })).v));
+}
+
+// A grant that sent its file is never refunded (download, then ask again with
+// a Range past the end so X answers 416: that used to reset the quota).
+{
+  const store = memoryUsageStore();
+  const subject = "ip:attacker";
+  const used = () => store.count(subject, MEDIA_BUCKET, "day");
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  const ref = { s: subject, c: newGrantRef() };
+  const serve = await startServing(store, ref);
+  check("first send of a grant", serve.ok && serve.first);
+  check("a second send is not the first", (await startServing(store, ref)).first === false);
+  check("no refund after the file was sent", (await refundUnserved(store, ref)) === false && (await used()) === 1);
+  check("grant still usable after a refused refund", !(await wasRefunded(store, ref)));
+
+  const unsent = { s: subject, c: newGrantRef() };
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  check("a grant that never sent is refunded", (await refundUnserved(store, unsent)) === true && (await used()) === 1);
+  check("and can't send afterwards", (await startServing(store, unsent)).ok === false);
+
+  // Race: the refund checks before the send marks, the send checks before
+  // the refund lands. One of them must lose.
+  const raced = { s: subject, c: newGrantRef() };
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  const before = await used();
+  let marked = false;
+  const racing = { ...store, async count(...a: Parameters<typeof store.count>) {
+    const n = await store.count(...a);
+    // The send marks itself right after the refund's first look.
+    if (a[1].startsWith("media-served:") && !marked) {
+      marked = true;
+      await startServing(store, raced);
+    }
+    return n;
+  } };
+  const refunded = await refundUnserved(racing, raced);
+  check("racing refund loses to a send in flight", refunded === false && (await used()) === before);
+}
+
+// X file links and media worker grants use different keys, so one can't be
+// passed off as the other (an X link "refunded" through /api/media/refund).
+{
+  const env = { MEDIA_WORKER_SECRET: "worker-secret" } as NodeJS.ProcessEnv;
+  const xKey = signingSecret(env);
+  check("X link key is not the worker secret", xKey !== "worker-secret" && xKey.length >= 32);
+  const xToken = signToken({ u: "https://video.twimg.com/a.mp4", s: "ip:a", c: "abcdefgh" }, xKey);
+  check("an X link doesn't verify as a worker grant", verifyToken(xToken, "worker-secret") === null);
+  const workerToken = signToken({ u: "https://youtu.be/x", s: "ip:a", c: "abcdefgh" }, "worker-secret");
+  check("a worker grant doesn't verify as an X link", verifyToken(workerToken, xKey) === null);
+  check("MEDIA_SIGNING_SECRET wins", signingSecret({ ...env, MEDIA_SIGNING_SECRET: "s" } as NodeJS.ProcessEnv) !== xKey);
+  const none = signingSecret({} as NodeJS.ProcessEnv);
+  check("no secret: a random key, not a constant", none.length >= 32 && none !== "pdf-wizard-unsigned-default");
+  check("no secret: a forged link with the old default fails",
+    verifyToken(signToken({ u: "https://video.twimg.com/a.mp4" }, "pdf-wizard-unsigned-default"), none) === null);
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);

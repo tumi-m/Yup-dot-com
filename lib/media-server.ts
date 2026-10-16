@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Server-only configuration and signing for video downloads.
@@ -39,20 +39,28 @@ export const WORKER_CONFIG_HELP: Record<Exclude<WorkerConfig, { ok: true }>["rea
 };
 
 /**
- * Key for tokens the web app signs for itself (X file links). Any configured
- * secret works; without one, links are still host-restricted and short-lived
- * but could be forged, so production should set MEDIA_SIGNING_SECRET.
+ * Key for tokens the web app signs for itself (X file links).
+ *
+ * It is derived from the configured secret with a purpose label, so an X link
+ * never verifies as a media worker grant and the other way round (the same
+ * raw secret used to sign both, which let an X download be "refunded" through
+ * /api/media/refund). With no media secret at all, it is derived from another
+ * server secret the deployment has, and failing that it is random per server
+ * process: never a constant anyone could sign with.
  */
-let warned = false;
-export function signingSecret(): string {
-  const secret =
-    process.env.MEDIA_SIGNING_SECRET?.trim() || process.env.MEDIA_WORKER_SECRET?.trim();
-  if (secret) return secret;
-  if (!warned) {
-    console.warn("MEDIA_SIGNING_SECRET is not set: X download links use an insecure default key.");
-    warned = true;
+let fallbackKey: string | null = null;
+export function signingSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const base =
+    env.MEDIA_SIGNING_SECRET?.trim() ||
+    env.MEDIA_WORKER_SECRET?.trim() ||
+    env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    env.PAYSTACK_SECRET_KEY?.trim();
+  if (base) return createHmac("sha256", base).update("pdf-wizard/x-file-link/v1").digest("base64url");
+  if (!fallbackKey) {
+    console.warn("MEDIA_SIGNING_SECRET is not set: X download links only work on the server instance that made them.");
+    fallbackKey = randomBytes(32).toString("base64url");
   }
-  return "pdf-wizard-unsigned-default";
+  return fallbackKey;
 }
 
 /** base64url(json) + "." + base64url(HMAC-SHA256), with an expiry in `e`. */

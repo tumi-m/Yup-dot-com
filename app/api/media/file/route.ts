@@ -1,5 +1,5 @@
 import { signingSecret, verifyToken } from "@/lib/media-server";
-import { grantRef, refundGrant, wasRefunded } from "@/lib/media-refund";
+import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
 import { isAllowedVideoUrl } from "@/lib/x-video";
 
@@ -14,9 +14,14 @@ export const maxDuration = 300;
  * Only accepts URLs inside a token signed by /api/media/link, and only
  * https://video.twimg.com MP4s, so it can't be used as an open proxy.
  *
- * When X refuses the file or the stream breaks, the download is given back
- * to the visitor's daily allowance (once per grant), and the grant is dead.
+ * When X refuses the file or the stream breaks before the grant ever sent a
+ * file, the download is given back to the visitor's daily allowance (once
+ * per grant), and the grant is dead. Once a grant has sent a file, later
+ * failures (say, a Range past the end) are not refunded.
+ *
+ * Redirects are followed by hand, and only to allowed hosts.
  */
+const MAX_REDIRECTS = 3;
 function allowed(url: string): boolean {
   if (isAllowedVideoUrl(url)) return true;
   // Local test servers, never in production.
@@ -37,30 +42,64 @@ async function handle(request: Request, method: "GET" | "HEAD") {
   }
   const name = typeof grant.n === "string" && grant.n ? grant.n : "video.mp4";
   const ref = grantRef(grant);
-  if (ref && (await wasRefunded(usageStore(), ref).catch(() => false))) {
-    return Response.json({ error: "This download link expired. Start the download again." }, { status: 403 });
-  }
-  const giveBack = () => (ref && method === "GET" ? refundGrant(usageStore(), ref).catch(() => false) : Promise.resolve(false));
+  const store = usageStore();
+  const expired = () =>
+    Response.json({ error: "This download link expired. Start the download again." }, { status: 403 });
+  if (ref && (await wasRefunded(store, ref).catch(() => false))) return expired();
+  let firstServe = false;
+  /**
+   * Gives the download back if this grant never sent its file, or (with
+   * `streamBroke`) if X broke off the first send of it.
+   */
+  const giveBack = async (streamBroke = false): Promise<boolean> => {
+    if (!ref || method !== "GET") return false;
+    if (streamBroke) return firstServe ? refundGrant(store, ref).catch(() => false) : false;
+    return refundUnserved(store, ref).catch(() => false);
+  };
 
   const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; PDFWizard/1.0)" };
   const range = request.headers.get("range");
   if (range) headers.Range = range;
 
-  let upstream: Response;
+  let upstream: Response | null = null;
   try {
-    upstream = await fetch(grant.u, { method, headers, signal: request.signal, cache: "no-store" });
+    let url = grant.u;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const res = await fetch(url, { method, headers, signal: request.signal, cache: "no-store", redirect: "manual" });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) {
+        upstream = res;
+        break;
+      }
+      await res.body?.cancel();
+      const next = new URL(location, url).toString();
+      if (!allowed(next)) break;
+      url = next;
+    }
   } catch {
     if (!request.signal.aborted) await giveBack();
+    return Response.json({ error: "X didn't send the file. Try again." }, { status: 502 });
+  }
+  if (!upstream) {
+    await giveBack();
     return Response.json({ error: "X didn't send the file. Try again." }, { status: 502 });
   }
   if (!upstream.ok && upstream.status !== 206) {
     await upstream.body?.cancel();
     await giveBack();
-    const expired = upstream.status === 403 || upstream.status === 404 || upstream.status === 410;
+    const gone = upstream.status === 403 || upstream.status === 404 || upstream.status === 410;
     return Response.json(
-      { error: expired ? "X no longer serves this file. Start the download again." : "X didn't send the file. Try again." },
+      { error: gone ? "X no longer serves this file. Start the download again." : "X didn't send the file. Try again." },
       { status: 502 }
     );
+  }
+  if (ref && method === "GET") {
+    const serving = await startServing(store, ref).catch(() => ({ ok: true, first: false }));
+    if (!serving.ok) {
+      await upstream.body?.cancel();
+      return expired();
+    }
+    firstServe = serving.first;
   }
 
   const out = new Headers({
@@ -80,8 +119,12 @@ async function handle(request: Request, method: "GET" | "HEAD") {
   });
 }
 
-/** Passes the file through; if X breaks off mid-file (not the visitor), refunds. */
-function refundOnBreak(body: ReadableStream<Uint8Array> | null, visitor: AbortSignal, giveBack: () => Promise<boolean>) {
+/** Passes the file through; if X breaks off the first send (not the visitor), refunds. */
+function refundOnBreak(
+  body: ReadableStream<Uint8Array> | null,
+  visitor: AbortSignal,
+  giveBack: (streamBroke: boolean) => Promise<boolean>
+) {
   if (!body) return null;
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
@@ -91,7 +134,7 @@ function refundOnBreak(body: ReadableStream<Uint8Array> | null, visitor: AbortSi
         if (done) controller.close();
         else controller.enqueue(value);
       } catch (err) {
-        if (!visitor.aborted) await giveBack();
+        if (!visitor.aborted) await giveBack(true);
         controller.error(err);
       }
     },

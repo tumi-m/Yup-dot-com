@@ -14,6 +14,7 @@ import type { UsageStore } from "./usage";
 
 export const MEDIA_BUCKET = "media";
 const refundBucket = (ref: string) => `media-refund:${ref}`;
+const servedBucket = (ref: string) => `media-served:${ref}`;
 
 /** How long after a grant expires it can still be refunded (jobs may run 20 min). */
 export const REFUND_GRACE_SECONDS = 2 * 60 * 60;
@@ -45,6 +46,41 @@ export async function refundGrant(store: UsageStore, ref: GrantRef): Promise<boo
 /** A refunded grant is dead: using it again would be a free download. */
 export async function wasRefunded(store: UsageStore, ref: GrantRef): Promise<boolean> {
   return (await store.count(ref.s, refundBucket(ref.c), "day")) > 0;
+}
+
+/**
+ * A grant that has sent a file is never refunded for a later failure:
+ * otherwise a visitor could download the file, ask for it again with a Range
+ * past its end, and the upstream error would give the download back.
+ *
+ * The two steps below run in opposite orders (serve: mark, then check for a
+ * refund; refund: refund, then check for a serve), so two requests racing on
+ * one grant can't both win: whichever looks second sees the other.
+ */
+
+/**
+ * Call before sending a file. `ok` false: the grant was refunded meanwhile,
+ * so don't send. `first`: no earlier request sent this grant's file.
+ */
+export async function startServing(store: UsageStore, ref: GrantRef): Promise<{ ok: boolean; first: boolean }> {
+  const first = (await store.consume(ref.s, servedBucket(ref.c), 1, "day")) >= 0;
+  return { ok: !(await wasRefunded(store, ref)), first };
+}
+
+export async function wasServed(store: UsageStore, ref: GrantRef): Promise<boolean> {
+  return (await store.count(ref.s, servedBucket(ref.c), "day")) > 0;
+}
+
+/** Refunds a grant that never sent its file. True if this call refunded it. */
+export async function refundUnserved(store: UsageStore, ref: GrantRef): Promise<boolean> {
+  if (await wasServed(store, ref)) return false;
+  if (!(await refundGrant(store, ref))) return false;
+  if (await wasServed(store, ref)) {
+    // Lost a race with a request that is sending the file: charge it again.
+    await store.consume(ref.s, MEDIA_BUCKET, 2_147_483_647, "day");
+    return false;
+  }
+  return true;
 }
 
 export type WorkerVerdict = "failed" | "unused" | "unreachable" | "used" | "unknown";
