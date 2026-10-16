@@ -20,9 +20,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# env files (only the example is committed)
 .env
-.env*.local
+.env*
+!.env.example
 
 # vercel
 .vercel

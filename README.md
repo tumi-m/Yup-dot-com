@@ -264,6 +264,57 @@ from open.er-api.com, with a built-in fallback table) plus the rand amount
 billed. Add `?currency=EUR` (any supported code) to a page to preview another
 currency.
 
+## Security
+
+What protects user data, and how each part is tested. To report a
+vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
+`/security`.
+
+- **Database (Supabase).** Row Level Security is on for every table, and every
+  policy is scoped to `auth.uid()`. From the browser (the public anon key) a
+  signed-in user can write only their profile's name and their own document
+  rows, and visitors without a session can write nothing. Plans, billing columns, team seats, payment events and usage
+  counters are written only by the server with the service role. Functions
+  that read plans or count usage are `SECURITY DEFINER` with a fixed
+  `search_path` and can't be called from the browser.
+- **Stored files.** The `documents` bucket is private, PDFs only. A file can
+  be uploaded or read only when the user owns a document row for it, a row
+  can't be pointed at another file, and a row can only be deleted after its
+  file, so the Free 5-document limit also limits stored files.
+- **Payments.** The Paystack webhook checks an HMAC-SHA512 signature
+  (constant-time) and the amount paid; events are applied once.
+- **Secrets.** Only `NEXT_PUBLIC_*` values reach the browser. `.env*` files
+  are git-ignored except `.env.example`.
+- **Downloads and imports.** Links users paste are fetched by the server only
+  from allow-listed hosts (`video.twimg.com`, Google Slides), checked again on
+  every redirect. X download links
+  are signed with their own key, expire, and are refunded only if they never
+  sent the file.
+- **Untrusted files** are parsed in the browser; PowerPoint text is sanitised
+  before it is shown as HTML.
+- **Headers.** HSTS, `nosniff`, `X-Frame-Options`, a Referrer and Permissions
+  policy, and a CSP that blocks plugins, `<base>` changes, off-site form posts
+  and framing (`next.config.ts`).
+
+**How it's tested** (all in CI, `.github/workflows/ci.yml`):
+
+- `scripts/test-rls.sh` runs [`tests/rls/rls.test.sql`](tests/rls/rls.test.sql)
+  on Postgres 16, against `supabase/schema.sql` and against the schema plus
+  every migration. It plays what anyone holding the anon key could try (read
+  other users' rows and files, give themselves a paid plan, forge billing
+  events, call the usage functions, keep files past the plan limit) and fails
+  if any of it works. Run it locally against any Postgres you can throw away:
+  `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
+- `scripts/check-bundle-secrets.mjs` builds with fake values in every server
+  secret and fails if one appears in `.next/static`, `public/` or a
+  prerendered page.
+- `npm test` covers webhook signatures, billing replay, token signing and
+  refunds, the PPTX sanitiser and URL allow-lists.
+
+**Settings to keep:** in Supabase, Auth → **Confirm email** must stay on
+(Team seats are granted to confirmed emails only). Set `MEDIA_SIGNING_SECRET`
+in production.
+
 ---
 
 ## Architecture
@@ -275,6 +326,7 @@ pdf-wizard/
 │   ├── tools/                   ← Tools hub + dynamic /tools/[slug] pages
 │   ├── pricing/                 ← Public pricing
 │   ├── privacy, terms, refunds, contact/ ← Legal pages (details from env)
+│   ├── security/                ← Public security summary
 │   ├── login, signup, auth/     ← Auth screens + callbacks
 │   ├── dashboard/               ← Document library (auth-gated)
 │   ├── editor/[id]/             ← The PDF editor
@@ -312,6 +364,7 @@ pdf-wizard/
 ├── tests/                        ← End-to-end pipeline tests (npm test)
 └── supabase/schema.sql           ← Tables, RLS, storage bucket + policies
     supabase/migrations/          ← Upgrades for existing projects
+    tests/rls/                    ← RLS / privilege tests (scripts/test-rls.sh)
 ```
 
 ---
@@ -342,8 +395,8 @@ ffmpeg.wasm · JSZip · Radix UI · lucide-react · yt-dlp (media worker)
 
 ## Production notes
 
-- Security headers (HSTS, nosniff, frame options, permissions policy) are set in
-  `next.config.ts`.
+- Security headers (HSTS, nosniff, frame options, permissions policy, a basic
+  CSP) are set in `next.config.ts`. See [Security](#security).
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
 - **Roadmap:** saved signatures, version history, shared team workspaces;
@@ -376,7 +429,7 @@ Variables** and redeploy:
 | `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
 | `OLLAMA_CONTEXT_TOKENS` | Optional. Context window to ask the model for (`num_ctx`, at least 8192). Unset: the model's default |
 | `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
-| `MEDIA_SIGNING_SECRET` | Signs X download links. Falls back to `MEDIA_WORKER_SECRET`; set one of them in production |
+| `MEDIA_SIGNING_SECRET` | Recommended. Signs X download links (with a key derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
 | `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 | `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |

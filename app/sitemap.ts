@@ -15,7 +15,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })
   );
 
-  const legalRoutes = ["/privacy", "/terms", "/refunds", "/contact"].map((path) => ({
+  const legalRoutes = ["/privacy", "/terms", "/refunds", "/security", "/contact"].map((path) => ({
     url: `${base}${path}`,
     lastModified: new Date(`${LEGAL_UPDATED}T12:00:00Z`),
     changeFrequency: "yearly" as const,

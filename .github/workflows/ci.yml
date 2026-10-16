@@ -21,7 +21,58 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Built with fake values in every secret, so the next step can prove
+      # none of them reaches the browser.
       - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://canary-project.supabase.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
+          SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
+          PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
+          PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
+          PAYSTACK_PLAN_TEAM: PLN_canary_team_93cd
+          OLLAMA_API_KEY: canary_ollama_key_77e0
+          OLLAMA_HOST: https://canary-ollama.invalid
+          USAGE_HASH_SALT: canary_usage_salt_0c6f
+          MEDIA_WORKER_URL: https://canary-worker.invalid
+          MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
+          MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
+      - run: node scripts/check-bundle-secrets.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
+          SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
+          PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
+          PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
+          PAYSTACK_PLAN_TEAM: PLN_canary_team_93cd
+          OLLAMA_API_KEY: canary_ollama_key_77e0
+          OLLAMA_HOST: https://canary-ollama.invalid
+          USAGE_HASH_SALT: canary_usage_salt_0c6f
+          MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
+          MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
+
+  # Row Level Security: runs supabase/schema.sql and the migrations on a
+  # plain Postgres 16 and tries what anyone holding the public anon key could.
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/test-rls.sh
 
   media-worker:
     runs-on: ubuntu-latest
