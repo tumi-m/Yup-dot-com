@@ -138,8 +138,12 @@ export function DashboardClient({
     setPendingDelete(null);
     const prev = docs;
     setDocs((d) => d.filter((x) => x.id !== doc.id));
-    const { error } = await supabase.from("documents").delete().eq("id", doc.id);
-    await supabase.storage.from("documents").remove([doc.storage_path]);
+    // The file goes first: the database refuses to delete a document whose
+    // file is still stored, so files are never left behind.
+    const { error: fileError } = await supabase.storage.from("documents").remove([doc.storage_path]);
+    const { error } = fileError
+      ? { error: fileError }
+      : await supabase.from("documents").delete().eq("id", doc.id);
     if (error) {
       setError("Failed to delete document.");
       setDocs(prev);

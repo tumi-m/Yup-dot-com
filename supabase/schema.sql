@@ -51,7 +51,7 @@ create policy "profiles_select_own" on public.profiles
 -- ---------- updated_at trigger ----------
 
 create or replace function public.set_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   new.updated_at = now();
   return new;
@@ -246,7 +246,7 @@ create policy "team_members_select_own" on public.team_members
 
 -- Team = the owner + 4 members, whoever inserts.
 create or replace function public.team_members_limit()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   perform pg_advisory_xact_lock(hashtext('team_members:' || new.owner_id::text));
   if (select count(*) from public.team_members where owner_id = new.owner_id) >= 4 then
@@ -324,6 +324,44 @@ create policy "documents_all_own" on public.documents
     and position('..' in storage_path) = 0
   );
 
+-- Column privileges: visitors without a session get nothing (RLS would
+-- already hide every row), and signed-in users may not truncate (RLS does not
+-- apply to TRUNCATE) or move a row to another file or owner, which would
+-- leave stored files outside the plan's document limit.
+revoke all on public.documents from anon;
+revoke all on public.documents from authenticated;
+grant select, insert, delete on public.documents to authenticated;
+grant update (name, size_bytes, page_count, updated_at) on public.documents to authenticated;
+
+-- A row can only be deleted once its file is gone (the browser removes the
+-- file first). Otherwise deleting rows would leave files behind, and a Free
+-- account could store any number of them under its 5-document limit.
+create or replace function public.documents_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') not in ('anon', 'authenticated') then
+    return coalesce(new, old);
+  end if;
+  if tg_op = 'UPDATE' then
+    new.id := old.id;
+    new.owner_id := old.owner_id;
+    new.storage_path := old.storage_path;
+    new.created_at := old.created_at;
+    return new;
+  end if;
+  if exists (select 1 from storage.objects o
+              where o.bucket_id = 'documents' and o.name = old.storage_path) then
+    raise exception 'Delete the file before its document.' using errcode = 'P0001';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists documents_guard on public.documents;
+create trigger documents_guard
+  before update or delete on public.documents
+  for each row execute function public.documents_guard();
+
 -- The Free plan keeps 5 cloud documents; this used to be enforced only in the
 -- browser.
 create or replace function public.documents_limit()
@@ -383,11 +421,17 @@ create policy "documents_storage_update" on storage.objects
     )
   );
 
+-- Reading (and signing a link to) a file needs its document row too, so a
+-- file left behind without one can't be used as free hosting.
 drop policy if exists "documents_storage_select" on storage.objects;
 create policy "documents_storage_select" on storage.objects
   for select to authenticated using (
     bucket_id = 'documents'
     and (storage.foldername(name))[1] = auth.uid()::text
+    and exists (
+      select 1 from public.documents d
+       where d.storage_path = objects.name and d.owner_id = auth.uid()
+    )
   );
 
 drop policy if exists "documents_storage_delete" on storage.objects;
