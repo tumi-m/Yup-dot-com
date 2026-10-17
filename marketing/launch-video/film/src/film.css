@@ -1,0 +1,118 @@
+/* Inter, self-hosted from @fontsource/inter (SIL OFL 1.1). */
+@font-face { font-family: "Inter"; font-weight: 400; font-display: block; src: url("../../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500; font-display: block; src: url("../../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; font-display: block; src: url("../../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 700; font-display: block; src: url("../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 800; font-display: block; src: url("../../node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2") format("woff2"); }
+
+:root {
+  /* app/globals.css */
+  --primary: #7c3aed;              /* hsl(262 83% 58%) */
+  --primary-ink: hsl(262 70% 42%); /* --accent-foreground, AA on white */
+  --ink: hsl(222 47% 11%);
+  --muted: hsl(263 14% 38%);
+  --wash: hsl(264 30% 96%);
+  --line: hsl(263 25% 91%);
+  --amber: #b45309;
+  --grad: linear-gradient(90deg, #7c3aed, #c026d3 52%, #b45309);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #0d0b14; overflow: hidden; }
+body { font-family: "Inter", system-ui, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; font-feature-settings: "cv11" 1; }
+
+#viewport { position: absolute; inset: 0; display: grid; place-items: center; }
+#stage { position: relative; overflow: hidden; background: #fff; transform-origin: 0 0; }
+#bg, #world, #hud, #grade { position: absolute; inset: 0; }
+#world { inset: auto; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+#hud { pointer-events: none; }
+/* vertical cut: product UI fades out before the top keep-clear zone and the caption band */
+#worldmask { position: absolute; inset: 0; }
+[data-fmt="9x16"] #worldmask {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, transparent 120px, #000 230px, #000 1250px, transparent 1330px);
+  mask-image: linear-gradient(180deg, transparent 0, transparent 120px, #000 230px, #000 1250px, transparent 1330px);
+}
+#grade { pointer-events: none; }
+
+/* ---------- ground: the site's lavender hero light */
+#wash { position: absolute; inset: 0; background: linear-gradient(180deg, hsl(264 62% 96.5%) 0%, hsl(264 60% 98.6%) 46%, #fff 100%); }
+#aurora { position: absolute; inset: 0; }
+.blob { position: absolute; border-radius: 50%; }
+#stars { position: absolute; left: 0; top: 0; }
+.star { position: absolute; border-radius: 50%; background: rgb(124 58 237); }
+
+/* ---------- grade */
+#vignette { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 78% at 50% 46%, rgba(46, 16, 101, 0) 58%, rgba(46, 16, 101, 0.05) 80%, rgba(46, 16, 101, 0.13) 100%); }
+#grain { position: absolute; inset: 0; mix-blend-mode: overlay; opacity: 0.16; background-size: 384px 384px; }
+
+/* ---------- generic world nodes */
+.grp { position: absolute; transform-origin: 50% 50%; }
+.abs { position: absolute; }
+.tile { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
+.face { position: absolute; left: 0; top: 0; white-space: nowrap; }
+.sheen { position: absolute; top: -40%; height: 180%; width: 46%; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.55) 50%, rgba(255,255,255,0)); transform: skewX(-16deg); pointer-events: none; }
+
+/* ---------- type */
+.display { font-weight: 800; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; }
+.grad-text { background-image: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.word { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.06em 0.05em 0.16em; margin: -0.06em -0.05em -0.16em; }
+.word > span { display: inline-block; }
+
+/* ---------- HUD captions */
+.cap { position: absolute; color: var(--ink); }
+.cap .line { display: block; }
+.small-print { font-weight: 500; letter-spacing: 0; color: var(--muted); }
+
+/* ---------- cursor */
+.cursor { position: absolute; left: 0; top: 0; width: 46px; height: 46px; transform-origin: 6px 4px; filter: drop-shadow(0 6px 10px rgba(30, 12, 70, 0.28)); }
+.ripple { position: absolute; left: 0; top: 0; border-radius: 50%; border: 2.5px solid rgba(124, 58, 237, 0.75); }
+
+/* ---------- product UI, rebuilt from the app (Tailwind values) */
+.ui { font-family: "Inter", system-ui, sans-serif; color: var(--ink); }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(124, 58, 237, 0.13), 0 2px 6px rgba(30, 12, 70, 0.04); }
+.card.journey { border-color: rgba(124, 58, 237, 0.2); }
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; align-items: center; }
+.ico { display: flex; align-items: center; justify-content: center; flex: none; }
+.muted { color: var(--muted); }
+.svg { display: block; flex: none; }
+
+.t-violet { background: #ede9fe; color: #6d28d9; }
+.t-orange { background: #ffedd5; color: #c2410c; }
+.t-orange8 { background: #ffedd5; color: #9a3412; }
+.t-amber { background: #fef3c7; color: #92400e; }
+.t-rose { background: #ffe4e6; color: #be123c; }
+.t-teal { background: #ccfbf1; color: #0f766e; }
+.t-cyan { background: #cffafe; color: #0e7490; }
+.t-emerald { background: #d1fae5; color: #047857; }
+.t-blue { background: #dbeafe; color: #1d4ed8; }
+.t-indigo { background: #e0e7ff; color: #4338ca; }
+.t-fuchsia { background: #fae8ff; color: #a21caf; }
+.t-red { background: #fee2e2; color: #b91c1c; }
+.t-ai { background: linear-gradient(135deg, #ede9fe, #fae8ff); color: #6d28d9; }
+
+.opt { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); font-size: 14px; font-weight: 600; gap: 10px; justify-content: center; }
+.tool { background: #fff; border: 1px solid var(--line); border-radius: 12px; font-size: 12.5px; font-weight: 500; gap: 8px; justify-content: center; }
+.filechip { background: var(--wash); border-radius: 12px; gap: 12px; padding: 0 16px; font-size: 14px; }
+.btn { display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn.primary { background: var(--primary); color: #fff; box-shadow: 0 10px 15px -3px rgba(124, 58, 237, 0.25), 0 4px 6px -4px rgba(124, 58, 237, 0.25); }
+.btn.outline { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+.pill { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 8px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 15px; font-weight: 500; white-space: nowrap; }
+.pill .ico { width: 28px; height: 28px; border-radius: 999px; }
+.badge { display: inline-flex; align-items: center; border-radius: 999px; font-weight: 500; white-space: nowrap; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.lines { display: flex; flex-direction: column; }
+.lines i { display: block; height: 9px; border-radius: 5px; background: #e6e3ec; }
+.field { display: flex; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 16px; }
+.thumb { background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.price-num { font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.check-row { display: flex; align-items: center; gap: 10px; font-size: 15px; white-space: nowrap; }
+.odo { display: inline-flex; overflow: hidden; vertical-align: top; }
+.odo .slot { display: inline-block; overflow: hidden; position: relative; }
+.odo .strip { display: flex; flex-direction: column; position: absolute; left: 0; top: 0; width: 100%; }
+.odo .strip span { display: block; text-align: center; }
+
+/* ---------- preview controls (never present in a render) */
+#scrub { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: rgba(13, 11, 20, 0.86); color: #ddd; font: 12px/1 ui-monospace, monospace; }
+#scrub input { flex: 1; }
+#scrub[hidden] { display: none; }

@@ -1,0 +1,29 @@
+{
+  "name": "pdf-wizard-launch-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The PDF Wizard launch film, built as a seekable HTML page and rendered to MP4.",
+  "type": "module",
+  "scripts": {
+    "preview": "node scripts/preview.mjs",
+    "snap": "node scripts/snap.mjs",
+    "draft": "node scripts/render.mjs --fmt 16x9 --draft",
+    "render:16x9": "node scripts/render.mjs --fmt 16x9",
+    "render:9x16": "node scripts/render.mjs --fmt 9x16",
+    "cues": "node scripts/cues.mjs",
+    "audio": "python3 audio/build.py",
+    "audio:plot": "python3 audio/viz.py",
+    "master": "node scripts/master.mjs",
+    "qa": "node scripts/qa.mjs",
+    "icons": "node scripts/icons.mjs",
+    "timeline:fmt": "node scripts/fmt-timeline.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/linux-x64": "4.1.0",
+    "@fontsource/inter": "5.3.0",
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
