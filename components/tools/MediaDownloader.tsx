@@ -455,6 +455,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
           if (out.blob.size < blob.size) {
             was = blob.size;
             blob = out.blob;
+          } else {
+            note = "Already compact, so this is the original.";
           }
         } catch (err) {
           if (isAbort(err) || signal.aborted) return;
@@ -849,6 +851,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                     type="button"
                     role="switch"
                     aria-checked={smaller}
+                    aria-label={`Smaller file, about ${shortBytes(chosen.smaller)}`}
+                    aria-describedby="smaller-note"
                     onClick={toggleSmaller}
                     title="Re-encoded on your device. Takes a little longer."
                     className={cn(
@@ -866,6 +870,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                     </span>
                     <span className="flex-1 font-medium">Smaller file</span>
                     <span className="tabular-nums text-muted-foreground">~{shortBytes(chosen.smaller)}</span>
+                    <span id="smaller-note" className="sr-only">
+                      Re-encoded on your device. Takes a little longer.
+                    </span>
                   </button>
                 )}
 

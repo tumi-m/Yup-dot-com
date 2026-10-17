@@ -41,6 +41,43 @@ export function targetBitrate(width: number, height: number, fps?: number | null
   return Math.round(pixels * frames * BITS_PER_PIXEL[preset] * scale);
 }
 
+/** mediabunny's MP4 timescale when no frame rate is set: 2^8 · 3^2 · 5^2 ticks a second. */
+const MP4_TIMESCALE = 57_600;
+
+/**
+ * The frame rate to tell the H.264 encoder. Its rate control spends
+ * bitrate / frame rate per frame and assumes 30 fps when not told, so 60 fps
+ * came out at twice the target and 24 fps at 0.8×. The value is within about
+ * 1% of `fps`, written as 57600/k with k sharing no factor with 57600:
+ * mediabunny's MP4 writer derives its timescale from it, and this keeps its
+ * fine 1/57600 s one instead of snapping frames to a 1/fps grid, which would
+ * bunch up variable-frame-rate (phone) video. (Conversion's own frameRate
+ * option resamples to that grid and drops or repeats frames.)
+ */
+export function encoderFrameRate(fps: number | null | undefined): number | undefined {
+  if (!fps || !Number.isFinite(fps) || fps < 1 || fps > 480) return undefined;
+  const k0 = Math.round(MP4_TIMESCALE / fps);
+  const coprime = (k: number) => k > 0 && k % 2 !== 0 && k % 3 !== 0 && k % 5 !== 0;
+  for (let d = 0; ; d++) {
+    if (coprime(k0 - d)) return MP4_TIMESCALE / (k0 - d);
+    if (coprime(k0 + d)) return MP4_TIMESCALE / (k0 + d);
+  }
+}
+
+/** Chrome's software H.264 encoder (OpenH264) budgets for at most 60 frames a second. */
+const ENCODER_MAX_FPS = 60;
+
+/**
+ * What to ask the encoder for to get `bitrate` at `fps`: that bitrate and
+ * frame rate, except above 60 fps, where it's told 60 and a bitrate scaled
+ * to match (an encoder that stops at 60 spent twice the target at 120 fps).
+ */
+export function encoderRequest(bitrate: number, fps: number | null | undefined): { bitrate: number; frameRate?: number } {
+  const frameRate = encoderFrameRate(fps && Math.min(fps, ENCODER_MAX_FPS));
+  if (!frameRate || !fps || fps <= ENCODER_MAX_FPS) return { bitrate, frameRate };
+  return { bitrate: Math.round((bitrate * ENCODER_MAX_FPS) / fps), frameRate };
+}
+
 /** True when the source is wasteful enough that re-encoding pays off. */
 export function worthReencoding(sourceBitrate: number, target: number): boolean {
   return sourceBitrate > 0 && target > 0 && sourceBitrate >= target * REENCODE_RATIO;

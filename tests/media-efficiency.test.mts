@@ -5,7 +5,7 @@
  * registration. Pure logic only; the browser path is checked with Playwright.
  */
 import {
-  BITS_PER_PIXEL, canEncodeH264, encodedBytes, planVideo, REENCODE_RATIO, shortBytes, targetBitrate, worthReencoding,
+  BITS_PER_PIXEL, canEncodeH264, encodedBytes, encoderFrameRate, encoderRequest, planVideo, REENCODE_RATIO, shortBytes, targetBitrate, worthReencoding,
 } from "../lib/video-quality.ts";
 import { probeSizes, qualitySizes, smallerSize, variantSize, workerQualitySizes } from "../lib/media-size.ts";
 import { mp3VbrLevel, parseAudioStream } from "../lib/mp3.ts";
@@ -39,6 +39,30 @@ check("60 fps costs 1.5× 30 fps, not 2×", Math.abs(targetBitrate(1920, 1080, 6
 check("unknown fps is treated as 30", targetBitrate(1920, 1080, null) === hd && targetBitrate(1920, 1080, 0) === hd);
 check("absurd fps is clamped", targetBitrate(1920, 1080, 1000) === targetBitrate(1920, 1080, 120));
 check("4K scales sub-linearly (×4 pixels, under ×3 bits)", targetBitrate(3840, 2160, 30) / hd < 3 && targetBitrate(3840, 2160, 30) / hd > 2.5);
+
+// ---------- the frame rate the encoder is told ----------
+// Chrome's encoder spends bitrate / frame rate per frame (30 when not told),
+// and mediabunny's MP4 timescale comes from the same number: it must stay
+// close to the real rate and keep the 1/57600 s timescale (57600/k, k coprime).
+{
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const rates = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 120, 240, 7.5, 27.3];
+  const got = rates.map((r) => [r, encoderFrameRate(r)] as const);
+  check("encoder frame rate is within 1% of the source's", got.every(([r, e]) => !!e && Math.abs(e / r - 1) < 0.01), JSON.stringify(got));
+  check(
+    "it keeps the MP4's 1/57600 s timescale",
+    got.every(([, e]) => {
+      const k = Math.round(57_600 / e!);
+      return Math.abs(57_600 / k - e!) < 1e-9 && gcd(k, 57_600) === 1;
+    })
+  );
+  check("no rate, or a nonsense one: the encoder isn't told", [null, undefined, 0, NaN, Infinity, -30, 0.5, 1000].every((r) => encoderFrameRate(r) === undefined));
+  const at60 = encoderRequest(6_531_840, 60);
+  check("up to 60 fps: the target bitrate at the source's rate", at60.bitrate === 6_531_840 && at60.frameRate === encoderFrameRate(60));
+  const at120 = encoderRequest(10_886_400, 120);
+  check("above 60 fps: told 60 with the bitrate scaled to match", at120.frameRate === encoderFrameRate(60) && at120.bitrate === 5_443_200, JSON.stringify(at120));
+  check("unknown rate: the bitrate as is, no rate", JSON.stringify(encoderRequest(4_000_000, null)) === JSON.stringify({ bitrate: 4_000_000 }));
+}
 
 // ---------- re-encode decision ----------
 check("re-encode only at ≥ 1.4× the target", REENCODE_RATIO === 1.4 && worthReencoding(hd * 1.4, hd) && !worthReencoding(hd * 1.39, hd));
@@ -85,6 +109,10 @@ check("no size and no bitrate: nothing shown", variantSize({ url: "u", bitrate: 
 check("no duration: nothing estimated", variantSize({ url: "u", bitrate: 2_000_000, width: null, height: null }, null) === null);
 check("unknown dimensions are assumed 16:9", smallerSize({ url: "u", bitrate: 0, width: null, height: 1080 }, 50 * MB, 30, true) === encodedBytes(hd, 128_000, 30));
 check("a silent clip counts no audio", smallerSize({ url: "u", bitrate: 0, width: 1920, height: 1080 }, 50 * MB, 30, false) === encodedBytes(hd, 0, 30));
+// The frame rate is unknown here: offered only when 60 fps would re-encode too.
+const at = (mbps: number) => smallerSize({ url: "u", bitrate: 0, width: 1920, height: 1080 }, (mbps * 1e6 * 10) / 8, 10, false);
+check("1080p at 8 Mbps: a 60 fps post would be kept, so not offered", at(8) === undefined);
+check("1080p at 9.2 Mbps: re-encoded at 30 and 60 fps, offered", at(9.2) === encodedBytes(hd, 0, 10) && 9.2e6 >= targetBitrate(1920, 1080, 60) * REENCODE_RATIO);
 
 // TikTok: DataSize is exact, PlayAddr's own width/height win.
 {
@@ -176,7 +204,7 @@ check("compress-video is registered under Video & Audio", !!tool && tool.categor
 check("it is a workbench tool with a processor", !!tool && panelSpec(tool).kind === "workbench" && !!PROCESSORS["compress-video"]);
 const proc = PROCESSORS["compress-video"];
 check("accepts MP4, MOV and WebM", ["video/mp4", "video/quicktime", "video/webm"].every((t) => proc.accept.split(",").includes(t)));
-check("one file at a time, size change reported", !proc.multiple && proc.minFiles === 1 && proc.reportsSizeChange === true);
+check("one file at a time, size change reported, can be cancelled", !proc.multiple && proc.minFiles === 1 && proc.reportsSizeChange === true && proc.cancellable === true);
 const labels = proc.fields[0].options!.map((o) => o.label).join(", ");
 const pdfLabels = PROCESSORS["compress-pdf"].fields[0].options!.map((o) => o.label).join(", ");
 check("presets read like the PDF compressor's", labels === pdfLabels && labels === "Smallest file, Recommended, High quality", labels);

@@ -31,8 +31,11 @@ export function smallerSize(v: XVariant, size: number, duration: number | null, 
   const height = v.width && v.height ? v.height : short;
   const audio = hasAudio ? TYPICAL_AUDIO_BITRATE : 0;
   const source = Math.max(0, (size * 8) / duration - audio);
-  const target = targetBitrate(width, height, 30);
-  return worthReencoding(source, target) ? encodedBytes(target, audio, duration) : undefined;
+  // The frame rate is only known once the file is read. Offer it only when it
+  // pays off at 60 fps too, so the browser re-encodes whenever it's offered;
+  // the size is for 30 fps, which most posts are.
+  if (!worthReencoding(source, targetBitrate(width, height, 60))) return undefined;
+  return encodedBytes(targetBitrate(width, height, 30), audio, duration);
 }
 
 /** Size per offered quality (by height), for the qualities this post has. */

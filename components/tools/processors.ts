@@ -33,6 +33,8 @@ export interface ToolProcessor {
    * purpose is size — comparing a PDF to, say, a .txt would be misleading.
    */
   reportsSizeChange?: boolean;
+  /** A long job that stops on ctx.signal: offer Cancel while it runs. */
+  cancellable?: boolean;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -115,6 +117,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
   },
   "compress-video": {
     reportsSizeChange: true,
+    cancellable: true,
     accept: "video/mp4,video/quicktime,video/webm,video/x-m4v",
     multiple: false,
     minFiles: 1,
