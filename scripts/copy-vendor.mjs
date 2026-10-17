@@ -61,6 +61,11 @@ for (const f of ["ffmpeg-core.js", "ffmpeg-core.wasm"]) {
   copy(join(pkgDir("@ffmpeg/core"), "dist", "esm", f), join(out, "ffmpeg-core", ffmpegCore, f));
 }
 
+// MozJPEG encoder/decoder (lib/image-codec.ts), loaded only when a tool needs it.
+const jsquash = version("@jsquash/jpeg");
+copy(join(pkgDir("@jsquash/jpeg"), "codec", "enc", "mozjpeg_enc.wasm"), join(out, "jsquash-jpeg", jsquash, "mozjpeg_enc.wasm"));
+copy(join(pkgDir("@jsquash/jpeg"), "codec", "dec", "mozjpeg_dec.wasm"), join(out, "jsquash-jpeg", jsquash, "mozjpeg_dec.wasm"));
+
 // Language models (LSTM "best_int" variants — what OEM 1 loads)
 const langs = ["eng", "spa", "fra", "deu", "por", "ita", "nld"];
 for (const lang of langs) {
@@ -69,4 +74,4 @@ for (const lang of langs) {
   copy(src, join(out, "tessdata", "4.0.0_best_int", `${lang}.traineddata.gz`));
 }
 
-console.log(`vendor assets ready: pdfjs ${pdfjs}, tesseract ${tess}, ${langs.length} OCR languages, ffmpeg ${ffmpegPkg} (core ${ffmpegCore})`);
+console.log(`vendor assets ready: pdfjs ${pdfjs}, tesseract ${tess}, ${langs.length} OCR languages, ffmpeg ${ffmpegPkg} (core ${ffmpegCore}), mozjpeg ${jsquash}`);
