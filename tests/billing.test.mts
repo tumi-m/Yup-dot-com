@@ -123,13 +123,38 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const usd = await deliver(store, "charge.success", { ...onceTx("pw_f", "pro", 1, 4900), currency: "USD" });
   check("non-ZAR charge ignored", usd.status === "ignored");
   const strMeta = await applyCharge({ ...onceTx("pw_g", "team", 1, 19900), metadata: JSON.stringify(onceTx("", "team", 1, 0).metadata) }, deps(store));
-  check("metadata as a JSON string is understood; a different plan starts now",
-    strMeta.status === "applied" && store.db.get(USER)!.prepaid_plan === "team" && store.db.get(USER)!.paid_until === "2026-11-04T08:00:00.000Z");
+  // 396 days of Pro left are worth 396 × 49/199 ≈ 97.5 days of Team, then the month.
+  check("metadata as a JSON string is understood; a different plan carries the time left over",
+    strMeta.status === "applied" && store.db.get(USER)!.prepaid_plan === "team" && store.db.get(USER)!.paid_until === "2027-02-09T20:10:51.256Z",
+    store.db.get(USER)!.paid_until!);
 
-  clock = new Date("2026-11-04T08:00:01Z");
+  clock = new Date("2027-02-09T20:10:52Z");
   check("prepaid expires at read time (no cron)", ownPlan(store.db.get(USER)!, clock) === "free");
-  clock = new Date("2026-11-04T07:59:59Z");
+  clock = new Date("2027-02-09T20:10:51Z");
   check("…and is active up to the second", ownPlan(store.db.get(USER)!, clock) === "team");
+}
+
+// A prepaid term on another plan keeps the time paid for on the current one.
+{
+  clock = new Date("2026-10-17T08:00:00Z");
+  const store = fakeStore([row(USER, "u@x.co")]);
+  await deliver(store, "charge.success", onceTx("pw_py", "pro", 12, 49000));
+  await deliver(store, "charge.success", onceTx("pw_tm", "team", 1, 19900));
+  let u = store.db.get(USER)!;
+  check("Pro year, then a Team month: Team runs past the month for the Pro time left",
+    u.prepaid_plan === "team" && u.paid_until === "2027-02-15T04:59:05.728Z" && ownPlan(u, new Date("2026-12-01T00:00:00Z")) === "team",
+    u.paid_until!);
+
+  const back = fakeStore([row(USER, "u@x.co")]);
+  await deliver(back, "charge.success", onceTx("pw_ty", "team", 12, 199000));
+  await deliver(back, "charge.success", onceTx("pw_pm", "pro", 1, 4900));
+  u = back.db.get(USER)!;
+  check("Team year, then a Pro month: the Team time left becomes Pro time",
+    u.prepaid_plan === "pro" && u.paid_until === "2030-12-07T16:19:35.510Z", u.paid_until!);
+
+  const ended = fakeStore([row(USER, "u@x.co", { prepaid_plan: "pro", paid_until: "2026-10-01T00:00:00.000Z" })]);
+  await deliver(ended, "charge.success", onceTx("pw_te", "team", 1, 19900));
+  check("an ended term adds nothing", ended.db.get(USER)!.paid_until === "2026-11-17T08:00:00.000Z");
 }
 
 // Failure mid-way releases the claim so Paystack's retry is processed.
@@ -250,6 +275,23 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const u = store.db.get(USER)!;
   check("subscription.create before charge.success matches by email", r.status === "applied" &&
     u.subscription_plan === "team" && u.paystack_customer_code === "CUS_9" && ownPlan(u, clock) === "team");
+}
+
+// A new subscription after a cancelled one renews a month after its own first charge.
+{
+  clock = new Date("2026-10-17T08:00:00Z");
+  const store = fakeStore([row(USER, "u@x.co", {
+    subscription_plan: "team", subscription_status: "cancelled", current_period_end: "2026-12-01T08:00:00.000Z",
+    paystack_subscription_code: "SUB_old", paystack_customer_code: "CUS_u",
+  })]);
+  const r = await deliver(store, "charge.success", {
+    status: "success", reference: "pw_re", amount: 19900, currency: "ZAR", paid_at: "2026-10-17T08:00:00.000Z",
+    customer: { customer_code: "CUS_u" }, plan: { plan_code: "PLN_team" },
+    metadata: { user_id: USER, plan: "team", mode: "subscription" },
+  });
+  const u = store.db.get(USER)!;
+  check("resubscribing after a cancel renews a month after the new charge", r.status === "applied" &&
+    u.subscription_status === "active" && u.current_period_end === "2026-11-17T08:00:00.000Z", u.current_period_end!);
 }
 
 // ---------- plan resolution with seats ----------

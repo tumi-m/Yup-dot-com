@@ -8,7 +8,8 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   // Back to where sign-up started (say, pricing), same-site paths only.
-  const next = safeRedirect(searchParams.get("next"));
+  const back = safeRedirect(searchParams.get("next"), "");
+  const next = back || "/dashboard";
 
   if (!isSupabaseConfigured()) {
     return NextResponse.redirect(`${origin}/login`);
@@ -22,5 +23,8 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth`);
+  // An expired link, or one opened in another browser: the login page
+  // explains, then carries on to the same place.
+  const redirect = back ? `&redirect=${encodeURIComponent(back)}` : "";
+  return NextResponse.redirect(`${origin}/login?error=auth${redirect}`);
 }

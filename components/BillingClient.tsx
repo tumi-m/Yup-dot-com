@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ExternalLink, Loader2, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
+import { paymentOutcome, type PaymentOutcome } from "@/lib/billing-ui";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
@@ -100,7 +102,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
   );
 }
 
-type VerifyState = "checking" | "success" | "failed" | "pending";
+type VerifyState = "checking" | "pending" | Exclude<PaymentOutcome, "retry">;
 
 /**
  * Shown on return from Paystack (?ref=…). Confirms the payment server-side,
@@ -120,14 +122,15 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
         try {
           const res = await fetch(`/api/billing/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" });
           const data = await res.json().catch(() => ({}));
-          if (data.status === "success") {
+          const outcome = paymentOutcome(res.status, data.status);
+          if (outcome === "success") {
             if (data.purchase) trackPurchase(reference, data.purchase as CheckoutChoice, data.purchase.amount);
             setState("success");
             router.refresh();
             return;
           }
-          if (res.status !== 202 && data.status !== "ongoing" && data.status !== "pending" && data.status !== "processing") {
-            setState("failed");
+          if (outcome !== "retry") {
+            setState(outcome);
             return;
           }
         } catch {
@@ -186,6 +189,22 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
         )}
         {state === "failed" && (
           <p className="font-medium">Payment didn&apos;t go through. You weren&apos;t charged.</p>
+        )}
+        {state === "other-account" && (
+          <p className="font-medium">
+            This payment belongs to a different account. Sign in with the account you paid from.
+          </p>
+        )}
+        {(state === "not-applied" || state === "unknown") && (
+          <p className="font-medium">
+            {state === "not-applied"
+              ? "We received your payment but couldn't apply it."
+              : "We couldn't confirm this payment. If you were charged,"}{" "}
+            <Link href="/contact" className="underline underline-offset-2 hover:text-primary">
+              {state === "not-applied" ? "Contact us" : "contact us"}
+            </Link>{" "}
+            with reference <span className="break-all font-mono text-sm">{reference}</span>.
+          </p>
         )}
         {state !== "checking" && (
           <button onClick={dismiss} aria-label="Dismiss" className="ml-auto text-muted-foreground hover:text-foreground">

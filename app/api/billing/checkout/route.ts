@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { siteUrl } from "@/lib/site";
-import { hasLiveSubscription } from "@/lib/billing";
+import { payOnceBlock, subscribeBlock } from "@/lib/billing-ui";
 import { billingContext, json } from "@/lib/billing-route";
 import { PLANS, prepaidPrice, toSubunit } from "@/lib/plans";
 import {
@@ -52,12 +52,13 @@ export async function POST(request: Request) {
   if (input.mode === "subscription") {
     plan = planCodes()[input.plan] ?? undefined;
     if (!plan) return json({ error: "This plan isn't set up yet." }, 503);
-    if (hasLiveSubscription(account.row, new Date())) {
-      return json({ error: "You already have a subscription. Manage it on the Billing page." }, 409);
-    }
+    const block = subscribeBlock(input.plan, account.profile.billing);
+    if (block) return json({ error: block }, 409);
     amount = toSubunit(PLANS[input.plan].priceMonthly);
     channels = SUBSCRIPTION_CHANNELS;
   } else {
+    const block = payOnceBlock(input.plan, account.profile.billing);
+    if (block) return json({ error: block }, 409);
     amount = toSubunit(prepaidPrice(input.plan, input.months));
     metadata.months = input.months;
     channels = ONCE_OFF_CHANNELS;
