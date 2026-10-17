@@ -900,7 +900,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 </div>
                 {status === "exporting" && (
                   <div className="order-last flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto" aria-live="polite">
-                    <ProgressBar value={Math.max(fraction, 0.03)} label="Exporting PDF" className="h-2 w-24 sm:w-40" />
+                    <ProgressBar value={fraction} determinate label="Exporting PDF" className="h-2 w-24 sm:w-40" />
                     <span className="text-xs tabular-nums text-muted-foreground">
                       {progress ? `${Math.min(progress.done + 1, progress.total)}/${progress.total}` : ""}
                     </span>

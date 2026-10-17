@@ -380,7 +380,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                     className="w-full max-w-md"
                   >
                     <motion.div initial={HANDOFF.track.initial} animate={HANDOFF.track.animate}>
-                      <ProgressBar value={Math.max(fraction, 0.03)} label="Converting" />
+                      <ProgressBar value={fraction} determinate label="Converting" />
                     </motion.div>
                     <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       <WorkingGlyph />

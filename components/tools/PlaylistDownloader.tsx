@@ -761,7 +761,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
               <AnimatePresence initial={false}>
                 {started > 0 && (
                   <motion.div key="overall" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T}>
-                    <ProgressBar value={Math.max(overall, 0.03)} label="Playlist progress" className="mb-2.5 h-2.5" />
+                    <ProgressBar value={overall} determinate label="Playlist progress" className="mb-2.5 h-2.5" />
                   </motion.div>
                 )}
               </AnimatePresence>

@@ -113,10 +113,15 @@ export const HANDOFF = {
   },
 } as const;
 
-/** Determinate progress fill: one smooth glide per update. */
-export const PROGRESS_T = 0.3;
-/** The bar holds at 100% this long before the result replaces it. */
-export const PROGRESS_HOLD_MS = 180;
+/**
+ * Determinate progress fill: one glide per update, on EASE_OUT, so a new
+ * value arriving mid-glide carries on forward instead of stalling.
+ */
+export const PROGRESS_T = DUR.base;
+/** How long a full bar is seen at rest before the result replaces it. */
+export const PROGRESS_REST = 0.12;
+/** The bar's last glide to 100% plus its rest, before the result takes over. */
+export const PROGRESS_HOLD_MS = Math.round((PROGRESS_T + PROGRESS_REST) * 1000);
 
 /**
  * The success moment, in seconds from the card's mount. The primary action is
