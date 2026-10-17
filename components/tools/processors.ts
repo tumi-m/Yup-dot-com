@@ -33,6 +33,8 @@ export interface ToolProcessor {
    * purpose is size — comparing a PDF to, say, a .txt would be misleading.
    */
   reportsSizeChange?: boolean;
+  /** A long job that stops on ctx.signal: offer Cancel while it runs. */
+  cancellable?: boolean;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -112,6 +114,31 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     run: async (files, o, ctx) => (await kit()).compressTool(files, { quality: o.quality }, ctx),
+  },
+  "compress-video": {
+    reportsSizeChange: true,
+    cancellable: true,
+    accept: "video/mp4,video/quicktime,video/webm,video/x-m4v",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "quality",
+        label: "Quality",
+        type: "select",
+        default: "recommended",
+        options: [
+          { value: "small", label: "Smallest file" },
+          { value: "recommended", label: "Recommended" },
+          { value: "high", label: "High quality" },
+        ],
+      },
+    ],
+    note: "Up to 4K. Long videos take a few minutes.",
+    run: async (files, o, ctx) => {
+      const { compressVideoTool } = await import("@/lib/video-compress");
+      return compressVideoTool(files, { quality: o.quality }, ctx);
+    },
   },
   "pdf-to-jpg": {
     accept: "application/pdf",

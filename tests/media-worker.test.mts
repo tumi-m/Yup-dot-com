@@ -281,6 +281,30 @@ try {
     body: JSON.stringify({ url: MPD }),
   }).then((r) => r.json());
   check("/info lists available heights", JSON.stringify(info.heights) === "[360,720,1080]", JSON.stringify(info.heights));
+  // A bare DASH manifest has bitrates but no duration, so no sizes can be given.
+  check("/info gives no made-up sizes without a duration", info.duration == null && JSON.stringify(info.sizes) === "{}", JSON.stringify(info.sizes));
+  // YouTube-shaped formats: H.264 picked over VP9 at the same size, M4A audio added to video-only files.
+  const sizes = JSON.parse(
+    execFileSync("python3", ["-c", `
+import json, sys
+sys.path.insert(0, "media-worker")
+import worker
+f = [
+  {"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2", "ext": "m4a", "abr": 129, "filesize": 1_000_000},
+  {"format_id": "251", "vcodec": "none", "acodec": "opus", "ext": "webm", "abr": 140, "filesize": 1_100_000},
+  {"format_id": "137", "vcodec": "avc1.640028", "acodec": "none", "width": 1920, "height": 1080, "tbr": 4000, "filesize": 20_000_000},
+  {"format_id": "248", "vcodec": "vp9", "acodec": "none", "width": 1920, "height": 1080, "tbr": 2600, "filesize": 13_000_000},
+  {"format_id": "136", "vcodec": "avc1.4d401f", "acodec": "none", "width": 1280, "height": 720, "tbr": 2000},
+  {"format_id": "18", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "width": 640, "height": 360, "filesize_approx": 3_000_000},
+]
+print(json.dumps(worker.estimate_sizes(f, 40)))
+`], { env: { ...process.env, MEDIA_WORKER_SECRET: "x" } }).toString()
+  );
+  check(
+    "sizes follow the worker's format choice",
+    sizes["1080"] === 21_000_000 && sizes["720"] === 2000 * 125 * 40 + 1_000_000 && sizes["360"] === 3_000_000,
+    JSON.stringify(sizes)
+  );
   check("unknown job id → 404", (await fetch(`${W}/jobs/aaaaaaaaaaaaaaaaaaaaaaaa`)).status === 404);
   // Playlists.
   const listing = (url: string, auth = `Bearer ${SECRET}`) =>

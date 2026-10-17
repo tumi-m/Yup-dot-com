@@ -56,6 +56,13 @@ function nextSteps(slug: string, filename: string): string[] {
   return [];
 }
 
+/** Video files some systems hand over without a type. */
+const VIDEO_EXT: Record<string, RegExp> = {
+  "video/mp4": /\.(mp4|m4v)$/,
+  "video/quicktime": /\.mov$/,
+  "video/webm": /\.webm$/,
+};
+
 type Status = "idle" | "working" | "done";
 
 interface Entry {
@@ -88,6 +95,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** Where focus goes once the next state has rendered, so it never drops to the page. */
   const focusNext = useRef<"progress" | "done" | "run" | null>(null);
+  /** The running job; aborted on Cancel, on new files and when the page goes away. */
+  const job = useRef<AbortController | null>(null);
+  useEffect(() => () => job.current?.abort(), []);
   const focusRef = (key: NonNullable<typeof focusNext.current>) => (el: HTMLElement | null) => {
     if (el && focusNext.current === key) {
       focusNext.current = null;
@@ -110,7 +120,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           f.type === t ||
           (t === "application/pdf" && name.endsWith(".pdf")) ||
           (!f.type && t === "image/jpeg" && /\.jpe?g$/.test(name)) ||
-          (!f.type && t === "image/png" && name.endsWith(".png"))
+          (!f.type && t === "image/png" && name.endsWith(".png")) ||
+          ((!f.type || f.type === "application/octet-stream") && VIDEO_EXT[t]?.test(name))
         );
       })
     );
@@ -124,6 +135,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       setError(`Files up to ${formatLimitBytes(limits.maxFileBytes)} on your plan.`);
       return;
     }
+    stopJob();
     const incoming = accepted.map((file) => ({ id: `f${++entrySeq}`, file }));
     // Decide from the current list, not inside the state updater: React may
     // run updaters later, so a flag set there is still false when read here.
@@ -154,11 +166,16 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setError(null);
     setProgress(null);
     const started = performance.now();
+    const ctl = new AbortController();
+    job.current = ctl;
     try {
       const out = await proc.run(files, options, {
-        progress: (fraction, label) =>
-          setProgress({ fraction: Math.max(0, Math.min(1, fraction)), label }),
+        progress: (fraction, label) => {
+          if (!ctl.signal.aborted) setProgress({ fraction: Math.max(0, Math.min(1, fraction)), label });
+        },
+        signal: ctl.signal,
       });
+      if (ctl.signal.aborted) return;
       setResults(Array.isArray(out) ? out : [out]);
       setElapsed((performance.now() - started) / 1000);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "done";
@@ -167,12 +184,30 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) setTimeout(() => setUpsell("nudge"), 1600);
     } catch (err) {
+      if (ctl.signal.aborted) return;
       setError(friendlyPdfError(err).message);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
       setStatus("idle");
     } finally {
-      setProgress(null);
+      if (job.current === ctl) {
+        job.current = null;
+        setProgress(null);
+      }
     }
+  }
+
+  /** Stops the running job, if any, and goes back to the ready state. */
+  function stopJob() {
+    if (!job.current) return;
+    job.current.abort();
+    job.current = null;
+    setProgress(null);
+    setStatus("idle");
+  }
+
+  function cancel() {
+    focusNext.current = "run";
+    stopJob();
   }
 
   async function downloadAll() {
@@ -208,6 +243,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }, []);
 
   function reset() {
+    stopJob();
     setEntries([]);
     setResults([]);
     setStatus("idle");
@@ -279,7 +315,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 <TrendingDown className="h-3 w-3" /> {Math.round(sizeDelta * 100)}% smaller
               </span>
             )}
-            {sizeDelta !== null && sizeDelta <= 0.01 && (
+            {sizeDelta !== null && sizeDelta < -0.01 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800">
+                {Math.round(-sizeDelta * 100)}% larger
+              </span>
+            )}
+            {sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
                 Already optimized
               </span>
@@ -626,6 +667,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     <p className="sr-only" aria-live="polite">
                       {progress?.label ?? "Casting…"}
                     </p>
+                    {proc.cancellable && (
+                      <div className="mt-2 flex justify-center">
+                        <Button variant="ghost" className="h-11 text-muted-foreground" onClick={cancel}>
+                          <X /> Cancel
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} transition={SPRING} tabIndex={-1} data-cast>

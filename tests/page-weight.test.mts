@@ -60,7 +60,7 @@ check(
 );
 
 // Heavy libraries load when used, not with the panel.
-const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist|jszip|docx|pptxtojson|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*)$/;
+const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist|jszip|docx|pptxtojson|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
 for (const file of [
   "components/tools/ToolWorkbench.tsx",
   "components/tools/processors.ts",

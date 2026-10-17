@@ -211,6 +211,31 @@ def display_filename(title: str | None, video_id: str | None, ext: str) -> str:
     return f"{name}.{ext}"
 
 
+def format_bytes(f: dict, duration) -> int:
+    """A format's size: exact, yt-dlp's estimate, or bitrate × duration."""
+    size = f.get("filesize") or f.get("filesize_approx")
+    if not size and f.get("tbr") and duration:
+        size = f["tbr"] * 1000 / 8 * duration
+    return int(size or 0)
+
+
+def estimate_sizes(formats: list, duration) -> dict:
+    """Bytes of the MP4 each frame size (short side) downloads, picked the way
+    download_opts does: H.264 if there is one, plus the best (M4A) audio."""
+    audios = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") not in (None, "none")]
+    audios.sort(key=lambda f: (f.get("ext") == "m4a", f.get("abr") or f.get("tbr") or 0))
+    audio = format_bytes(audios[-1], duration) if audios else 0
+    sizes = {}
+    for side in {short_side(f) for f in formats if is_video(f)}:
+        same = [f for f in formats if is_video(f) and short_side(f) == side]
+        same.sort(key=lambda f: ((f.get("vcodec") or "").startswith("avc1"), f.get("tbr") or 0))
+        best = same[-1]
+        video = format_bytes(best, duration)
+        if video:
+            sizes[str(side)] = video + (audio if best.get("acodec") in (None, "none") else 0)
+    return sizes
+
+
 def summarize(info: dict) -> dict:
     formats = info.get("formats") or []
     return {
@@ -222,6 +247,7 @@ def summarize(info: dict) -> dict:
         # Short side, like the plan limits: a 1080x1920 Short is 1080p.
         "heights": sorted({short_side(f) for f in formats if is_video(f)}) or ([short_side(info)] if info.get("height") else []),
         "hasAudio": any(f.get("acodec") != "none" for f in formats) if formats else True,
+        "sizes": estimate_sizes(formats, info.get("duration")),
     }
 
 

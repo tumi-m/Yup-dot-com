@@ -503,6 +503,8 @@ export async function pdfToChunksTool(
 export interface ToolContext {
   /** fraction in 0..1, plus a short human label */
   progress?: (fraction: number, label: string) => void;
+  /** Aborted when the person cancels or leaves; long tools stop early. */
+  signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------

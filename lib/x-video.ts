@@ -18,6 +18,8 @@ export interface XVariant {
   bitrate: number;
   width: number | null;
   height: number | null;
+  /** Exact file size in bytes, when the platform says. */
+  size?: number;
 }
 
 import { cleanTitle } from "./media";
