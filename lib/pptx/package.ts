@@ -42,6 +42,7 @@
  *    any hyperlink).
  */
 import JSZip from "jszip";
+import { zipEntryOptions } from "../zip";
 import {
   type XmlDocument,
   type XmlElement,
@@ -474,9 +475,6 @@ export interface SaveOptions {
   renumber?: boolean;
 }
 
-/** Media that is already compressed. */
-const PRECOMPRESSED = /\.(jpe?g|png|gif|webp|mp4|m4v|mov|wmv|avi|mpe?g|webm|ogv|mp3|m4a|wma|ogg|oga|aac)$/i;
-
 export async function saveDeck(deck: Deck, options: SaveOptions = {}): Promise<Uint8Array> {
   if (options.renumber !== false) renumberSlideParts(deck);
   const out = new JSZip();
@@ -500,11 +498,11 @@ export async function saveDeck(deck: Deck, options: SaveOptions = {}): Promise<U
     } else {
       throw new PptxError(`No content for ${name}`);
     }
-    // Deflating JPEGs, PNGs and video gains nothing and is most of the save
-    // time on photo-heavy decks: store them as they are.
-    out.file(name, data, { compression: PRECOMPRESSED.test(name) ? "STORE" : "DEFLATE", createFolders: false });
+    // Media is stored as it is: deflating JPEGs, PNGs and video gains nothing
+    // and is most of the save time on photo-heavy decks.
+    out.file(name, data, { ...zipEntryOptions(name), createFolders: false });
   }
-  return out.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  return out.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
 /**

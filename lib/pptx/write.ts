@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { zipEntryOptions } from "../zip";
 
 /**
  * Minimal PowerPoint (.pptx) writer: one picture per slide.
@@ -297,8 +298,8 @@ export async function writePptx(input: PptxInput): Promise<Uint8Array> {
   const n = input.slides.length;
   const zip = new JSZip();
   // Office never writes folder entries; keep the package to parts only.
-  const put = (name: string, data: string | Uint8Array, opts: JSZip.JSZipFileOptions = {}) =>
-    zip.file(name, data, { ...opts, createFolders: false });
+  const put = (name: string, data: string | Uint8Array) =>
+    zip.file(name, data, { ...zipEntryOptions(name), createFolders: false });
 
   // [Content_Types].xml first, as Office writes it.
   put("[Content_Types].xml", contentTypes(n));
@@ -360,14 +361,12 @@ export async function writePptx(input: PptxInput): Promise<Uint8Array> {
         { id: "rId2", type: `${REL}/image`, target: `../media/image${num}.${ext}` },
       ])
     );
-    // Images are already compressed; storing them avoids wasted CPU.
-    put(`ppt/media/image${num}.${ext}`, slide.image, { compression: "STORE" });
+    put(`ppt/media/image${num}.${ext}`, slide.image);
   });
 
   return zip.generateAsync({
     type: "uint8array",
     compression: "DEFLATE",
-    compressionOptions: { level: 6 },
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
 }

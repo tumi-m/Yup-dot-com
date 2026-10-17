@@ -13,6 +13,7 @@ import {
   WidthType,
 } from "docx";
 import JSZip from "jszip";
+import { zipEntryOptions } from "../zip";
 import type { ParsedDocument, TableBlock } from "./parse";
 
 /**
@@ -222,9 +223,11 @@ function sheetXml(table: TableBlock) {
 export async function tablesToXlsx(tables: TableBlock[]): Promise<Uint8Array> {
   if (!tables.length) throw new Error("No tables to export.");
   const zip = new JSZip();
+  // Office never writes folder entries; keep the package to parts only.
+  const put = (name: string, data: string) => zip.file(name, data, { ...zipEntryOptions(name), createFolders: false });
   const names = tables.map((t, i) => `Table ${i + 1} (p${t.page})`.slice(0, 31));
 
-  zip.file(
+  put(
     "[Content_Types].xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
@@ -240,14 +243,14 @@ export async function tablesToXlsx(tables: TableBlock[]): Promise<Uint8Array> {
         .join("") +
       `</Types>`
   );
-  zip.file(
+  put(
     "_rels/.rels",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
       `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
       `</Relationships>`
   );
-  zip.file(
+  put(
     "xl/workbook.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>` +
@@ -256,7 +259,7 @@ export async function tablesToXlsx(tables: TableBlock[]): Promise<Uint8Array> {
         .join("") +
       `</sheets></workbook>`
   );
-  zip.file(
+  put(
     "xl/_rels/workbook.xml.rels",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
@@ -270,7 +273,7 @@ export async function tablesToXlsx(tables: TableBlock[]): Promise<Uint8Array> {
       `</Relationships>`
   );
   // Style 1 = bold header row.
-  zip.file(
+  put(
     "xl/styles.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
@@ -283,7 +286,7 @@ export async function tablesToXlsx(tables: TableBlock[]): Promise<Uint8Array> {
       `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
       `</styleSheet>`
   );
-  tables.forEach((t, i) => zip.file(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(t)));
+  tables.forEach((t, i) => put(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(t)));
 
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
