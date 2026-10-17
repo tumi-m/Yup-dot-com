@@ -17,9 +17,9 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      // Opens at 200ms and closes at 150ms on the token curves. Blur only on
-      // larger screens: fading a backdrop-filter is costly on phones.
-      "fixed inset-0 z-50 bg-black/60 sm:backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:fill-mode-forwards data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=closed]:duration-fast data-[state=open]:ease-out data-[state=closed]:ease-in",
+      // Opens at 200ms and closes at 150ms on the token curves. A plain scrim:
+      // fading a backdrop blur costs whole frames while the dialog opens.
+      "fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:fill-mode-forwards data-[state=open]:fade-in-0 data-[state=open]:duration-200 data-[state=closed]:duration-fast data-[state=open]:ease-out data-[state=closed]:ease-in",
       className
     )}
     {...props}
