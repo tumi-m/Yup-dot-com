@@ -4,12 +4,14 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { ToolGrid } from "@/components/ToolGrid";
 import { Starfield } from "@/components/landing/HeroScene";
 import { WordReveal } from "@/components/motion/primitives";
+import { YOUTUBE_ENABLED } from "@/lib/media";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "All PDF tools",
-  description:
-    "Merge, split, compress, convert, OCR, protect, edit and sign PDFs. PPTX to PDF, Google Slides downloads, YouTube to MP4 and X to MP4 or MP3.",
+  description: `Merge, split, compress, convert, OCR, protect, edit and sign PDFs. PPTX to PDF, Google Slides downloads, and ${
+    YOUTUBE_ENABLED ? "YouTube, X, TikTok and Instagram" : "X, TikTok and Instagram"
+  } to MP4 or MP3.`,
   alternates: { canonical: "/tools" },
 };
 

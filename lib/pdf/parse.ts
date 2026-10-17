@@ -97,16 +97,22 @@ interface RawItem {
   fontName?: string;
 }
 
+// Characters XML 1.0 forbids (C0 controls, U+FFFE/U+FFFF, lone surrogates).
+// Broken font maps can produce them, and one is enough to corrupt a .docx.
+const XML_ILLEGAL =
+  /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function toSpans(items: RawItem[]): ParsedSpan[] {
   const spans: ParsedSpan[] = [];
   for (const item of items) {
-    if (!item.str || !item.str.trim()) continue;
+    const text = item.str?.replace(XML_ILLEGAL, "");
+    if (!text || !text.trim()) continue;
     const [a, b, , , e, f] = item.transform;
     // For unrotated text a == d == fontSize; hypot covers rotated runs.
     const fontSize = Math.hypot(a, b) || item.height || 12;
     const fontName = item.fontName ?? "";
     spans.push({
-      text: item.str,
+      text,
       x: e,
       y: f,
       width: item.width,
@@ -577,14 +583,16 @@ export function extractTables(doc: ParsedDocument): TableBlock[] {
   return doc.blocks.filter((b): b is TableBlock => b.type === "table");
 }
 
+function csvCell(cell: string): string {
+  // Spreadsheets run cells starting with = + - @ as formulas. Plain negative
+  // numbers (and a lone "-") are safe and stay as they are.
+  const safe = /^[=+\-@\t\r]/.test(cell) && !/^-([\d.,]+%?)?$/.test(cell) ? `'${cell}` : cell;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** UTF-8 CSV with a byte-order mark, so Excel shows accented text correctly. */
 export function tableToCsv(table: TableBlock): string {
-  return table.rows
-    .map((row) =>
-      row
-        .map((cell) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell))
-        .join(",")
-    )
-    .join("\n");
+  return "\uFEFF" + table.rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
 export interface Chunk {
@@ -592,6 +600,34 @@ export interface Chunk {
   path: string;
   text: string;
   page: number;
+}
+
+/**
+ * Splits text longer than `max` into pieces that fit, breaking at the last
+ * line break (table row, list item), sentence end or space that fits.
+ */
+function splitToFit(text: string, max: number): string[] {
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const head = rest.slice(0, max + 1);
+    const min = max / 2; // a break this early would leave a tiny piece
+    let cut = head.lastIndexOf("\n");
+    if (cut < min) {
+      cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("? "), head.lastIndexOf("! ")) + 1;
+    }
+    if (cut < min) cut = head.lastIndexOf(" ");
+    if (cut < 1) {
+      cut = Math.max(1, max);
+      // Don't split a surrogate pair.
+      if (cut > 1 && /[\uD800-\uDBFF]/.test(rest[cut - 1])) cut--;
+    }
+    const piece = rest.slice(0, cut).trim();
+    if (piece) pieces.push(piece);
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
 }
 
 /**
@@ -607,7 +643,8 @@ export function toChunks(doc: ParsedDocument, maxChars = 1200): Chunk[] {
   const flush = () => {
     if (buffer.trim()) {
       chunks.push({
-        path: headings.join(" > "),
+        // Skip unset levels, e.g. when the first heading is an h3.
+        path: headings.filter(Boolean).join(" > "),
         text: buffer.trim(),
         page: bufferPage,
       });
@@ -631,11 +668,13 @@ export function toChunks(doc: ParsedDocument, maxChars = 1200): Chunk[] {
     else if (block.type === "table") text = block.rows.map((r) => r.join(" | ")).join("\n");
 
     if (!text) continue;
-    if (buffer.length + text.length > maxChars) {
-      flush();
-      bufferPage = block.page;
+    for (const piece of splitToFit(text, maxChars)) {
+      if (buffer && buffer.length + 2 + piece.length > maxChars) {
+        flush();
+        bufferPage = block.page;
+      }
+      buffer += (buffer ? "\n\n" : "") + piece;
     }
-    buffer += (buffer ? "\n\n" : "") + text;
   }
   flush();
   return chunks;
