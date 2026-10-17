@@ -145,31 +145,26 @@ export function NavShell({
       {/* A sibling of the header: its backdrop-filter would trap a fixed child. */}
       <AnimatePresence>
         {open && (
-          <motion.div
-            key="sheet"
-            ref={sheetRef}
-            className="fixed inset-x-0 bottom-0 top-16 z-30 md:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
-            transition={{ duration: DUR.base, ease: EASE_OUT }}
-          >
+          <motion.div key="sheet" ref={sheetRef} className="fixed inset-x-0 bottom-0 top-16 z-30 md:hidden">
             {/* No blur on phones: it dropped out before the fade finished. */}
-            <button
+            <motion.button
               type="button"
               tabIndex={-1}
               aria-hidden
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: { duration: DUR.base, ease: EASE_OUT } }}
+              exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
               className="absolute inset-0 h-full w-full cursor-default bg-background/70 sm:bg-background/60 sm:backdrop-blur-sm"
               onClick={() => setOpen(false)}
             />
-            {/* Leaves upward with the sheet, so the links never sit faded over the page. */}
+            {/* The panel is solid before its links appear, and the links are
+                gone before it fades, so menu text never sits over page text. */}
             <motion.nav
               id={sheetId}
               aria-label="Menu"
-              initial={{ y: -8 }}
-              animate={{ y: 0 }}
-              exit={{ y: -8, opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
-              transition={{ duration: DUR.base, ease: EASE_OUT }}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+              exit={{ opacity: 0, y: -8, transition: { duration: DUR.fast, ease: EASE_IN, delay: DUR.tap } }}
               className="relative border-b border-border bg-background shadow-xl shadow-primary/5"
             >
               <div className="container flex flex-col gap-1 py-4">
@@ -180,8 +175,8 @@ export function NavShell({
                     <motion.div
                       key={l.href}
                       initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: DUR.base, ease: EASE_OUT, delay: (i + 1) * STAGGER }}
+                      animate={{ opacity: 1, y: 0, transition: { duration: DUR.base, ease: EASE_OUT, delay: LINKS_AFTER + i * STAGGER } }}
+                      exit={LINK_EXIT}
                     >
                       <Link
                         href={l.href}
@@ -200,8 +195,8 @@ export function NavShell({
                 <motion.div
                   className="mt-2"
                   initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: DUR.base, ease: EASE_OUT, delay: (links.length + 1) * STAGGER }}
+                  animate={{ opacity: 1, y: 0, transition: { duration: DUR.base, ease: EASE_OUT, delay: LINKS_AFTER + links.length * STAGGER } }}
+                  exit={LINK_EXIT}
                 >
                   {mobileActions}
                 </motion.div>
@@ -213,6 +208,11 @@ export function NavShell({
     </>
   );
 }
+
+/** Menu links start once the panel is mostly solid... */
+const LINKS_AFTER = DUR.fast / 2;
+/** ...and leave before it starts to fade. */
+const LINK_EXIT = { opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } };
 
 const LINKS: NavLink[] = [
   { href: "/tools", label: "Tools" },
