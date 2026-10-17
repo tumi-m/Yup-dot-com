@@ -126,6 +126,13 @@
   }
 }
 
+/* Spinners stand still with reduced motion too (most use motion-safe:animate-spin already). */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation: none;
+  }
+}
+
 /* Reveal (components/motion/primitives.tsx): held back only after hydration. */
 [data-reveal="pending"] {
   opacity: 0;

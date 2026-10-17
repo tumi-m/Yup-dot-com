@@ -112,7 +112,7 @@ export function PricingCards({
                   disabled={isCurrent || loading !== null}
                   onClick={() => choose(plan.id)}
                 >
-                  {loading === `${plan.id}:subscription` && <Loader2 className="motion-safe:animate-spin" />}
+                  {loading === `${plan.id}:subscription` && <Loader2 className="animate-spin" />}
                   {isCurrent
                     ? "Current plan"
                     : plan.id === "free"

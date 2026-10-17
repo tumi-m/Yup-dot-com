@@ -1,7 +1,8 @@
 import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
-import { STAGGER_HERO, WordReveal } from "@/components/motion/primitives";
+import { WordReveal } from "@/components/motion/primitives";
+import { STAGGER_HERO } from "@/components/motion/tokens";
 import { PricingCards } from "@/components/PricingCards";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
@@ -34,14 +35,17 @@ export default async function PricingPage({
       <main id="main" className="relative flex-1 overflow-hidden">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[480px] bg-gradient-to-b from-primary/10 to-transparent" />
         <Starfield className="h-[480px]" />
-        <div className="container relative py-16 sm:py-20">
+        {/* --enter-after: the cards settle once the heading's last word is on its way. */}
+        <div
+          className="container relative py-16 sm:py-20"
+          style={{ "--enter-after": `${HEADING.split(" ").length * STAGGER_HERO}s` } as React.CSSProperties}
+        >
           <div className="mx-auto max-w-2xl text-center">
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
               <WordReveal text={HEADING} />
             </h1>
           </div>
-          {/* The cards settle once the heading's last word is on its way. */}
-          <div className="mt-14" style={{ "--enter-after": `${HEADING.split(" ").length * STAGGER_HERO}s` } as React.CSSProperties}>
+          <div className="mt-14">
             <PricingCards isAuthed={!!user} currentPlan={profile?.plan} display={display} />
           </div>
 
