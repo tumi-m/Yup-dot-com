@@ -447,7 +447,7 @@ Variables** and redeploy:
 | `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
 | `OLLAMA_CONTEXT_TOKENS` | Optional. Context window to ask the model for (`num_ctx`, at least 8192). Unset: the model's default |
 | `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
-| `MEDIA_SIGNING_SECRET` | Recommended. Signs X download links (with a key derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
+| `MEDIA_SIGNING_SECRET` | Recommended. Signs and encrypts X, TikTok and Instagram download links (with keys derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
 | `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 | `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |

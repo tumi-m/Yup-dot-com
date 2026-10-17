@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
-import { signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
+import { sealToken, signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
 import { MEDIA_BUCKET, newGrantRef } from "@/lib/media-refund";
@@ -23,7 +23,8 @@ const bodySchema = z.object({
  * browser can never raise its own quality.
  *
  * X, TikTok, Instagram: the token names one file on that platform's video
- * CDN (plus the headers the CDN wants), streamed by /api/media/file.
+ * CDN (plus the headers the CDN wants), streamed by /api/media/file. It is
+ * encrypted, so the file can only be had through that route.
  * YouTube: the token goes to the media worker, which verifies it itself.
  *
  * Each grant records who it was counted against and a random reference, so
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
     grant = (ref) => ({
       mode: kind === "mp3" ? "convert" : "direct",
       href: `/api/media/file?t=${encodeURIComponent(
-        signToken(
+        sealToken(
           { u: variant.url, n: mp4Name, ...(platform === "x" ? {} : { p: platform, h: headers }), ...ref },
           signingSecret(),
           30 * 60
