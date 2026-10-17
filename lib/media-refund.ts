@@ -105,24 +105,29 @@ export async function refundUnserved(store: UsageStore, ref: GrantRef, now = Dat
   return true;
 }
 
-export type WorkerVerdict = "failed" | "unused" | "unreachable" | "used" | "unknown";
+export type WorkerVerdict = "failed" | "unused" | "rejected" | "unreachable" | "used" | "unknown";
 
 /**
  * Voids a grant at the worker, so it can no longer start a job, and returns
- * what the worker knows about it. "failed", "unused" and "unreachable" allow
- * a refund: the visitor got no file. ("unreachable": a worker that can't
- * answer can't have just served one either.) A worker too old to void
- * grants answers 404: "unknown", since the grant would still work there.
+ * what the worker knows about it. "failed", "unused" and "rejected" allow a
+ * refund: the visitor got no file.
+ *
+ * The worker keeps its record in memory, so it can only vouch for a grant
+ * made after it started: one that restarted since (a redeploy, a crash, a
+ * host waking from sleep) may have run the job and forgotten it. A worker
+ * that doesn't answer may have run it too ("unreachable"). A worker too old
+ * to void grants answers 404: "unknown", since the grant would still work
+ * there. "rejected": the worker refuses our secret, so it refused the grant.
  */
 export async function askWorker(
   workerUrl: string,
   secret: string,
-  ref: string,
+  ref: GrantRef,
   fetcher: typeof fetch = fetch
 ): Promise<WorkerVerdict> {
   let res: Response;
   try {
-    res = await fetcher(`${workerUrl}/refs/${encodeURIComponent(ref)}/void`, {
+    res = await fetcher(`${workerUrl}/refs/${encodeURIComponent(ref.c)}/void`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(10_000),
@@ -132,12 +137,12 @@ export async function askWorker(
     return "unreachable";
   }
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  // A sleeping host's HTML page, or a worker that rejects our secret (so it
-  // rejected the grant too): no job ran.
-  if (!body || res.status === 401) return "unreachable";
+  // A sleeping host's HTML page.
+  if (!body) return "unreachable";
+  if (res.status === 401) return "rejected";
   if (!res.ok || typeof body.used !== "boolean") return "unknown";
-  if (!body.used) return "unused";
-  return body.status === "error" ? "failed" : "used";
+  if (body.used) return body.status === "error" ? "failed" : "used";
+  return typeof body.since === "number" && body.since < ref.t ? "unused" : "unknown";
 }
 
-export const REFUNDABLE: readonly WorkerVerdict[] = ["failed", "unused", "unreachable"];
+export const REFUNDABLE: readonly WorkerVerdict[] = ["failed", "unused", "rejected"];

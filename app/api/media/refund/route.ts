@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const ref = grantRef(verifyToken(parsed.data.token, config.secret, REFUND_GRACE_SECONDS));
   if (!ref) return Response.json({ refunded: false }, { status: 400 });
 
-  const verdict = await askWorker(config.url, config.secret, ref.c);
+  const verdict = await askWorker(config.url, config.secret, ref);
   if (!REFUNDABLE.includes(verdict)) return Response.json({ refunded: false }, { status: 409 });
   return Response.json({ refunded: await refundGrant(usageStore(), ref) });
 }

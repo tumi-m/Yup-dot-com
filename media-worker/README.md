@@ -31,9 +31,10 @@ and each token starts one job.
 A download that fails or is cancelled (`DELETE /jobs/<id>`) doesn't count
 against the visitor's quota: the web app voids the grant at the worker's
 `POST /refs/<grant>/void`, which says how its job ended, before giving the
-download back. A grant given back can't start a job afterwards. Redeploy the
-worker along with the web app: an older worker can't void grants, so nothing
-is given back.
+download back. The worker keeps this record in memory, so a grant made before
+it last restarted isn't given back, and neither is one while it can't be
+reached: it may have run the job. Redeploy the worker along with the web app:
+an older worker can't void grants, so nothing is given back.
 
 ## Deploy
 

@@ -70,6 +70,9 @@ jobs: dict[str, dict] = {}
 # start a job afterwards.
 refs: dict[str, dict] = {}
 REF_TTL = 6 * 60 * 60
+# refs live in memory: this process knows of grants used since it started,
+# and nothing from before (a redeploy, a crash, a host waking from sleep).
+STARTED = time.time()
 jobs_lock = threading.Lock()
 
 
@@ -586,7 +589,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/refs/([\w-]{8,64})/void", path)
         if m:
             # Server to server, before a refund: from now on this grant can't
-            # start a job here. Says whether it already had one.
+            # start a job here. Says whether it already had one, and since
+            # when this process would know.
             if not self.authorized():
                 return self.json(401, {"error": "Unauthorized."})
             with jobs_lock:
@@ -594,8 +598,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     refs[m.group(1)] = {"status": "void", "created": time.time()}
             if not job or job.get("status") == "void":
-                return self.json(200, {"used": False})
-            return self.json(200, {"used": True, "status": job.get("status"), "error": job.get("error")})
+                return self.json(200, {"used": False, "since": STARTED})
+            return self.json(200, {"used": True, "status": job.get("status"), "error": job.get("error"), "since": STARTED})
 
         if path in ("/info", "/playlist"):
             if not self.authorized():

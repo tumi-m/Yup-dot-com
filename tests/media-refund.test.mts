@@ -1,8 +1,8 @@
 /**
  * Media download refunds (lib/media-refund.ts): a grant is given back once,
  * a refunded grant is dead, and YouTube refunds follow the worker's record of
- * the grant (failed, never used, or worker unreachable), never a download
- * that finished or is still running.
+ * the grant (failed, or never used while the worker was up), never a
+ * download that finished, is still running, or that the worker can't vouch for.
  */
 import {
   askWorker,
@@ -61,22 +61,30 @@ const check = (name: string, ok: boolean, extra = "") => {
     }) as typeof fetch;
     return { f, calls };
   };
+  // The grant was made at t=1000; the worker started before it, or after.
   const ask = (status: number, body: unknown, throws = false) => {
     const x = fake(status, body, throws);
-    return askWorker("https://w.test", "sek", "ref-12345678", x.f).then((v) => ({ v, calls: x.calls }));
+    return askWorker("https://w.test", "sek", { s: "ip:a", c: "ref-12345678", t: 1000 }, x.f).then((v) => ({ v, calls: x.calls }));
   };
-  const failed = await ask(200, { used: true, status: "error", error: "Cancelled." });
+  const failed = await ask(200, { used: true, status: "error", error: "Cancelled.", since: 900 });
   check("job failed or cancelled → refund", failed.v === "failed" && REFUNDABLE.includes(failed.v));
   check("voids the grant at /refs/<ref>/void with the shared secret",
     failed.calls[0].url === "https://w.test/refs/ref-12345678/void" && failed.calls[0].method === "POST" && failed.calls[0].auth === "Bearer sek");
-  check("job ready → no refund", (await ask(200, { used: true, status: "ready" })).v === "used");
-  check("job still running → no refund", (await ask(200, { used: true, status: "working" })).v === "used");
-  check("grant never used (now void) → refund", (await ask(200, { used: false })).v === "unused");
+  check("job ready → no refund", (await ask(200, { used: true, status: "ready", since: 900 })).v === "used");
+  check("job still running → no refund", (await ask(200, { used: true, status: "working", since: 900 })).v === "used");
+  check("grant never used (now void) → refund", (await ask(200, { used: false, since: 900 })).v === "unused");
+  // A worker that restarted after the grant was made may have run it and forgotten.
+  const restarted = await ask(200, { used: false, since: 1100 });
+  check("worker restarted since the grant → no refund", restarted.v === "unknown" && !REFUNDABLE.includes(restarted.v));
+  check("worker that doesn't say when it started → no refund", (await ask(200, { used: false })).v === "unknown");
   check("old worker that can't void grants → no refund",
     (await ask(404, { error: "Not found." })).v === "unknown" && (await ask(404, { used: false })).v === "unknown");
-  check("worker down → refund", (await ask(0, null, true)).v === "unreachable");
-  check("sleeping host (HTML) → refund", (await ask(503, "<html>waking up</html>")).v === "unreachable");
-  check("worker rejects our secret (so it rejected the job too) → refund", (await ask(401, { error: "Unauthorized." })).v === "unreachable");
+  // It may have run the job before it went quiet.
+  const down = await ask(0, null, true);
+  check("worker down or too slow → no refund", down.v === "unreachable" && !REFUNDABLE.includes(down.v));
+  check("sleeping host (HTML) → no refund", !REFUNDABLE.includes((await ask(503, "<html>waking up</html>")).v));
+  const rejected = await ask(401, { error: "Unauthorized." });
+  check("worker rejects our secret (so it rejected the job too) → refund", rejected.v === "rejected" && REFUNDABLE.includes(rejected.v));
   check("anything else → no refund", !REFUNDABLE.includes((await ask(500, { error: "x" })).v));
 }
 
