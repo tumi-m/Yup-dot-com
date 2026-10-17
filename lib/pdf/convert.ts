@@ -185,12 +185,18 @@ function columnName(index: number) {
 /**
  * Returns a number for cells that are unambiguously numeric ("1,900,000",
  * "-3.5", "(120)" accounting negatives) so spreadsheets can sum them.
- * Percentages and currency stay as text to avoid silently changing meaning.
+ * Percentages and currency stay as text to avoid silently changing meaning,
+ * and so do codes a number would change: leading zeros ("007012"), more
+ * digits than a spreadsheet keeps (over 15) and unbalanced brackets ("(5").
  */
 export function parseNumeric(cell: string): number | null {
   const s = cell.trim();
   if (!/^\(?-?\d{1,3}(,\d{3})*(\.\d+)?\)?$|^\(?-?\d+(\.\d+)?\)?$/.test(s)) return null;
-  const negative = s.startsWith("(") && s.endsWith(")");
+  const negative = s.startsWith("(");
+  if (negative !== s.endsWith(")")) return null;
+  const digits = s.replace(/[^\d.]/g, "");
+  if (/^0\d/.test(digits)) return null;
+  if (digits.replace(".", "").replace(/^0+/, "").length > 15) return null;
   const n = Number(s.replace(/[(),]/g, ""));
   if (!Number.isFinite(n)) return null;
   return negative ? -Math.abs(n) : n;
