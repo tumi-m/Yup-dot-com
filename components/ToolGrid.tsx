@@ -7,8 +7,9 @@ import { Search, X } from "lucide-react";
 import { TOOLS, type ToolMeta } from "@/lib/tools";
 import {
   DUR,
-  EASE_IN,
-  EASE_OUT,
+  ENTER_T,
+  EXIT_T,
+  POP_IN,
   Reveal,
   SPRING_LAYOUT,
   SpotlightCard,
@@ -28,14 +29,14 @@ function ToolCard({ tool }: { tool: ToolMeta }) {
         <div className="relative flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
           <div
             className={cn(
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110 motion-reduce:transform-none",
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-200 ease-out group-hover:-rotate-6 group-hover:scale-110 group-hover:duration-150 motion-reduce:transform-none",
               tool.tint
             )}
           >
             <tool.icon className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold leading-snug transition-colors group-hover:text-primary sm:text-base">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold leading-snug transition-colors duration-200 group-hover:text-primary group-hover:duration-100 sm:text-base">
               {tool.name}
               {tool.badge && (
                 <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
@@ -55,8 +56,9 @@ const GRID = "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4";
 
 /**
  * Tool catalogue. With `filterable`, adds instant search and category pills.
- * Switching category swaps the list as a unit: the old one fades out, then the
- * new one rises in, so nothing flies across the page.
+ * Filtering keeps one grid: cards that leave fade out together, the ones that
+ * stay glide to their new places, and new ones fade in, so the page never
+ * empties and the footer never jumps.
  */
 export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
   if (!filterable) {
@@ -150,8 +152,8 @@ function FilterableGrid() {
                   type="button"
                   initial={{ opacity: 0, scale: 0.6 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.6, transition: { duration: DUR.tap } }}
-                  transition={{ duration: DUR.fast, ease: EASE_OUT }}
+                  exit={{ opacity: 0, scale: 0.6, transition: EXIT_T }}
+                  transition={{ ...ENTER_T, duration: DUR.fast }}
                   onClick={() => {
                     setQuery("");
                     searchRef.current?.focus();
@@ -212,30 +214,32 @@ function FilterableGrid() {
         </div>
       </div>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={pill}
-          className={GRID}
-          initial="hidden"
-          animate="show"
-          exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
-        >
+      <div className={cn(GRID, "relative")}>
+        <AnimatePresence mode="popLayout" initial={false}>
           {filtered.map((tool, i) => (
             <motion.div
               key={tool.slug}
-              variants={{
-                hidden: { opacity: 0, y: 8 },
-                show: { opacity: 1, y: 0, transition: { duration: DUR.base, ease: EASE_OUT, delay: staggerDelay(i, 0.025) } },
-              }}
+              layout="position"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1, transition: { ...ENTER_T, delay: staggerDelay(i) } }}
+              exit={{ opacity: 0, scale: 0.97, transition: EXIT_T }}
+              transition={{ layout: SPRING_LAYOUT }}
             >
               <ToolCard tool={tool} />
             </motion.div>
           ))}
-        </motion.div>
-      </AnimatePresence>
+        </AnimatePresence>
+      </div>
 
+      <AnimatePresence initial={false}>
       {filtered.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground motion-safe:animate-rise">
+        <motion.div
+          key="none"
+          initial={POP_IN.initial}
+          animate={POP_IN.animate}
+          exit={POP_IN.exit}
+          className="flex flex-col items-center gap-3 py-16 text-muted-foreground"
+        >
           <p>No match</p>
           <button
             type="button"
@@ -244,12 +248,13 @@ function FilterableGrid() {
               select("all");
               searchRef.current?.focus();
             }}
-            className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium text-foreground transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium text-foreground transition-[border-color,transform] duration-200 hover:border-primary/50 hover:duration-100 active:scale-[0.97] active:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:active:scale-100"
           >
             <X className="h-3.5 w-3.5" /> Clear
           </button>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }
