@@ -2,6 +2,8 @@
 
 import * as pdfjsLib from "pdfjs-dist";
 import { configureWorker } from "./worker";
+import { ownText, showsPictures } from "./page-content";
+import type { OwnText } from "./ocr-layer";
 
 function ensureWorker() {
   configureWorker(pdfjsLib);
@@ -34,8 +36,10 @@ export interface LoadedPdf {
     scale: number,
     opts?: { pixelRatio?: number }
   ) => Promise<void>;
-  /** The page's own text layer, as plain text. */
-  pageText: (pageNumber: number) => Promise<string>;
+  /** The page's own text pieces and where they sit, in displayed points from the top-left. */
+  ownText: (pageNumber: number) => Promise<OwnText[]>;
+  /** True when the page shows a picture big enough to hold words. */
+  showsPictures: (pageNumber: number) => Promise<boolean>;
   destroy: () => void;
 }
 
@@ -103,10 +107,17 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
       slot.done = run.catch(() => {});
       return run;
     },
-    async pageText(pageNumber) {
+    async ownText(pageNumber) {
+      return ownText(await doc.getPage(pageNumber));
+    },
+    async showsPictures(pageNumber) {
       const page = await doc.getPage(pageNumber);
-      const content = await page.getTextContent();
-      return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+      try {
+        return await showsPictures(page, pdfjsLib.OPS as unknown as Record<string, number>);
+      } finally {
+        // Drop the decoded pictures now; pages to read are rendered afresh.
+        page.cleanup();
+      }
     },
     destroy() {
       doc.destroy();

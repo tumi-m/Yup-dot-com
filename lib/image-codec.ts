@@ -1,9 +1,10 @@
 /**
  * JPEG encode/decode with MozJPEG compiled to WebAssembly.
  *
- * MozJPEG (trellis quantisation, tuned tables) makes files roughly 10–20%
- * smaller than a browser's built-in encoder at the same visual quality, and
- * gives the same bytes in every browser. Decoding through it ignores EXIF
+ * MozJPEG (trellis quantisation, tuned tables) gives the same bytes in every
+ * browser and in Node, and can write one-channel gray JPEGs, which a canvas
+ * can't. At equal SSIM its files measured about the size of Chromium's own
+ * encoder (95–103% on photos and a scan). Decoding through it ignores EXIF
  * rotation and embedded colour profiles, which is what a PDF viewer does with
  * an image stream too.
  *
@@ -23,7 +24,7 @@ export interface RawImage {
 }
 
 export interface JpegOptions {
-  /** 1–100, MozJPEG's scale (a few points above the browser's for the same look; see mozQuality). */
+  /** 1–100, MozJPEG's scale (see mozQuality for the browser equivalent). */
   quality: number;
   /** One channel instead of three; for pictures with no colour. */
   gray?: boolean;
@@ -32,6 +33,11 @@ export interface JpegOptions {
    * and older PDF readers only handle baseline JPEGs.
    */
   progressive?: boolean;
+  /**
+   * Colour at full resolution (4:4:4) instead of halved both ways (4:2:0).
+   * Browsers do this at quality 1: sharp coloured text and lines stay clean.
+   */
+  fullChroma?: boolean;
 }
 
 const vendorUrl = (file: string) => `${globalThis.location?.origin ?? ""}/vendor/jsquash-jpeg/${JSQUASH_JPEG_VERSION}/${file}`;
@@ -78,15 +84,11 @@ function loadDecoder() {
 }
 
 /**
- * The quality setting for MozJPEG that looks like `browserQuality` (0–1) from
- * canvas.toBlob. Measured against Chrome on photos, slides and document pages
- * (same SSIM and PSNR): MozJPEG needs a slightly higher number, about 94 for
- * the browser's 0.92 and 90 for 0.85, and then makes files of about the same
- * size on photos and smaller ones on text and flat graphics.
+ * The MozJPEG quality that matches `browserQuality` (0–1) from canvas.toBlob,
+ * fitted on SSIM against Chromium 141 over 0.3–0.9 (0.4 → 58, 0.6 → 72, 0.8 → 87).
  */
 export function mozQuality(browserQuality: number): number {
-  const q = 100 - 0.7 * (100 - browserQuality * 100);
-  return Math.max(1, Math.min(100, Math.round(q)));
+  return Math.max(1, Math.min(100, Math.round(browserQuality * 72 + 29)));
 }
 
 /** RGBA → JPEG. Alpha is ignored (flatten onto a background first if it matters). */
@@ -101,7 +103,7 @@ export async function encodeJpeg(image: RawImage, opts: JpegOptions): Promise<Ui
     color_space: opts.gray ? 1 : 3,
     // 4:2:0 chroma: the eye barely sees colour detail, and it halves the colour data twice over.
     auto_subsample: false,
-    chroma_subsample: 2,
+    chroma_subsample: opts.fullChroma ? 1 : 2,
   });
   return new Uint8Array(out);
 }
@@ -109,9 +111,17 @@ export async function encodeJpeg(image: RawImage, opts: JpegOptions): Promise<Ui
 /** JPEG → RGBA. Throws on CMYK and damaged files. */
 export async function decodeJpeg(bytes: Uint8Array): Promise<RawImage> {
   await loadDecoder();
-  const copy = bytes.slice().buffer as ArrayBuffer;
+  // A fresh copy: `bytes` may be a view into a larger buffer (a Node Buffer's slice() is not a copy).
+  const copy = new Uint8Array(bytes).buffer as ArrayBuffer;
   const img = await decodeWasm(copy, { preserveOrientation: false });
   return { data: img.data, width: img.width, height: img.height };
+}
+
+/** True when every pixel is a shade of grey: such a JPEG needs only one channel. */
+export function isGray(img: RawImage): boolean {
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) if (d[i] !== d[i + 1] || d[i] !== d[i + 2]) return false;
+  return true;
 }
 
 /** A canvas's pixels, or null where they can't be read. */
@@ -129,6 +139,8 @@ export function canvasPixels(canvas: HTMLCanvasElement): RawImage | null {
 /**
  * Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if
  * the wasm can't load. Pass `pixels` when they have been read already.
+ * Grey renders get a one-channel JPEG; at quality 1 colour is kept at full
+ * resolution, as the browser does.
  */
 export async function canvasToJpeg(
   canvas: HTMLCanvasElement,
@@ -137,7 +149,14 @@ export async function canvasToJpeg(
 ): Promise<Uint8Array> {
   try {
     const pixels = opts.pixels ?? canvasPixels(canvas);
-    if (pixels) return await encodeJpeg(pixels, { quality: mozQuality(browserQuality), progressive: opts.progressive });
+    if (pixels) {
+      return await encodeJpeg(pixels, {
+        quality: mozQuality(browserQuality),
+        progressive: opts.progressive,
+        gray: isGray(pixels),
+        fullChroma: browserQuality >= 1,
+      });
+    }
   } catch {
     // Fall back below.
   }

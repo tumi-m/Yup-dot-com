@@ -52,6 +52,8 @@ export interface OcrText {
   imageWidth: number;
   imageHeight: number;
   words: OcrWord[];
+  /** Words read but left out because the page's own text already has them. */
+  known?: number;
 }
 
 /** The rendered page itself: JPEG or PNG bytes, or lossless pixels ready for the PDF. */
@@ -70,6 +72,58 @@ export function textAgrees(ocrWords: { text: string }[], pageText: string): bool
   if (!read.length) return true;
   const own = new Set(wordsOf(pageText));
   return read.filter((w) => own.has(w)).length >= read.length * 0.5;
+}
+
+/**
+ * True when much of a page's text is characters no real text uses (control
+ * codes, private-use glyphs, U+FFFD): fonts that don't say which letters
+ * their glyphs are.
+ */
+export function looksGarbled(text: string): boolean {
+  const chars = text.replace(/\s+/g, "");
+  if (!chars) return false;
+  const odd = chars.match(/[\p{Cc}\p{Co}\uFFFD]/gu)?.length ?? 0;
+  return odd > chars.length * 0.1;
+}
+
+/** A piece of a page's own text, boxed in displayed points from the top-left. */
+export interface OwnText {
+  text: string;
+  /** pdf.js's name for the font: a broken encoding garbles everything in that font. */
+  font: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * The OCR'd words a page's own text doesn't already have. A word is left out
+ * where it sits on the page's own text and that text is real (in that font,
+ * most words OCR read on it are in it too), so search and copy find each word
+ * once. Words on pictures (a scanned signature, a pasted screenshot) and on
+ * text garbled by a broken font encoding stay.
+ */
+export function newWords(src: OcrText, own: OwnText[]): OcrWord[] {
+  if (!own.length) return src.words;
+  const sx = src.widthPt / src.imageWidth;
+  const sy = src.heightPt / src.imageHeight;
+  const under = src.words.map((w) => {
+    const x = ((w.x0 + w.x1) / 2) * sx;
+    const y = ((w.y0 + w.y1) / 2) * sy;
+    return own.find((t) => x >= t.x0 && x <= t.x1 && y >= t.y0 && y <= t.y1);
+  });
+  const real = new Map<string, boolean>();
+  for (const t of under) {
+    if (!t || real.has(t.font)) continue;
+    const read = src.words.filter((_, i) => under[i]?.font === t.font);
+    const text = own.filter((o) => o.font === t.font).map((o) => o.text).join(" ");
+    real.set(t.font, textAgrees(read, text));
+  }
+  return src.words.filter((_, i) => {
+    const t = under[i];
+    return !t || !real.get(t.font);
+  });
 }
 
 /** The standard fonts are WinAnsi-only; skip words they cannot encode. */

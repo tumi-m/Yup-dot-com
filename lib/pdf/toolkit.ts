@@ -222,12 +222,14 @@ const MAX_PAGE_PT = 14400;
 
 export async function imagesToPdfTool(
   files: File[],
-  opts: { pageSize: string; margin: string }
+  opts: { pageSize: string; margin: string },
+  ctx: ToolContext = {}
 ): Promise<ToolFile> {
   const out = await PDFDocument.create();
   const margin = Number(opts.margin) || 0;
 
-  for (const file of files) {
+  for (const [i, file] of files.entries()) {
+    if (files.length > 1) ctx.progress?.(i / files.length, `Image ${i + 1} of ${files.length}`);
     const data = await buf(file);
     const kind = sniffImage(data);
     if (!kind) throw new Error(`${file.name}: use a JPG or PNG image.`);
@@ -238,6 +240,8 @@ export async function imagesToPdfTool(
 
     let page: PDFPage;
     let rect: { x: number; y: number; width: number; height: number };
+    // The picture is right-sized for 300 DPI at its drawn size times this.
+    let print = 1;
     if (opts.pageSize === "fit") {
       // 1 px = 1 pt, capped at the 200-inch page limit PDF viewers enforce.
       const scale = Math.min(1, (MAX_PAGE_PT - margin * 2) / Math.max(shown.width, shown.height));
@@ -245,6 +249,9 @@ export async function imagesToPdfTool(
       const h = shown.height * scale;
       page = out.addPage([w + margin * 2, h + margin * 2]);
       rect = { x: margin, y: margin, width: w, height: h };
+      // At 1 pt per pixel a phone photo makes a 42-inch page, which no one
+      // prints or views at that size: size it for A4 paper instead.
+      print = Math.min(1, A4.h / Math.max(w, h));
     } else {
       page = out.addPage([A4.w, A4.h]);
       const maxW = A4.w - margin * 2;
@@ -257,7 +264,7 @@ export async function imagesToPdfTool(
 
     // Size on the page in the image's stored orientation, for right-sizing.
     const sideways = orientation >= 5;
-    const fit = { widthPt: sideways ? rect.height : rect.width, heightPt: sideways ? rect.width : rect.height };
+    const fit = { widthPt: (sideways ? rect.height : rect.width) * print, heightPt: (sideways ? rect.width : rect.height) * print };
     let img: EmbeddedImage;
     try {
       img = await embedImage(out, data, kind, size, fit);
@@ -562,8 +569,12 @@ export async function ocrTool(
     ctx.progress?.(1, "Building searchable PDF…");
     return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
   }
-  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, skipPagesWithText: true });
-  if (pages.every((p) => !p)) throw new Error("This PDF already has text you can search and copy.");
+  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, newWordsOnly: true });
+  if (!pages.some((p) => p?.words.length)) {
+    // Pages left unread, or words left out, mean the text is there already.
+    const there = pages.some((p) => !p || p.known);
+    throw new Error(there ? "This PDF can already be searched and copied. To get its text, use PDF to Text." : "No text found in this PDF.");
+  }
   ctx.progress?.(1, "Building searchable PDF…");
   return { blob: pdfBlob(await addTextLayer(original, pages)), filename: `${base}-searchable.pdf` };
 }

@@ -2,9 +2,10 @@ process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/b
 // Export sizing: JPEG quality mapping, DPI maths, the downscaler, lossless
 // PDF images, Images -> PDF right-sizing, one copy of repeated pictures, and
 // which zip entries are deflated.
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { deflateSync, crc32 } from "node:zlib";
-import { PDFDocument, PDFName, PDFNumber, PDFRawStream } from "pdf-lib";
+import { deflateSync, crc32, inflateSync } from "node:zlib";
+import { PDFArray, PDFDocument, PDFName, PDFNumber, PDFRawStream } from "pdf-lib";
 import type { RawImage } from "../lib/image-codec.ts";
 import { downsampleTarget, resizeRgba, screenRatio } from "../lib/image-fit.ts";
 import {
@@ -16,13 +17,13 @@ import {
   pngAsIs,
   readPng,
 } from "../lib/pdf/flate-image.ts";
-import { looksPhotographic } from "../lib/pdf/embed-image.ts";
-import { jpegOrientation } from "../lib/pdf/images.ts";
+import { looksPhotographic, smallerRender } from "../lib/pdf/embed-image.ts";
+import { jpegChannels, jpegOrientation } from "../lib/pdf/images.ts";
 import { imagesToPdfTool } from "../lib/pdf/toolkit.ts";
 import { bakeAnnotations } from "../lib/pdf/bake.ts";
 import { tablesToXlsx } from "../lib/pdf/convert.ts";
 import { writePptx } from "../lib/pptx/write.ts";
-import { zipEntryOptions } from "../lib/zip.ts";
+import { zipEntryOptions, zipEntryOptionsFor } from "../lib/zip.ts";
 import type { Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
@@ -35,7 +36,7 @@ function check(name: string, ok: boolean, extra?: unknown) {
 
 // Loaded dynamically: tsx gives a static import its own copy of the module,
 // and the wasm has to reach the copy the app modules use.
-const { decodeJpeg, encodeJpeg, mozQuality, useJpegWasm } = await import("../lib/image-codec.ts");
+const { decodeJpeg, encodeJpeg, isGray, mozQuality, useJpegWasm } = await import("../lib/image-codec.ts");
 const codec = "./node_modules/@jsquash/jpeg/codec/";
 await useJpegWasm({
   encoder: await WebAssembly.compile(readFileSync(codec + "enc/mozjpeg_enc.wasm")),
@@ -66,10 +67,10 @@ function withOrientation(jpeg: Uint8Array, orientation: number): Uint8Array {
   return new Uint8Array([...jpeg.subarray(0, 2), ...app1, ...jpeg.subarray(2)]);
 }
 
-/** Image XObjects in a PDF (soft masks not counted), with their pixel size and filter. */
+/** Image XObjects in a PDF (soft masks not counted), with their pixel size, filter and colour space. */
 async function pdfImages(bytes: Uint8Array) {
   const doc = await PDFDocument.load(bytes);
-  const found: { width: number; height: number; filter: string; length: number }[] = [];
+  const found: { width: number; height: number; filter: string; length: number; colorSpace: string; contents: Uint8Array }[] = [];
   const masks = new Set<unknown>();
   for (const [, obj] of doc.context.enumerateIndirectObjects()) {
     if (obj instanceof PDFRawStream) {
@@ -81,15 +82,46 @@ async function pdfImages(bytes: Uint8Array) {
     if (!(obj instanceof PDFRawStream) || obj.dict.get(PDFName.of("Subtype")) !== PDFName.of("Image")) continue;
     if (masks.has(ref.toString())) continue;
     const n = (k: string) => (obj.dict.get(PDFName.of(k)) as PDFNumber).asNumber();
-    found.push({ width: n("Width"), height: n("Height"), filter: String(obj.dict.get(PDFName.of("Filter"))), length: obj.contents.length });
+    found.push({
+      width: n("Width"),
+      height: n("Height"),
+      filter: String(obj.dict.get(PDFName.of("Filter"))),
+      length: obj.contents.length,
+      colorSpace: String(obj.dict.get(PDFName.of("ColorSpace"))),
+      contents: obj.contents,
+    });
   }
   return found;
 }
 
 // --- JPEG quality mapping -----------------------------------------------------
-check("mozQuality: browser 0.92 looks like MozJPEG 94", mozQuality(0.92) === 94, mozQuality(0.92));
+check("mozQuality: browser 0.92 looks like MozJPEG 95", mozQuality(0.92) === 95, mozQuality(0.92));
 check("mozQuality: browser 0.85 looks like MozJPEG 90", mozQuality(0.85) === 90, mozQuality(0.85));
 check("mozQuality: stays within 1-100", mozQuality(1) === 100 && mozQuality(0) >= 1 && mozQuality(-1) >= 1);
+
+/** Sampling factors (H×V) of each channel, from a JPEG's frame header. */
+function sampling(jpeg: Uint8Array): string[] {
+  for (let i = 2; i + 4 < jpeg.length; ) {
+    const marker = jpeg[i + 1];
+    const len = (jpeg[i + 2] << 8) | jpeg[i + 3];
+    if (marker === 0xc0 || marker === 0xc2) {
+      const out: string[] = [];
+      for (let c = 0; c < jpeg[i + 9]; c++) {
+        const f = jpeg[i + 11 + c * 3];
+        out.push(`${f >> 4}x${f & 15}`);
+      }
+      return out;
+    }
+    i += 2 + len;
+  }
+  return [];
+}
+const colourful = image(64, 64, (x, y) => [x * 4, y * 4, 255 - x * 4]);
+check("encodeJpeg: colour halved both ways by default (4:2:0)", sampling(await encodeJpeg(colourful, { quality: 90 })).join() === "2x2,1x1,1x1");
+check("encodeJpeg: fullChroma keeps colour at full resolution (4:4:4)", sampling(await encodeJpeg(colourful, { quality: 100, fullChroma: true })).join() === "1x1,1x1,1x1");
+const greyJpeg = await encodeJpeg(image(64, 64, (x) => [x * 4, x * 4, x * 4]), { quality: 90, gray: true });
+check("encodeJpeg: gray writes one channel", jpegChannels(greyJpeg) === 1 && sampling(greyJpeg).length === 1);
+check("isGray: grey yes, colour no", isGray(image(8, 8, (x) => [x, x, x])) && !isGray(colourful));
 
 // --- Sizing maths -------------------------------------------------------------
 check("screenRatio: 16:9 slide (960x540 pt) renders 1920x1080", screenRatio(960, 540) * 960 === 1920 && screenRatio(960, 540) * 540 === 1080);
@@ -130,6 +162,32 @@ for (const [name, img, enc] of [["palette", flat, pal], ["RGB", rgbImg, rgbEnc]]
 }
 check("flatness: flat graphics near 1, photos low", flatness(flat) > 0.95 && flatness(photo(200, 100)) < 0.2);
 check("looksPhotographic: photo yes, flat graphic no", looksPhotographic(photo(200, 100)) && !looksPhotographic(flat));
+
+// Rendered slides: lossless only when no bigger than the JPEG.
+/** A 1080p white slide: a title bar, lines of word-like blocks, and an optional photo inset. */
+function slide(inset: number) {
+  const pic = photo(inset, Math.round(inset * 0.75));
+  return image(1920, 1080, (x, y) => {
+    if (inset && x >= 1500 && x < 1500 + pic.width && y >= 100 && y < 100 + pic.height) {
+      const i = ((y - 100) * pic.width + (x - 1500)) * 4;
+      return [pic.data[i], pic.data[i + 1], pic.data[i + 2]];
+    }
+    if (y >= 80 && y < 160 && x >= 120 && x < 1100) return [30, 60, 140];
+    const line = Math.floor((y - 260) / 60);
+    const inLine = y >= 260 && line < 8 && (y - 260) % 60 < 22;
+    const word = Math.floor((x - 120) / 110);
+    const ink = inLine && x >= 120 && x < 1300 - line * 60 && (x - 120) % 110 < 70 + ((word * 13 + line * 7) % 30);
+    return ink ? [25, 25, 35] : [255, 255, 255];
+  });
+}
+// The photo is small enough that the slide is still 98% flat.
+for (const [name, inset, want] of [["a text slide", 0, "flate"], ["a text slide with a 200 px photo", 200, "jpeg"]] as const) {
+  const px = slide(inset);
+  const jpeg = await encodeJpeg(px, { quality: mozQuality(0.92) });
+  const got = await smallerRender(px, jpeg);
+  const lossless = "flate" in got ? got.flate.data.length : (await encodeFlate(px)).data.length;
+  check(`smallerRender: ${name} keeps the smaller (${want})`, want in got, { jpeg: jpeg.length, lossless });
+}
 
 /** A real PNG built with zlib, like other tools write it. */
 function makePng(img: RawImage, colorType: 2 | 6): Uint8Array {
@@ -224,11 +282,44 @@ if (canvasMod) {
   const bottom = at(0.5, 0.8);
   check("jpg-to-pdf (A4): EXIF orientation still applied (red on top)", top[0] > 150 && top[2] < 100 && bottom[2] > 150 && bottom[0] < 100, { top, bottom });
 }
-const fit = new Uint8Array(await (await imagesToPdfTool([file(sideways, "phone.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer());
+const progress: string[] = [];
+const fit = new Uint8Array(
+  await (
+    await imagesToPdfTool([file(sideways, "phone.jpg", "image/jpeg"), file(sideways, "phone2.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" }, {
+      progress: (_f, label) => progress.push(label),
+    })
+  ).blob.arrayBuffer()
+);
 const fitDoc = await PDFDocument.load(fit);
-const [kept] = await pdfImages(fit);
-check("jpg-to-pdf (fit): 1 px = 1 pt, so the photo is kept as it is", kept.width === 6000 && kept.length === sideways.length, kept);
-check("jpg-to-pdf (fit): EXIF 6 still gives a portrait page", fitDoc.getPage(0).getWidth() === 3000 && fitDoc.getPage(0).getHeight() === 6000);
+const [fitted] = await pdfImages(fit);
+// The default page size: 1 pt per pixel, but the picture is sized for A4 paper (long side 3508 px).
+check("jpg-to-pdf (fit): a big photo is sized for A4 paper at 300 DPI", fitted.width === 3508 && fitted.height === 1754 && fitted.length < sideways.length * 0.85, { ...fitted, contents: undefined });
+check("jpg-to-pdf (fit): the page stays 1 pt per pixel, portrait for EXIF 6", fitDoc.getPage(0).getWidth() === 3000 && fitDoc.getPage(0).getHeight() === 6000);
+check("jpg-to-pdf: progress counts the images", progress.join() === "Image 1 of 2,Image 2 of 2", progress);
+const modest = await encodeJpeg(photo(2000, 1500), { quality: 90 });
+const [untouched] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(modest, "m.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
+check("jpg-to-pdf (fit): a photo that fits A4 at 300 DPI is kept as it is", untouched.width === 2000 && untouched.length === modest.length, { ...untouched, contents: undefined });
+
+// A greyscale scan stays one channel when it is scaled down.
+const greyScan = await encodeJpeg(image(4000, 2400, (x, y) => { const v = (x * 7 + y * 3 + noise() * 0.3) & 255; return [v, v, v]; }), { quality: 90, gray: true });
+const [greyOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(greyScan, "scan.jpg", "image/jpeg")], { pageSize: "a4", margin: "0" })).blob.arrayBuffer()));
+check("jpg-to-pdf: a grey JPEG is scaled down as grey", greyOut.width === 2480 && greyOut.colorSpace === "/DeviceGray" && jpegChannels(greyOut.contents) === 1, { ...greyOut, contents: undefined });
+
+// CMYK can't be decoded here: it goes in as it is, without trying (which logs an error).
+const cmyk = sideways.slice();
+for (let i = 2; i + 10 < cmyk.length; ) {
+  if (cmyk[i + 1] === 0xc0) {
+    cmyk[i + 9] = 4; // claims four channels
+    break;
+  }
+  i += 2 + ((cmyk[i + 2] << 8) | cmyk[i + 3]);
+}
+const logged: unknown[] = [];
+const consoleError = console.error;
+console.error = (...args: unknown[]) => logged.push(args);
+const [cmykOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(cmyk, "cmyk.jpg", "image/jpeg")], { pageSize: "a4", margin: "0" })).blob.arrayBuffer()));
+console.error = consoleError;
+check("jpg-to-pdf: a CMYK JPEG goes in as it is, without a decode attempt", cmykOut.length === cmyk.length && cmykOut.colorSpace === "/DeviceCMYK" && !logged.length, { length: cmykOut.length, cs: cmykOut.colorSpace, logged });
 
 const photoPng = makePng(photo(800, 600), 2);
 const fromPhotoPng = new Uint8Array(await (await imagesToPdfTool([file(photoPng, "photo.png", "image/png")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer());
@@ -249,12 +340,22 @@ if (canvasMod) {
   for (let i = 0; i < 3; i++) base.addPage([612, 792]);
   const big = await encodeJpeg(photo(3000, 2000), { quality: 90 });
   const dataUrl = `data:image/jpeg;base64,${Buffer.from(big).toString("base64")}`;
-  const anns: Annotation[] = [0, 1, 2].map((page) => ({ id: `i${page}`, page, type: "image", x: 50, y: 50, width: 200, height: 133, dataUrl, signature: false }));
+  // Square boxes: the 3:2 photo shows 200 x 133 pt, centred, as the editor shows it.
+  const anns: Annotation[] = [0, 1, 2].map((page) => ({ id: `i${page}`, page, type: "image", x: 50, y: 50, width: 200, height: 200, dataUrl, signature: false }));
   const out = await bakeAnnotations(await base.save(), anns);
   const imgs = await pdfImages(out);
   check("edit: a picture on three pages is stored once", imgs.length === 1, imgs.length);
   // 200 pt wide at 300 DPI = 833 px.
-  check("edit: a big photo shown 200 pt wide is stored at 300 DPI", imgs[0]?.width === 833, imgs[0]);
+  check("edit: a big photo shown 200 pt wide is stored at 300 DPI", imgs[0]?.width === 833, { ...imgs[0], contents: undefined });
+  const page1 = (await PDFDocument.load(out)).getPage(0);
+  const contents = page1.node.Contents()!;
+  const streams = contents instanceof PDFArray ? contents.asArray().map((r) => page1.doc.context.lookup(r) as PDFRawStream) : [contents as PDFRawStream];
+  const ops = streams
+    .map((st) => Buffer.from(st.dict.get(PDFName.of("Filter")) ? inflateSync(st.contents) : st.contents).toString("latin1"))
+    .join("\n");
+  const placed = /1 0 0 1 ([\d.-]+) ([\d.-]+) cm\n1 0 0 1 0 0 cm\n([\d.]+) 0 0 ([\d.]+) 0 0 cm\n1 0 0 1 0 0 cm\n\/Image/.exec(ops)?.slice(1).map((v) => Math.round(Number(v)));
+  // Box (50, 50) 200 x 200 on a 792 pt page: bottom 542, image 133 high, 33 pt from the box bottom.
+  check("edit: the photo keeps its proportions, centred in its box", JSON.stringify(placed) === JSON.stringify([50, 575, 200, 133]), placed);
   check("edit: the export is smaller than the photo alone", out.length < big.length, { out: out.length, photo: big.length });
   const stored = (await PDFDocument.load(out)).context
     .enumerateIndirectObjects()
@@ -269,6 +370,18 @@ check("zip: XML deflated hard", zipEntryOptions("ppt/slides/slide1.xml").compres
 check("zip: text-like files deflated hard", ["a.csv", "b.txt", "c.md", "d.json", "_rels/.rels"].every((n) => zipEntryOptions(n).compressionOptions?.level === 9));
 check("zip: compressed media and Office files stored", ["a.jpg", "b.JPEG", "c.png", "d.mp3", "e.mp4", "f.zip", "g.docx", "h.xlsx", "i.pptx"].every((n) => zipEntryOptions(n).compression === "STORE"));
 check("zip: PDFs deflated at the usual level", zipEntryOptions("page-1.pdf").compression === "DEFLATE" && zipEntryOptions("page-1.pdf").compressionOptions?.level === 6);
+{
+  // A PDF of scans barely deflates: stored. One of text deflates well: deflated.
+  const scanned = new Uint8Array(randomBytes(1_000_000));
+  const texty = new TextEncoder().encode("BT /F1 12 Tf 72 700 Td (Quarterly revenue grew in every region) Tj ET\n".repeat(15000));
+  const asScan = await zipEntryOptionsFor("scan.pdf", new Blob([scanned]));
+  const asText = await zipEntryOptionsFor("report.pdf", new Blob([texty]));
+  const small = await zipEntryOptionsFor("small.pdf", new Blob([scanned.subarray(0, 100_000)]));
+  check("zip: a PDF that doesn't deflate is stored", asScan.compression === "STORE", asScan);
+  check("zip: a PDF that deflates is deflated", asText.compression === "DEFLATE" && asText.compressionOptions?.level === 6, asText);
+  check("zip: small files are deflated without sampling", small.compression === "DEFLATE", small);
+  check("zip: images stay stored", (await zipEntryOptionsFor("a.jpg", new Blob([texty]))).compression === "STORE");
+}
 
 /** Compression method of each entry, from the zip's central directory. */
 function methods(bytes: Uint8Array) {

@@ -2,7 +2,7 @@
 
 import { loadForRender } from "./render";
 import { canvasToJpeg } from "../image-codec";
-import { textAgrees, type OcrPage, type OcrText, type OcrWord } from "./ocr-layer";
+import { looksGarbled, newWords, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 
 /** Engine, WebAssembly core, and language models are all self-hosted. */
@@ -34,11 +34,12 @@ export interface OcrOptions {
   lang?: string;
   onProgress?: (p: OcrProgress) => void;
   /**
-   * Null for pages whose own text already says what OCR reads: a second copy
-   * would turn up twice in search and copy. Pages whose text is garbled
-   * (broken font encodings) still get the OCR'd words.
+   * Only the words the PDF's own text doesn't already have (see newWords): a
+   * second copy would turn up twice in search and copy. Pages of plain text
+   * aren't read at all once one of them shows the text layer is sound.
+   * Null for pages left unread.
    */
-  skipPagesWithText?: boolean;
+  newWordsOnly?: boolean;
 }
 
 /** Recognised words per page, measured on a render of each page as displayed. */
@@ -52,25 +53,56 @@ export async function ocrDocument(
   const { createWorker } = await import("tesseract.js");
   const loaded = await loadForRender(bytes);
   const total = loaded.numPages;
+  const newOnly = !!opts.newWordsOnly && !opts.images;
+  // Progress counts the pages actually read.
   let current = 1;
+  let count = total;
 
   opts.onProgress?.({ page: 1, total, pageProgress: 0, stage: "loading" });
-  const worker = await createWorker(opts.lang ?? "eng", 1, {
+  // The engine loads while the pages are checked.
+  const workerReady = createWorker(opts.lang ?? "eng", 1, {
     workerPath: `${TESSERACT_BASE}/worker.min.js`,
     corePath: `${TESSERACT_BASE}/core`,
     langPath: TESSDATA,
     logger: (m: { status: string; progress: number }) => {
       if (m.status === "recognizing text") {
-        opts.onProgress?.({ page: current, total, pageProgress: m.progress, stage: "recognizing" });
+        opts.onProgress?.({ page: current, total: count, pageProgress: m.progress, stage: "recognizing" });
       }
     },
   });
+  // A failed load is reported where it is awaited, below.
+  workerReady.catch(() => {});
 
-  const pages: (OcrText | OcrPage | null)[] = [];
+  const pages: (OcrText | OcrPage | null)[] = new Array(total).fill(null);
   try {
-    for (let i = 1; i <= total; i++) {
-      current = i;
-      opts.onProgress?.({ page: i, total, pageProgress: 0, stage: "rendering" });
+    let toRead = Array.from({ length: total }, (_, i) => i + 1);
+    const own = new Map<number, OwnText[]>();
+    // Plain-text pages: no pictures, and a text layer of their own.
+    let plain: number[] = [];
+    let sample = 0;
+    if (newOnly) {
+      toRead = [];
+      for (let i = 1; i <= total; i++) {
+        const pieces = await loaded.ownText(i);
+        own.set(i, pieces);
+        const text = pieces.map((t) => t.text).join(" ");
+        const hasText = text.replace(/\s+/g, "").length >= HAS_TEXT && !looksGarbled(text);
+        if (hasText && !(await loaded.showsPictures(i))) plain.push(i);
+        else toRead.push(i);
+      }
+      // Read one plain page (the fullest) to check the text layer says what the
+      // page shows; the rest are read only if it doesn't.
+      sample = plain.reduce((best, i) => (textLength(own.get(i)!) > textLength(own.get(best)!) ? i : best), plain[0] ?? 0);
+      if (sample) toRead.unshift(sample);
+      plain = plain.filter((i) => i !== sample);
+    }
+    const worker = await workerReady;
+
+    for (let k = 0; k < toRead.length; k++) {
+      const i = toRead[k];
+      current = k + 1;
+      count = toRead.length;
+      opts.onProgress?.({ page: current, total: count, pageProgress: 0, stage: "rendering" });
       const vp = await loaded.getPageViewport(i, RENDER_SCALE);
       const canvas = document.createElement("canvas");
       // Word boxes are measured against canvas.width/height below, so any
@@ -89,15 +121,6 @@ export async function ocrDocument(
         }
       }
 
-      if (opts.skipPagesWithText && !opts.images) {
-        const own = await loaded.pageText(i);
-        if (own.replace(/\s+/g, "").length >= HAS_TEXT && textAgrees(words, own)) {
-          canvas.width = canvas.height = 0;
-          pages.push(null);
-          continue;
-        }
-      }
-
       const text: OcrText = {
         widthPt: vp.baseWidth,
         heightPt: vp.baseHeight,
@@ -105,15 +128,24 @@ export async function ocrDocument(
         imageHeight: canvas.height,
         words,
       };
-      pages.push(opts.images ? { ...text, imageType: "jpeg", image: await canvasToJpeg(canvas, 0.85) } : text);
+      if (newOnly) {
+        const pieces = own.get(i)!;
+        // A text layer that doesn't say what the page shows: read every page.
+        if (i === sample && !textAgrees(words, pieces.map((t) => t.text).join(" "))) toRead.push(...plain);
+        text.words = newWords(text, pieces);
+        text.known = words.length - text.words.length;
+      }
+      pages[i - 1] = opts.images ? { ...text, imageType: "jpeg", image: await canvasToJpeg(canvas, 0.85) } : text;
       canvas.width = canvas.height = 0;
     }
   } finally {
-    await worker.terminate();
+    workerReady.then((w) => w.terminate(), () => {});
     loaded.destroy();
   }
   return pages;
 }
+
+const textLength = (pieces: OwnText[]) => pieces.reduce((n, t) => n + t.text.length, 0);
 
 /** Plain text from OCR results, one block per page. */
 export function ocrText(pages: (OcrText | null)[]): string {

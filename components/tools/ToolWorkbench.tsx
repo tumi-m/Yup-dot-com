@@ -182,9 +182,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     }
     if (proc.zipName) {
       const JSZip = (await import("jszip")).default;
-      const { zipEntryOptions } = await import("@/lib/zip");
+      const { zipEntryOptionsFor } = await import("@/lib/zip");
       const zip = new JSZip();
-      for (const r of results) zip.file(r.filename, r.blob, zipEntryOptions(r.filename));
+      for (const r of results) zip.file(r.filename, r.blob, await zipEntryOptionsFor(r.filename, r.blob));
       downloadBlob(await zip.generateAsync({ type: "blob" }), proc.zipName);
     } else {
       results.forEach((r) => downloadBlob(r.blob, r.filename));
