@@ -163,9 +163,9 @@ export function parseTikTokItem(id: string, item: Json, pageUrl: string, cookie:
     const key = parseUrlKey(String(info?.PlayAddr?.UrlKey ?? ""));
     // bytevc2 is ByteDance's own codec, which nothing outside TikTok plays.
     if (key?.codec === "bytevc2") continue;
-    let width: number | null = null;
-    let height: number | null = null;
-    if (key?.res) {
+    let width: number | null = Number(info?.PlayAddr?.Width) || null;
+    let height: number | null = Number(info?.PlayAddr?.Height) || null;
+    if (!(width && height) && key?.res) {
       if (ratio < 1) {
         width = key.res;
         height = Math.round(key.res / ratio / 2) * 2;
@@ -177,9 +177,10 @@ export function parseTikTokItem(id: string, item: Json, pageUrl: string, cookie:
     const urls = Array.isArray(info?.PlayAddr?.UrlList) ? info.PlayAddr.UrlList : [];
     // Prefer H.264 (plays everywhere) over HEVC at the same size.
     const bitrate = (Number(info?.Bitrate) || key?.bitrate || 0) + (key?.codec === "h264" ? 1 : 0);
+    const size = Number(info?.PlayAddr?.DataSize) || undefined;
     for (const u of urls) {
       if (/\/media-video-hvc1\//.test(String(u))) continue; // sometimes video-only
-      add(u, { bitrate, width, height });
+      add(u, { bitrate, width, height, ...(size ? { size } : {}) });
     }
   }
   const play = Array.isArray(video.playAddr) ? video.playAddr.map((p: Json) => p?.src) : [video.playAddr];

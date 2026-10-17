@@ -43,6 +43,7 @@ work with or without an account.
 | **YouTube to MP3** | Audio only, extracted by the worker's ffmpeg. *Needs the media worker.* |
 | **YouTube Playlist** | Lists a playlist (up to 200), downloads the picked videos as MP4 or MP3 two at a time (each counts toward the daily quota), and exports the list as CSV or TXT. *Needs the media worker.* |
 | **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
+| **Compress Video** | MP4, MOV or WebM in, a smaller H.264 MP4 out, in the browser (WebCodecs). Three presets; up to 4K. A file that's already lean comes back as it was. |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
@@ -120,6 +121,17 @@ limits logged-out access hard, especially from cloud servers, so expect
 TikTok and Instagram are unofficial, change without notice, and forbid
 downloading in their terms; files only ever come from their own CDNs
 (host allowlists in `lib/social/direct.ts`).
+
+Each quality shows its file size: exact where the platform gives one
+(TikTok's `DataSize`, or a HEAD request's `Content-Length`), otherwise bitrate ×
+duration (`lib/media-size.ts`). When a 1080p or 720p file spends at least 1.4×
+the bits it needs (`lib/video-quality.ts`, about 4.4 Mbps at 1080p30), a
+**Smaller file** switch re-encodes it to H.264 in the browser with
+[mediabunny](https://mediabunny.dev) (`lib/video-compress.ts`, the same engine as
+Compress Video). It's off until the visitor turns it on (the choice is
+remembered), and hidden where the browser has no H.264 encoder. MP3s use the
+LAME VBR level closest to 1.4× the source's audio bitrate (V2 to V6) and keep
+mono audio mono.
 
 **YouTube** is paused (its tools are hidden) until `NEXT_PUBLIC_ENABLE_YOUTUBE=1`.
 It needs a separate container ([`media-worker/`](media-worker/README.md):
@@ -409,7 +421,7 @@ npm install
 
 Next.js 16 (App Router) · React 19.3 · TypeScript · Tailwind CSS · Supabase
 (Auth + Postgres + Storage) · Paystack · Ollama · pdf-lib · pdf.js · Tesseract.js ·
-ffmpeg.wasm · JSZip · Radix UI · lucide-react · yt-dlp (media worker)
+ffmpeg.wasm · mediabunny · JSZip · Radix UI · lucide-react · yt-dlp (media worker)
 
 ## Production notes
 

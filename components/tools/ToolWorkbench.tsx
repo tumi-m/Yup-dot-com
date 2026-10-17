@@ -56,6 +56,13 @@ function nextSteps(slug: string, filename: string): string[] {
   return [];
 }
 
+/** Video files some systems hand over without a type. */
+const VIDEO_EXT: Record<string, RegExp> = {
+  "video/mp4": /\.(mp4|m4v)$/,
+  "video/quicktime": /\.mov$/,
+  "video/webm": /\.webm$/,
+};
+
 type Status = "idle" | "working" | "done";
 
 interface Entry {
@@ -110,7 +117,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           f.type === t ||
           (t === "application/pdf" && name.endsWith(".pdf")) ||
           (!f.type && t === "image/jpeg" && /\.jpe?g$/.test(name)) ||
-          (!f.type && t === "image/png" && name.endsWith(".png"))
+          (!f.type && t === "image/png" && name.endsWith(".png")) ||
+          ((!f.type || f.type === "application/octet-stream") && VIDEO_EXT[t]?.test(name))
         );
       })
     );

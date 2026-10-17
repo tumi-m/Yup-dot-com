@@ -65,6 +65,9 @@ export function isAllowedMediaUrl(url: string, platform: DirectPlatform): boolea
   return false;
 }
 
+/** Sent to the video CDNs unless the grant carries the platform's own. */
+export const FETCH_UA = "Mozilla/5.0 (compatible; PDFWizard/1.0)";
+
 /** Only these headers may travel in a grant to the video CDN. */
 export function grantHeaders(h: unknown): Record<string, string> {
   const out: Record<string, string> = {};

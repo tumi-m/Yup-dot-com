@@ -12,6 +12,50 @@ export const FFMPEG_CORE_VERSION = "0.12.10";
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
+export interface AudioStream {
+  kbps: number | null;
+  channels: number | null;
+  /** HE-AAC rebuilds its top octave, so it sounds better than its bitrate. */
+  heAac: boolean;
+}
+
+/**
+ * The first audio stream in an ffmpeg log, e.g.
+ * "Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, stereo, fltp, 128 kb/s (default)"
+ */
+export function parseAudioStream(log: string): AudioStream | null {
+  const line = log.split("\n").find((l) => /Stream #\d+:\d+.*: Audio: /.test(l));
+  if (!line) return null;
+  const layout = line.match(/\d+ Hz, ([^,]+),/)?.[1]?.trim() ?? "";
+  const channels =
+    layout === "mono" ? 1 : layout === "stereo" ? 2 : Number(layout.match(/^(\d+) channels/)?.[1]) || (layout ? 2 : null);
+  return {
+    kbps: Number(line.match(/(\d+(?:\.\d+)?) kb\/s/)?.[1]) || null,
+    channels,
+    heAac: /HE-AAC/i.test(line),
+  };
+}
+
+/** Average stereo bitrates (kbps) of LAME's VBR levels V0…V9. */
+const LAME_VBR_KBPS = [245, 225, 190, 175, 165, 130, 115, 100, 85, 65];
+
+/**
+ * LAME VBR level (-q:a) for a source: about 1.4× its bitrate, from V6 to V2.
+ * A low-bitrate source gains nothing from a big MP3, and V2 is already
+ * transparent for almost everyone. Unknown sources get V2.
+ */
+export function mp3VbrLevel(src: AudioStream | null): number {
+  if (!src?.kbps) return 2;
+  // Compare as stereo: a mono stream needs about half the bits.
+  const kbps = src.kbps * (src.channels === 1 ? 2 : 1) * (src.heAac ? 2 : 1);
+  const target = kbps * 1.4;
+  let level = 2;
+  for (let v = 3; v <= 6; v++) {
+    if (Math.abs(LAME_VBR_KBPS[v] - target) < Math.abs(LAME_VBR_KBPS[level] - target)) level = v;
+  }
+  return level;
+}
+
 /** A failure worth showing as is. */
 export class ConvertError extends Error {}
 
@@ -32,6 +76,8 @@ export async function loadMp3Converter(signal?: AbortSignal): Promise<Mp3Convert
   let nextId = 0;
   let onProgress: ((fraction: number) => void) | undefined;
   let disposed = false;
+  /** ffmpeg's log lines, while something is listening. */
+  let log: string[] | null = null;
 
   const failAll = (err: Error) => {
     for (const p of pending.values()) p.reject(err);
@@ -50,7 +96,11 @@ export async function loadMp3Converter(signal?: AbortSignal): Promise<Mp3Convert
       if (typeof data?.progress === "number" && data.progress >= 0) onProgress?.(Math.min(1, data.progress));
       return;
     }
-    if (type === "LOG" || id === undefined) return;
+    if (type === "LOG") {
+      if (log && typeof data?.message === "string") log.push(data.message);
+      return;
+    }
+    if (id === undefined) return;
     const p = pending.get(id);
     if (!p) return;
     pending.delete(id);
@@ -81,8 +131,18 @@ export async function loadMp3Converter(signal?: AbortSignal): Promise<Mp3Convert
       onProgress = progress;
       try {
         await send("WRITE_FILE", { path: "in.mp4", data: input }, [input.buffer]);
+        // Read the audio stream first (no output file, so ffmpeg only probes),
+        // then pick the MP3 quality from it.
+        log = [];
+        await send<number>("EXEC", { args: ["-nostdin", "-hide_banner", "-i", "in.mp4"], timeout: 30_000 }).catch(() => -1);
+        const src = parseAudioStream(log.join("\n"));
+        log = null;
         const code = await send<number>("EXEC", {
-          args: ["-nostdin", "-y", "-i", "in.mp4", "-vn", "-c:a", "libmp3lame", "-q:a", "2", "out.mp3"],
+          args: [
+            "-nostdin", "-y", "-i", "in.mp4", "-vn",
+            ...(src?.channels === 1 ? ["-ac", "1"] : []),
+            "-c:a", "libmp3lame", "-q:a", String(mp3VbrLevel(src)), "out.mp3",
+          ],
           timeout: -1,
         });
         if (code !== 0) throw new ConvertError("This video's audio couldn't be converted.");

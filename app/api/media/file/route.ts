@@ -1,7 +1,7 @@
 import { signingSecret, verifyToken } from "@/lib/media-server";
 import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
-import { grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
+import { FETCH_UA, grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -60,7 +60,7 @@ async function handle(request: Request, method: "GET" | "HEAD") {
     return refundUnserved(store, ref).catch(() => false);
   };
 
-  const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; PDFWizard/1.0)", ...grantHeaders(grant.h) };
+  const headers: Record<string, string> = { "User-Agent": FETCH_UA, ...grantHeaders(grant.h) };
   const range = request.headers.get("range");
   if (range) headers.Range = range;
 

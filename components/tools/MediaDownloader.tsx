@@ -32,6 +32,7 @@ import {
 import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
+import { canEncodeH264, shortBytes } from "@/lib/video-quality";
 
 export interface MediaToolConfig {
   platform: MediaPlatform;
@@ -46,7 +47,8 @@ interface Info {
   duration?: number | null;
   thumbnail?: string | null;
   hasAudio?: boolean;
-  qualities: { height: number; available: boolean; locked: boolean }[];
+  /** size: bytes of that quality's file (exact or estimated); smaller: about what "Smaller file" makes of it. */
+  qualities: { height: number; available: boolean; locked: boolean; size?: number; exact?: boolean; smaller?: number }[];
   /** The link this preview was made from; downloads always use it. */
   url: string;
 }
@@ -57,6 +59,9 @@ interface SavedFile {
   href: string;
   name: string;
   size?: number | null;
+  /** The download's size before "Smaller file" re-encoded it. */
+  was?: number;
+  note?: string;
   /** blob: kept in this tab. remote: a link that can expire (worker job, X stream). */
   source: "blob" | "remote";
 }
@@ -68,8 +73,24 @@ const STAGES: Record<string, string> = {
   fetching: "Fetching the video…",
   preparing: "Preparing converter…",
   converting: "Converting to MP3…",
+  shrinking: "Making it smaller…",
   ready: "Ready",
 };
+
+/** "Smaller file" is remembered per browser. */
+const SMALLER_KEY = "pw.media.smaller";
+function readSmaller(): boolean {
+  try {
+    return localStorage.getItem(SMALLER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeSmaller(on: boolean) {
+  try {
+    localStorage.setItem(SMALLER_KEY, on ? "1" : "0");
+  } catch {}
+}
 
 /** Give up on a stuck worker job rather than spinning forever. */
 const POLL_DEADLINE_MS = 20 * 60 * 1000;
@@ -178,6 +199,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   /** Set after a 429: the day's downloads are spent. */
   const [limit, setLimit] = useState<{ upgrade: boolean } | null>(null);
   const [starting, setStarting] = useState(false);
+  /** "Smaller file": re-encode in this tab. Offered only where the browser can make H.264. */
+  const [canShrink, setCanShrink] = useState(false);
+  const [smaller, setSmaller] = useState(false);
+  useEffect(() => {
+    setSmaller(readSmaller());
+    let live = true;
+    void canEncodeH264().then((ok) => live && setCanShrink(ok));
+    return () => {
+      live = false;
+    };
+  }, []);
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
   const blobUrl = useRef<string | null>(null);
@@ -359,7 +391,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     setProgress({ value: 0, stage: data.mode === "worker" ? "queued" : data.mode === "convert" ? "fetching" : "downloading" });
     focusNext.current = "progress";
     setPhase("working");
-    if (data.mode === "direct") return await downloadX(data.href, data.filename, ctl.signal);
+    if (data.mode === "direct") return await downloadX(data.href, data.filename, ctl.signal, shrinkOffered && smaller);
     if (data.mode === "convert") return await convertToMp3(data.href, data.filename, ctl.signal);
     await runWorkerJob(data.workerUrl, data.token, ctl.signal, retried);
   }
@@ -391,8 +423,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     return res;
   }
 
-  /** X video: our own origin streams it; it's read here so a broken stream is never reported as saved. */
-  async function downloadX(href: string, name: string, signal: AbortSignal) {
+  /**
+   * X, TikTok, Instagram video: our own origin streams it; it's read here so a
+   * broken stream is never reported as saved. With `shrink`, it's then
+   * re-encoded in this tab (lib/video-compress.ts), which keeps the original
+   * when that wouldn't pay off or can't be done here.
+   */
+  async function downloadX(href: string, name: string, signal: AbortSignal, shrink = false) {
     try {
       const res = await fetchFile(href, signal);
       const size = Number(res.headers.get("content-length")) || 0;
@@ -401,13 +438,33 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
         await res.body?.cancel();
         return finish({ href, name, size, source: "remote" });
       }
-      const bytes = await readWithProgress(res, (f) => advance(f, "downloading")).catch((err) => {
+      // Re-encoding usually takes longer than the download.
+      const share = shrink ? 0.3 : 1;
+      const bytes = await readWithProgress(res, (f) => advance(f * share, "downloading")).catch((err) => {
         throw isAbort(err) ? err : new Shown("X stopped sending the video. Try again.");
       });
       if (!alive.current || signal.aborted) return;
+      let blob = new Blob([bytes as BlobPart], { type: "video/mp4" });
+      let was: number | undefined;
+      let note: string | undefined;
+      if (shrink) {
+        advance(share, "shrinking");
+        try {
+          const { compressVideo } = await import("@/lib/video-compress");
+          const out = await compressVideo(blob, { signal, onProgress: (f) => advance(share + f * (1 - share), "shrinking") });
+          if (out.blob.size < blob.size) {
+            was = blob.size;
+            blob = out.blob;
+          }
+        } catch (err) {
+          if (isAbort(err) || signal.aborted) return;
+          note = "This browser couldn't make it smaller, so this is the original.";
+        }
+        if (!alive.current || signal.aborted) return;
+      }
       releaseBlob();
-      blobUrl.current = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "video/mp4" }));
-      finish({ href: blobUrl.current, name, size: bytes.byteLength, source: "blob" });
+      blobUrl.current = URL.createObjectURL(blob);
+      finish({ href: blobUrl.current, name, size: blob.size, was, note, source: "blob" });
     } catch (err) {
       if (isAbort(err) || signal.aborted) return;
       fail(err instanceof Shown ? err.message : "X stopped sending the video. Try again.");
@@ -568,6 +625,14 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   // e.g. an X post that only exists in 1080p, for a free user.
   const allLocked = kind === "mp4" && available.length > 0 && available.every((q) => q.locked);
   const lockedOnly = allLocked ? available[available.length - 1].height : null;
+  const chosen = info?.qualities.find((q) => q.height === height && q.available && !q.locked);
+  const sized = kind === "mp4" && available.some((q) => q.size);
+  // Only offered where re-encoding saves a lot; YouTube files come from the worker.
+  const shrinkOffered = canShrink && kind === "mp4" && info?.platform !== "youtube" && !!chosen?.smaller;
+  const toggleSmaller = () => {
+    setSmaller(!smaller);
+    writeSmaller(!smaller);
+  };
   const returnTo = info ? `${pathname}?url=${encodeURIComponent(info.url)}` : pathname;
   const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -746,10 +811,15 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                           onClick={() => pickQuality(q)}
                           disabled={!q.available}
                           aria-pressed={height === q.height && !q.locked}
-                          aria-label={q.locked && q.available ? `${q.height}p (Pro)` : undefined}
+                          aria-label={
+                            q.available && (q.locked || q.size)
+                              ? `${q.height}p${q.size ? `, ${q.exact ? "" : "about "}${shortBytes(q.size)}` : ""}${q.locked ? " (Pro)" : ""}`
+                              : undefined
+                          }
                           title={!q.available ? "Not available for this video" : q.locked ? "Pro" : undefined}
                           className={cn(
-                            "relative h-11 rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-35",
+                            "relative flex flex-col items-center justify-center rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-35",
+                            sized ? "h-14" : "h-11",
                             focusRing,
                             height === q.height && !q.locked
                               ? "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25"
@@ -757,6 +827,12 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                           )}
                         >
                           {q.height}p
+                          {sized && q.available && q.size ? (
+                            <span className="mt-0.5 text-[11px] font-normal leading-none opacity-75">
+                              {q.exact ? "" : "~"}
+                              {shortBytes(q.size)}
+                            </span>
+                          ) : null}
                           {q.locked && q.available && (
                             <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-fuchsia-500 text-white shadow">
                               <Crown className="h-3 w-3" />
@@ -766,6 +842,31 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       ))}
                     </div>
                   </div>
+                )}
+
+                {shrinkOffered && chosen?.smaller && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={smaller}
+                    onClick={toggleSmaller}
+                    title="Re-encoded on your device. Takes a little longer."
+                    className={cn(
+                      "flex min-h-11 w-full items-center gap-3 rounded-xl border border-border bg-background px-3.5 text-left text-sm transition-colors hover:border-primary/50",
+                      focusRing
+                    )}
+                  >
+                    <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", smaller ? "bg-primary" : "bg-secondary")}>
+                      <motion.span
+                        className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow"
+                        initial={false}
+                        animate={{ x: smaller ? 16 : 0 }}
+                        transition={SPRING}
+                      />
+                    </span>
+                    <span className="flex-1 font-medium">Smaller file</span>
+                    <span className="tabular-nums text-muted-foreground">~{shortBytes(chosen.smaller)}</span>
+                  </button>
                 )}
 
                 {note && <p className="text-sm text-muted-foreground">{note}</p>}
@@ -894,7 +995,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground">
               {file.name}
               {file.size ? ` · ${formatBytes(file.size)}` : ""}
+              {file.size && file.was ? ` · ${Math.round((1 - file.size / file.was) * 100)}% smaller` : ""}
             </p>
+            {file.note && <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">{file.note}</p>}
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button size="lg" variant="outline" onClick={saveAgain} disabled={starting}>
                 {starting ? <Loader2 className="motion-safe:animate-spin" /> : <Download />} Download again

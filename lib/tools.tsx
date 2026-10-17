@@ -33,6 +33,7 @@ import {
   GalleryHorizontalEnd,
   FileDown,
   FileSliders,
+  Shrink,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -437,6 +438,15 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-amber-100 text-amber-800",
     custom: "media",
     media: { platform: "instagram", kind: "mp3" },
+  },
+  {
+    slug: "compress-video",
+    name: "Compress Video",
+    title: "Compress Video: make MP4, MOV and WebM files smaller",
+    description: "Make a video smaller, as an MP4.",
+    icon: Shrink,
+    category: "media",
+    tint: "bg-emerald-100 text-emerald-800",
   },
 ];
 

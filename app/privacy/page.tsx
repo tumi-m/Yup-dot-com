@@ -154,8 +154,9 @@ export default function PrivacyPage() {
 
       <Section id="browser" title={S.browser}>
         <p>
-          The PDF and PowerPoint tools (merge, compress, convert, OCR, sign and the rest) run on your device. Files you
-          open in them are not uploaded to us. The editor does the same when you&apos;re signed out, keeping your work in
+          The PDF and PowerPoint tools (merge, compress, convert, OCR, sign and the rest) and Compress Video run on your
+          device. Files you open in them are not uploaded to us. Making a downloaded video smaller, or turning it into
+          MP3, also happens on your device. The editor does the same when you&apos;re signed out, keeping your work in
           your browser&apos;s storage so it survives a reload (clearing your browser data removes it). When you&apos;re
           signed in, it saves to your cloud library.
         </p>
