@@ -13,7 +13,7 @@ export interface TierLimits {
   aiAnswersPerDay: number;
   /** Characters of document text the AI will read. */
   aiDocumentChars: number;
-  /** Video/audio downloads (YouTube, X) per day. */
+  /** Video/audio downloads (X, TikTok, Instagram; YouTube when enabled) per day. */
   mediaDownloadsPerDay: number;
   /** Google Slides link imports per day. */
   linkImportsPerDay: number;

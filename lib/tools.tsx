@@ -21,6 +21,9 @@ import {
   MonitorPlay,
   Film,
   Music2,
+  Music,
+  Video,
+  Instagram,
   AudioLines,
   ListVideo,
   PenLine,
@@ -32,6 +35,7 @@ import {
   FileSliders,
   type LucideIcon,
 } from "lucide-react";
+import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
 
 export type ToolCategory =
   | "organize"
@@ -61,7 +65,7 @@ export interface ToolMeta {
   /** Google Slides import settings: which file the deck is fetched as. */
   slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
-  media?: { platform: "youtube" | "x"; kind: "mp4" | "mp3"; defaultHeight?: number };
+  media?: { platform: MediaPlatform; kind: "mp4" | "mp3"; defaultHeight?: number };
   /** Optional ribbon shown on the tool card. */
   badge?: string;
 }
@@ -77,7 +81,7 @@ export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   edit: "Edit & Sign",
 };
 
-export const TOOLS: ToolMeta[] = [
+const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "merge-pdf",
     name: "Merge PDF",
@@ -390,7 +394,56 @@ export const TOOLS: ToolMeta[] = [
     custom: "media",
     media: { platform: "x", kind: "mp3" },
   },
+  {
+    slug: "tiktok-to-mp4",
+    name: "TikTok to MP4",
+    title: "TikTok Video Downloader: save TikToks as MP4",
+    description: "Save a TikTok as MP4.",
+    icon: Video,
+    category: "media",
+    tint: "bg-cyan-100 text-cyan-800",
+    custom: "media",
+    media: { platform: "tiktok", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "tiktok-to-mp3",
+    name: "TikTok to MP3",
+    title: "TikTok to MP3: save the sound",
+    description: "Save a TikTok's audio.",
+    icon: Music,
+    category: "media",
+    tint: "bg-pink-100 text-pink-700",
+    custom: "media",
+    media: { platform: "tiktok", kind: "mp3" },
+  },
+  {
+    slug: "instagram-to-mp4",
+    name: "Instagram to MP4",
+    title: "Instagram Reels Downloader: save Reels and videos as MP4",
+    description: "Save a Reel or video post as MP4.",
+    icon: Instagram,
+    category: "media",
+    tint: "bg-gradient-to-br from-fuchsia-100 to-amber-100 text-fuchsia-700",
+    custom: "media",
+    media: { platform: "instagram", kind: "mp4", defaultHeight: 720 },
+  },
+  {
+    slug: "instagram-to-mp3",
+    name: "Instagram to MP3",
+    title: "Instagram to MP3: save a Reel's audio",
+    description: "Save a Reel's audio.",
+    icon: AudioLines,
+    category: "media",
+    tint: "bg-amber-100 text-amber-800",
+    custom: "media",
+    media: { platform: "instagram", kind: "mp3" },
+  },
 ];
+
+const isYoutubeTool = (t: ToolMeta) => t.media?.platform === "youtube" || t.custom === "playlist";
+
+/** Every tool on the site. YouTube's are left out while it's paused (lib/media.ts). */
+export const TOOLS: ToolMeta[] = YOUTUBE_ENABLED ? ALL_TOOLS : ALL_TOOLS.filter((t) => !isYoutubeTool(t));
 
 export function getTool(slug: string): ToolMeta | undefined {
   return TOOLS.find((t) => t.slug === slug);

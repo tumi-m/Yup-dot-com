@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { cleanTitle, maxHeightFor, parseMediaUrl, QUALITIES } from "@/lib/media";
+import { cleanTitle, maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
 import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
-import { resolveXVideo, X_FAILURE_MESSAGE, XResolveError, xAvailableQualities } from "@/lib/x-video";
+import { DirectResolveError, failureMessage, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
+import { xAvailableQualities } from "@/lib/x-video";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,18 +15,19 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const media = parsed.success ? parseMediaUrl(parsed.data.url) : null;
   if (!media) {
-    return Response.json({ error: "Paste a YouTube or X (Twitter) video link." }, { status: 400 });
+    return Response.json({ error: "Paste an X, TikTok or Instagram video link." }, { status: 400 });
   }
   const { tier } = await resolveTier();
   const allowed = maxHeightFor(tier);
 
-  // X: resolved here, no worker needed.
-  if (media.platform === "x") {
+  // X, TikTok and Instagram: resolved here, no worker needed.
+  if (isDirectPlatform(media.platform)) {
+    const platform = media.platform;
     try {
-      const video = await resolveXVideo(media.id, undefined, media.index);
+      const video = await resolveDirect(media);
       const available = xAvailableQualities(video, QUALITIES);
       return Response.json({
-        platform: "x",
+        platform,
         title: video.title,
         uploader: video.author ? `@${video.author}` : null,
         duration: video.duration,
@@ -34,12 +36,19 @@ export async function POST(request: Request) {
         qualities: QUALITIES.map((h) => ({ height: h, available: available.includes(h), locked: h > allowed })),
       });
     } catch (err) {
-      const kind = err instanceof XResolveError ? err.kind : "unreachable";
-      if (!(err instanceof XResolveError)) console.error("x resolve failed:", err);
-      return Response.json({ error: X_FAILURE_MESSAGE[kind] }, { status: kind === "unreachable" ? 502 : 422 });
+      const kind = err instanceof DirectResolveError ? err.kind : "unreachable";
+      if (!(err instanceof DirectResolveError)) console.error(`${platform} resolve failed:`, err);
+      else if (kind === "blocked" || kind === "unreachable") console.warn(`${platform} resolve: ${kind}`);
+      return Response.json(
+        { error: failureMessage(platform, kind) },
+        { status: kind === "unreachable" || kind === "blocked" ? 502 : 422 }
+      );
     }
   }
 
+  if (!YOUTUBE_ENABLED) {
+    return Response.json({ error: "YouTube downloads are paused for now. X, TikTok and Instagram work." }, { status: 503 });
+  }
   const config = workerConfig();
   if (!config.ok) {
     console.error(`YouTube downloads disabled: ${WORKER_CONFIG_HELP[config.reason]}`);

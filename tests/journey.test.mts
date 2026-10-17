@@ -58,21 +58,21 @@ check(
 check("slides invalid → none", slidesActions("hello").length === 0);
 
 // Media links
-const yt = mediaActions("https://youtu.be/dQw4w9WgXcQ");
+const yt = mediaActions("https://youtu.be/dQw4w9WgXcQ", true);
 check(
   "youtube → mp4 + mp3",
   yt.length === 2 && yt[0].href.startsWith("/tools/youtube-to-mp4?url=https%3A%2F%2Fyoutu.be") && yt[1].href.startsWith("/tools/youtube-to-mp3?url="),
   yt
 );
 const PL = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf";
-const plOnly = mediaActions(`https://www.youtube.com/playlist?list=${PL}`);
+const plOnly = mediaActions(`https://www.youtube.com/playlist?list=${PL}`, true);
 check(
   "playlist → playlist tool",
   plOnly.length === 1 && plOnly[0].label === "Playlist" &&
     plOnly[0].href === `/tools/youtube-playlist?url=${encodeURIComponent(`https://www.youtube.com/playlist?list=${PL}`)}`,
   plOnly
 );
-const plVideo = mediaActions(`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${PL}&index=2`);
+const plVideo = mediaActions(`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${PL}&index=2`, true);
 check(
   "video in playlist → playlist, or this video alone",
   plVideo.length === 3 && plVideo[0].label === "Playlist" &&
@@ -87,6 +87,13 @@ check(
   x
 );
 check("media invalid → none", mediaActions("https://vimeo.com/123").length === 0);
+check("YouTube paused → no actions", mediaActions("https://youtu.be/dQw4w9WgXcQ", false).length === 0 && mediaActions(`https://www.youtube.com/playlist?list=${PL}`, false).length === 0);
+const tt = mediaActions("https://www.tiktok.com/@scout2015/video/6718335390845095173");
+check("tiktok → tiktok mp4 + mp3", tt.length === 2 && tt[0].href.startsWith("/tools/tiktok-to-mp4?url=") && tt[1].href.startsWith("/tools/tiktok-to-mp3?url="), JSON.stringify(tt));
+const ttShort = mediaActions("https://vm.tiktok.com/ZMabc123/");
+check("tiktok short link → tiktok tools", ttShort[0]?.href.startsWith("/tools/tiktok-to-mp4?url="));
+const ig = mediaActions("https://www.instagram.com/reel/C4Hm4z2oEVp/?igsh=abc");
+check("instagram reel → instagram mp4 + mp3", ig.length === 2 && ig[0].href.startsWith("/tools/instagram-to-mp4?url=") && ig[1].href.startsWith("/tools/instagram-to-mp3?url="), JSON.stringify(ig));
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

@@ -109,9 +109,10 @@ export default function PrivacyPage() {
           When you download a video or import Google Slides, the link you paste goes to our server. For YouTube, our
           download server fetches the video and deletes the file automatically soon after you download it. For X
           (Twitter), our server looks the post up through X&apos;s public embed service and, if that fails, the public
-          FxTwitter or vxTwitter services. For Google Slides, our server downloads the deck from Google. We don&apos;t
-          store the links, apart from short-lived technical logs. Video previews load their thumbnail straight from
-          YouTube or X.
+          FxTwitter or vxTwitter services. For TikTok and Instagram, our server opens the public post the way a
+          logged-out visitor would and passes the video on to you. For Google Slides, our server downloads the deck
+          from Google. We don&apos;t store the links or the videos, apart from short-lived technical logs. Video
+          previews load their thumbnail straight from the site the video is on.
         </p>
 
         <h3>Daily limits</h3>

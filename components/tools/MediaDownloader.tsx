@@ -20,7 +20,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
-import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, type MediaKind, type MediaPlatform } from "@/lib/media";
+import {
+  parseMediaUrl,
+  parsePlaylistUrl,
+  PLATFORM_LABEL,
+  PLATFORM_PLACEHOLDER,
+  YOUTUBE_ENABLED,
+  type MediaKind,
+  type MediaPlatform,
+} from "@/lib/media";
 import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
@@ -220,7 +228,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   }, []);
 
   const detected = url ? parseMediaUrl(url) : null;
-  const playlist = url ? parsePlaylistUrl(url) : null;
+  const playlist = url && YOUTUBE_ENABLED ? parsePlaylistUrl(url) : null;
 
   // A ?url= link (e.g. from the homepage) looks the video up straight away.
   const autoLookup = useRef(false);
@@ -599,7 +607,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   readOnly={loading}
-                  placeholder={config.platform === "youtube" ? "youtu.be/…" : "x.com/user/status/…"}
+                  placeholder={PLATFORM_PLACEHOLDER[config.platform]}
                   inputMode="url"
                   autoComplete="off"
                   spellCheck={false}
@@ -642,7 +650,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
               )}
               {detected && detected.platform !== config.platform && (
                 <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-2 text-xs text-muted-foreground">
-                  That&apos;s a {PLATFORM_LABEL[detected.platform]} link — it works here too.
+                  {detected.platform === "youtube" && !YOUTUBE_ENABLED
+                    ? "YouTube downloads are paused for now."
+                    : <>That&apos;s a {PLATFORM_LABEL[detected.platform]} link — it works here too.</>}
                 </motion.p>
               )}
             </AnimatePresence>

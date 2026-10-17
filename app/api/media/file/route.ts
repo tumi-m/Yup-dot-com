@@ -1,18 +1,19 @@
 import { signingSecret, verifyToken } from "@/lib/media-server";
 import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
-import { isAllowedVideoUrl } from "@/lib/x-video";
+import { grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * Streams one X video file from video.twimg.com under our own origin, so the
- * browser saves it with a proper filename (a cross-origin link would just
- * play it) and the MP3 converter can read it without CORS.
+ * Streams one video file from X, TikTok or Instagram under our own origin,
+ * so the browser saves it with a proper filename (a cross-origin link would
+ * just play it) and the MP3 converter can read it without CORS.
  *
- * Only accepts URLs inside a token signed by /api/media/link, and only
- * https://video.twimg.com MP4s, so it can't be used as an open proxy.
+ * Only accepts URLs inside a token signed by /api/media/link, and only on
+ * that platform's video CDN (lib/social/direct.ts), so it can't be used as an
+ * open proxy. The token may carry the Cookie/Referer the CDN asked for.
  *
  * When X refuses the file or the stream breaks before the grant ever sent a
  * file, the download is given back to the visitor's daily allowance (once
@@ -22,8 +23,8 @@ export const maxDuration = 300;
  * Redirects are followed by hand, and only to allowed hosts.
  */
 const MAX_REDIRECTS = 3;
-function allowed(url: string): boolean {
-  if (isAllowedVideoUrl(url)) return true;
+function allowed(url: string, platform: DirectPlatform): boolean {
+  if (isAllowedMediaUrl(url, platform)) return true;
   // Local test servers, never in production.
   const extra = process.env.NODE_ENV !== "production" ? process.env.MEDIA_TEST_HOSTS : undefined;
   if (!extra) return false;
@@ -36,8 +37,10 @@ function allowed(url: string): boolean {
 
 async function handle(request: Request, method: "GET" | "HEAD") {
   const token = new URL(request.url).searchParams.get("t") ?? "";
-  const grant = verifyToken<{ u?: unknown; n?: unknown }>(token, signingSecret());
-  if (!grant || typeof grant.u !== "string" || !allowed(grant.u)) {
+  const grant = verifyToken<{ u?: unknown; n?: unknown; p?: unknown; h?: unknown }>(token, signingSecret());
+  // Grants without a platform predate TikTok/Instagram and are X.
+  const platform: DirectPlatform | null = grant ? (grant.p === undefined ? "x" : isDirectPlatform(String(grant.p)) ? (grant.p as DirectPlatform) : null) : null;
+  if (!grant || !platform || typeof grant.u !== "string" || !allowed(grant.u, platform)) {
     return Response.json({ error: "This download link expired. Start the download again." }, { status: 403 });
   }
   const name = typeof grant.n === "string" && grant.n ? grant.n : "video.mp4";
@@ -57,7 +60,7 @@ async function handle(request: Request, method: "GET" | "HEAD") {
     return refundUnserved(store, ref).catch(() => false);
   };
 
-  const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; PDFWizard/1.0)" };
+  const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; PDFWizard/1.0)", ...grantHeaders(grant.h) };
   const range = request.headers.get("range");
   if (range) headers.Range = range;
 
@@ -73,23 +76,23 @@ async function handle(request: Request, method: "GET" | "HEAD") {
       }
       await res.body?.cancel();
       const next = new URL(location, url).toString();
-      if (!allowed(next)) break;
+      if (!allowed(next, platform)) break;
       url = next;
     }
   } catch {
     if (!request.signal.aborted) await giveBack();
-    return Response.json({ error: "X didn't send the file. Try again." }, { status: 502 });
+    return Response.json({ error: "The video site didn't send the file. Try again." }, { status: 502 });
   }
   if (!upstream) {
     await giveBack();
-    return Response.json({ error: "X didn't send the file. Try again." }, { status: 502 });
+    return Response.json({ error: "The video site didn't send the file. Try again." }, { status: 502 });
   }
   if (!upstream.ok && upstream.status !== 206) {
     await upstream.body?.cancel();
     await giveBack();
     const gone = upstream.status === 403 || upstream.status === 404 || upstream.status === 410;
     return Response.json(
-      { error: gone ? "X no longer serves this file. Start the download again." : "X didn't send the file. Try again." },
+      { error: gone ? "That site no longer serves this file. Start the download again." : "The video site didn't send the file. Try again." },
       { status: 502 }
     );
   }

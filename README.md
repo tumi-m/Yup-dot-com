@@ -37,7 +37,9 @@ work with or without an account.
 | **PPTX → PDF** | Renders PowerPoint slides in the browser as image-based pages with a selectable text layer; hidden slides are skipped and the file is never uploaded. |
 | **Edit PPTX** | Edit slide text, reorder, duplicate or delete slides, then save as PPTX or PDF. In the browser. |
 | **Google Slides → PDF / PPTX** | Download a deck from its link. The deck must be shared as "Anyone with the link"; private decks get a message saying so. PPTX can go straight into Edit PPTX. |
-| **YouTube to MP4** | 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
+| **TikTok to MP4 / MP3** | Save a TikTok (full or short `vm.tiktok.com` link), or just its sound. Works with no extra setup. |
+| **Instagram to MP4 / MP3** | Save a public Reel or video post, or just its audio. Works with no extra setup, but Instagram often blocks logged-out access from servers. |
+| **YouTube to MP4** | *Paused (hidden) until `NEXT_PUBLIC_ENABLE_YOUTUBE=1`.* 360p–720p free; **1080p with Pro**. Separate 720p and 1080p pages. *Needs the media worker.* |
 | **YouTube to MP3** | Audio only, extracted by the worker's ffmpeg. *Needs the media worker.* |
 | **YouTube Playlist** | Lists a playlist (up to 200), downloads the picked videos as MP4 or MP3 two at a time (each counts toward the daily quota), and exports the list as CSV or TXT. *Needs the media worker.* |
 | **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
@@ -104,11 +106,27 @@ through X's public embed endpoint (with FxTwitter and vxTwitter as fallbacks),
 and MP3 is converted in the browser with ffmpeg.wasm (self-hosted under
 `/vendor`). These endpoints are unofficial and can change without notice.
 
-**YouTube** needs a separate container ([`media-worker/`](media-worker/README.md):
+**TikTok** works on the web app alone too (`lib/social/tiktok.ts`, following
+yt-dlp's web method): the server loads the public post page, reads the
+`__UNIVERSAL_DATA_FOR_REHYDRATION__` JSON for the play URLs, and solves
+TikTok's proof-of-work page when it shows one. The page's cookies and Referer
+travel inside the signed download grant, because TikTok's CDN wants them.
+
+**Instagram** (`lib/social/instagram.ts`) tries yt-dlp's logged-out GraphQL
+query, then the post page's embedded JSON, then the embed page. Instagram
+limits logged-out access hard, especially from cloud servers, so expect
+"Instagram is limiting downloads right now" at times.
+
+TikTok and Instagram are unofficial, change without notice, and forbid
+downloading in their terms; files only ever come from their own CDNs
+(host allowlists in `lib/social/direct.ts`).
+
+**YouTube** is paused (its tools are hidden) until `NEXT_PUBLIC_ENABLE_YOUTUBE=1`.
+It needs a separate container ([`media-worker/`](media-worker/README.md):
 yt-dlp + Deno + ffmpeg), because YouTube's HD tracks must be merged and its
 stream URLs only work from the IP that requested them.
 
-For both, the web app checks the plan (1080p is Pro) and the daily quota
+For all of them, the web app checks the plan (1080p is Pro) and the daily quota
 (guest 5, free account 10, Pro 200), then signs a short-lived token for exactly
 one download. Open `/api/media/health` after deploying to see what's missing.
 Read the worker README's **Things to know before launch** section: YouTube
@@ -441,6 +459,7 @@ Variables** and redeploy:
 | `NEXT_PUBLIC_CONTACT_PHONE` | Optional. Contact page phone number |
 | `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
+| `NEXT_PUBLIC_ENABLE_YOUTUBE` | Optional. `1` brings back the YouTube tools (they are paused and hidden by default); needs the media worker |
 | `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Optional. Search Console HTML-tag token, if you don't verify by DNS |
 | `NEXT_PUBLIC_BING_SITE_VERIFICATION` | Optional. Bing Webmaster Tools `msvalidate.01` token |
 

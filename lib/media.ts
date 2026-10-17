@@ -1,11 +1,17 @@
 /**
- * YouTube and X (Twitter) downloads, shared by the API routes and the UI.
- * X posts are resolved by the web app itself (lib/x-video.ts); YouTube needs
- * the separate media worker (media-worker/), because yt-dlp and ffmpeg can't
- * run on serverless.
+ * Video downloads, shared by the API routes and the UI. X, TikTok and
+ * Instagram posts are resolved by the web app itself (lib/social/*); YouTube
+ * needs the separate media worker (media-worker/), because yt-dlp and ffmpeg
+ * can't run on serverless.
  */
 
-export type MediaPlatform = "youtube" | "x";
+export type MediaPlatform = "youtube" | "x" | "tiktok" | "instagram";
+
+/**
+ * YouTube is paused until the media worker is running reliably. Set
+ * NEXT_PUBLIC_ENABLE_YOUTUBE=1 (and redeploy) to bring its tools back.
+ */
+export const YOUTUBE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1";
 export type MediaKind = "mp4" | "mp3";
 
 export interface ParsedMediaUrl {
@@ -13,8 +19,12 @@ export interface ParsedMediaUrl {
   id: string;
   /** Normalised URL sent to the worker — never the raw user input. */
   canonical: string;
-  /** X: the media position a /video/N or /photo/N link points at (1-based). */
+  /** X: the media position a /video/N or /photo/N link points at (1-based). Instagram: ?img_index=N. */
   index?: number;
+  /** TikTok: the @username in the link, if any. */
+  user?: string;
+  /** TikTok: a vm/vt/t short link, expanded on the server. `canonical` is the short link. */
+  short?: boolean;
 }
 
 const YT_ID = /^[\w-]{11}$/;
@@ -41,6 +51,30 @@ export function parseMediaUrl(input: string): ParsedMediaUrl | null {
     if (v && YT_ID.test(v)) return yt(v);
     const m = url.pathname.match(/^\/(?:shorts|embed|live|v)\/([\w-]{11})/);
     return m ? yt(m[1]) : null;
+  }
+  if (url.hostname === "vm.tiktok.com" || url.hostname === "vt.tiktok.com") {
+    const code = url.pathname.match(/^\/(\w{4,20})\/?$/)?.[1];
+    return code ? { platform: "tiktok", id: code, short: true, canonical: `https://${url.hostname}/${code}/` } : null;
+  }
+  if (host === "tiktok.com") {
+    const short = url.pathname.match(/^\/t\/(\w{4,20})\/?$/)?.[1];
+    if (short) return { platform: "tiktok", id: short, short: true, canonical: `https://www.tiktok.com/t/${short}/` };
+    const m = url.pathname.match(/^\/@([\w.-]{1,40})\/video\/(\d{8,25})/);
+    if (m) return { platform: "tiktok", id: m[2], user: m[1], canonical: `https://www.tiktok.com/@${m[1]}/video/${m[2]}` };
+    const e = url.pathname.match(/^\/(?:embed(?:\/v2)?|share\/video)\/(\d{8,25})/);
+    return e ? { platform: "tiktok", id: e[1], canonical: `https://www.tiktok.com/@_/video/${e[1]}` } : null;
+  }
+  if (host === "instagram.com") {
+    const m = url.pathname.match(/^\/(?:[\w.]{1,30}\/)?(?:p|reels?|tv)\/([A-Za-z0-9_-]{5,60})\/?/);
+    if (!m) return null;
+    const n = Number(url.searchParams.get("img_index"));
+    const index = Number.isInteger(n) && n >= 1 && n <= 20 ? n : undefined;
+    return {
+      platform: "instagram",
+      id: m[1],
+      canonical: `https://www.instagram.com/p/${m[1]}/${index ? `?img_index=${index}` : ""}`,
+      ...(index ? { index } : {}),
+    };
   }
   if (host === "x.com" || host === "twitter.com") {
     const m = url.pathname.match(/^\/(?:[\w]{1,15}|i(?:\/web)?)\/status(?:es)?\/(\d{5,25})(?:\/(?:video|photo)\/([1-9]))?/);
@@ -129,4 +163,14 @@ export function cleanTitle(text: unknown): string {
 export const PLATFORM_LABEL: Record<MediaPlatform, string> = {
   youtube: "YouTube",
   x: "X (Twitter)",
+  tiktok: "TikTok",
+  instagram: "Instagram",
+};
+
+/** What to type in the link box, per platform. */
+export const PLATFORM_PLACEHOLDER: Record<MediaPlatform, string> = {
+  youtube: "youtu.be/…",
+  x: "x.com/user/status/…",
+  tiktok: "tiktok.com/@user/video/…",
+  instagram: "instagram.com/reel/…",
 };

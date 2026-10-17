@@ -57,7 +57,7 @@ export default function TermsPage() {
       <Section id="service" title={S.service}>
         <p>
           {b.name} offers PDF and PowerPoint tools that run in your browser, a PDF editor, a cloud library for account
-          holders, an AI assistant for PDFs, Google Slides downloads, and video and audio downloads from YouTube and X.
+          holders, an AI assistant for PDFs, Google Slides downloads, and video and audio downloads from X, TikTok and Instagram.
           Some features need an account or a paid plan.
         </p>
       </Section>
@@ -90,7 +90,7 @@ export default function TermsPage() {
             uploads or content whose licence allows it.
           </li>
           <li>
-            YouTube, X and other platforms have their own terms, which may forbid downloading. You&apos;re responsible
+            X, TikTok, Instagram, YouTube and other platforms have their own terms, which may forbid downloading. You&apos;re responsible
             for following them and copyright law.
           </li>
           <li>
@@ -174,7 +174,7 @@ export default function TermsPage() {
       <Section id="others" title={S.others}>
         <p>
           The service relies on other providers, including Paystack, Supabase, Vercel, Ollama and Google, and fetches
-          content from sites such as YouTube, X and Google Slides at your request. We aren&apos;t responsible for their
+          content from sites such as X, TikTok, Instagram and Google Slides at your request. We aren&apos;t responsible for their
           content, availability or terms.
         </p>
       </Section>

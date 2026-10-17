@@ -32,7 +32,7 @@ import {
   type JourneyAction,
   type JourneyChoice,
 } from "@/lib/journey";
-import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL } from "@/lib/media";
+import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLED } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
 
@@ -316,9 +316,15 @@ export function HeroJourney() {
                 {choice === "media" && (
                   <LinkBranch
                     id="journey-media-url"
-                    label="YouTube or X link"
-                    placeholder="youtu.be/… or x.com/…"
-                    hint="Paste a YouTube or X video link."
+                    label={YOUTUBE_ENABLED ? "Video link" : "X, TikTok or Instagram link"}
+                    placeholder="tiktok.com/… or instagram.com/reel/…"
+                    hint={(url) =>
+                      !YOUTUBE_ENABLED && parseMediaUrl(url)?.platform === "youtube"
+                        ? "YouTube downloads are paused for now."
+                        : YOUTUBE_ENABLED
+                          ? "Paste a YouTube, X, TikTok or Instagram video link."
+                          : "Paste an X, TikTok or Instagram video link."
+                    }
                     actionsFor={mediaActions}
                     tag={(url) => {
                       if (parsePlaylistUrl(url)) return "YouTube playlist";
@@ -373,7 +379,7 @@ function LinkBranch({
   id: string;
   label: string;
   placeholder: string;
-  hint: string;
+  hint: string | ((url: string) => string);
   actionsFor: (url: string) => JourneyAction[];
   tag?: (url: string) => string | null;
   autoFocus?: boolean;
@@ -440,7 +446,9 @@ function LinkBranch({
       </div>
 
       <div id={`${id}-status`} aria-live="polite" className="min-h-0">
-        {invalid && <p className="px-1 pt-2 text-xs font-medium text-amber-700">{hint}</p>}
+        {invalid && (
+          <p className="px-1 pt-2 text-xs font-medium text-amber-700">{typeof hint === "function" ? hint(url) : hint}</p>
+        )}
         {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700">Clipboard blocked. Paste with Ctrl+V.</p>}
         {platform && <span className="sr-only">{platform} link</span>}
       </div>
