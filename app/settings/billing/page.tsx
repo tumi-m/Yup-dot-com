@@ -109,7 +109,7 @@ export default async function BillingPage({
           <>
             <h2 className="mt-12 text-xl font-semibold">Upgrade</h2>
             <div className="mt-6">
-              <PricingCards isAuthed currentPlan={profile.plan} display={display} />
+              <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />
             </div>
           </>
         )}

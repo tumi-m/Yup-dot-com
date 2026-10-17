@@ -39,7 +39,7 @@ export default async function PricingPage({
             </h1>
           </div>
           <div className="mt-14">
-            <PricingCards isAuthed={!!user} currentPlan={profile?.plan} display={display} />
+            <PricingCards isAuthed={!!user} currentPlan={profile?.plan} billing={profile?.billing} display={display} />
           </div>
 
           <section className="mx-auto mt-24 max-w-2xl">

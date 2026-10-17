@@ -6,6 +6,8 @@ import Link from "next/link";
 import { Check, Loader2 } from "lucide-react";
 import { PLAN_LIST, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
+import { cardOffer } from "@/lib/billing-ui";
+import type { BillingSummary } from "@/lib/billing";
 import { startCheckout, type CheckoutRequest } from "@/components/BillingClient";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,10 +18,13 @@ const loadingKey = (r: CheckoutRequest) => `${r.plan}:${r.mode === "once" ? r.mo
 export function PricingCards({
   isAuthed,
   currentPlan,
+  billing,
   display,
 }: {
   isAuthed: boolean;
   currentPlan?: PlanId;
+  /** The signed-in customer's subscription and prepaid term, if any. */
+  billing?: BillingSummary;
   /** Local-currency strings; rand when absent. Checkout always bills rand. */
   display?: PriceDisplay;
 }) {
@@ -59,6 +64,7 @@ export function PricingCards({
       <div className="mx-auto grid max-w-md items-stretch gap-6 lg:max-w-none lg:grid-cols-3">
         {PLAN_LIST.map((plan, i) => {
           const isCurrent = currentPlan === plan.id;
+          const offer = isPaidPlan(plan.id) ? cardOffer(plan.id, currentPlan, billing) : null;
           return (
             <div key={plan.id} className="motion-safe:animate-rise" style={{ animationDelay: `${i * 0.06}s` }}>
               <div
@@ -99,22 +105,31 @@ export function PricingCards({
                   ))}
                 </ul>
 
-                <Button
-                  className="mt-8 h-11"
-                  variant={plan.highlighted ? "default" : "outline"}
-                  disabled={isCurrent || loading !== null}
-                  onClick={() => choose(plan.id)}
-                >
-                  {loading === `${plan.id}:subscription` && <Loader2 className="animate-spin" />}
-                  {isCurrent
-                    ? "Current plan"
-                    : plan.id === "free"
-                      ? "Start free"
-                      : `Upgrade to ${plan.name}`}
-                </Button>
+                {offer?.main === "blocked" ? (
+                  // A subscription can't start yet: say what to do instead.
+                  <p className="mt-8 flex min-h-11 items-center justify-center rounded-lg bg-muted px-4 py-2 text-center text-sm text-muted-foreground">
+                    {offer.text}
+                  </p>
+                ) : (
+                  <Button
+                    className="mt-8 h-11"
+                    variant={plan.highlighted ? "default" : "outline"}
+                    disabled={isCurrent || offer?.main === "included" || loading !== null}
+                    onClick={() => choose(plan.id)}
+                  >
+                    {loading === `${plan.id}:subscription` && <Loader2 className="animate-spin" />}
+                    {isCurrent
+                      ? "Current plan"
+                      : offer?.main === "included"
+                        ? offer.text
+                        : plan.id === "free"
+                          ? "Start free"
+                          : `Upgrade to ${plan.name}`}
+                  </Button>
+                )}
                 {/* Kept in every card (empty on Free) so the buttons line up. */}
                 <div className="mt-2 flex min-h-11 flex-wrap items-center justify-center gap-x-1 text-xs text-muted-foreground">
-                  {isPaidPlan(plan.id) && !isCurrent && (
+                  {offer?.payOnce && (
                     <>
                       <span className="whitespace-nowrap">Pay once:</span>
                       {([1, 12] as const).map((months) => {
@@ -138,6 +153,7 @@ export function PricingCards({
                           </button>
                         );
                       })}
+                      {offer.payOnceNote && <span className="w-full text-center">{offer.payOnceNote}</span>}
                     </>
                   )}
                 </div>
