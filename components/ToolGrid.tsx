@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Search, X } from "lucide-react";
@@ -58,7 +58,7 @@ const GRID = "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4";
  * Tool catalogue. With `filterable`, adds instant search and category pills.
  * Filtering keeps one grid: cards that leave fade out together, the ones that
  * stay glide to their new places, and new ones fade in, so the page never
- * empties and the footer never jumps.
+ * empties and nothing below slides under the cards that are leaving.
  */
 export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
   if (!filterable) {
@@ -102,7 +102,19 @@ function FilterableGrid() {
     });
   }, [pill, reduce]);
 
+  // While cards that drop out fade away, the grid keeps its height, so the
+  // footer doesn't jump up under them; it is released once they have gone.
+  const grid = useRef<HTMLDivElement>(null);
+  function holdHeight() {
+    const el = grid.current;
+    if (el) el.style.minHeight = `${el.offsetHeight}px`;
+  }
+  function releaseHeight() {
+    if (grid.current) grid.current.style.minHeight = "";
+  }
+
   function select(next: ToolPill) {
+    holdHeight();
     setPill(next);
     const url = new URL(window.location.href);
     if (next === "all") url.searchParams.delete("c");
@@ -111,6 +123,16 @@ function FilterableGrid() {
   }
 
   const filtered = useMemo(() => filterTools(TOOLS, pill, query), [pill, query]);
+
+  // Nothing leaving means no exit to wait for, and "No match" belongs right
+  // under the search: in both cases the grid sizes itself at once.
+  const shown = useRef(filtered.map((t) => t.slug));
+  useLayoutEffect(() => {
+    const now = filtered.map((t) => t.slug);
+    const leaving = shown.current.some((slug) => !now.includes(slug));
+    shown.current = now;
+    if (!leaving || !now.length) releaseHeight();
+  }, [filtered]);
 
   // Screen readers hear the result count once typing pauses.
   const [status, setStatus] = useState("");
@@ -139,7 +161,10 @@ function FilterableGrid() {
             ref={searchRef}
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              holdHeight();
+              setQuery(e.target.value);
+            }}
             placeholder="Search tools"
             aria-label="Search tools"
             className="h-12 w-full rounded-full border border-input bg-background pl-11 pr-12 text-sm shadow-sm outline-none transition-shadow focus:ring-2 focus:ring-ring [&::-webkit-search-cancel-button]:hidden"
@@ -155,6 +180,7 @@ function FilterableGrid() {
                   exit={{ opacity: 0, scale: 0.6, transition: EXIT_T }}
                   transition={{ ...ENTER_T, duration: DUR.fast }}
                   onClick={() => {
+                    holdHeight();
                     setQuery("");
                     searchRef.current?.focus();
                   }}
@@ -214,8 +240,8 @@ function FilterableGrid() {
         </div>
       </div>
 
-      <div className={cn(GRID, "relative")}>
-        <AnimatePresence mode="popLayout" initial={false}>
+      <div ref={grid} className={cn(GRID, "relative content-start")}>
+        <AnimatePresence mode="popLayout" initial={false} onExitComplete={releaseHeight}>
           {filtered.map((tool, i) => (
             <motion.div
               key={tool.slug}
