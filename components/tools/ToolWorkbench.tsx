@@ -23,19 +23,19 @@ import { formatBytes } from "@/lib/utils";
 import type { ToolFile } from "@/lib/pdf/toolkit";
 import {
   CountUp,
-  DUR,
   ENTER,
   ENTER_T,
   EXIT,
   EXIT_T,
   FADE_EXIT,
+  HANDOFF,
   InlineError,
   NOTICE_T,
   PROGRESS_HOLD_MS,
   SPRING_LAYOUT,
   SUCCESS,
 } from "@/components/motion/primitives";
-import { ProgressBar, WorkingGlyph } from "@/components/motion/Progress";
+import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
 import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { PROCESSORS, type ToolField } from "./processors";
 import { SuccessCard } from "./SuccessCard";
@@ -482,18 +482,23 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       ref={focusRef("progress")}
                       tabIndex={-1}
                       data-progress
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0, transition: NOTICE_T }}
+                      initial={HANDOFF.in.initial}
+                      animate={HANDOFF.in.animate}
                       exit={FADE_EXIT}
                       className="w-full max-w-md outline-none"
                     >
-                      <ProgressBar value={progress?.fraction} label="Progress" />
+                      <motion.div initial={HANDOFF.track.initial} animate={HANDOFF.track.animate}>
+                        <ProgressBar value={progress?.fraction} label="Progress" />
+                      </motion.div>
                       <p aria-hidden className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                         <WorkingGlyph />
-                        {progress?.label ?? "Casting…"}
-                        {progress && (
-                          <span className="tabular-nums">{Math.round(progress.fraction * 100)}%</span>
-                        )}
+                        {/* The number hangs off the label, so the label stays put as it grows. */}
+                        <span className="relative">
+                          {progress?.label ?? "Casting…"}
+                          <span className="absolute left-full top-0 ml-1.5">
+                            <ProgressPercent value={progress?.fraction} />
+                          </span>
+                        </span>
                       </p>
                       {/* Announces the stage, not every percent. */}
                       <p className="sr-only" aria-live="polite">
@@ -505,7 +510,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       key="cast"
                       initial={{ opacity: 0, scale: 0.97 }}
                       animate={{ opacity: 1, scale: 1, transition: NOTICE_T }}
-                      exit={{ opacity: 0, scale: 0.97, transition: { duration: DUR.tap, ease: EXIT_T.ease } }}
+                      exit={HANDOFF.out}
                     >
                       <Button ref={focusRef("run")} size="lg" onClick={run} data-cast className="min-w-52 shadow-lg shadow-primary/25">
                         <Sparkles /> Cast spell

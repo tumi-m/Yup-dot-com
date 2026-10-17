@@ -7,6 +7,7 @@ import {
   EASE_OUT,
   ENTER,
   EXIT,
+  HANDOFF,
   POP_IN,
   progressTranslate,
   SHAKE_T,
@@ -62,6 +63,10 @@ check("error shake stays within 0.3-0.4s", SHAKE_T.duration >= 0.3 && SHAKE_T.du
 check("success: Download is interactive by 0.45s", SUCCESS.actions + DUR.base <= 0.45);
 check("success: whole stagger under 0.5s before the upsell", Math.max(SUCCESS.title, SUCCESS.check, SUCCESS.stats, SUCCESS.actions, SUCCESS.next) < 0.5 && SUCCESS.upsell >= 0.6);
 check("success card is a slow, page-level change", SUCCESS_CARD_T.duration === DUR.slow && SUCCESS_CARD_T.opacity.duration === DUR.base);
+check("handoff: the progress waits until the button has gone", HANDOFF.in.animate.transition.delay >= HANDOFF.out.transition.duration && HANDOFF.track.animate.transition.delay >= HANDOFF.out.transition.duration);
+check("handoff: the button leaves on the exit curve, the track arrives on the entrance curve", HANDOFF.out.transition.ease === EASE_IN && HANDOFF.track.animate.transition.ease === EASE_OUT);
+check("handoff: the whole swap stays within a swap budget", HANDOFF.track.animate.transition.delay + HANDOFF.track.animate.transition.duration <= 0.4);
+check("handoff: the track grows out of about a button's width", HANDOFF.track.initial.scaleX > 0.3 && HANDOFF.track.initial.scaleX < 0.6);
 check("css ease", cssEase(EASE_OUT) === "cubic-bezier(0.22, 1, 0.36, 1)" && cssEase(EASE_IN) === "cubic-bezier(0.4, 0, 1, 1)");
 check("css ms", cssMs(DUR.base) === "240ms" && cssMs(DUR.fast) === "150ms" && cssMs(0.1) === "100ms");
 check("progress: full bar at 1", progressTranslate(1) === "translateX(0.00%)");

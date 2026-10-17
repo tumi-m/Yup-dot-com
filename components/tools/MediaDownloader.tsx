@@ -30,7 +30,7 @@ import {
   SPRING_LAYOUT,
   SuccessBadge,
 } from "@/components/motion/primitives";
-import { ProgressBar } from "@/components/motion/Progress";
+import { ProgressBar, ProgressPercent } from "@/components/motion/Progress";
 import { scrollIntoViewIfNeeded, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
@@ -862,8 +862,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
               >
                 <ProgressBar value={progress.value} label="Download progress" />
                 <p className="mt-2 text-center text-sm text-muted-foreground" aria-hidden>
-                  {kind === "mp3" && progress.stage === "processing" ? STAGES.converting : (STAGES[progress.stage] ?? "Working…")}
-                  {progress.value > 0.02 && <span className="ml-1 tabular-nums">{Math.round(progress.value * 100)}%</span>}
+                  {/* The number hangs off the label, so the label stays put as it grows. */}
+                  <span className="relative">
+                    {kind === "mp3" && progress.stage === "processing" ? STAGES.converting : (STAGES[progress.stage] ?? "Working…")}
+                    <span className="absolute left-full top-0 ml-1">
+                      <ProgressPercent value={progress.value} />
+                    </span>
+                  </span>
                 </p>
                 {/* Announces stage changes only, not every percent. */}
                 <p className="sr-only" aria-live="polite">

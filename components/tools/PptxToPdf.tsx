@@ -7,16 +7,15 @@ import { Download, EyeOff, Loader2, Presentation, RotateCcw, Sparkles, Timer, X 
 import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import {
-  DUR,
   ENTER,
   EXIT,
-  EXIT_T,
   FADE_EXIT,
+  HANDOFF,
   InlineError,
   NOTICE_T,
   PROGRESS_HOLD_MS,
 } from "@/components/motion/primitives";
-import { ProgressBar, WorkingGlyph } from "@/components/motion/Progress";
+import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
 import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
@@ -375,17 +374,19 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                 {status === "working" ? (
                   <motion.div
                     key="progress"
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0, transition: NOTICE_T }}
+                    initial={HANDOFF.in.initial}
+                    animate={HANDOFF.in.animate}
                     exit={FADE_EXIT}
                     className="w-full max-w-md"
                   >
-                    <ProgressBar value={Math.max(fraction, 0.03)} label="Converting" />
+                    <motion.div initial={HANDOFF.track.initial} animate={HANDOFF.track.animate}>
+                      <ProgressBar value={Math.max(fraction, 0.03)} label="Converting" />
+                    </motion.div>
                     <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       <WorkingGlyph />
-                      <span aria-live="polite" className="inline-flex gap-1.5">
+                      <span aria-live="polite" className="inline-flex gap-1.5 tabular-nums">
                         {progress ? `Slide ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : "Casting…"}
-                        <span className="tabular-nums">{Math.round(fraction * 100)}%</span>
+                        <ProgressPercent value={fraction} />
                       </span>
                       <Button variant="ghost" size="sm" className="tap ml-1" onClick={cancelConvert} data-testid="cancel-convert">
                         Cancel
@@ -397,7 +398,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                     key="convert"
                     initial={{ opacity: 0, scale: 0.97 }}
                     animate={{ opacity: 1, scale: 1, transition: NOTICE_T }}
-                    exit={{ opacity: 0, scale: 0.97, transition: { duration: DUR.tap, ease: EXIT_T.ease } }}
+                    exit={HANDOFF.out}
                   >
                     <Button size="lg" onClick={convert} className="min-w-52 shadow-lg shadow-primary/25" data-testid="convert">
                       <Sparkles /> Convert to PDF

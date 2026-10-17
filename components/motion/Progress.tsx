@@ -52,6 +52,19 @@ export function ProgressBar({
   );
 }
 
+/**
+ * The percentage beside a progress label, in a box as wide as "100%", so the
+ * label next to it never moves as the number grows. Empty until there is a
+ * number.
+ */
+export function ProgressPercent({ value }: { value?: number | null }) {
+  return (
+    <span className="inline-block w-[4.6ch] text-left tabular-nums">
+      {value != null && value > 0.02 ? `${Math.round(Math.min(1, value) * 100)}%` : ""}
+    </span>
+  );
+}
+
 /** The turning sparkle beside a working label; still with reduced motion. */
 export function WorkingGlyph({ className }: { className?: string }) {
   return <Sparkles aria-hidden className={cn("h-3.5 w-3.5 shrink-0 text-primary motion-safe:animate-glyph", className)} />;

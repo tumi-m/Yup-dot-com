@@ -96,6 +96,23 @@ export const GULP_T = { duration: 0.25, ease: EASE_OUT } as const;
 /** How long a "this changed" glow takes to fade (colour only, no movement). */
 export const GLOW_FADE = 0.9;
 
+/**
+ * A button handing its place to the progress it started. The button sinks
+ * and fades in `tap`; only then does the progress fade in, its track
+ * stretching out from about the button's width, so the two never overlap.
+ */
+export const HANDOFF = {
+  out: { opacity: 0, scale: 0.97, transition: { duration: DUR.tap, ease: EASE_IN } },
+  in: {
+    initial: { opacity: 0 },
+    animate: { opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT, delay: DUR.tap } },
+  },
+  track: {
+    initial: { scaleX: 0.45 },
+    animate: { scaleX: 1, transition: { duration: DUR.base, ease: EASE_OUT, delay: DUR.tap } },
+  },
+} as const;
+
 /** Determinate progress fill: one smooth glide per update. */
 export const PROGRESS_T = 0.3;
 /** The bar holds at 100% this long before the result replaces it. */
