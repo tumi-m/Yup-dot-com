@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { annotationLabel } from "@/lib/editor/types";
@@ -260,16 +261,9 @@ export function PropertiesPanel({
             )}
             {(annotation.field === "dropdown" || annotation.field === "radio") && (
               <Field label="Options (one per line)">
-                <textarea
-                  value={annotation.options.join("\n")}
-                  onChange={(e) =>
-                    onChange({
-                      ...annotation,
-                      options: e.target.value.split("\n").filter(Boolean),
-                    })
-                  }
-                  rows={4}
-                  className="w-full rounded-md border border-input bg-background p-2 text-sm"
+                <OptionsField
+                  options={annotation.options}
+                  onChange={(options) => onChange({ ...annotation, options })}
                 />
               </Field>
             )}
@@ -286,6 +280,40 @@ export function PropertiesPanel({
         </div>
       </div>
     </aside>
+  );
+}
+
+const optionLines = (text: string) => text.split("\n").filter(Boolean);
+
+/**
+ * One option per line. The text is kept as typed, so Enter can start a new
+ * option; blank lines are left out of the options.
+ */
+function OptionsField({
+  options,
+  onChange,
+}: {
+  options: string[];
+  onChange: (options: string[]) => void;
+}) {
+  const [text, setText] = useState(options.join("\n"));
+  // Show options changed elsewhere (undo, another field selected).
+  useEffect(() => {
+    setText((current) =>
+      optionLines(current).join("\n") === options.join("\n") ? current : options.join("\n")
+    );
+  }, [options]);
+  return (
+    <textarea
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const next = optionLines(e.target.value);
+        if (next.join("\n") !== options.join("\n")) onChange(next);
+      }}
+      rows={4}
+      className="w-full rounded-md border border-input bg-background p-2 text-sm"
+    />
   );
 }
 
