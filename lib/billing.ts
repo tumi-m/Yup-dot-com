@@ -375,18 +375,25 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     if (customerCode) patch.paystack_customer_code = customerCode;
 
     if (kind.mode === "once") {
-      // The same plan extends from whenever the current term ends; a different
-      // plan starts now.
-      const running = row.prepaid_plan === kind.plan && prepaidActive(row, now);
-      const base = running ? new Date(row.paid_until!) : now;
+      // The new term starts after the time left on the current one. On a
+      // different plan that time is converted at the price ratio, so a
+      // change of plan never loses paid time.
+      let base = now;
+      if (prepaidActive(row, now)) {
+        const left = time(row.paid_until) - now.getTime();
+        const rate = PLANS[row.prepaid_plan!].priceMonthly / PLANS[kind.plan].priceMonthly;
+        base = new Date(now.getTime() + Math.floor(left * rate));
+      }
       patch.prepaid_plan = kind.plan;
       patch.paid_until = iso(addMonths(base, kind.months));
     } else {
       const paidAt = tx.paid_at ? new Date(tx.paid_at) : now;
       const end = iso(addMonths(Number.isNaN(paidAt.getTime()) ? now : paidAt, 1));
-      patch.subscription_plan = kind.plan;
-      patch.current_period_end = later(row.current_period_end, end);
       const firstCharge = metaUser !== null;
+      patch.subscription_plan = kind.plan;
+      // A new subscription renews a month after its first charge, whatever
+      // an older, ended one ran to.
+      patch.current_period_end = firstCharge ? end : later(row.current_period_end, end);
       const st = row.subscription_status;
       if (firstCharge || st === null || st === "active" || st === "attention") {
         patch.subscription_status = "active";
