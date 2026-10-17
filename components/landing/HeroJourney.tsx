@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  AlertTriangle,
   ArrowLeft,
   ClipboardPaste,
   Clapperboard,
@@ -21,7 +20,17 @@ import {
   UploadCloud,
   type LucideIcon,
 } from "lucide-react";
-import { DUR, EASE, EASE_IN, EASE_OUT, SPRING_POP, STAGGER } from "@/components/motion/primitives";
+import {
+  DUR,
+  EASE_IN,
+  ENTER_T,
+  FADE_EXIT,
+  InlineError,
+  RESIZE_T,
+  SPRING,
+  SPRING_POP,
+  staggerDelay,
+} from "@/components/motion/primitives";
 import {
   choiceForFiles,
   choiceFromHash,
@@ -52,6 +61,17 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   Playlist: ListVideo,
 };
 
+/**
+ * Swapping the question for a branch (and back): the old view fades in `tap`
+ * where it stands while the panel already resizes around the new one, which
+ * fades in once the old has gone. Exit plus entrance stay under 0.4s, and the
+ * two never overlap.
+ */
+const SWAP_EXIT = { opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } } as const;
+const SWAP_ENTER_T = { ...ENTER_T, delay: DUR.tap } as const;
+/** The panel's resize: transform only (motion's layout), leading the content. */
+const PANEL_T = { layout: RESIZE_T } as const;
+
 function setHash(choice: JourneyChoice | null) {
   const { pathname, search } = window.location;
   window.history.replaceState(window.history.state, "", choice ? `#${choice}` : pathname + search);
@@ -72,6 +92,7 @@ export function HeroJourney() {
   const [pptxError, setPptxError] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [drops, setDrops] = useState(0);
   const dragDepth = useRef(0);
   const tiles = useRef<Partial<Record<JourneyChoice, HTMLButtonElement | null>>>({});
   /** The tile to focus when the question comes back. */
@@ -123,17 +144,6 @@ export function HeroJourney() {
     if (target !== choice) choose(target);
   }
 
-  // Animate the panel's height as its content changes.
-  const inner = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number | "auto">("auto");
-  useLayoutEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const active = choice ? CHOICES[choice] : null;
   const fileBranchEmpty =
     (choice === "pdf" && pdfFiles.length === 0) || (choice === "pptx" && !pptxFile);
@@ -158,27 +168,32 @@ export function HeroJourney() {
         e.preventDefault();
         dragDepth.current = 0;
         setDragging(false);
+        if (e.dataTransfer.files.length) setDrops((n) => n + 1);
         receive(e.dataTransfer.files);
       }}
       data-testid="journey"
       data-choice={choice ?? ""}
     >
+      {/* The panel resizes with motion's layout animation (transform, scale
+          corrected for the content and the radius), so nothing re-lays out
+          per frame; the content below follows in the same LayoutGroup. */}
       <motion.div
-        animate={{ height }}
-        transition={reduce ? { duration: 0 } : { duration: DUR.base, ease: EASE_OUT }}
-        className="relative overflow-hidden rounded-3xl border border-primary/20 bg-background/90 text-left shadow-2xl shadow-primary/10"
+        layout
+        transition={reduce ? { layout: { duration: 0 } } : PANEL_T}
+        style={{ borderRadius: 24 }}
+        className="relative overflow-hidden border border-primary/20 bg-background/90 text-left shadow-2xl shadow-primary/10"
       >
-        <div ref={inner} className="p-3 sm:p-4">
-          {/* "wait": the old state fades out before the new one enters, so the
-              two never overlap. */}
-          <AnimatePresence mode="wait" initial={false}>
+        <motion.div layout="position" transition={reduce ? { layout: { duration: 0 } } : PANEL_T} className="relative p-3 sm:p-4">
+          {/* "popLayout": the old view leaves the flow at once, so the panel
+              starts resizing on the click; the new view waits for it to fade. */}
+          <AnimatePresence mode="popLayout" initial={false}>
             {choice === null || !active ? (
               <motion.div
                 key="question"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
-                transition={{ duration: 0.28, ease: EASE_OUT }}
+                exit={SWAP_EXIT}
+                transition={SWAP_ENTER_T}
               >
                 <p id="journey-question" className="px-1 pb-3 pt-1 text-sm font-semibold">
                   What are you working on?
@@ -221,13 +236,13 @@ export function HeroJourney() {
                         // when the visitor comes back to the question.
                         initial={interacted ? { opacity: 0, y: 8 } : false}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: DUR.base, ease: EASE_OUT, delay: STAGGER * i }}
-                        whileHover={{ y: -3 }}
-                        whileTap={{ scale: 0.97 }}
-                        className="group flex min-h-[6.5rem] flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        transition={{ ...ENTER_T, delay: staggerDelay(i) }}
+                        whileHover={{ y: -2, transition: SPRING }}
+                        whileTap={{ scale: 0.97, transition: SPRING }}
+                        className="group flex min-h-[6.5rem] flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", tint)}>
-                          <Icon className="h-5 w-5 transition-transform duration-300 group-hover:scale-110" />
+                          <Icon className="h-5 w-5 transition-transform duration-200 ease-out group-hover:scale-110 group-hover:duration-150 motion-reduce:transform-none" />
                         </span>
                         {label}
                       </motion.button>
@@ -236,17 +251,7 @@ export function HeroJourney() {
                 </div>
                 <AnimatePresence initial={false}>
                   {dropError ? (
-                    <motion.p
-                      key="err"
-                      role="alert"
-                      data-testid="tool-error"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex items-center justify-center gap-1.5 pt-3 text-xs font-medium text-destructive"
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5" /> {dropError}
-                    </motion.p>
+                    <InlineError key="err" compact message={dropError} className="justify-center pt-3" />
                   ) : (
                     // Nothing to drop on a touch screen.
                     <p className="flex items-center justify-center gap-1.5 pt-3 text-xs text-muted-foreground pointer-coarse:hidden">
@@ -260,14 +265,14 @@ export function HeroJourney() {
                 key={choice}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
-                transition={{ duration: 0.28, ease: EASE_OUT }}
+                exit={SWAP_EXIT}
+                transition={SWAP_ENTER_T}
               >
                 <div className="flex items-center gap-3 pb-3">
                   <motion.span
                     initial={{ scale: 0.6, rotate: -12 }}
                     animate={{ scale: 1, rotate: 0 }}
-                    transition={SPRING_POP}
+                    transition={{ ...SPRING_POP, delay: DUR.tap }}
                     className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", active.tint)}
                   >
                     <active.icon className="h-5 w-5" />
@@ -276,7 +281,7 @@ export function HeroJourney() {
                   <button
                     type="button"
                     onClick={back}
-                    className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] duration-200 hover:bg-accent hover:text-foreground hover:duration-100 active:scale-[0.97] active:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:active:scale-100"
                   >
                     <ArrowLeft className="h-4 w-4" /> Change
                   </button>
@@ -289,6 +294,7 @@ export function HeroJourney() {
                     onFiles={receive}
                     onClear={() => setPdfFiles([])}
                     dragging={dragging}
+                    drops={drops}
                     autoFocus={interacted}
                   />
                 )}
@@ -299,6 +305,7 @@ export function HeroJourney() {
                     onFiles={receive}
                     onClear={() => setPptxFile(null)}
                     dragging={dragging}
+                    drops={drops}
                     error={pptxError}
                     autoFocus={interacted}
                   />
@@ -334,19 +341,13 @@ export function HeroJourney() {
                     autoFocus={interacted}
                   />
                 )}
-                {dropError && (
-                  <p
-                    role="alert"
-                    data-testid="tool-error"
-                    className="flex items-center gap-1.5 px-1 pt-3 text-xs font-medium text-destructive"
-                  >
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {dropError}
-                  </p>
-                )}
+                <AnimatePresence>
+                  {dropError && <InlineError key="err" compact message={dropError} className="px-1 pt-3" />}
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </motion.div>
 
         {/* Drop overlay for states without their own dropzone. */}
         <AnimatePresence>
@@ -355,7 +356,8 @@ export function HeroJourney() {
               aria-hidden
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={FADE_EXIT}
+              transition={{ duration: DUR.fast }}
               className="pointer-events-none absolute inset-1.5 flex items-center justify-center gap-2 rounded-[1.25rem] border-2 border-dashed border-primary bg-background/95 text-base font-semibold text-primary"
             >
               <UploadCloud className="h-5 w-5" /> Release
@@ -409,7 +411,11 @@ function LinkBranch({
   }
 
   return (
-    <form
+    // A layout node, so a re-render here (the actions appearing) has the
+    // panel and the page below resize smoothly with it.
+    <motion.form
+      layout="position"
+      transition={PANEL_T}
       onSubmit={(e) => {
         e.preventDefault();
         if (actions[0]) router.push(actions[0].href);
@@ -459,8 +465,8 @@ function LinkBranch({
             key="actions"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3, ease: EASE }}
+            exit={FADE_EXIT}
+            transition={ENTER_T}
             className="pt-3"
           >
             {platform && (
@@ -476,15 +482,14 @@ function LinkBranch({
                     key={a.href}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05, duration: 0.3, ease: EASE }}
-                    whileHover={{ y: -3 }}
-                    whileTap={{ scale: 0.97 }}
+                    transition={{ ...ENTER_T, delay: staggerDelay(i) }}
+                    whileTap={{ scale: 0.97, transition: SPRING }}
                     tabIndex={-1}
                   >
                     <Link
                       href={a.href}
                       className={cn(
-                        "flex h-14 items-center justify-center gap-2 rounded-2xl text-sm font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                        "flex h-14 items-center justify-center gap-2 rounded-2xl text-sm font-semibold shadow-sm transition-colors duration-200 hover:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         i === 0
                           ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:bg-primary/90"
                           : "border border-border bg-card hover:border-primary/50"
@@ -499,6 +504,6 @@ function LinkBranch({
           </motion.div>
         )}
       </AnimatePresence>
-    </form>
+    </motion.form>
   );
 }

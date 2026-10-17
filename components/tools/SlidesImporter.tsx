@@ -3,10 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertTriangle, ClipboardPaste, Download, Link2, Loader2, PenLine, Presentation, RotateCcw } from "lucide-react";
+import { ClipboardPaste, Download, Link2, PenLine, Presentation, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
+import {
+  DUR,
+  EASE_OUT,
+  ENTER_T,
+  EXIT,
+  EXIT_T,
+  FADE_EXIT,
+  InlineError,
+  NOTICE_T,
+  SuccessBadge,
+} from "@/components/motion/primitives";
+import { ProgressBar } from "@/components/motion/Progress";
+import { settleSlot, useHeightLock } from "@/components/motion/focus";
 import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
@@ -53,6 +65,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   const router = useRouter();
   const params = useSearchParams();
   const [url, setUrl] = useState("");
+  /** Keeps the form's footprint while the result replaces it. */
+  const flow = useHeightLock<HTMLDivElement>();
   const [phase, setPhase] = useState<Phase>("input");
   const [action, setAction] = useState<Action>("download");
   const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
@@ -145,6 +159,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
       setError({ message: SLIDES_FAILURE_MESSAGE[bad] });
       return;
     }
+    // The form's footprint is kept while the result replaces it.
+    flow.lock();
     busy.current = true;
     const mine = {};
     current.current = mine;
@@ -162,10 +178,13 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         }
         // Too big to edit on this plan: keep the file, say why.
         setError({ message: `Editing takes files up to ${formatLimitBytes(max)} on your plan.`, upgrade: true });
+        settleSlot(flow.ref.current);
         setPhase("ready");
         return;
       }
       setFile({ ...f, saved: true });
+      // The page settles while the form leaves, so the card lands in view.
+      settleSlot(flow.ref.current);
       setPhase("ready");
       saveAs(f.href, f.name);
       trackDownload(f.name);
@@ -212,6 +231,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   }
 
   function reset() {
+    flow.lock();
     releaseBlob();
     setFile(null);
     setUrl("");
@@ -223,6 +243,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
 
   return (
     <div className="space-y-4">
+      <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
         {phase !== "ready" && (
           <motion.form
@@ -231,10 +252,11 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
               e.preventDefault();
               void run("download");
             }}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.35, ease: EASE }}
+            exit={EXIT}
+            transition={ENTER_T}
+            onAnimationStart={(def) => def !== EXIT && flow.release()}
             className="rounded-3xl border border-border bg-card p-5 shadow-xl shadow-primary/5"
           >
             <label htmlFor="slides-url" className="mb-2 flex items-center gap-2 text-sm font-medium">
@@ -276,7 +298,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
                   id="slides-url-hint"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
+                  exit={FADE_EXIT}
+                  transition={NOTICE_T}
                   className="mt-2 text-xs text-muted-foreground"
                 >
                   {problem === "published" ? SLIDES_FAILURE_MESSAGE.published : "Not a Google Slides link."}
@@ -286,23 +309,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
 
             {phase === "fetching" ? (
               <div className="mt-4">
-                <div className="relative h-3 overflow-hidden rounded-full bg-secondary">
-                  {fraction > 0.02 ? (
-                    <motion.div
-                      key="bar"
-                      className="h-full rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400"
-                      animate={{ width: `${Math.max(4, fraction * 100)}%` }}
-                      transition={{ ease: "easeOut", duration: 0.4 }}
-                    />
-                  ) : (
-                    <motion.div
-                      key="shimmer"
-                      className="absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
-                      animate={{ x: ["-100%", "300%"] }}
-                      transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
-                    />
-                  )}
-                </div>
+                <ProgressBar value={fraction} label="Import progress" />
                 <div className="mt-2 flex items-center justify-center gap-2">
                   <p className="text-sm text-muted-foreground" aria-live="polite" role="status">
                     {progress.received ? "Downloading…" : "Exporting from Google…"}
@@ -320,11 +327,9 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
               </div>
             ) : (
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} tabIndex={-1} className="flex-1">
-                  <Button type="submit" size="lg" className="h-12 w-full shadow-lg shadow-primary/25" disabled={!url.trim()}>
-                    <Download /> Download {ext}
-                  </Button>
-                </motion.div>
+                <Button type="submit" size="lg" className="h-12 flex-1 shadow-lg shadow-primary/25" disabled={!url.trim()}>
+                  <Download /> Download {ext}
+                </Button>
                 {format === "pptx" && (
                   <Button type="button" size="lg" variant="outline" className="h-12 sm:min-w-32" disabled={!url.trim()} onClick={() => void run("edit")}>
                     <PenLine /> Edit
@@ -339,22 +344,13 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         {phase === "ready" && file && (
           <motion.div
             key="ready"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.45, ease: EASE }}
-            className="relative overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, transition: EXIT_T }}
+            transition={{ duration: DUR.slow, ease: EASE_OUT, opacity: ENTER_T }}
+            className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
           >
-            <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
-              <SparkleBurst />
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={SPRING}
-                className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
-              >
-                <Presentation className="h-8 w-8" />
-              </motion.div>
-            </div>
+            <SuccessBadge icon={Presentation} />
             <h2 className="mt-5 text-2xl font-bold">{file.saved ? "Downloaded" : "Ready"}</h2>
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground" data-testid="slides-file">
               {file.name} · {formatBytes(file.size)}
@@ -377,25 +373,17 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
 
       <AnimatePresence>
         {error && (
-          <motion.div
-            role="alert"
-            data-testid="tool-error"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          >
-            <AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="flex-1">{error.message}</span>
+          <InlineError key="error" message={error.message}>
             {error.upgrade && tier !== "pro" && tier !== "team" && (
               <Link href="/pricing" className="tap font-semibold underline underline-offset-2">
                 Upgrade
               </Link>
             )}
-          </motion.div>
+          </InlineError>
         )}
       </AnimatePresence>
     </div>

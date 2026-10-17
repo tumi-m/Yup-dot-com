@@ -1,9 +1,136 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Loader2, UploadCloud } from "lucide-react";
+import { motion } from "motion/react";
+import { Loader2, UploadCloud, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GULP_T, SPRING_POP } from "@/components/motion/tokens";
 import { cn } from "@/lib/utils";
+
+/**
+ * Drag-over state for a drop target. Counts enter/leave pairs, so crossing a
+ * child (icon, text, button) never flickers the state off and on again.
+ */
+export function useFileDrag(onDrop: (files: FileList) => void, disabled = false) {
+  const depth = useRef(0);
+  const [over, setOver] = useState(false);
+  /** Bumps on each drop, so the tile can play its "gulp". */
+  const [drops, setDrops] = useState(0);
+  const handlers = {
+    onDragEnter: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      depth.current++;
+      setOver(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+    },
+    onDragLeave: () => {
+      depth.current = Math.max(0, depth.current - 1);
+      if (depth.current === 0) setOver(false);
+    },
+    onDrop: (e: React.DragEvent) => {
+      // preventDefault marks the drop as handled for any parent listener.
+      e.preventDefault();
+      depth.current = 0;
+      setOver(false);
+      if (disabled || !e.dataTransfer.files.length) return;
+      setDrops((n) => n + 1);
+      onDrop(e.dataTransfer.files);
+    },
+  };
+  return { over: over && !disabled, drops, handlers };
+}
+
+/**
+ * The upload tile: bobs gently at rest (CSS), lifts and grows while a file is
+ * held over it, and swallows the file with a small squash when it lands.
+ */
+export function DropTile({
+  dragging,
+  drops,
+  busy = false,
+  icon: Icon = UploadCloud,
+  className,
+}: {
+  dragging: boolean;
+  drops: number;
+  busy?: boolean;
+  icon?: LucideIcon;
+  className?: string;
+}) {
+  const [gulping, setGulping] = useState(0);
+  const gulp = drops > gulping;
+  return (
+    <motion.div
+      animate={dragging ? { scale: 1.1, y: -4 } : gulp ? { scale: [1.1, 0.92, 1], y: 0 } : { scale: 1, y: 0 }}
+      transition={gulp && !dragging ? GULP_T : SPRING_POP}
+      onAnimationComplete={() => gulp && setGulping(drops)}
+      className="relative mx-auto w-fit"
+    >
+      {/* The bob pauses where it is rather than stopping, so a drag lifts
+          the tile from wherever it was instead of snapping it home first. */}
+      <div
+        className={cn(
+          "flex h-14 w-14 items-center justify-center rounded-2xl motion-safe:animate-bob",
+          (dragging || busy) && "motion-safe:[animation-play-state:paused]",
+          className
+        )}
+      >
+        {busy ? <Loader2 className="h-7 w-7 motion-safe:animate-spin" /> : <Icon className="h-7 w-7" />}
+      </div>
+    </motion.div>
+  );
+}
+
+/**
+ * The tool pages' drop zone: a large dashed card. The line reads `dragLabel`
+ * and everything under it hides while a file is held over it. Buttons and
+ * notes go in `children`; the file input stays with the caller.
+ */
+export function ToolDropzone({
+  label,
+  dragLabel = "Release to add",
+  onFiles,
+  busy = false,
+  disabled = false,
+  icon,
+  tileClassName = "bg-primary/10 text-primary",
+  className,
+  children,
+  ...rest
+}: {
+  label: string;
+  dragLabel?: string;
+  onFiles: (files: FileList) => void;
+  busy?: boolean;
+  disabled?: boolean;
+  icon?: LucideIcon;
+  tileClassName?: string;
+  className?: string;
+  children?: React.ReactNode;
+} & Omit<React.HTMLAttributes<HTMLDivElement>, "onDragEnter" | "onDragOver" | "onDragLeave" | "onDrop" | "children">) {
+  const { over, drops, handlers } = useFileDrag(onFiles, disabled || busy);
+  return (
+    <div
+      {...rest}
+      {...handlers}
+      className={cn(
+        "group relative overflow-hidden rounded-3xl border-2 border-dashed bg-card p-10 text-center transition-[border-color,background-color] duration-150",
+        over ? "border-primary bg-primary/5" : "border-border hover:border-primary/60",
+        className
+      )}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,hsl(var(--primary)/0.10),transparent_60%)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-hover:duration-150"
+      />
+      <DropTile dragging={over} drops={drops} busy={busy} icon={icon} className={tileClassName} />
+      <p className="relative mt-4 text-lg font-semibold">{over ? dragLabel : label}</p>
+      <div className={cn("relative", over && "invisible")}>{children}</div>
+    </div>
+  );
+}
 
 /**
  * The one drop zone look: dashed primary border, an upload tile that bobs at
@@ -33,36 +160,17 @@ export function Dropzone({
   className?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const depth = useRef(0);
-  const [over, setOver] = useState(false);
+  const { over, drops, handlers } = useFileDrag(onFiles, disabled);
   const dragging = (over || draggingFromParent) && !disabled;
 
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed bg-card px-6 py-12 text-center transition-colors",
+        "flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed bg-card px-6 py-12 text-center transition-[border-color,background-color] duration-150",
         dragging ? "border-primary bg-primary/5" : "border-primary/30 hover:border-primary/60",
         className
       )}
-      onDragEnter={(e) => {
-        if (!e.dataTransfer.types.includes("Files")) return;
-        depth.current++;
-        setOver(true);
-      }}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-      }}
-      onDragLeave={() => {
-        depth.current = Math.max(0, depth.current - 1);
-        if (depth.current === 0) setOver(false);
-      }}
-      onDrop={(e) => {
-        // preventDefault marks the drop as handled for any parent listener.
-        e.preventDefault();
-        depth.current = 0;
-        setOver(false);
-        if (!disabled) onFiles(e.dataTransfer.files);
-      }}
+      {...handlers}
     >
       <input
         ref={input}
@@ -77,16 +185,12 @@ export function Dropzone({
           e.target.value = "";
         }}
       />
-      <div className={cn("transition-transform duration-300 ease-out", dragging && "scale-[1.12] motion-reduce:scale-100")}>
-        <div
-          className={cn(
-            "flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30",
-            !dragging && !busy && "motion-safe:animate-bob"
-          )}
-        >
-          {busy ? <Loader2 className="h-6 w-6 animate-spin" /> : <UploadCloud className="h-6 w-6" />}
-        </div>
-      </div>
+      <DropTile
+        dragging={dragging}
+        drops={drops}
+        busy={busy}
+        className="bg-primary text-primary-foreground shadow-lg shadow-primary/30 [&_svg]:h-6 [&_svg]:w-6"
+      />
       <p className="text-lg font-semibold">{dragging ? "Release" : label}</p>
       <Button
         type="button"

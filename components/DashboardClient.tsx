@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Crown, Loader2, Pencil, Trash2, Upload } from "lucide-react";
+import { Crown, Loader2, Pencil, Trash2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getPageCount } from "@/lib/pdf/operations";
 import { formatBytes, formatDate, uuid } from "@/lib/utils";
@@ -16,8 +16,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Dropzone } from "@/components/ui/dropzone";
-import { AnimatePresence, motion } from "motion/react";
-import { DUR, EASE_OUT, Reveal, staggerDelay } from "@/components/motion/primitives";
+import { AnimatePresence } from "motion/react";
+import { InlineError, Reveal, staggerDelay } from "@/components/motion/primitives";
 import { getTool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 import type { DocumentRecord, PlanId } from "@/lib/types";
@@ -29,7 +29,7 @@ function PageThumb({ pages }: { pages: number }) {
   return (
     <div className="relative flex h-28 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-violet-50 via-fuchsia-50 to-amber-50">
       {pages > 1 && <div aria-hidden className="absolute h-20 w-16 translate-x-1.5 translate-y-1 rotate-6 rounded-md bg-white/70 shadow-sm" />}
-      <div aria-hidden className="relative h-20 w-16 rounded-md bg-white p-2 shadow-md shadow-primary/10 transition-transform duration-300 ease-out group-hover:-rotate-3">
+      <div aria-hidden className="relative h-20 w-16 rounded-md bg-white p-2 shadow-md shadow-primary/10 transition-transform duration-200 ease-out group-hover:-rotate-3 group-hover:duration-150 motion-reduce:transform-none">
         <div className="h-1 w-3/4 rounded bg-primary/40" />
         <div className="mt-1.5 space-y-1">
           <div className="h-0.5 w-full rounded bg-secondary-foreground/15" />
@@ -202,7 +202,7 @@ export function DashboardClient({
           />
           {docs.length > 0 && (
             <Button className="h-11" onClick={() => fileInput.current?.click()} disabled={uploading || atLimit}>
-              {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
+              {uploading ? <Loader2 className="motion-safe:animate-spin" /> : <Upload />}
               Upload PDF
             </Button>
           )}
@@ -210,21 +210,7 @@ export function DashboardClient({
       </div>
 
       <AnimatePresence initial={false}>
-        {error && (
-          <motion.p
-            key="error"
-            role="alert"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: DUR.base, ease: EASE_OUT }}
-            className="overflow-hidden"
-          >
-            <span className="mt-4 flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
-            </span>
-          </motion.p>
-        )}
+        {error && <InlineError key="error" message={error} className="mt-4" />}
       </AnimatePresence>
 
       {docs.length === 0 ? (
@@ -248,7 +234,7 @@ export function DashboardClient({
           {docs.map((doc, i) => (
             <div
               key={doc.id}
-              className="group flex min-w-0 flex-col rounded-2xl border border-border bg-card p-5 transition-[transform,box-shadow,border-color] duration-300 ease-out hover:-translate-y-[3px] hover:border-primary/40 hover:shadow-lg motion-safe:animate-rise motion-reduce:transform-none"
+              className="group flex min-w-0 flex-col rounded-2xl border border-border bg-card p-5 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:duration-150 motion-safe:animate-rise motion-reduce:transform-none"
               style={{ animationDelay: `${staggerDelay(i)}s` }}
             >
               <PageThumb pages={doc.page_count} />
@@ -306,7 +292,7 @@ export function DashboardClient({
               <Reveal key={slug}>
                 <Link
                   href={`/tools/${slug}`}
-                  className="flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card p-3 transition-[transform,box-shadow,border-color] duration-300 ease-out hover:-translate-y-[3px] hover:border-primary/40 hover:shadow-md"
+                  className="flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card p-3 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md hover:duration-150 motion-reduce:transform-none"
                 >
                   <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg", tool.tint)}>
                     <tool.icon className="h-4 w-4" />

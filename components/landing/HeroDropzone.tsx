@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { AlertTriangle, ArrowRight, FileText, Presentation, UploadCloud, X } from "lucide-react";
+import { ArrowRight, FileText, Presentation, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DropTile } from "@/components/ui/dropzone";
 import { fileToHandoff, setHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
-import { EASE, SPRING, SPRING_POP } from "@/components/motion/primitives";
+import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { cn, formatBytes } from "@/lib/utils";
 
 const PDF_ACTIONS = [
@@ -34,6 +35,20 @@ const ACCEPT = {
 };
 
 /**
+ * Each branch keeps one height whether it shows the drop zone or the tools
+ * for a chosen file: the tallest of the two (for PDFs, the nine-tool grid).
+ * A file picked in the system dialog or dropped isn't "recent input", so
+ * growing then would shift the page under the visitor. Wherever a file can
+ * be dropped (a mouse, or a wide screen) the room is held from the start; on
+ * a phone, where the only way in is the Choose file button, it is taken at
+ * that tap (`armed`), so the drop zone isn't padded with empty space.
+ */
+const RESERVE = {
+  pdf: { always: "sm:min-h-[332px] max-sm:pointer-fine:min-h-[342px]", armed: "min-h-[342px] sm:min-h-[332px]" },
+  pptx: { always: "sm:min-h-[160px] max-sm:pointer-fine:min-h-[244px]", armed: "min-h-[244px] sm:min-h-[160px]" },
+};
+
+/**
  * Drop a file, pick a spell. The file is handed to the chosen tool without a
  * second upload. The parent owns the files so a drop anywhere on the hero
  * panel lands here.
@@ -44,6 +59,7 @@ export function HeroDropzone({
   onFiles,
   onClear,
   dragging,
+  drops = 0,
   error,
   autoFocus,
 }: {
@@ -52,6 +68,8 @@ export function HeroDropzone({
   onFiles: (list: FileList | null) => void;
   onClear: () => void;
   dragging: boolean;
+  /** Counts drops, so the tile can swallow each one. */
+  drops?: number;
   error?: string | null;
   autoFocus?: boolean;
 }) {
@@ -59,6 +77,7 @@ export function HeroDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const chooseRef = useRef<HTMLButtonElement>(null);
   const [going, setGoing] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
 
   useEffect(() => {
     if (autoFocus && files.length === 0) chooseRef.current?.focus({ preventScroll: true });
@@ -84,20 +103,22 @@ export function HeroDropzone({
   const FileIcon = mode === "pptx" ? Presentation : FileText;
 
   return (
+    // A layout node, so taking the room at the tap resizes the panel smoothly.
+    <motion.div layout="position" transition={{ layout: RESIZE_T }} className={cn("flex flex-col", RESERVE[mode].always, armed && RESERVE[mode].armed)}>
     <AnimatePresence mode="wait" initial={false}>
       {files.length === 0 ? (
         <motion.div
           key="drop"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.3, ease: EASE }}
+          exit={EXIT}
+          transition={ENTER_T}
+          className="flex flex-1 flex-col"
         >
-          <motion.div
-            animate={{ scale: dragging ? 1.015 : 1 }}
-            transition={SPRING}
+          <div
             className={cn(
-              "rounded-2xl border-2 border-dashed p-4 transition-colors sm:p-5",
+              "flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-4 transition-[border-color,background-color] duration-150 sm:p-5",
+              mode === "pptx" && "sm:flex-row",
               dragging ? "border-primary bg-primary/5" : "border-primary/30 hover:border-primary/60"
             )}
           >
@@ -113,51 +134,39 @@ export function HeroDropzone({
                 e.target.value = "";
               }}
             />
-            <div className="flex flex-col items-center gap-4 sm:flex-row">
-              {/* Same treatment as the shared Dropzone: bob at rest, pop on drag. */}
-              <motion.div animate={{ scale: dragging ? 1.12 : 1 }} transition={SPRING_POP} className="shrink-0">
-                <div
-                  className={cn(
-                    "flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30",
-                    !dragging && "motion-safe:animate-bob"
-                  )}
-                >
-                  <UploadCloud className="h-6 w-6" />
-                </div>
-              </motion.div>
-              <p className="flex-1 text-center text-lg font-semibold sm:text-left">
-                {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
-              </p>
-              <Button
-                ref={chooseRef}
-                size="lg"
-                className="h-12 w-full px-6 shadow-lg shadow-primary/25 sm:w-auto"
-                onClick={() => inputRef.current?.click()}
-              >
-                Choose file
-              </Button>
-            </div>
-          </motion.div>
+            {/* Same treatment as the shared drop zone: bob at rest, lift on drag, swallow the drop. */}
+            <DropTile
+              dragging={dragging}
+              drops={drops}
+              className={cn(
+                "bg-primary text-primary-foreground shadow-lg shadow-primary/30",
+                mode === "pptx" && "h-12 w-12 [&_svg]:h-6 [&_svg]:w-6"
+              )}
+            />
+            <p className={cn("text-center text-lg font-semibold", mode === "pptx" && "sm:flex-1 sm:text-left")}>
+              {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
+            </p>
+            <Button
+              ref={chooseRef}
+              size="lg"
+              className={cn("h-12 w-full px-6 shadow-lg shadow-primary/25 sm:w-auto", dragging && "invisible")}
+              onClick={() => {
+                setArmed(true);
+                inputRef.current?.click();
+              }}
+            >
+              Choose file
+            </Button>
+          </div>
 
           <AnimatePresence>
-            {error && (
-              <motion.p
-                role="alert"
-                data-testid="tool-error"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex items-center gap-2 overflow-hidden pt-3 text-sm font-medium text-destructive"
-              >
-                <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
-              </motion.p>
-            )}
+            {error && <InlineError key="error" compact message={error} className="pt-3 text-sm" />}
           </AnimatePresence>
 
           {mode === "pptx" && (
             <Link
               href="/tools/pdf-to-pptx"
-              className="group mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="group mt-2 inline-flex min-h-11 items-center gap-1.5 self-start rounded-lg text-sm font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               PDF to PPTX
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
@@ -169,8 +178,8 @@ export function HeroDropzone({
           key="actions"
           initial={{ opacity: 0, y: 8, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.35, ease: EASE }}
+          exit={EXIT}
+          transition={ENTER_T}
         >
           <div className="flex items-center gap-3 rounded-xl bg-secondary/60 py-1 pl-3 pr-1">
             <FileIcon className="h-5 w-5 shrink-0 text-primary" />
@@ -204,13 +213,12 @@ export function HeroDropzone({
                   key={slug}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.035 }}
-                  whileHover={{ y: -3 }}
-                  whileTap={{ scale: 0.96 }}
+                  transition={{ ...ENTER_T, delay: staggerDelay(i) }}
+                  whileTap={{ scale: 0.97 }}
                   disabled={going !== null}
                   onClick={() => go(slug)}
                   className={cn(
-                    "flex min-h-[5.25rem] flex-col items-center justify-center gap-1.5 rounded-2xl border border-border bg-card p-2.5 text-center text-xs font-medium leading-tight transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex min-h-[5.25rem] flex-col items-center justify-center gap-1.5 rounded-2xl border border-border bg-card p-2.5 text-center text-xs font-medium leading-tight transition-colors duration-200 hover:border-primary/50 hover:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     mode === "pptx" && "min-h-[6rem] text-sm font-semibold",
                     going === slug && "border-primary"
                   )}
@@ -226,5 +234,6 @@ export function HeroDropzone({
         </motion.div>
       )}
     </AnimatePresence>
+    </motion.div>
   );
 }

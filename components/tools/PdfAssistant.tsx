@@ -3,18 +3,11 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import {
-  ArrowUp,
-  FileText,
-  Loader2,
-  RotateCcw,
-  Sparkles,
-  Square,
-  UploadCloud,
-  AlertTriangle,
-} from "lucide-react";
+import { ArrowUp, FileText, RotateCcw, Sparkles, Square, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EASE, SPRING } from "@/components/motion/primitives";
+import { ToolDropzone } from "@/components/ui/dropzone";
+import { ENTER, ENTER_T, InlineError, SUCCESS, staggerDelay } from "@/components/motion/primitives";
+import { scrollBehavior } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { useSearchParams } from "next/navigation";
 import type { Tier } from "@/lib/limits";
@@ -115,7 +108,6 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   /** The finished answer, read out once instead of word by word. */
   const [announce, setAnnounce] = useState("");
   const [error, setError] = useState<{ message: string; needsLogin?: boolean } | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     if (params.get("handoff") !== "1") return;
@@ -142,7 +134,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   }, [docLoaded]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: scrollBehavior() });
   }, [messages]);
 
   async function loadFile(file: File | undefined) {
@@ -258,26 +250,15 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   if (!doc) {
     return (
       <div className="space-y-4">
-        <motion.div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setDragging(false); loadFile(e.dataTransfer.files[0]); }}
-          animate={{ scale: dragging ? 1.02 : 1 }}
-          transition={SPRING}
-          className={cn(
-            "relative overflow-hidden rounded-3xl border-2 border-dashed bg-card p-10 text-center transition-colors",
-            dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/60"
-          )}
+        <ToolDropzone
+          label={parsing ? "Reading your document…" : "Drop a PDF to start the conversation"}
+          dragLabel="Release to open"
+          busy={parsing}
+          icon={Sparkles}
+          tileClassName="bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-primary/30"
+          onFiles={(files) => loadFile(files[0])}
         >
           <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { loadFile(e.target.files?.[0]); e.target.value = ""; }} />
-          <motion.div
-            animate={parsing ? { rotate: 360 } : { y: [0, -5, 0] }}
-            transition={parsing ? { duration: 1.2, repeat: Infinity, ease: "linear" } : { duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-            className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-primary/30"
-          >
-            {parsing ? <Loader2 className="h-7 w-7" /> : <Sparkles className="h-7 w-7" />}
-          </motion.div>
-          <p className="mt-4 text-lg font-semibold">{parsing ? "Reading your document…" : "Drop a PDF to start the conversation"}</p>
           {!parsing && (
             <Button className="mt-4" onClick={() => inputRef.current?.click()}>
               <UploadCloud /> Choose PDF
@@ -286,21 +267,16 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           <p className="mt-4 text-xs text-muted-foreground">
             Only the PDF's text is sent to the AI.
           </p>
-        </motion.div>
-        {error && (
-          <p role="alert" data-testid="tool-error" className="flex items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error.message}
-          </p>
-        )}
+        </ToolDropzone>
+        <AnimatePresence>{error && <InlineError key="error" message={error.message} />}</AnimatePresence>
       </div>
     );
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: EASE }}
+      initial={ENTER.initial}
+      animate={ENTER.animate}
       className="overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5"
     >
       <div className="flex items-center gap-3 border-b border-border bg-secondary/40 px-5 py-3">
@@ -343,10 +319,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
                   key={s}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + i * 0.06 }}
-                  whileHover={{ y: -2 }}
+                  transition={{ ...ENTER_T, delay: SUCCESS.title + staggerDelay(i) }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={() => ask(s)}
-                  className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm transition-colors hover:border-primary/50 hover:text-primary"
+                  className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm transition-colors duration-200 hover:border-primary/50 hover:text-primary hover:duration-100"
                 >
                   {s}
                 </motion.button>
@@ -359,9 +335,9 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           {messages.map((m, i) => (
             <motion.div
               key={i}
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.3, ease: EASE }}
+              transition={ENTER_T}
               className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
             >
               <div
@@ -376,12 +352,12 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
                     <Markdown text={m.content} />
                   ) : (
                     <span className="flex gap-1 py-1.5" aria-label="Thinking">
+                      {/* CSS, so the dots keep moving while the answer streams in. */}
                       {[0, 1, 2].map((d) => (
-                        <motion.span
+                        <span
                           key={d}
-                          className="h-2 w-2 rounded-full bg-primary/60"
-                          animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
-                          transition={{ duration: 0.9, repeat: Infinity, delay: d * 0.15 }}
+                          className="h-2 w-2 rounded-full bg-primary/60 motion-safe:animate-typing"
+                          style={{ animationDelay: `${d * 0.15}s` }}
                         />
                       ))}
                     </span>
@@ -397,20 +373,11 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
 
       <AnimatePresence>
         {error && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <p role="alert" data-testid="tool-error" className="mx-5 mb-3 flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <span className="flex-1">{error.message}</span>
-              {error.needsLogin && (
-                <Link href="/login?redirect=/tools/chat-with-pdf" className="font-semibold underline">Sign in</Link>
-              )}
-            </p>
-          </motion.div>
+          <InlineError key="error" message={error.message} className="mx-5 mb-3 py-2.5">
+            {error.needsLogin && (
+              <Link href="/login?redirect=/tools/chat-with-pdf" className="font-semibold underline">Sign in</Link>
+            )}
+          </InlineError>
         )}
       </AnimatePresence>
 
@@ -442,11 +409,9 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             <Square className="h-4 w-4" />
           </Button>
         ) : (
-          <motion.div whileTap={{ scale: 0.9 }} tabIndex={-1}>
-            <Button type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
-              <ArrowUp />
-            </Button>
-          </motion.div>
+          <Button type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
+            <ArrowUp />
+          </Button>
         )}
       </form>
       <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="ai" tier={tier} returnTo="/tools/chat-with-pdf" />

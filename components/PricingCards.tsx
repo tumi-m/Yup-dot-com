@@ -10,6 +10,8 @@ import { cardOffer } from "@/lib/billing-ui";
 import type { BillingSummary } from "@/lib/billing";
 import { startCheckout, type CheckoutRequest } from "@/components/BillingClient";
 import { Button } from "@/components/ui/button";
+import { AnimatePresence } from "motion/react";
+import { InlineError, STAGGER_HERO, staggerDelay, useAmbient } from "@/components/motion/primitives";
 import { cn } from "@/lib/utils";
 import type { PlanId } from "@/lib/types";
 
@@ -32,6 +34,8 @@ export function PricingCards({
   const [loading, setLoading] = useState<string | null>(null);
   /** A failed checkout, shown in the card whose button was pressed. */
   const [error, setError] = useState<{ plan: PlanId; message: string } | null>(null);
+  // The turning ring on the recommended plan stops while it is offscreen.
+  const ring = useAmbient<HTMLDivElement>();
 
   async function choose(plan: PlanId, req?: CheckoutRequest) {
     setError(null);
@@ -66,10 +70,13 @@ export function PricingCards({
           const isCurrent = currentPlan === plan.id;
           const offer = isPaidPlan(plan.id) ? cardOffer(plan.id, currentPlan, billing) : null;
           return (
-            <div key={plan.id} className="motion-safe:animate-rise" style={{ animationDelay: `${i * 0.06}s` }}>
+            // Transform only, so the prices paint at once. A page can hold the
+            // cards back (--enter-after) until its heading has started rising.
+            <div key={plan.id} className="motion-safe:animate-rise-soft" style={{ animationDelay: `calc(var(--enter-after, 0s) + ${staggerDelay(i, STAGGER_HERO)}s)` }}>
               <div
+                ref={plan.highlighted ? ring : undefined}
                 className={cn(
-                  "relative flex h-full flex-col rounded-3xl border bg-card p-8 transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-[3px] motion-reduce:transform-none",
+                  "relative flex h-full flex-col rounded-3xl border bg-card p-8 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:duration-150 motion-reduce:transform-none",
                   plan.highlighted
                     ? "border-transparent shadow-2xl shadow-primary/20 lg:-my-3 lg:py-11"
                     : "border-border hover:shadow-lg"
@@ -77,7 +84,7 @@ export function PricingCards({
               >
                 {plan.highlighted && (
                   <>
-                    {/* Gradient border; the angle turns, the shape never moves. */}
+                    {/* Gradient border: a painted layer turns behind a 1px mask. */}
                     <span aria-hidden className="pricing-ring" />
                     <span className="absolute -top-3 left-8 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30">
                       Most popular
@@ -143,7 +150,7 @@ export function PricingCards({
                             title={display && !display.local ? `Billed as ${formatPrice(prepaidPrice(req.plan, months))}` : undefined}
                             className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg px-2 font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                           >
-                            {loading === loadingKey(req) && <Loader2 className="h-3 w-3 animate-spin" />}
+                            {loading === loadingKey(req) && <Loader2 className="h-3 w-3 motion-safe:animate-spin" />}
                             {months === 1 ? "1 month" : "1 year"} {displayPrice(display, prepaidPrice(req.plan, months))}
                             {months === 12 && (
                               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
@@ -157,11 +164,9 @@ export function PricingCards({
                     </>
                   )}
                 </div>
-                {error?.plan === plan.id && (
-                  <p role="alert" className="mt-2 rounded-lg bg-destructive/10 px-4 py-3 text-center text-sm text-destructive">
-                    {error.message}
-                  </p>
-                )}
+                <AnimatePresence>
+                  {error?.plan === plan.id && <InlineError key="error" message={error.message} className="mt-2" />}
+                </AnimatePresence>
               </div>
             </div>
           );

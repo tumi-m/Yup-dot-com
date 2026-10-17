@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Search, X } from "lucide-react";
 import { TOOLS, type ToolMeta } from "@/lib/tools";
 import {
   DUR,
-  EASE_IN,
-  EASE_OUT,
+  ENTER_T,
+  EXIT_T,
+  PillLabel,
+  POP_IN,
   Reveal,
   SPRING_LAYOUT,
   SpotlightCard,
@@ -28,14 +30,14 @@ function ToolCard({ tool }: { tool: ToolMeta }) {
         <div className="relative flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
           <div
             className={cn(
-              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110 motion-reduce:transform-none",
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-200 ease-out group-hover:-rotate-6 group-hover:scale-110 group-hover:duration-150 motion-reduce:transform-none",
               tool.tint
             )}
           >
             <tool.icon className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold leading-snug transition-colors group-hover:text-primary sm:text-base">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold leading-snug transition-colors duration-200 group-hover:text-primary group-hover:duration-100 sm:text-base">
               {tool.name}
               {tool.badge && (
                 <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
@@ -55,8 +57,9 @@ const GRID = "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4";
 
 /**
  * Tool catalogue. With `filterable`, adds instant search and category pills.
- * Switching category swaps the list as a unit: the old one fades out, then the
- * new one rises in, so nothing flies across the page.
+ * Filtering keeps one grid: cards that leave fade out together, the ones that
+ * stay glide to their new places, and new ones fade in, so the page never
+ * empties and nothing below slides under the cards that are leaving.
  */
 export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
   if (!filterable) {
@@ -78,6 +81,8 @@ function FilterableGrid() {
   const [query, setQuery] = useState("");
   const [pill, setPill] = useState<ToolPill>("all");
   const pillRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** True once a pill has been chosen here, so the first render doesn't animate. */
+  const slid = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -100,7 +105,20 @@ function FilterableGrid() {
     });
   }, [pill, reduce]);
 
+  // While cards that drop out fade away, the grid keeps its height, so the
+  // footer doesn't jump up under them; it is released once they have gone.
+  const grid = useRef<HTMLDivElement>(null);
+  function holdHeight() {
+    const el = grid.current;
+    if (el) el.style.minHeight = `${el.offsetHeight}px`;
+  }
+  function releaseHeight() {
+    if (grid.current) grid.current.style.minHeight = "";
+  }
+
   function select(next: ToolPill) {
+    holdHeight();
+    slid.current = true;
     setPill(next);
     const url = new URL(window.location.href);
     if (next === "all") url.searchParams.delete("c");
@@ -109,6 +127,16 @@ function FilterableGrid() {
   }
 
   const filtered = useMemo(() => filterTools(TOOLS, pill, query), [pill, query]);
+
+  // Nothing leaving means no exit to wait for, and "No match" belongs right
+  // under the search: in both cases the grid sizes itself at once.
+  const shown = useRef(filtered.map((t) => t.slug));
+  useLayoutEffect(() => {
+    const now = filtered.map((t) => t.slug);
+    const leaving = shown.current.some((slug) => !now.includes(slug));
+    shown.current = now;
+    if (!leaving || !now.length) releaseHeight();
+  }, [filtered]);
 
   // Screen readers hear the result count once typing pauses.
   const [status, setStatus] = useState("");
@@ -137,7 +165,10 @@ function FilterableGrid() {
             ref={searchRef}
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              holdHeight();
+              setQuery(e.target.value);
+            }}
             placeholder="Search tools"
             aria-label="Search tools"
             className="h-12 w-full rounded-full border border-input bg-background pl-11 pr-12 text-sm shadow-sm outline-none transition-shadow focus:ring-2 focus:ring-ring [&::-webkit-search-cancel-button]:hidden"
@@ -150,9 +181,10 @@ function FilterableGrid() {
                   type="button"
                   initial={{ opacity: 0, scale: 0.6 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.6, transition: { duration: DUR.tap } }}
-                  transition={{ duration: DUR.fast, ease: EASE_OUT }}
+                  exit={{ opacity: 0, scale: 0.6, transition: EXIT_T }}
+                  transition={{ ...ENTER_T, duration: DUR.fast }}
                   onClick={() => {
+                    holdHeight();
                     setQuery("");
                     searchRef.current?.focus();
                   }}
@@ -194,48 +226,56 @@ function FilterableGrid() {
                 tabIndex={active ? 0 : -1}
                 onClick={() => select(p)}
                 className={cn(
-                  "relative h-11 shrink-0 snap-center whitespace-nowrap rounded-full px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:pointer-coarse:h-11",
-                  active ? "text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  "relative h-11 shrink-0 snap-center whitespace-nowrap rounded-full px-4 text-sm font-medium transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:pointer-coarse:h-11",
+                  !active && "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 {active && (
                   <motion.span
                     layoutId="category-pill"
-                    className="absolute inset-0 rounded-full bg-primary shadow-md shadow-primary/30"
+                    className="absolute inset-0 bg-primary shadow-md shadow-primary/30"
+                    // Radius in style, so motion keeps the ends round while the pill stretches.
+                    style={{ borderRadius: 9999 }}
                     transition={SPRING_LAYOUT}
                   />
                 )}
-                <span className="relative">{pillLabel(p)}</span>
+                {/* Turns white as the pill arrives under it, not before (white
+                    on the page would vanish mid-slide). */}
+                <PillLabel chosen={active} slide={slid.current} className="z-[1]">
+                  {pillLabel(p)}
+                </PillLabel>
               </button>
             );
           })}
         </div>
       </div>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={pill}
-          className={GRID}
-          initial="hidden"
-          animate="show"
-          exit={{ opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
-        >
+      <div ref={grid} className={cn(GRID, "relative content-start")}>
+        <AnimatePresence mode="popLayout" initial={false} onExitComplete={releaseHeight}>
           {filtered.map((tool, i) => (
             <motion.div
               key={tool.slug}
-              variants={{
-                hidden: { opacity: 0, y: 8 },
-                show: { opacity: 1, y: 0, transition: { duration: DUR.base, ease: EASE_OUT, delay: staggerDelay(i, 0.025) } },
-              }}
+              layout="position"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1, transition: { ...ENTER_T, delay: staggerDelay(i) } }}
+              exit={{ opacity: 0, scale: 0.97, transition: EXIT_T }}
+              transition={{ layout: SPRING_LAYOUT }}
             >
               <ToolCard tool={tool} />
             </motion.div>
           ))}
-        </motion.div>
-      </AnimatePresence>
+        </AnimatePresence>
+      </div>
 
+      <AnimatePresence initial={false}>
       {filtered.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground motion-safe:animate-rise">
+        <motion.div
+          key="none"
+          initial={POP_IN.initial}
+          animate={POP_IN.animate}
+          exit={POP_IN.exit}
+          className="flex flex-col items-center gap-3 py-16 text-muted-foreground"
+        >
           <p>No match</p>
           <button
             type="button"
@@ -244,12 +284,13 @@ function FilterableGrid() {
               select("all");
               searchRef.current?.focus();
             }}
-            className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium text-foreground transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium text-foreground transition-[border-color,transform] duration-200 hover:border-primary/50 hover:duration-100 active:scale-[0.97] active:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:active:scale-100"
           >
             <X className="h-3.5 w-3.5" /> Clear
           </button>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

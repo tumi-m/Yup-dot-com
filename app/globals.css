@@ -68,7 +68,7 @@
   details::details-content {
     block-size: 0;
     overflow: clip;
-    transition: block-size 0.25s cubic-bezier(0.22, 1, 0.36, 1), content-visibility 0.25s allow-discrete;
+    transition: block-size var(--dur-base) var(--ease-in-out), content-visibility var(--dur-base) allow-discrete;
   }
   details[open]::details-content {
     block-size: auto;
@@ -89,31 +89,47 @@
   }
 }
 
-/* The recommended plan's turning gradient border (PricingCards). */
-@property --ring-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-@keyframes ring-turn {
+/*
+ * The recommended plan's turning gradient border (PricingCards). The gradient
+ * is painted once on an oversized square that rotates, so each frame is a
+ * composite, not a repaint; the mask leaves a 1px ring of it.
+ */
+@keyframes ring-spin {
   to {
-    --ring-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 .pricing-ring {
   position: absolute;
   inset: -1px;
   padding: 1px;
+  overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  background: conic-gradient(from var(--ring-angle), hsl(var(--primary)), #e879f9, #fbbf24, hsl(var(--primary)));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
+.pricing-ring::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 250%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: conic-gradient(hsl(var(--primary)), #e879f9, #fbbf24, hsl(var(--primary)));
+}
 @media (prefers-reduced-motion: no-preference) {
-  .pricing-ring {
-    animation: ring-turn 9s linear infinite;
+  .pricing-ring::before {
+    animation: ring-spin 9s linear infinite;
+  }
+}
+
+/* Spinners stand still with reduced motion too (most use motion-safe:animate-spin already). */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation: none;
   }
 }
 
@@ -123,7 +139,7 @@
   transform: translateY(16px);
 }
 [data-reveal="shown"] {
-  animation: reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) var(--reveal-delay, 0s) backwards;
+  animation: reveal var(--dur-slow) var(--ease-out) var(--reveal-delay, 0s) backwards;
 }
 @media print {
   [data-reveal] {
@@ -134,7 +150,9 @@
 
 /* Ambient loops stop while their section is offscreen (see useAmbient). */
 [data-paused="true"],
-[data-paused="true"] * {
+[data-paused="true"] *,
+[data-paused="true"] *::before,
+[data-paused="true"] *::after {
   animation-play-state: paused !important;
 }
 
@@ -156,7 +174,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .route-enter main {
-    animation: route-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation: route-in var(--dur-base) var(--ease-out) backwards;
   }
 }
 

@@ -2,6 +2,7 @@ import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
 import { WordReveal } from "@/components/motion/primitives";
+import { STAGGER_HERO } from "@/components/motion/tokens";
 import { PricingCards } from "@/components/PricingCards";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
@@ -14,6 +15,8 @@ export const metadata = {
 };
 
 export const dynamic = "force-dynamic";
+
+const HEADING = "Simple, honest pricing";
 
 export default async function PricingPage({
   searchParams,
@@ -32,10 +35,14 @@ export default async function PricingPage({
       <main id="main" className="relative flex-1 overflow-hidden">
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[480px] bg-gradient-to-b from-primary/10 to-transparent" />
         <Starfield className="h-[480px]" />
-        <div className="container relative py-16 sm:py-20">
+        {/* --enter-after: the cards settle once the heading's last word is on its way. */}
+        <div
+          className="container relative py-16 sm:py-20"
+          style={{ "--enter-after": `${HEADING.split(" ").length * STAGGER_HERO}s` } as React.CSSProperties}
+        >
           <div className="mx-auto max-w-2xl text-center">
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-              <WordReveal text="Simple, honest pricing" />
+              <WordReveal text={HEADING} />
             </h1>
           </div>
           <div className="mt-14">
@@ -49,7 +56,7 @@ export default async function PricingPage({
                 <details key={f.q} className="group rounded-2xl border border-border bg-card transition-shadow open:shadow-md">
                   <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-4 font-medium [&::-webkit-details-marker]:hidden">
                     {f.q}
-                    <span aria-hidden className="text-xl leading-none text-primary transition-transform duration-300 group-open:rotate-45">+</span>
+                    <span aria-hidden className="text-xl leading-none text-primary transition-transform duration-base ease-in-out group-open:rotate-45 motion-reduce:transition-none">+</span>
                   </summary>
                   <p className="px-5 pb-4 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
                 </details>

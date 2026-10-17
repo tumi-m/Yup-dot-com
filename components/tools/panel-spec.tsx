@@ -24,10 +24,10 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
 
 /** Rendered heights of each kind of tool panel before a file is chosen. */
 export function placeholderSize(kind: PanelSpec["kind"]): string {
-  if (kind === "editor") return "h-[288px] sm:h-[240px]";
+  if (kind === "editor") return "h-[296px] sm:h-[244px]";
   if (kind === "assistant") return "h-[300px] sm:h-[272px]";
   if (kind === "media" || kind === "playlist") return "h-[206px] sm:h-[150px]";
-  if (kind === "slides-import") return "h-[182px]";
+  if (kind === "slides-import") return "h-[158px] sm:h-[182px]";
   return "h-[292px]";
 }
 
