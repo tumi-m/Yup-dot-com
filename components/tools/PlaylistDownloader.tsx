@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  AlertTriangle,
   ClipboardPaste,
   Clock,
   Crown,
@@ -21,8 +20,22 @@ import {
   Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ProgressFill } from "@/components/tools/MediaDownloader";
-import { EASE, SPRING } from "@/components/motion/primitives";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DUR,
+  EASE_OUT,
+  ENTER,
+  ENTER_T,
+  EXIT,
+  EXIT_T,
+  FADE_EXIT,
+  InlineError,
+  NOTICE_T,
+  SPRING,
+  SPRING_LAYOUT,
+  staggerDelay,
+} from "@/components/motion/primitives";
+import { ProgressBar } from "@/components/motion/Progress";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import { parseMediaUrl, parsePlaylistUrl, type MediaKind } from "@/lib/media";
 import { exportName, formatDuration, playlistCsv, playlistTxt, type PlaylistEntry } from "@/lib/playlist";
@@ -447,10 +460,10 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
           <motion.form
             key="input"
             onSubmit={lookup}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.35, ease: EASE }}
+            exit={EXIT}
+            transition={ENTER_T}
             className="rounded-3xl border border-border bg-card p-5 shadow-xl shadow-primary/5"
           >
             <label htmlFor="playlist-url" className="mb-2 block text-sm font-medium">
@@ -490,11 +503,10 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
               {playlist?.video && phase === "input" && (
                 <motion.div
                   key="scope"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.3, ease: EASE }}
-                  className="overflow-hidden"
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={FADE_EXIT}
+                  transition={NOTICE_T}
                 >
                   <div className="mt-3 inline-flex rounded-xl bg-secondary p-1" role="radiogroup" aria-label="Download">
                     {(["playlist", "video"] as const).map((s) => (
@@ -517,7 +529,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                           scope === s ? "text-foreground" : "text-muted-foreground"
                         )}
                       >
-                        {scope === s && <motion.span layoutId="scope-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING} />}
+                        {scope === s && <motion.span layoutId="scope-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />}
                         <span className="relative flex items-center gap-1.5">
                           {s === "playlist" ? <ListVideo className="h-4 w-4" /> : <Film className="h-4 w-4" />}
                           {s === "playlist" ? "Whole playlist" : "This video"}
@@ -528,7 +540,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                 </motion.div>
               )}
               {single && (
-                <motion.p key="single" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
+                <motion.p key="single" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 flex items-center gap-1 text-sm text-muted-foreground">
                   That&apos;s a single video.
                   <Link
                     href={`/tools/youtube-to-mp4?url=${encodeURIComponent(single.canonical)}`}
@@ -540,19 +552,28 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
               )}
             </AnimatePresence>
 
-            {phase === "loading" && (
-              <div className="mt-4 space-y-2" aria-hidden>
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="h-10 w-16 rounded-lg bg-secondary motion-safe:animate-pulse" />
-                    <div className="flex-1 space-y-2 py-1">
-                      <div className="h-3 w-4/5 rounded bg-secondary motion-safe:animate-pulse" />
-                      <div className="h-3 w-1/5 rounded bg-secondary motion-safe:animate-pulse" />
+            <AnimatePresence initial={false}>
+              {phase === "loading" && (
+                <motion.div
+                  key="skeleton"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+                  exit={FADE_EXIT}
+                  className="mt-4 space-y-2"
+                  aria-hidden
+                >
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex gap-3">
+                      <Skeleton className="h-10 w-16 rounded-lg" />
+                      <div className="flex-1 space-y-2 py-1">
+                        <Skeleton className="h-3 w-4/5 rounded" />
+                        <Skeleton className="h-3 w-1/5 rounded" />
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.form>
         )}
 
@@ -560,10 +581,10 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
           <motion.section
             key="list"
             aria-labelledby="playlist-title"
-            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: EASE }}
+            exit={EXIT}
+            transition={ENTER_T}
             className="overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5"
           >
             {/* Header */}
@@ -610,7 +631,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                       kind === k ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    {kind === k && <motion.span layoutId="pl-kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING} />}
+                    {kind === k && <motion.span layoutId="pl-kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />}
                     <span className="relative flex items-center gap-1.5">
                       {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
                       {k.toUpperCase()}
@@ -624,8 +645,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                     key="quality"
                     initial={{ opacity: 0, x: 8 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 8 }}
-                    transition={{ duration: 0.25, ease: EASE }}
+                    exit={{ opacity: 0, x: 8, transition: EXIT_T }}
+                    transition={ENTER_T}
                     role="group"
                     aria-label="Quality"
                     className="grid grid-cols-4 gap-1.5"
@@ -693,9 +714,9 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                 return (
                   <motion.li
                     key={x.id}
-                    initial={reduce ? false : { opacity: 0, y: 8 }}
+                    initial={reduce ? false : ENTER.initial}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, ease: EASE, delay: Math.min(i, 14) * 0.03 }}
+                    transition={{ ...ENTER_T, delay: staggerDelay(i) }}
                     className={cn(
                       "flex items-center gap-2 border-b border-border/60 px-3 py-1.5 last:border-b-0 sm:gap-3 sm:px-5",
                       it.status === "ready" && "bg-emerald-500/5"
@@ -723,8 +744,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                           {it.status === "failed" && <span className="text-destructive"> · {it.error}</span>}
                         </span>
                         {it.status === "downloading" && (
-                          <span className="relative mt-1 block h-1 overflow-hidden rounded-full bg-secondary" aria-hidden>
-                            <ProgressFill value={it.progress} />
+                          <span className="mt-1 block" aria-hidden>
+                            <ProgressBar value={it.progress} label={`Downloading ${x.title}`} className="h-1" />
                           </span>
                         )}
                       </span>
@@ -739,22 +760,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
             <div className="border-t border-border p-5">
               <AnimatePresence initial={false}>
                 {started > 0 && (
-                  <motion.div key="overall" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-                    <div
-                      className="relative mb-2.5 h-2.5 overflow-hidden rounded-full bg-secondary"
-                      role="progressbar"
-                      aria-label="Playlist progress"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.round(overall * 100)}
-                    >
-                      <motion.div
-                        key="determinate"
-                        className="h-full rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400"
-                        animate={{ width: `${Math.max(2, overall * 100)}%` }}
-                        transition={{ ease: "easeOut", duration: 0.5 }}
-                      />
-                    </div>
+                  <motion.div key="overall" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T}>
+                    <ProgressBar value={Math.max(overall, 0.03)} label="Playlist progress" className="mb-2.5 h-2.5" />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -773,9 +780,10 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                 {limitHit && (
                   <motion.button
                     type="button"
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
+                    exit={FADE_EXIT}
+                    transition={NOTICE_T}
                     onClick={() => setUpsell("downloads")}
                     className="mb-4 flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3.5 py-2.5 text-left text-sm text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-amber-950/30 dark:text-amber-200"
                   >
@@ -792,13 +800,11 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                     <Square className="fill-current" /> Stop
                   </Button>
                 ) : (
-                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} tabIndex={-1} className="flex-1">
-                    <Button size="lg" className="w-full shadow-lg shadow-primary/25" onClick={downloadSelected} disabled={!pending || limitHit}>
-                      <Download />
-                      {pending === entries.length ? "Download all" : pending ? `Download ${pending}` : "Download"}
-                      <span className="text-sm font-normal">· {kind === "mp3" ? "MP3" : `${height}p`}</span>
-                    </Button>
-                  </motion.div>
+                  <Button size="lg" className="flex-1 shadow-lg shadow-primary/25" onClick={downloadSelected} disabled={!pending || limitHit}>
+                    <Download />
+                    {pending === entries.length ? "Download all" : pending ? `Download ${pending}` : "Download"}
+                    <span className="text-sm font-normal">· {kind === "mp3" ? "MP3" : `${height}p`}</span>
+                  </Button>
                 )}
                 <Button size="lg" variant="outline" onClick={reset}>
                   <RotateCcw /> Different link
@@ -809,20 +815,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {error && (
-          <motion.p
-            role="alert"
-            data-testid="tool-error"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
-          </motion.p>
-        )}
-      </AnimatePresence>
+      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">Only download videos you have permission to use.</p>
 
@@ -848,8 +841,8 @@ function ItemAction({ item, title, onRetry }: { item: Item; title: string; onRet
         key={item.status}
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ duration: 0.18 }}
+        exit={{ opacity: 0, scale: 0.8, transition: EXIT_T }}
+        transition={{ duration: DUR.fast, ease: EASE_OUT }}
         className="shrink-0"
       >
         {item.status === "queued" && (
@@ -870,7 +863,7 @@ function ItemAction({ item, title, onRetry }: { item: Item; title: string; onRet
             rel="noopener"
             aria-label={`Save ${title}`}
             title="Save"
-            className={cn(box, "bg-emerald-500 text-white shadow-md shadow-emerald-500/30 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2")}
+            className={cn(box, "bg-emerald-500 text-white shadow-md shadow-emerald-500/30 transition-transform duration-200 hover:duration-100 active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2")}
           >
             <motion.span initial={{ y: -6, scale: 0 }} animate={{ y: 0, scale: 1 }} transition={SPRING}>
               <Download className="h-5 w-5" aria-hidden />

@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import {
-  AlertTriangle,
   ClipboardPaste,
   Crown,
   Download,
@@ -18,7 +17,21 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EASE, SPRING, SparkleBurst } from "@/components/motion/primitives";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DUR,
+  EASE_OUT,
+  ENTER_T,
+  EXIT,
+  EXIT_T,
+  FADE_EXIT,
+  InlineError,
+  NOTICE_T,
+  SPRING_LAYOUT,
+  SuccessBadge,
+} from "@/components/motion/primitives";
+import { ProgressBar } from "@/components/motion/Progress";
+import { scrollIntoViewIfNeeded, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
   parseMediaUrl,
@@ -135,32 +148,6 @@ function duration(s?: number | null) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-/** Progress fill: determinate once there's a number; a sweep (or, with reduced motion, a still bar) before. */
-export function ProgressFill({ value }: { value: number }) {
-  const reduce = useReducedMotion();
-  const gradient = "rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-amber-400";
-  if (value > 0.02) {
-    return (
-      <motion.span
-        key="determinate"
-        className={cn("block h-full", gradient)}
-        initial={false}
-        animate={{ width: `${Math.max(4, value * 100)}%` }}
-        transition={{ ease: "easeOut", duration: 0.5 }}
-      />
-    );
-  }
-  if (reduce) return <span key="still" className="block h-full w-full rounded-full bg-primary/35" />;
-  return (
-    <motion.span
-      key="sweep"
-      className="absolute inset-y-0 left-0 block w-1/3 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
-      animate={{ x: ["-100%", "300%"] }}
-      transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
-    />
-  );
-}
-
 export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tier: Tier }) {
   const params = useSearchParams();
   const pathname = usePathname();
@@ -187,27 +174,15 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const op = useRef<AbortController | null>(null);
   const job = useRef<{ workerUrl: string; id: string; token: string } | null>(null);
   /** Where keyboard focus goes once the next phase has rendered. */
-  const focusNext = useRef<"url" | "download" | "progress" | "ready" | null>(null);
-  const focusRef = (key: NonNullable<typeof focusNext.current>) => (el: HTMLElement | null) => {
-    if (el && focusNext.current === key) {
-      focusNext.current = null;
-      // Show the ring only to keyboard users, like a click would.
-      el.focus({ preventScroll: true, focusVisible: keyboard.current } as FocusOptions);
-    }
-  };
-  const keyboard = useRef(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Tab" || e.key === "Enter" || e.key === " ") keyboard.current = true;
-    };
-    const onPointer = () => (keyboard.current = false);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("pointerdown", onPointer, true);
-    return () => {
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("pointerdown", onPointer, true);
-    };
-  }, []);
+  const { next: focusNext, focusRef } = useFocusNext<"url" | "download" | "progress" | "ready">();
+  /**
+   * Reserved at the Download click: the card keeps its height while the
+   * options give way to progress and progress gives way to the result, so
+   * nothing below it moves when the download finishes on its own.
+   */
+  const flow = useHeightLock<HTMLDivElement>();
+  const slot = useHeightLock<HTMLDivElement>();
+  const readyCard = useRef<HTMLDivElement>(null);
 
   const stopPolling = () => {
     if (poll.current) clearTimeout(poll.current);
@@ -326,6 +301,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
 
   async function start() {
     if (busy.current || !info) return;
+    flow.lock();
+    slot.lock();
     busy.current = true;
     setStarting(true);
     setError(null);
@@ -346,6 +323,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     const data = await res?.json().catch(() => ({}));
     if (!alive.current) return;
     if (!res?.ok) {
+      // The button was disabled while starting; give focus back to it.
+      focusNext.current = "download";
       if (res?.status === 429) {
         setLimit({ upgrade: !!data?.upgrade });
         if (data?.upgrade) setUpsell("downloads");
@@ -546,6 +525,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   }
 
   function reset() {
+    flow.lock();
     lookupSeq.current++;
     op.current?.abort();
     op.current = null;
@@ -561,6 +541,15 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     focusNext.current = "url";
     setPhase("input");
   }
+
+  // Back on the options (cancel or failure): they fill the slot they left.
+  const releaseSlot = slot.release;
+  useLayoutEffect(() => {
+    if (phase === "preview") releaseSlot();
+  }, [phase, releaseSlot]);
+  useEffect(() => {
+    if (phase === "ready") scrollIntoViewIfNeeded(readyCard.current);
+  }, [phase]);
 
   const platformName = PLATFORM_LABEL[config.platform];
   const loading = phase === "loading";
@@ -583,15 +572,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
 
   return (
     <div className="space-y-4">
+      <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
         {(phase === "input" || phase === "loading") && (
           <motion.form
             key="input"
             onSubmit={lookup}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.35, ease: EASE }}
+            exit={EXIT}
+            transition={ENTER_T}
+            onAnimationStart={(def) => def !== EXIT && flow.release()}
             className="rounded-3xl border border-border bg-card p-5 shadow-xl shadow-primary/5"
             aria-busy={loading}
           >
@@ -636,7 +627,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   key="playlist"
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
+                  exit={FADE_EXIT}
+                  transition={NOTICE_T}
                   className="mt-3 flex items-center gap-2 text-sm"
                 >
                   <span className="text-muted-foreground">{detected ? "Part of a playlist." : "That's a playlist."}</span>
@@ -649,33 +641,42 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 </motion.div>
               )}
               {detected && detected.platform !== config.platform && (
-                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-2 text-xs text-muted-foreground">
+                <motion.p key="other" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground">
                   {detected.platform === "youtube" && !YOUTUBE_ENABLED
                     ? "YouTube downloads are paused for now."
                     : <>That&apos;s a {PLATFORM_LABEL[detected.platform]} link — it works here too.</>}
                 </motion.p>
               )}
             </AnimatePresence>
-            {loading && (
-              <div className="mt-4 flex gap-3" aria-hidden>
-                <div className="h-16 w-28 shrink-0 rounded-xl bg-secondary motion-safe:animate-pulse sm:h-20 sm:w-36" />
-                <div className="flex-1 space-y-2 py-1">
-                  <div className="h-3 w-4/5 rounded bg-secondary motion-safe:animate-pulse" />
-                  <div className="h-3 w-2/5 rounded bg-secondary motion-safe:animate-pulse" />
-                </div>
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {loading && (
+                <motion.div
+                  key="skeleton"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+                  exit={FADE_EXIT}
+                  className="mt-4 flex min-h-20 gap-3"
+                  aria-hidden
+                >
+                  <Skeleton className="h-16 w-28 shrink-0 rounded-xl sm:h-20 sm:w-36" />
+                  <div className="flex-1 space-y-2 py-1">
+                    <Skeleton className="h-3 w-4/5 rounded" />
+                    <Skeleton className="h-3 w-2/5 rounded" />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.form>
         )}
 
         {info && (phase === "preview" || phase === "working") && (
           <motion.div
             key="preview"
-            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: EASE }}
-            className="overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5"
+            exit={EXIT}
+            transition={ENTER_T}
+            className="flex flex-1 flex-col overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5"
           >
             <div className="flex gap-3 p-4 sm:gap-4 sm:p-5">
               <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-xl bg-secondary sm:h-24 sm:w-40">
@@ -698,8 +699,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
               </div>
             </div>
 
+            <div ref={slot.ref} className="flex flex-1 flex-col border-t border-border" style={{ minHeight: slot.minHeight }}>
+            <AnimatePresence mode="wait" initial={false}>
             {phase === "preview" ? (
-              <div className="space-y-4 border-t border-border p-4 sm:p-5">
+              <motion.div
+                key="options"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1, transition: NOTICE_T }}
+                exit={FADE_EXIT}
+                className="space-y-4 p-4 sm:p-5"
+              >
                 <div className="inline-flex rounded-xl bg-secondary p-1" role="radiogroup" aria-label="Format">
                   {(["mp4", "mp3"] as const).map((k) => (
                     <button
@@ -722,7 +731,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       )}
                     >
                       {kind === k && (
-                        <motion.span layoutId="kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING} />
+                        <motion.span layoutId="kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />
                       )}
                       <span className="relative flex items-center gap-1.5">
                         {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
@@ -742,7 +751,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                         <motion.button
                           key={q.height}
                           type="button"
-                          whileTap={q.available ? { scale: 0.95 } : undefined}
+                          whileTap={q.available ? { scale: 0.97 } : undefined}
                           onClick={() => pickQuality(q)}
                           disabled={!q.available}
                           aria-pressed={height === q.height && !q.locked}
@@ -773,8 +782,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 {kind === "mp4" && (wantedLocked || allLocked) && (
                   <motion.button
                     type="button"
-                    initial={{ opacity: 0, y: 6 }}
+                    initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
+                    transition={NOTICE_T}
                     onClick={() => setUpsell("quality")}
                     className={cn(
                       "flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3.5 py-2.5 text-left text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
@@ -791,9 +801,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   {limit?.upgrade && (
                     <motion.button
                       type="button"
-                      initial={{ opacity: 0, y: 6 }}
+                      initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
+                      exit={FADE_EXIT}
+                      transition={NOTICE_T}
                       onClick={() => setUpsell("downloads")}
                       className={cn(
                         "flex min-h-11 w-full items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3.5 py-2.5 text-left text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
@@ -808,7 +819,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 </AnimatePresence>
 
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} tabIndex={-1} className="flex-1">
+                  <div className="flex-1">
                     {allLocked && info.hasAudio !== false ? (
                       <Button
                         ref={focusRef("download")}
@@ -833,24 +844,23 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                         {kind === "mp3" ? "MP3" : `MP4 · ${height}p`}
                       </Button>
                     )}
-                  </motion.div>
+                  </div>
                   <Button size="lg" variant="outline" onClick={reset}>
                     <RotateCcw /> Different link
                   </Button>
                 </div>
-              </div>
+              </motion.div>
             ) : (
-              <div ref={focusRef("progress")} tabIndex={-1} className="border-t border-border p-4 outline-none sm:p-5">
-                <div
-                  className="relative h-3 overflow-hidden rounded-full bg-secondary"
-                  role="progressbar"
-                  aria-label="Download progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={progress.value > 0.02 ? Math.round(progress.value * 100) : undefined}
-                >
-                  <ProgressFill value={progress.value} />
-                </div>
+              <motion.div
+                key="progress"
+                ref={focusRef("progress")}
+                tabIndex={-1}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0, transition: NOTICE_T }}
+                exit={FADE_EXIT}
+                className="flex flex-1 flex-col justify-center p-4 outline-none sm:p-5"
+              >
+                <ProgressBar value={progress.value} label="Download progress" />
                 <p className="mt-2 text-center text-sm text-muted-foreground" aria-hidden>
                   {kind === "mp3" && progress.stage === "processing" ? STAGES.converting : (STAGES[progress.stage] ?? "Working…")}
                   {progress.value > 0.02 && <span className="ml-1 tabular-nums">{Math.round(progress.value * 100)}%</span>}
@@ -864,30 +874,24 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                     <X /> Cancel
                   </Button>
                 </div>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
+            </div>
           </motion.div>
         )}
 
         {phase === "ready" && file && (
           <motion.div
             key="ready"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.45, ease: EASE }}
-            className="relative overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
+            ref={readyCard}
+            initial={{ opacity: 0, scale: 0.98, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, transition: EXIT_T }}
+            transition={{ duration: DUR.slow, ease: EASE_OUT, opacity: ENTER_T }}
+            className="relative flex flex-1 scroll-mt-24 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
           >
-            <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
-              <SparkleBurst />
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={SPRING}
-                className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
-              >
-                {kind === "mp3" ? <Music2 className="h-8 w-8" /> : <Film className="h-8 w-8" />}
-              </motion.div>
-            </div>
+            <SuccessBadge icon={kind === "mp3" ? Music2 : Film} />
             <h2 ref={focusRef("ready")} tabIndex={-1} className="mt-5 text-2xl font-bold outline-none">
               Your download has started
             </h2>
@@ -906,21 +910,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
 
-      <AnimatePresence>
-        {error && (
-          <motion.p
-            role="alert"
-            data-testid="tool-error"
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="flex items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
-          >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
-          </motion.p>
-        )}
-      </AnimatePresence>
+      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">Only download videos you have permission to use.</p>
 
