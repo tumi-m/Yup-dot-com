@@ -93,10 +93,11 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(var(--rise, 12px))" },
           to: { opacity: "1", transform: "none" },
         },
-        // Transform only: the text is painted (and counted as painted) from
-        // the first frame, rising out of an overflow mask.
+        // Transform only, rising out of an overflow mask. It starts with most
+        // of each glyph already showing, so the text is painted (and counted
+        // for LCP, which ignores text fully clipped at first paint) at once.
         "rise-mask": {
-          from: { transform: "translateY(105%)" },
+          from: { transform: "translateY(35%)" },
           to: { transform: "none" },
         },
         "rise-soft": {

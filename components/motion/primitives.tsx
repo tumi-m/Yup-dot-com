@@ -118,8 +118,9 @@ export function Reveal({
 
 /**
  * Headline that rises in word by word out of a mask. CSS keyframes on
- * transform only, so the server-rendered text paints (and counts as painted)
- * from the first frame, and stays put with reduced motion.
+ * transform only, starting with most of each word showing, so the
+ * server-rendered text paints (and counts as painted) from the first frame,
+ * and stays put with reduced motion.
  */
 export function WordReveal({
   text,

@@ -5,7 +5,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardHat } from "@/components/WizardLogo";
 import { TOOLS } from "@/lib/tools";
-import { Reveal, WordReveal } from "@/components/motion/primitives";
+import { Reveal, STAGGER_HERO, WordReveal } from "@/components/motion/primitives";
 import { Aurora, HeroScene, Starfield } from "./HeroScene";
 import { HeroJourney } from "./HeroJourney";
 import { RotatingWord } from "./RotatingWord";
@@ -16,6 +16,8 @@ import { RotatingWord } from "./RotatingWord";
 const GRADIENT_WORD =
   "bg-[linear-gradient(90deg,#7c3aed,#c026d3,#b45309,#c026d3,#7c3aed)] bg-[length:200%_100%] bg-clip-text text-transparent motion-safe:animate-shimmer";
 
+const LINE_1 = "Cast spells on";
+
 export function Hero({ isAuthed }: { isAuthed: boolean }) {
   return (
     <section className="relative overflow-hidden">
@@ -25,12 +27,16 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
       <div className="container relative grid grid-cols-1 items-start gap-12 py-16 short:py-6 lg:grid-cols-[1.05fr_1fr] lg:py-24">
         <div className="min-w-0 text-center lg:pt-4 lg:text-left">
           <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl short:!text-4xl">
-            <WordReveal text="Cast spells on" />{" "}
+            <WordReveal text={LINE_1} />{" "}
             <span className="sr-only">your PDFs, slides and videos.</span>
             {/* The page's largest text: painted from the first frame and only
-                moved (out of a mask), never faded in or delayed. */}
+                moved (out of a mask), never faded in. It rises after the words
+                above it, so the headline reads in order. */}
             <span aria-hidden className="block overflow-hidden pb-[0.12em]">
-              <span className="block motion-safe:animate-rise-mask">
+              <span
+                className="block motion-safe:animate-rise-mask"
+                style={{ animationDelay: `${LINE_1.split(" ").length * STAGGER_HERO}s` }}
+              >
                 <RotatingWord words={["your PDFs.", "your slides.", "your videos."]} className={GRADIENT_WORD} />
               </span>
             </span>

@@ -64,7 +64,9 @@ export function PricingCards({
         {PLAN_LIST.map((plan, i) => {
           const isCurrent = currentPlan === plan.id;
           return (
-            <div key={plan.id} className="motion-safe:animate-rise" style={{ animationDelay: `${staggerDelay(i, STAGGER_HERO)}s` }}>
+            // Transform only, so the prices paint at once. A page can hold the
+            // cards back (--enter-after) until its heading has started rising.
+            <div key={plan.id} className="motion-safe:animate-rise-soft" style={{ animationDelay: `calc(var(--enter-after, 0s) + ${staggerDelay(i, STAGGER_HERO)}s)` }}>
               <div
                 ref={plan.highlighted ? ring : undefined}
                 className={cn(
