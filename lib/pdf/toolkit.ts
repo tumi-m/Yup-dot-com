@@ -8,7 +8,7 @@ import {
   extractTables,
   tableToCsv,
 } from "./parse";
-import { friendlyPdfError } from "./errors";
+import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
 import { drawOrientedImage, jpegOrientation, orientedSize, sniffImage } from "./images";
 
@@ -140,41 +140,54 @@ export async function splitTool(
 }
 
 // ---------------------------------------------------------------------------
-// Compress — rasterise each page to JPEG and rebuild. Best for scans and
-// image-heavy PDFs; this flattens selectable text (a known trade-off).
+// Compress — images are resized to what the page shows and re-encoded; text,
+// links, bookmarks and forms stay as they are (see lib/pdf/compress).
 // ---------------------------------------------------------------------------
 export async function compressTool(
   files: File[],
   opts: { quality: string },
   ctx: ToolContext = {}
 ): Promise<ToolFile> {
-  const quality = Number(opts.quality) || 0.6;
-  const bytes = await buf(files[0]);
+  const file = files[0];
+  const [{ presetFrom }, { compressFile }] = await Promise.all([import("./compress"), import("./compress/off-thread")]);
+  const preset = presetFrom(opts.quality);
+  let compressed: Uint8Array;
+  try {
+    compressed = await compressFile(file, preset, ctx.progress);
+  } catch (err) {
+    if (friendlyPdfError(err).message === ENCRYPTED_MESSAGE) throw friendlyPdfError(err);
+    // A file pdf-lib can't read: pdf.js may still render it.
+    try {
+      compressed = await rasterCompress(await buf(file), { smallest: 0.4, balanced: 0.6, high: 0.8 }[preset], ctx);
+    } catch (fallbackErr) {
+      throw friendlyPdfError(fallbackErr);
+    }
+  }
+  // Never hand back a bigger file, nor one that is barely smaller.
+  if (compressed.length > file.size * 0.98) {
+    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf" };
+  }
+  return { blob: pdfBlob(compressed), filename: suffixed(file, "compressed") };
+}
+
+/** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
+async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolContext): Promise<Uint8Array> {
+  const { canvasToJpeg } = await import("../image-codec");
   const loaded = await loadForRender(bytes);
   const out = await PDFDocument.create();
-  // Render at ~150 DPI equivalent for a sensible size/quality balance.
-  const scale = 1.5;
-
+  const scale = 1.5; // ~108 DPI
   for (let i = 1; i <= loaded.numPages; i++) {
     ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
     const vp = await loaded.getPageViewport(i, scale);
     const canvas = document.createElement("canvas");
     await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
-    const img = await out.embedJpg(await canvasBytes(canvas, "image/jpeg", quality));
+    const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
     canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
-    // Place at the page's true point size (vp at scale 1).
-    const pageW = vp.baseWidth;
-    const pageH = vp.baseHeight;
-    const page = out.addPage([pageW, pageH]);
-    page.drawImage(img, { x: 0, y: 0, width: pageW, height: pageH });
+    const page = out.addPage([vp.baseWidth, vp.baseHeight]);
+    page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
   }
   loaded.destroy();
-  const compressed = await out.save();
-  // Rasterising can inflate text-only PDFs. Never hand back a bigger file.
-  if (compressed.length >= bytes.length) {
-    return { blob: pdfBlob(bytes), filename: files[0].name.replace(/\.pdf$/i, "") + ".pdf" };
-  }
-  return { blob: pdfBlob(compressed), filename: suffixed(files[0], "compressed") };
+  return out.save();
 }
 
 // ---------------------------------------------------------------------------

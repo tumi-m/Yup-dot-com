@@ -20,7 +20,7 @@ work with or without an account.
 | **Merge PDF** | Combine multiple PDFs into one (drag to reorder). |
 | **Split PDF** | Extract page ranges, or split every page into its own file. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
-| **Compress PDF** | Shrink file size by recompressing pages (never returns a bigger file). |
+| **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
@@ -244,9 +244,10 @@ The suites in `tests/` run the real pipeline against generated files. For PDFs:
 structure extraction, multi-column reading order, table-vs-gutter
 disambiguation, baking every annotation type, the form detect/fill/flatten
 round-trip, protect/unlock (verified by pdf.js as an independent reader), the
-OCR text layer, and Word/Excel output (verified with python-docx and
-openpyxl). Others cover PPTX parsing, editing and rendering, Google Slides
-and video links, usage limits, the watermark, billing, the AI client, the
+OCR text layer, Word/Excel output (verified with python-docx and
+openpyxl), and compression (images sized by placement, lossless graphics,
+text and forms kept). Others cover PPTX parsing, editing and rendering,
+Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
 with outputs checked by independent readers.
@@ -374,6 +375,7 @@ pdf-wizard/
 ├── lib/
 │   ├── pdf/parse.ts              ← Layout-aware parsing + serializers
 │   ├── pdf/toolkit.ts            ← All tool processing (merge/split/compress/…)
+│   ├── pdf/compress/             ← Compression: image sizing, re-encoding, clean-up
 │   ├── pdf/bake.ts               ← Flatten annotations, links, form fields
 │   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
 │   ├── pdf/operations.ts         ← pdf-lib page ops
