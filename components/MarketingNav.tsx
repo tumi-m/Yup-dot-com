@@ -127,17 +127,20 @@ export function NavShell({
             aria-expanded={open}
             aria-controls={sheetId}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={open ? "x" : "menu"}
-                initial={{ rotate: -90, opacity: 0 }}
-                animate={{ rotate: 0, opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
-                exit={{ rotate: 90, opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
-                className="block"
-              >
-                {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </motion.span>
-            </AnimatePresence>
+            {/* The two icons turn past each other in place, so the button is never empty. */}
+            <span className="relative block h-5 w-5">
+              <AnimatePresence initial={false}>
+                <motion.span
+                  key={open ? "x" : "menu"}
+                  initial={{ rotate: -90, opacity: 0 }}
+                  animate={{ rotate: 0, opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+                  exit={{ rotate: 90, opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
+                  className="absolute inset-0"
+                >
+                  {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </motion.span>
+              </AnimatePresence>
+            </span>
           </button>
         </div>
       </header>
