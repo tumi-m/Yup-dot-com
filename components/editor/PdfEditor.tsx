@@ -101,6 +101,8 @@ export function PdfEditor({
   const [scale, setScale] = useState(1.3);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Set while a page operation, save or download runs; Ctrl+S must not start another. */
+  const busyRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
@@ -249,7 +251,8 @@ export function PdfEditor({
       transform: (input: Uint8Array) => Promise<Uint8Array>,
       message: string
     ) => {
-      if (!bytes) return;
+      if (!bytes || busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         // Bake pending edits — including typed form values — first, or the
@@ -265,6 +268,7 @@ export function PdfEditor({
       } catch (err) {
         toast(friendlyPdfError(err).message || "Operation failed.", "error");
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
@@ -352,6 +356,8 @@ export function PdfEditor({
   );
 
   async function handleDownload() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const grant = await authorize();
@@ -366,16 +372,18 @@ export function PdfEditor({
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   const handleSave = useCallback(async () => {
-    if (!bytes) return;
+    if (!bytes || busyRef.current) return;
     if (pristine) {
       toast(source.kind === "local" ? "Saved on this device." : "Saved to your library.", "success");
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     try {
       const grant = await authorize();
@@ -432,6 +440,7 @@ export function PdfEditor({
     } catch (err) {
       toast(friendlyPdfError(err).message || "Save failed.", "error");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }, [bytes, pristine, authorize, buildOutput, supabase, source, docName, numPages, history, toast, tier]);
