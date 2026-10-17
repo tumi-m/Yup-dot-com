@@ -4,6 +4,7 @@ import { resolveTier } from "@/lib/tier";
 import { aiRemaining, claimAiAnswer, usageSubject } from "@/lib/usage";
 import { ollamaConfig, streamChat, userMessage, OllamaError, type ChatMessage } from "@/lib/ai/ollama";
 import { fitDocument } from "@/lib/ai/document";
+import { refuseCrossSite } from "@/lib/cross-site";
 
 /**
  * Chat with / summarize a PDF. Open to guests with a small daily allowance,
@@ -57,6 +58,8 @@ function json(status: number, message: string) {
 }
 
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const config = ollamaConfig();
   if (!config) {
     console.error("AI assistant disabled: set OLLAMA_API_KEY (Ollama Cloud) or OLLAMA_HOST (your own server).");

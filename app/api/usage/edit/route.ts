@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { resolveTier } from "@/lib/tier";
 import { claimEdit, usageSubject } from "@/lib/usage";
+import { refuseCrossSite } from "@/lib/cross-site";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,8 @@ const bodySchema = z.object({
  * also says whether the file gets the "Made with PDF Wizard" mark.
  */
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request." }, { status: 400 });
   const { user, tier } = await resolveTier();

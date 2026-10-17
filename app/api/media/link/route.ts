@@ -4,6 +4,7 @@ import { sealToken, signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig }
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
 import { MEDIA_BUCKET, newGrantRef, type GrantRef } from "@/lib/media-refund";
+import { refuseCrossSite } from "@/lib/cross-site";
 import { consumeDaily, usageSubject } from "@/lib/usage";
 import { directFilename, DirectResolveError, failureMessage, grantHeaders, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
 import { audioSourceVariant, pickXVariant, variantQuality } from "@/lib/x-video";
@@ -31,6 +32,8 @@ const bodySchema = z.object({
  * reference, so a download that fails is given back (lib/media-refund.ts).
  */
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request." }, { status: 400 });
   const media = parseMediaUrl(parsed.data.url);

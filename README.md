@@ -308,6 +308,10 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   every redirect. X download links
   are signed with their own key, expire, and are refunded only if they never
   sent the file.
+- **Cross-site requests.** Routes that spend an allowance or change an
+  account refuse requests from other sites' pages (`Sec-Fetch-Site`,
+  `Origin`) and bodies that aren't JSON (`lib/cross-site.ts`), so another
+  site can't use up a guest's free edit, AI answers or downloads.
 - **Untrusted files** are parsed in the browser; PowerPoint text is sanitised
   before it is shown as HTML.
 - **Headers.** HSTS, `nosniff`, `X-Frame-Options`, a Referrer and Permissions
