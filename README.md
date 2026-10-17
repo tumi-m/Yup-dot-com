@@ -566,3 +566,8 @@ Paystack accounts in South Africa charge in ZAR only.
 The webhook handles `charge.success`, `subscription.create`,
 `subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
 `invoice.update`. Each delivery is applied once (`billing_events` records them).
+
+## Third-party licences
+
+The open-source libraries the app ships to browsers, with their licences and
+sources, are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
