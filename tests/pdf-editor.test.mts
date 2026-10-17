@@ -29,5 +29,11 @@ check("no max length when the field has none", detected.find((f) => f.name === "
 const long = await fillFormFields(formBytes, { zip: "123456" });
 check("a value over max length keeps what fits", (await textOf(long, "zip")) === "12345", await textOf(long, "zip"));
 
+// Multi-line fields
+check("multi-line is detected", detected.find((f) => f.name === "notes")?.multiline === true);
+check("single-line is not", detected.find((f) => f.name === "zip")?.multiline === false);
+const lines = await fillFormFields(formBytes, { notes: "Line 1\nLine 2" });
+check("line breaks are kept", (await textOf(lines, "notes")) === "Line 1\nLine 2", await textOf(lines, "notes"));
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

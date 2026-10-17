@@ -300,6 +300,22 @@ function FormFieldOverlay({
     );
   }
 
+  if (field.multiline) {
+    return (
+      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+        <textarea
+          aria-label={field.name}
+          value={value}
+          maxLength={field.maxLength}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-full w-full resize-none rounded-sm px-1 leading-tight ${shared}`}
+          data-fit-text
+          style={{ fontSize: Math.max(8, Math.min(12, field.height * 0.55) * scale) }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={style} onPointerDown={(e) => e.stopPropagation()}>
       <input

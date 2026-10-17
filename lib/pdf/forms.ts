@@ -47,6 +47,8 @@ export interface DetectedField {
   exportValue?: string;
   /** Text fields: the most characters the field takes. */
   maxLength?: number;
+  /** Text fields that take several lines. */
+  multiline?: boolean;
   readOnly: boolean;
 }
 
@@ -103,11 +105,13 @@ export async function detectFormFields(
     let value = "";
     let options: string[] = [];
     let maxLength: number | undefined;
+    let multiline = false;
 
     try {
       if (field instanceof PDFTextField) {
         value = field.getText() ?? "";
         maxLength = field.getMaxLength();
+        multiline = field.isMultiline();
       } else if (field instanceof PDFCheckBox) value = field.isChecked() ? "true" : "";
       else if (field instanceof PDFRadioGroup) {
         value = field.getSelected() ?? "";
@@ -159,6 +163,7 @@ export async function detectFormFields(
         options,
         exportValue,
         maxLength,
+        multiline,
         readOnly,
       });
     });
