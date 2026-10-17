@@ -10,8 +10,9 @@ const bodySchema = z.object({ token: z.string().min(10).max(4000) });
 
 /**
  * YouTube: gives a download back when its worker job failed, was cancelled,
- * or never started. The browser sends the grant it was given; the worker's
- * own record of that grant decides, so a finished download can't be refunded.
+ * or never started. The browser sends the grant it was given; the worker voids
+ * it and its own record of it decides, so a finished download can't be
+ * refunded and a refunded grant can't start one (lib/media-refund.ts).
  */
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));

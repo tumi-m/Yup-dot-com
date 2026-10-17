@@ -29,8 +29,11 @@ YouTube and X hosts. A tampered token (say, 720p edited to 1080p) is rejected,
 and each token starts one job.
 
 A download that fails or is cancelled (`DELETE /jobs/<id>`) doesn't count
-against the visitor's quota: the web app asks the worker's `GET /refs/<grant>`
-how the job ended before giving the download back.
+against the visitor's quota: the web app voids the grant at the worker's
+`POST /refs/<grant>/void`, which says how its job ended, before giving the
+download back. A grant given back can't start a job afterwards. Redeploy the
+worker along with the web app: an older worker can't void grants, so nothing
+is given back.
 
 ## Deploy
 

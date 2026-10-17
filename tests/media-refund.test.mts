@@ -53,9 +53,9 @@ const check = (name: string, ok: boolean, extra = "") => {
 // The worker decides YouTube refunds.
 {
   const fake = (status: number, body: unknown, throws = false) => {
-    const calls: { url: string; auth: string | null }[] = [];
+    const calls: { url: string; method?: string; auth: string | null }[] = [];
     const f = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      calls.push({ url, method: init?.method, auth: new Headers(init?.headers).get("authorization") });
       if (throws) throw new TypeError("fetch failed");
       return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
     }) as typeof fetch;
@@ -67,11 +67,13 @@ const check = (name: string, ok: boolean, extra = "") => {
   };
   const failed = await ask(200, { used: true, status: "error", error: "Cancelled." });
   check("job failed or cancelled → refund", failed.v === "failed" && REFUNDABLE.includes(failed.v));
-  check("asks /refs/<ref> with the shared secret", failed.calls[0].url === "https://w.test/refs/ref-12345678" && failed.calls[0].auth === "Bearer sek");
+  check("voids the grant at /refs/<ref>/void with the shared secret",
+    failed.calls[0].url === "https://w.test/refs/ref-12345678/void" && failed.calls[0].method === "POST" && failed.calls[0].auth === "Bearer sek");
   check("job ready → no refund", (await ask(200, { used: true, status: "ready" })).v === "used");
   check("job still running → no refund", (await ask(200, { used: true, status: "working" })).v === "used");
-  check("grant never used → refund", (await ask(404, { used: false })).v === "unused");
-  check("old worker without /refs → no refund", (await ask(404, { error: "Not found." })).v === "unknown");
+  check("grant never used (now void) → refund", (await ask(200, { used: false })).v === "unused");
+  check("old worker that can't void grants → no refund",
+    (await ask(404, { error: "Not found." })).v === "unknown" && (await ask(404, { used: false })).v === "unknown");
   check("worker down → refund", (await ask(0, null, true)).v === "unreachable");
   check("sleeping host (HTML) → refund", (await ask(503, "<html>waking up</html>")).v === "unreachable");
   check("worker rejects our secret (so it rejected the job too) → refund", (await ask(401, { error: "Unauthorized." })).v === "unreachable");

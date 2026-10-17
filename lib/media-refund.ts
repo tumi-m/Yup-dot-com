@@ -8,8 +8,9 @@ import { periodStart, type UsageStore, type UsageWindow } from "./usage";
  * (`t`), and a random reference (`c`); a grant is refunded at most once.
  *
  * X: /api/media/file sees the failure itself (X refused the file, or the
- * stream broke). YouTube: the browser asks /api/media/refund, which checks
- * with the worker's record of the grant (GET /refs/<c>) before refunding.
+ * stream broke). YouTube: the browser asks /api/media/refund, which voids
+ * the grant at the worker (POST /refs/<c>/void) and refunds by what the
+ * worker says became of it.
  */
 
 export const MEDIA_BUCKET = "media";
@@ -107,9 +108,11 @@ export async function refundUnserved(store: UsageStore, ref: GrantRef, now = Dat
 export type WorkerVerdict = "failed" | "unused" | "unreachable" | "used" | "unknown";
 
 /**
- * What the worker knows about a grant. "failed", "unused" and "unreachable"
- * allow a refund: the visitor got no file. ("unreachable": a worker that
- * can't answer can't have just served one either.)
+ * Voids a grant at the worker, so it can no longer start a job, and returns
+ * what the worker knows about it. "failed", "unused" and "unreachable" allow
+ * a refund: the visitor got no file. ("unreachable": a worker that can't
+ * answer can't have just served one either.) A worker too old to void
+ * grants answers 404: "unknown", since the grant would still work there.
  */
 export async function askWorker(
   workerUrl: string,
@@ -119,7 +122,8 @@ export async function askWorker(
 ): Promise<WorkerVerdict> {
   let res: Response;
   try {
-    res = await fetcher(`${workerUrl}/refs/${encodeURIComponent(ref)}`, {
+    res = await fetcher(`${workerUrl}/refs/${encodeURIComponent(ref)}/void`, {
+      method: "POST",
       headers: { Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(10_000),
       cache: "no-store",
@@ -131,9 +135,9 @@ export async function askWorker(
   // A sleeping host's HTML page, or a worker that rejects our secret (so it
   // rejected the grant too): no job ran.
   if (!body || res.status === 401) return "unreachable";
-  if (res.status === 404) return body.used === false ? "unused" : "unknown";
-  if (res.ok && body.used === true) return body.status === "error" ? "failed" : "used";
-  return "unknown";
+  if (!res.ok || typeof body.used !== "boolean") return "unknown";
+  if (!body.used) return "unused";
+  return body.status === "error" ? "failed" : "used";
 }
 
 export const REFUNDABLE: readonly WorkerVerdict[] = ["failed", "unused", "unreachable"];
