@@ -11,7 +11,7 @@ import {
 } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { EASE, STAGGER, staggerDelay } from "./tokens";
+import { EASE, STAGGER_HERO, staggerDelay } from "./tokens";
 
 export * from "./tokens";
 
@@ -103,8 +103,9 @@ export function Reveal({
 }
 
 /**
- * Headline that rises in word by word. CSS keyframes, so the server-rendered
- * text paints before hydration and stays put with reduced motion.
+ * Headline that rises in word by word out of a mask. CSS keyframes on
+ * transform only, so the server-rendered text paints (and counts as painted)
+ * from the first frame, and stays put with reduced motion.
  */
 export function WordReveal({
   text,
@@ -122,8 +123,8 @@ export function WordReveal({
       {words.map((word, i) => (
         <span key={i} className="inline-block overflow-hidden pb-[0.12em] align-bottom" aria-hidden>
           <span
-            className="inline-block motion-safe:animate-rise-word"
-            style={{ animationDelay: `${delay + i * STAGGER * 1.5}s` }}
+            className="inline-block motion-safe:animate-rise-mask"
+            style={{ animationDelay: `${delay + i * STAGGER_HERO}s` }}
           >
             {word}
             {i < words.length - 1 ? " " : ""}

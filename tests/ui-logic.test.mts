@@ -1,4 +1,24 @@
-import { staggerDelay, STAGGER, STAGGER_CAP, DUR } from "../components/motion/tokens.ts";
+import {
+  cssEase,
+  cssMs,
+  DUR,
+  EASE_IN,
+  EASE_IN_OUT,
+  EASE_OUT,
+  ENTER,
+  EXIT,
+  POP_IN,
+  progressTranslate,
+  SHAKE_T,
+  SPRING,
+  SPRING_LAYOUT,
+  SPRING_POP,
+  STAGGER,
+  STAGGER_CAP,
+  staggerDelay,
+  SUCCESS,
+  SUCCESS_CARD_T,
+} from "../components/motion/tokens.ts";
 import {
   filterTools,
   groupOf,
@@ -25,9 +45,28 @@ const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 check("stagger starts at 0", staggerDelay(0) === 0);
 check("stagger steps by STAGGER", near(staggerDelay(3), 3 * STAGGER));
 check("stagger caps at STAGGER_CAP", near(staggerDelay(40), STAGGER_CAP * STAGGER) && staggerDelay(40) === staggerDelay(STAGGER_CAP));
-check("stagger custom step", near(staggerDelay(20, 0.025), 12 * 0.025));
+check("stagger custom step", near(staggerDelay(20, 0.025), STAGGER_CAP * 0.025));
 check("stagger ignores negatives", staggerDelay(-2) === 0);
 check("exits are never slower than entrances", DUR.fast <= DUR.base && DUR.tap < DUR.fast);
+check("duration scale", DUR.tap === 0.1 && DUR.fast === 0.15 && DUR.base === 0.24 && DUR.slow === 0.4 && DUR.hero === 0.6, DUR);
+check("a list's whole stagger fits in one entrance", staggerDelay(1000) <= DUR.base + 1e-9, staggerDelay(1000));
+check("exits are at most 70% of their entrance", EXIT.transition.duration <= ENTER.animate.transition.duration * 0.7 && POP_IN.exit.transition.duration <= POP_IN.animate.transition.duration * 0.7);
+check("a wait-mode swap (exit then enter) costs at most 0.4s", EXIT.transition.duration + ENTER.animate.transition.duration <= 0.4);
+check("exits accelerate away (ease-in, no lingering)", EXIT.transition.ease === EASE_IN && EASE_IN[0] > 0 && EASE_IN[2] === 1 && EASE_IN[3] === 1);
+check("entrances decelerate", ENTER.animate.transition.ease === EASE_OUT && EASE_OUT[1] === 1);
+check("on-screen moves ease both ways", EASE_IN_OUT[1] === 0 && EASE_IN_OUT[3] === 1);
+check("press and layout springs settle without bounce", SPRING.damping / (2 * Math.sqrt(SPRING.stiffness)) > 0.7 && SPRING_LAYOUT.damping / (2 * Math.sqrt(SPRING_LAYOUT.stiffness)) > 0.85);
+check("the pop spring overshoots a little", SPRING_POP.damping / (2 * Math.sqrt(SPRING_POP.stiffness)) > 0.5 && SPRING_POP.damping / (2 * Math.sqrt(SPRING_POP.stiffness)) < 0.7);
+check("error shake stays within 0.3-0.4s", SHAKE_T.duration >= 0.3 && SHAKE_T.duration <= 0.4 && SHAKE_T.ease === EASE_IN_OUT);
+check("success: Download is interactive by 0.45s", SUCCESS.actions + DUR.base <= 0.45);
+check("success: whole stagger under 0.5s before the upsell", Math.max(SUCCESS.title, SUCCESS.check, SUCCESS.stats, SUCCESS.actions, SUCCESS.next) < 0.5 && SUCCESS.upsell >= 0.6);
+check("success card is a slow, page-level change", SUCCESS_CARD_T.duration === DUR.slow && SUCCESS_CARD_T.opacity.duration === DUR.base);
+check("css ease", cssEase(EASE_OUT) === "cubic-bezier(0.22, 1, 0.36, 1)" && cssEase(EASE_IN) === "cubic-bezier(0.4, 0, 1, 1)");
+check("css ms", cssMs(DUR.base) === "240ms" && cssMs(DUR.fast) === "150ms" && cssMs(0.1) === "100ms");
+check("progress: full bar at 1", progressTranslate(1) === "translateX(0.00%)");
+check("progress: half way", progressTranslate(0.5) === "translateX(-50.00%)");
+check("progress: never quite empty", progressTranslate(0) === "translateX(-96.00%)" && progressTranslate(-1) === progressTranslate(0));
+check("progress: clamps and survives NaN", progressTranslate(7) === progressTranslate(1) && progressTranslate(NaN) === progressTranslate(0));
 
 // Category pills: Optimize folds into Organize
 check("8 pills, no optimize", TOOL_PILLS.length === 8 && !TOOL_PILLS.includes("optimize" as never), TOOL_PILLS);
