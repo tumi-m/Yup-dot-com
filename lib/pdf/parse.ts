@@ -583,14 +583,16 @@ export function extractTables(doc: ParsedDocument): TableBlock[] {
   return doc.blocks.filter((b): b is TableBlock => b.type === "table");
 }
 
+function csvCell(cell: string): string {
+  // Spreadsheets run cells starting with = + - @ as formulas. Plain negative
+  // numbers (and a lone "-") are safe and stay as they are.
+  const safe = /^[=+\-@\t\r]/.test(cell) && !/^-([\d.,]+%?)?$/.test(cell) ? `'${cell}` : cell;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** UTF-8 CSV with a byte-order mark, so Excel shows accented text correctly. */
 export function tableToCsv(table: TableBlock): string {
-  return table.rows
-    .map((row) =>
-      row
-        .map((cell) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell))
-        .join(",")
-    )
-    .join("\n");
+  return "\uFEFF" + table.rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 
 export interface Chunk {
