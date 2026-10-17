@@ -172,11 +172,18 @@ export function resizeDraft(
 ): Annotation {
   if (draft.type === "draw") {
     const points = [...draft.points, { x: x - draft.x, y: y - draft.y }];
+    // Keep the box around the whole stroke, also when it goes up or left of
+    // where it started, so the stroke can be selected and moved.
+    const minX = Math.min(...points.map((p) => p.x));
+    const minY = Math.min(...points.map((p) => p.y));
+    const shifted = points.map((p) => ({ x: p.x - minX, y: p.y - minY }));
     return {
       ...draft,
-      points,
-      width: Math.max(1, ...points.map((p) => p.x)),
-      height: Math.max(1, ...points.map((p) => p.y)),
+      x: draft.x + minX,
+      y: draft.y + minY,
+      points: shifted,
+      width: Math.max(1, ...shifted.map((p) => p.x)),
+      height: Math.max(1, ...shifted.map((p) => p.y)),
     };
   }
 

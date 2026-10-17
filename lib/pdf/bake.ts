@@ -257,11 +257,15 @@ export async function bakeAnnotations(
             const embed = ann.dataUrl.startsWith("data:image/jpeg")
               ? await doc.embedJpg(ann.dataUrl)
               : await doc.embedPng(ann.dataUrl);
+            // Fit inside the box, centred, as the editor shows it (object-contain).
+            const fit = Math.min(ann.width / embed.width, ann.height / embed.height);
+            const width = embed.width * fit;
+            const height = embed.height * fit;
             page.drawImage(embed, {
-              x: ann.x,
-              y: bottom,
-              width: ann.width,
-              height: ann.height,
+              x: ann.x + (ann.width - width) / 2,
+              y: bottom + (ann.height - height) / 2,
+              width,
+              height,
             });
           } catch {
             // Skip an unreadable image rather than failing the whole export.

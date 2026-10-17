@@ -409,11 +409,8 @@ function Content({
         );
       }
       if (ann.field === "radio") {
-        return (
-          <div className={`${base} flex items-center justify-center rounded-full`}>
-            {ann.value ? "●" : ""}
-          </div>
-        );
+        // Its value is what the button stands for, not whether it's chosen.
+        return <div className={`${base} rounded-full`} />;
       }
       if (ann.field === "dropdown") {
         return (

@@ -93,11 +93,17 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
   }
 
   async function blankDocument() {
+    setError(null);
     setBusy(true);
-    const { PDFDocument } = await import("pdf-lib");
-    const doc = await PDFDocument.create();
-    doc.addPage([595.28, 841.89]); // A4
-    await openLocal(await doc.save(), "Untitled.pdf", 1);
+    try {
+      const { PDFDocument } = await import("pdf-lib");
+      const doc = await PDFDocument.create();
+      doc.addPage([595.28, 841.89]); // A4
+      await openLocal(await doc.save(), "Untitled.pdf", 1);
+    } catch {
+      setError("Couldn't store the document on this device. Free up some space or allow site storage, then try again.");
+      setBusy(false);
+    }
   }
 
   // A file handed over from the homepage or another tool opens immediately.

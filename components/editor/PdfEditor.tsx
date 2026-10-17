@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { tryCreateClient } from "@/lib/supabase/client";
 import { getLocalDoc, saveLocalDoc } from "@/lib/local-store";
-import type { Tier } from "@/lib/limits";
+import { limitsFor, type Tier } from "@/lib/limits";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { documentFingerprint, EditCheckError, requestEdit } from "@/lib/edit-usage";
 import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
@@ -71,6 +71,10 @@ export type EditorSource =
   | { kind: "cloud"; doc: DocumentRecord }
   | { kind: "local"; id: string };
 
+/** Zoom limits. Low enough to fit a poster-size page on a phone. */
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 3;
+
 /** Phone-width layout, where side panels become overlays. */
 const narrow = () => window.matchMedia("(max-width: 767px)").matches;
 
@@ -85,8 +89,10 @@ export function PdfEditor({
   const [docName, setDocName] = useState(source.kind === "cloud" ? source.doc.name : "Document");
   const [upsellOpen, setUpsellOpen] = useState(false);
   const [editsOpen, setEditsOpen] = useState(false);
-  /** The bytes last loaded or saved, and the fingerprint they were saved under. */
-  const savedRef = useRef<{ bytes: Uint8Array | null; fp: string | null }>({ bytes: null, fp: null });
+  /** The bytes last loaded or saved. */
+  const savedRef = useRef<{ bytes: Uint8Array | null }>({ bytes: null });
+  /** The file last built, for which edits, and the fingerprint it was claimed under. */
+  const builtRef = useRef<{ key: string; out: Uint8Array; fp: string; watermark: boolean } | null>(null);
   const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -101,6 +107,8 @@ export function PdfEditor({
   const [scale, setScale] = useState(1.3);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Set while a page operation, save or download runs; Ctrl+S must not start another. */
+  const busyRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
@@ -130,7 +138,7 @@ export function PdfEditor({
           return;
         }
         setDocName(local.name.replace(/\.pdf$/i, ""));
-        savedRef.current = { bytes: local.bytes, fp: null };
+        savedRef.current = { bytes: local.bytes };
         setBytes(local.bytes);
         return;
       }
@@ -147,7 +155,7 @@ export function PdfEditor({
         return;
       }
       const loadedBytes = new Uint8Array(await data.arrayBuffer());
-      savedRef.current = { bytes: loadedBytes, fp: null };
+      savedRef.current = { bytes: loadedBytes };
       setBytes(loadedBytes);
     })();
     return () => {
@@ -178,7 +186,7 @@ export function PdfEditor({
             (wide && showSidebarRef.current ? 176 : 0) -
             (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
           if (available > 0 && vp.width * 1.3 > available) {
-            setScale(Math.max(0.4, Math.min(1.3, available / vp.width)));
+            setScale(Math.max(MIN_ZOOM, Math.min(1.3, available / vp.width)));
           }
         }
         setLoaded(local);
@@ -249,7 +257,8 @@ export function PdfEditor({
       transform: (input: Uint8Array) => Promise<Uint8Array>,
       message: string
     ) => {
-      if (!bytes) return;
+      if (!bytes || busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         // Bake pending edits — including typed form values — first, or the
@@ -265,6 +274,7 @@ export function PdfEditor({
       } catch (err) {
         toast(friendlyPdfError(err).message || "Operation failed.", "error");
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
@@ -312,30 +322,8 @@ export function PdfEditor({
 
   // ---- export ----
   const pristine = !!bytes && bytes === savedRef.current.bytes && !annotations.length && !Object.keys(formValues).length;
-
-  /**
-   * One edit a day on Free: asks the server right before building a file.
-   * The same unchanged document again today is free, and the answer says
-   * whether the file gets the "Made with PDF Wizard" mark.
-   */
-  const authorize = useCallback(async () => {
-    if (!bytes) return null;
-    const fp =
-      pristine && savedRef.current.fp
-        ? savedRef.current.fp
-        : await documentFingerprint(bytes, JSON.stringify(annotations), JSON.stringify(formValues));
-    try {
-      const grant = await requestEdit(fp);
-      if (!grant.allowed) {
-        setEditsOpen(true);
-        return null;
-      }
-      return { fp, watermark: grant.watermark };
-    } catch (err) {
-      toast(err instanceof EditCheckError ? err.message : "Couldn't save right now. Try again.", "error");
-      return null;
-    }
-  }, [bytes, pristine, annotations, formValues, toast]);
+  /** Page operations change the bytes, so they count as unsaved too. */
+  const dirty = !!bytes && !pristine;
 
   const buildOutput = useCallback(
     async (watermark: boolean) => {
@@ -349,14 +337,49 @@ export function PdfEditor({
     [bytes, annotations, formValues]
   );
 
+  /**
+   * One edit a day on Free: builds the file, then asks the server for it.
+   * The claim is the fingerprint of the file itself (of the document, when
+   * nothing changed), so downloading it again, saving it, or reopening the
+   * saved copy later is the same edit. The answer says whether the file gets
+   * the "Made with PDF Wizard" mark; it is rebuilt if the plan has changed.
+   */
+  const buildAuthorized = useCallback(async () => {
+    if (!bytes) return null;
+    const key = await documentFingerprint(bytes, JSON.stringify(annotations), JSON.stringify(formValues));
+    let built = builtRef.current?.key === key ? builtRef.current : null;
+    if (!built) {
+      const watermark = limitsFor(tier).watermark;
+      const out = await buildOutput(watermark);
+      built = { key, out, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
+    }
+    let grant;
+    try {
+      grant = await requestEdit(built.fp);
+    } catch (err) {
+      toast(err instanceof EditCheckError ? err.message : "Couldn't save right now. Try again.", "error");
+      return null;
+    }
+    if (!grant.allowed) {
+      setEditsOpen(true);
+      return null;
+    }
+    if (grant.watermark !== built.watermark) {
+      built = { ...built, watermark: grant.watermark, out: await buildOutput(grant.watermark) };
+    }
+    builtRef.current = built;
+    return built;
+  }, [bytes, pristine, annotations, formValues, buildOutput, tier, toast]);
+
   async function handleDownload() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
-      const grant = await authorize();
-      if (!grant) return;
-      const out = await buildOutput(grant.watermark);
+      const built = await buildAuthorized();
+      if (!built) return;
       downloadBlob(
-        new Blob([out.slice() as unknown as BlobPart], { type: "application/pdf" }),
+        new Blob([built.out.slice() as unknown as BlobPart], { type: "application/pdf" }),
         `${docName}.pdf`
       );
       trackToolUsed();
@@ -364,21 +387,23 @@ export function PdfEditor({
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   const handleSave = useCallback(async () => {
-    if (!bytes) return;
+    if (!bytes || busyRef.current) return;
     if (pristine) {
       toast(source.kind === "local" ? "Saved on this device." : "Saved to your library.", "success");
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     try {
-      const grant = await authorize();
-      if (!grant) return;
-      const out = await buildOutput(grant.watermark);
+      const built = await buildAuthorized();
+      if (!built) return;
+      const out = built.out;
       const blob = new Blob([out.slice() as unknown as BlobPart], {
         type: "application/pdf",
       });
@@ -410,8 +435,8 @@ export function PdfEditor({
       }
 
       const saved = new Uint8Array(out);
-      // Downloading what was just saved is the same edit.
-      savedRef.current = { bytes: saved, fp: grant.fp };
+      // Downloading what was just saved, now or after reopening it, is the same edit.
+      savedRef.current = { bytes: saved };
       history.reset([]);
       setSelectedId(null);
       setFormValues({});
@@ -430,9 +455,10 @@ export function PdfEditor({
     } catch (err) {
       toast(friendlyPdfError(err).message || "Save failed.", "error");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-  }, [bytes, pristine, authorize, buildOutput, supabase, source, docName, numPages, history, toast, tier]);
+  }, [bytes, pristine, buildAuthorized, supabase, source, docName, numPages, history, toast, tier]);
 
   // ---- tool switching side effects ----
   const handleToolChange = (next: ToolId) => {
@@ -455,7 +481,7 @@ export function PdfEditor({
     const vp = await loaded.getPageViewport(page + 1, 1);
     const available =
       canvasArea.current.clientWidth - (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
-    setScale(Math.max(0.4, Math.min(3, available / vp.baseWidth)));
+    setScale(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, available / vp.baseWidth)));
   }, [loaded, page]);
 
   // Phones: start without the page panel. The page panel and the properties
@@ -525,17 +551,32 @@ export function PdfEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, selectedId, deleteAnnotation, handleSave, placementImage]);
 
-  const dirty = annotations.length > 0 || Object.keys(formValues).length > 0;
-
-  // Don't let a stray tab close throw away unsaved edits.
+  // Don't let a stray tab close or link throw away unsaved edits.
   useEffect(() => {
     if (!dirty) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
+    // In-app links navigate without unloading the page, so ask here too.
+    const onLink = (e: MouseEvent) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+      const to = new URL(a.href, window.location.href);
+      if (to.origin !== window.location.origin) return; // a full navigation: beforeunload asks
+      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
+      if (!window.confirm("Discard changes and leave?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
+    window.addEventListener("click", onLink, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      window.removeEventListener("click", onLink, true);
+    };
   }, [dirty]);
 
   return (
@@ -729,7 +770,8 @@ export function PdfEditor({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setScale((s) => Math.max(0.4, +(s - 0.2).toFixed(2)))}
+                  onClick={() => setScale((s) => Math.max(MIN_ZOOM, +(s - 0.2).toFixed(2)))}
+                  disabled={scale <= MIN_ZOOM}
                   aria-label="Zoom out"
                 >
                   <ZoomOut />
@@ -740,7 +782,8 @@ export function PdfEditor({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setScale((s) => Math.min(3, +(s + 0.2).toFixed(2)))}
+                  onClick={() => setScale((s) => Math.min(MAX_ZOOM, +(s + 0.2).toFixed(2)))}
+                  disabled={scale >= MAX_ZOOM}
                   aria-label="Zoom in"
                 >
                   <ZoomIn />
