@@ -2,6 +2,7 @@ import { z } from "zod";
 import { siteUrl } from "@/lib/site";
 import { payOnceBlock, subscribeBlock } from "@/lib/billing-ui";
 import { billingContext, json } from "@/lib/billing-route";
+import { refuseCrossSite } from "@/lib/cross-site";
 import { PLANS, prepaidPrice, toSubunit } from "@/lib/plans";
 import {
   ONCE_OFF_CHANNELS,
@@ -29,6 +30,8 @@ const bodySchema = z.discriminatedUnion("mode", [
  * African channel. Returns the hosted checkout URL.
  */
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const ctx = await billingContext();
   if (ctx instanceof Response) return ctx;
   const { account, paystack } = ctx;

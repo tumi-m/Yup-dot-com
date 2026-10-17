@@ -1,8 +1,8 @@
 /**
  * Media download refunds (lib/media-refund.ts): a grant is given back once,
  * a refunded grant is dead, and YouTube refunds follow the worker's record of
- * the grant (failed, never used, or worker unreachable), never a download
- * that finished or is still running.
+ * the grant (failed, or never used while the worker was up), never a
+ * download that finished, is still running, or that the worker can't vouch for.
  */
 import {
   askWorker,
@@ -19,6 +19,7 @@ import { signingSecret, signToken, verifyToken } from "../lib/media-server.ts";
 import { consumeDaily, memoryUsageStore } from "../lib/usage.ts";
 
 const results: boolean[] = [];
+const now = () => Math.floor(Date.now() / 1000);
 const check = (name: string, ok: boolean, extra = "") => {
   results.push(ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && extra ? "  — " + extra : ""}`);
@@ -28,8 +29,9 @@ const check = (name: string, ok: boolean, extra = "") => {
 {
   const c = newGrantRef();
   check("new grant refs are random and URL-safe", /^[\w-]{16}$/.test(c) && c !== newGrantRef(), c);
-  check("grantRef reads s and c", JSON.stringify(grantRef({ s: "ip:abc", c, u: "x" })) === JSON.stringify({ s: "ip:abc", c }));
-  check("grantRef rejects old or odd grants", grantRef({ u: "x" }) === null && grantRef({ s: "ip:a", c: "../../x" }) === null && grantRef(null) === null);
+  check("grantRef reads s, c and t", JSON.stringify(grantRef({ s: "ip:abc", c, t: 1700000000, u: "x" })) === JSON.stringify({ s: "ip:abc", c, t: 1700000000 }));
+  check("grantRef rejects old or odd grants",
+    grantRef({ u: "x" }) === null && grantRef({ s: "ip:a", c: "../../x", t: 1 }) === null && grantRef({ s: "ip:a", c }) === null && grantRef(null) === null);
 }
 
 // Refund once, then the grant is dead.
@@ -38,41 +40,51 @@ const check = (name: string, ok: boolean, extra = "") => {
   const subject = "ip:guest";
   for (let i = 0; i < 5; i++) await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   check("guest has used all 5", (await consumeDaily(subject, MEDIA_BUCKET, 5, store)) === -1);
-  const ref = { s: subject, c: newGrantRef() };
+  const ref = { s: subject, c: newGrantRef(), t: now() };
   check("not refunded yet", !(await wasRefunded(store, ref)));
   check("first refund gives the download back", (await refundGrant(store, ref)) === true && (await store.count(subject, MEDIA_BUCKET, "day")) === 4);
   check("second refund of the same grant does nothing", (await refundGrant(store, ref)) === false && (await store.count(subject, MEDIA_BUCKET, "day")) === 4);
   check("refunded grant is marked dead", await wasRefunded(store, ref));
   check("the guest can download again", (await consumeDaily(subject, MEDIA_BUCKET, 5, store)) === 0);
-  const other = { s: "ip:someone-else", c: ref.c };
+  const other = { ...ref, s: "ip:someone-else" };
   check("refund bookkeeping is per subject", !(await wasRefunded(store, other)));
 }
 
 // The worker decides YouTube refunds.
 {
   const fake = (status: number, body: unknown, throws = false) => {
-    const calls: { url: string; auth: string | null }[] = [];
+    const calls: { url: string; method?: string; auth: string | null }[] = [];
     const f = (async (url: string, init?: RequestInit) => {
-      calls.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      calls.push({ url, method: init?.method, auth: new Headers(init?.headers).get("authorization") });
       if (throws) throw new TypeError("fetch failed");
       return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
     }) as typeof fetch;
     return { f, calls };
   };
+  // The grant was made at t=1000; the worker started before it, or after.
   const ask = (status: number, body: unknown, throws = false) => {
     const x = fake(status, body, throws);
-    return askWorker("https://w.test", "sek", "ref-12345678", x.f).then((v) => ({ v, calls: x.calls }));
+    return askWorker("https://w.test", "sek", { s: "ip:a", c: "ref-12345678", t: 1000 }, x.f).then((v) => ({ v, calls: x.calls }));
   };
-  const failed = await ask(200, { used: true, status: "error", error: "Cancelled." });
+  const failed = await ask(200, { used: true, status: "error", error: "Cancelled.", since: 900 });
   check("job failed or cancelled → refund", failed.v === "failed" && REFUNDABLE.includes(failed.v));
-  check("asks /refs/<ref> with the shared secret", failed.calls[0].url === "https://w.test/refs/ref-12345678" && failed.calls[0].auth === "Bearer sek");
-  check("job ready → no refund", (await ask(200, { used: true, status: "ready" })).v === "used");
-  check("job still running → no refund", (await ask(200, { used: true, status: "working" })).v === "used");
-  check("grant never used → refund", (await ask(404, { used: false })).v === "unused");
-  check("old worker without /refs → no refund", (await ask(404, { error: "Not found." })).v === "unknown");
-  check("worker down → refund", (await ask(0, null, true)).v === "unreachable");
-  check("sleeping host (HTML) → refund", (await ask(503, "<html>waking up</html>")).v === "unreachable");
-  check("worker rejects our secret (so it rejected the job too) → refund", (await ask(401, { error: "Unauthorized." })).v === "unreachable");
+  check("voids the grant at /refs/<ref>/void with the shared secret",
+    failed.calls[0].url === "https://w.test/refs/ref-12345678/void" && failed.calls[0].method === "POST" && failed.calls[0].auth === "Bearer sek");
+  check("job ready → no refund", (await ask(200, { used: true, status: "ready", since: 900 })).v === "used");
+  check("job still running → no refund", (await ask(200, { used: true, status: "working", since: 900 })).v === "used");
+  check("grant never used (now void) → refund", (await ask(200, { used: false, since: 900 })).v === "unused");
+  // A worker that restarted after the grant was made may have run it and forgotten.
+  const restarted = await ask(200, { used: false, since: 1100 });
+  check("worker restarted since the grant → no refund", restarted.v === "unknown" && !REFUNDABLE.includes(restarted.v));
+  check("worker that doesn't say when it started → no refund", (await ask(200, { used: false })).v === "unknown");
+  check("old worker that can't void grants → no refund",
+    (await ask(404, { error: "Not found." })).v === "unknown" && (await ask(404, { used: false })).v === "unknown");
+  // It may have run the job before it went quiet.
+  const down = await ask(0, null, true);
+  check("worker down or too slow → no refund", down.v === "unreachable" && !REFUNDABLE.includes(down.v));
+  check("sleeping host (HTML) → no refund", !REFUNDABLE.includes((await ask(503, "<html>waking up</html>")).v));
+  const rejected = await ask(401, { error: "Unauthorized." });
+  check("worker rejects our secret (so it rejected the job too) → refund", rejected.v === "rejected" && REFUNDABLE.includes(rejected.v));
   check("anything else → no refund", !REFUNDABLE.includes((await ask(500, { error: "x" })).v));
 }
 
@@ -83,21 +95,21 @@ const check = (name: string, ok: boolean, extra = "") => {
   const subject = "ip:attacker";
   const used = () => store.count(subject, MEDIA_BUCKET, "day");
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
-  const ref = { s: subject, c: newGrantRef() };
+  const ref = { s: subject, c: newGrantRef(), t: now() };
   const serve = await startServing(store, ref);
   check("first send of a grant", serve.ok && serve.first);
   check("a second send is not the first", (await startServing(store, ref)).first === false);
   check("no refund after the file was sent", (await refundUnserved(store, ref)) === false && (await used()) === 1);
   check("grant still usable after a refused refund", !(await wasRefunded(store, ref)));
 
-  const unsent = { s: subject, c: newGrantRef() };
+  const unsent = { s: subject, c: newGrantRef(), t: now() };
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   check("a grant that never sent is refunded", (await refundUnserved(store, unsent)) === true && (await used()) === 1);
   check("and can't send afterwards", (await startServing(store, unsent)).ok === false);
 
   // Race: the refund checks before the send marks, the send checks before
   // the refund lands. One of them must lose.
-  const raced = { s: subject, c: newGrantRef() };
+  const raced = { s: subject, c: newGrantRef(), t: now() };
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   const before = await used();
   let marked = false;

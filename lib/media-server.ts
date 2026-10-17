@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Server-only configuration and signing for video downloads.
@@ -82,6 +82,36 @@ export function verifyToken<T extends Record<string, unknown>>(token: string, se
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as T & { e?: number };
     if (typeof payload.e !== "number" || payload.e + graceSeconds < Date.now() / 1000) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+const sealKey = (secret: string) => createHmac("sha256", secret).update("pdf-wizard/sealed-token/v1").digest();
+
+/**
+ * Like signToken, but the payload is encrypted as well (AES-256-GCM), so only
+ * the server can read it. File links name the video's CDN address and the
+ * headers the CDN wants: a visitor who could read them would fetch the file
+ * straight from the CDN, and the grant would never be marked as sent.
+ */
+export function sealToken(payload: Record<string, unknown>, secret: string, ttlSeconds = 600): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", sealKey(secret), iv);
+  const json = JSON.stringify({ ...payload, e: Math.floor(Date.now() / 1000) + ttlSeconds });
+  const data = Buffer.concat([cipher.update(json), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), data]).toString("base64url");
+}
+
+export function openToken<T extends Record<string, unknown>>(token: string, secret: string): T | null {
+  try {
+    const raw = Buffer.from(token, "base64url");
+    if (raw.length <= 28) return null;
+    const decipher = createDecipheriv("aes-256-gcm", sealKey(secret), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    const payload = JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString()) as T & { e?: number };
+    if (!payload || typeof payload.e !== "number" || payload.e < Date.now() / 1000) return null;
     return payload;
   } catch {
     return null;

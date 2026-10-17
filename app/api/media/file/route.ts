@@ -1,4 +1,4 @@
-import { signingSecret, verifyToken } from "@/lib/media-server";
+import { openToken, signingSecret } from "@/lib/media-server";
 import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
 import { grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
@@ -11,14 +11,15 @@ export const maxDuration = 300;
  * so the browser saves it with a proper filename (a cross-origin link would
  * just play it) and the MP3 converter can read it without CORS.
  *
- * Only accepts URLs inside a token signed by /api/media/link, and only on
+ * Only accepts URLs inside a token sealed by /api/media/link, and only on
  * that platform's video CDN (lib/social/direct.ts), so it can't be used as an
- * open proxy. The token may carry the Cookie/Referer the CDN asked for.
+ * open proxy. The token may carry the Cookie/Referer the CDN asked for; it is
+ * encrypted, so the visitor can't skip this route and its bookkeeping.
  *
  * When X refuses the file or the stream breaks before the grant ever sent a
  * file, the download is given back to the visitor's daily allowance (once
  * per grant), and the grant is dead. Once a grant has sent a file, later
- * failures (say, a Range past the end) are not refunded.
+ * failures are not refunded, and a failed Range request never is.
  *
  * Redirects are followed by hand, and only to allowed hosts.
  */
@@ -37,7 +38,7 @@ function allowed(url: string, platform: DirectPlatform): boolean {
 
 async function handle(request: Request, method: "GET" | "HEAD") {
   const token = new URL(request.url).searchParams.get("t") ?? "";
-  const grant = verifyToken<{ u?: unknown; n?: unknown; p?: unknown; h?: unknown }>(token, signingSecret());
+  const grant = openToken<{ u?: unknown; n?: unknown; p?: unknown; h?: unknown }>(token, signingSecret());
   // Grants without a platform predate TikTok/Instagram and are X.
   const platform: DirectPlatform | null = grant ? (grant.p === undefined ? "x" : isDirectPlatform(String(grant.p)) ? (grant.p as DirectPlatform) : null) : null;
   if (!grant || !platform || typeof grant.u !== "string" || !allowed(grant.u, platform)) {
@@ -49,19 +50,21 @@ async function handle(request: Request, method: "GET" | "HEAD") {
   const expired = () =>
     Response.json({ error: "This download link expired. Start the download again." }, { status: 403 });
   if (ref && (await wasRefunded(store, ref).catch(() => false))) return expired();
+  const range = request.headers.get("range");
   let firstServe = false;
   /**
    * Gives the download back if this grant never sent its file, or (with
-   * `streamBroke`) if X broke off the first send of it.
+   * `streamBroke`) if X broke off the first send of it. Never for a Range
+   * request: the visitor picks the range (one past the end makes the CDN
+   * answer 416), so its failure says nothing about the file.
    */
   const giveBack = async (streamBroke = false): Promise<boolean> => {
-    if (!ref || method !== "GET") return false;
+    if (!ref || method !== "GET" || range) return false;
     if (streamBroke) return firstServe ? refundGrant(store, ref).catch(() => false) : false;
     return refundUnserved(store, ref).catch(() => false);
   };
 
   const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; PDFWizard/1.0)", ...grantHeaders(grant.h) };
-  const range = request.headers.get("range");
   if (range) headers.Range = range;
 
   let upstream: Response | null = null;

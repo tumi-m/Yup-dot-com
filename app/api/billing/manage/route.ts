@@ -1,11 +1,14 @@
 import { billingContext, json } from "@/lib/billing-route";
+import { refuseCrossSite } from "@/lib/cross-site";
 import { subscriptionActive } from "@/lib/billing";
 import { subscriptionManageLink } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
 
 /** Paystack's hosted page for updating the card or cancelling. */
-export async function POST() {
+export async function POST(request: Request) {
+  const refused = refuseCrossSite(request, { json: false });
+  if (refused) return refused;
   const ctx = await billingContext();
   if (ctx instanceof Response) return ctx;
   const { row } = ctx.account;

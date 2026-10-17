@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
-import { signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
+import { sealToken, signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
-import { MEDIA_BUCKET, newGrantRef } from "@/lib/media-refund";
+import { MEDIA_BUCKET, newGrantRef, type GrantRef } from "@/lib/media-refund";
+import { refuseCrossSite } from "@/lib/cross-site";
 import { consumeDaily, usageSubject } from "@/lib/usage";
 import { directFilename, DirectResolveError, failureMessage, grantHeaders, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
 import { audioSourceVariant, pickXVariant, variantQuality } from "@/lib/x-video";
@@ -23,13 +24,16 @@ const bodySchema = z.object({
  * browser can never raise its own quality.
  *
  * X, TikTok, Instagram: the token names one file on that platform's video
- * CDN (plus the headers the CDN wants), streamed by /api/media/file.
+ * CDN (plus the headers the CDN wants), streamed by /api/media/file. It is
+ * encrypted, so the file can only be had through that route.
  * YouTube: the token goes to the media worker, which verifies it itself.
  *
- * Each grant records who it was counted against and a random reference, so
- * a download that fails is given back (lib/media-refund.ts).
+ * Each grant records who it was counted against, when, and a random
+ * reference, so a download that fails is given back (lib/media-refund.ts).
  */
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request." }, { status: 400 });
   const media = parseMediaUrl(parsed.data.url);
@@ -54,7 +58,7 @@ export async function POST(request: Request) {
   }
 
   // Resolve (X) or check configuration (YouTube) before spending the quota.
-  let grant: (ref: { s: string; c: string }) => Record<string, unknown>;
+  let grant: (ref: GrantRef) => Record<string, unknown>;
   if (isDirectPlatform(media.platform)) {
     const platform = media.platform;
     let video;
@@ -84,7 +88,7 @@ export async function POST(request: Request) {
     grant = (ref) => ({
       mode: kind === "mp3" ? "convert" : "direct",
       href: `/api/media/file?t=${encodeURIComponent(
-        signToken(
+        sealToken(
           { u: variant.url, n: mp4Name, ...(platform === "x" ? {} : { p: platform, h: headers }), ...ref },
           signingSecret(),
           30 * 60
@@ -106,6 +110,7 @@ export async function POST(request: Request) {
   }
 
   const subject = usageSubject(request, user);
+  const made = Math.floor(Date.now() / 1000);
   const remaining = await consumeDaily(subject, MEDIA_BUCKET, limitsFor(tier).mediaDownloadsPerDay);
   if (remaining < 0) {
     const paid = tier === "pro" || tier === "team";
@@ -114,5 +119,5 @@ export async function POST(request: Request) {
       { status: 429 }
     );
   }
-  return Response.json({ ...grant({ s: subject, c: newGrantRef() }), remaining });
+  return Response.json({ ...grant({ s: subject, c: newGrantRef(), t: made }), remaining });
 }

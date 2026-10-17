@@ -233,9 +233,10 @@ try {
   const expired = await runJob(await signMediaToken({ u: MPD, k: "mp4", h: 720 }, SECRET, -5));
   check("expired token rejected as expired", expired.status === 401 && expired.body.code === "expired", JSON.stringify(expired.body));
 
-  // One grant, one job; /refs tells the web app whether a grant was used (for refunds).
+  // One grant, one job; /refs/<c>/void tells the web app whether a grant was
+  // used (for refunds), and voids an unused one so it can't start a job later.
   const refs = (c: string, auth = `Bearer ${SECRET}`) =>
-    fetch(`${W}/refs/${c}`, { headers: { Authorization: auth } }).then(async (r) => ({ status: r.status, body: await r.json() }));
+    fetch(`${W}/refs/${c}/void`, { method: "POST", headers: { Authorization: auth } }).then(async (r) => ({ status: r.status, body: await r.json() }));
   const once = await signMediaToken({ u: MPD, k: "mp3", h: 0, c: "grant-once-0001" }, SECRET);
   const first = await runJob(once);
   const again = await runJob(once);
@@ -243,7 +244,11 @@ try {
   const used = await refs("grant-once-0001");
   check("/refs: used grant reports its job's status", used.status === 200 && used.body.used === true && used.body.status === "ready", JSON.stringify(used.body));
   const unused = await refs("grant-never-001");
-  check("/refs: unknown grant is unused", unused.status === 404 && unused.body.used === false, JSON.stringify(unused.body));
+  check("/refs: unknown grant is unused, with when the worker started",
+    unused.status === 200 && unused.body.used === false && typeof unused.body.since === "number" && unused.body.since <= Date.now() / 1000, JSON.stringify(unused.body));
+  const voided = await runJob(await signMediaToken({ u: MPD, k: "mp3", h: 0, c: "grant-never-001" }, SECRET));
+  check("a voided grant can't start a job", voided.status === 409, JSON.stringify(voided.body));
+  check("voiding twice still reads as unused", (await refs("grant-never-001")).body.used === false);
   check("/refs requires the shared secret", (await refs("grant-once-0001", "Bearer wrong")).status === 401);
 
   // A ready file answers HEAD (the app checks before saving it again); a gone one 404s.

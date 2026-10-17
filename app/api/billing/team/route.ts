@@ -1,6 +1,7 @@
 import { checkNewMember, normalizeEmail, ownPlan, SEAT_ERRORS } from "@/lib/billing";
 import { addTeamMember, listTeamMembers, removeTeamMember } from "@/lib/billing-store";
 import { billingContext, json } from "@/lib/billing-route";
+import { refuseCrossSite } from "@/lib/cross-site";
 import { TEAM_SEATS } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const ctx = await billingContext({ paystack: false });
   if (ctx instanceof Response) return ctx;
   const { user, row } = ctx.account;
@@ -43,6 +46,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const ctx = await billingContext({ paystack: false });
   if (ctx instanceof Response) return ctx;
   const body = (await request.json().catch(() => null)) as { email?: unknown } | null;

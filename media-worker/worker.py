@@ -66,8 +66,13 @@ slots = threading.BoundedSemaphore(MAX_CONCURRENT)
 jobs: dict[str, dict] = {}
 # Grant nonce ("c" in the token) -> its job. Outlives the job itself, so the
 # web app can still ask whether a grant was used when deciding on a refund.
+# A grant refunded unused is kept here too (status "void"), so it can't
+# start a job afterwards.
 refs: dict[str, dict] = {}
 REF_TTL = 6 * 60 * 60
+# refs live in memory: this process knows of grants used since it started,
+# and nothing from before (a redeploy, a crash, a host waking from sleep).
+STARTED = time.time()
 jobs_lock = threading.Lock()
 
 
@@ -513,15 +518,6 @@ class Handler(BaseHTTPRequestHandler):
                 "cookies": bool(COOKIES),
                 "playlists": True,
             })
-        m = re.fullmatch(r"/refs/([\w-]{8,64})", path)
-        if m:
-            # Server to server: was this grant used, and how did its job end?
-            if not self.authorized():
-                return self.json(401, {"error": "Unauthorized."})
-            job = refs.get(m.group(1))
-            if not job:
-                return self.json(404, {"used": False})
-            return self.json(200, {"used": True, "status": job.get("status"), "error": job.get("error")})
         m = re.fullmatch(r"/jobs/([\w-]{16,64})(/file)?", path)
         if not m:
             return self.json(404, {"error": "Not found."})
@@ -590,6 +586,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        m = re.fullmatch(r"/refs/([\w-]{8,64})/void", path)
+        if m:
+            # Server to server, before a refund: from now on this grant can't
+            # start a job here. Says whether it already had one, and since
+            # when this process would know.
+            if not self.authorized():
+                return self.json(401, {"error": "Unauthorized."})
+            with jobs_lock:
+                job = refs.get(m.group(1))
+                if not job:
+                    refs[m.group(1)] = {"status": "void", "created": time.time()}
+            if not job or job.get("status") == "void":
+                return self.json(200, {"used": False, "since": STARTED})
+            return self.json(200, {"used": True, "status": job.get("status"), "error": job.get("error"), "since": STARTED})
+
         if path in ("/info", "/playlist"):
             if not self.authorized():
                 return self.json(401, {"error": "Unauthorized."})
