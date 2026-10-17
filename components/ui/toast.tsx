@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
+import { ENTER_T, EXIT_T, SHAKE_T, SHAKE_X, SPRING_LAYOUT } from "@/components/motion/tokens";
 import { cn } from "@/lib/utils";
 
 export type ToastTone = "success" | "error" | "info";
@@ -38,6 +40,10 @@ const ICONS = {
   info: Info,
 };
 
+/**
+ * Toasts rise in, errors shake once, dismissed ones slide off to the right,
+ * and the rest close the gap on the layout spring.
+ */
 export function ToastStack({
   toasts,
   onDismiss,
@@ -47,14 +53,26 @@ export function ToastStack({
 }) {
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 sm:bottom-6 sm:right-6">
+      <AnimatePresence initial={false}>
       {toasts.map((t) => {
         const Icon = ICONS[t.tone];
         return (
-          <div
+          <motion.div
             key={t.id}
+            layout
             role="status"
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              ...(t.tone === "error" ? { x: SHAKE_X } : {}),
+              transition: { ...ENTER_T, x: SHAKE_T },
+            }}
+            exit={{ opacity: 0, x: 24, transition: EXIT_T }}
+            transition={{ layout: SPRING_LAYOUT }}
             className={cn(
-              "pointer-events-auto flex items-start gap-3 rounded-xl border bg-card px-4 py-3 shadow-lg animate-fade-in",
+              "pointer-events-auto flex items-start gap-3 rounded-xl border bg-card px-4 py-3 shadow-lg",
               t.tone === "success" && "border-emerald-500/40",
               t.tone === "error" && "border-destructive/50",
               t.tone === "info" && "border-border"
@@ -77,9 +95,10 @@ export function ToastStack({
             >
               <X className="h-3.5 w-3.5" />
             </button>
-          </div>
+          </motion.div>
         );
       })}
+      </AnimatePresence>
     </div>
   );
 }

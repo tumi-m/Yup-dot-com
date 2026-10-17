@@ -77,7 +77,7 @@ export function NavShell({
       <header
         ref={headerRef}
         className={cn(
-          "sticky top-0 z-40 w-full border-b transition-[background-color,border-color,box-shadow] duration-300",
+          "sticky top-0 z-40 w-full border-b transition-[background-color,border-color,box-shadow] duration-base ease-out",
           scrolled || open
             ? "border-border/70 bg-background/85 shadow-sm backdrop-blur-xl"
             : // At the top only the hero sky is beneath; blurring it every frame buys nothing.
@@ -131,9 +131,8 @@ export function NavShell({
               <motion.span
                 key={open ? "x" : "menu"}
                 initial={{ rotate: -90, opacity: 0 }}
-                animate={{ rotate: 0, opacity: 1 }}
-                exit={{ rotate: 90, opacity: 0 }}
-                transition={{ duration: DUR.tap }}
+                animate={{ rotate: 0, opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+                exit={{ rotate: 90, opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } }}
                 className="block"
               >
                 {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -155,18 +154,21 @@ export function NavShell({
             exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
             transition={{ duration: DUR.base, ease: EASE_OUT }}
           >
+            {/* No blur on phones: it dropped out before the fade finished. */}
             <button
               type="button"
               tabIndex={-1}
               aria-hidden
-              className="absolute inset-0 h-full w-full cursor-default bg-background/60 backdrop-blur-sm"
+              className="absolute inset-0 h-full w-full cursor-default bg-background/70 sm:bg-background/60 sm:backdrop-blur-sm"
               onClick={() => setOpen(false)}
             />
+            {/* Leaves upward with the sheet, so the links never sit faded over the page. */}
             <motion.nav
               id={sheetId}
               aria-label="Menu"
               initial={{ y: -8 }}
               animate={{ y: 0 }}
+              exit={{ y: -8, opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
               transition={{ duration: DUR.base, ease: EASE_OUT }}
               className="relative border-b border-border bg-background shadow-xl shadow-primary/5"
             >
@@ -186,7 +188,7 @@ export function NavShell({
                         aria-current={active ? "page" : undefined}
                         onClick={() => setOpen(false)}
                         className={cn(
-                          "flex h-11 items-center rounded-lg px-3 font-medium hover:bg-accent",
+                          "flex h-11 items-center rounded-lg px-3 font-medium transition-colors duration-200 hover:bg-accent hover:duration-100",
                           active && "bg-accent text-accent-foreground"
                         )}
                       >
