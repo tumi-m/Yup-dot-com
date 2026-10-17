@@ -1,9 +1,10 @@
 /**
  * JPEG encode/decode with MozJPEG compiled to WebAssembly.
  *
- * MozJPEG (trellis quantisation, tuned tables) makes files roughly 10–20%
- * smaller than a browser's built-in encoder at the same visual quality, and
- * gives the same bytes in every browser. Decoding through it ignores EXIF
+ * MozJPEG (trellis quantisation, tuned tables) gives the same bytes in every
+ * browser and in Node, and can write one-channel gray JPEGs, which a canvas
+ * can't. At equal SSIM its files measured about the size of Chromium's own
+ * encoder (95–103% on photos and a scan). Decoding through it ignores EXIF
  * rotation and embedded colour profiles, which is what a PDF viewer does with
  * an image stream too.
  *
@@ -23,7 +24,7 @@ export interface RawImage {
 }
 
 export interface JpegOptions {
-  /** 1–100, MozJPEG's scale (about 5 points below the browser's for the same look). */
+  /** 1–100, MozJPEG's scale (see mozQuality for the browser equivalent). */
   quality: number;
   /** One channel instead of three; for pictures with no colour. */
   gray?: boolean;
@@ -77,9 +78,12 @@ function loadDecoder() {
   });
 }
 
-/** The quality setting for MozJPEG that looks like `browserQuality` (0–1) from canvas.toBlob. */
+/**
+ * The MozJPEG quality that matches `browserQuality` (0–1) from canvas.toBlob,
+ * fitted on SSIM against Chromium 141 over 0.3–0.9 (0.4 → 58, 0.6 → 72, 0.8 → 87).
+ */
 export function mozQuality(browserQuality: number): number {
-  return Math.max(1, Math.min(100, Math.round(browserQuality * 100) - 5));
+  return Math.max(1, Math.min(100, Math.round(browserQuality * 72 + 29)));
 }
 
 /** RGBA → JPEG. Alpha is ignored (flatten onto a background first if it matters). */
@@ -102,7 +106,8 @@ export async function encodeJpeg(image: RawImage, opts: JpegOptions): Promise<Ui
 /** JPEG → RGBA. Throws on CMYK and damaged files. */
 export async function decodeJpeg(bytes: Uint8Array): Promise<RawImage> {
   await loadDecoder();
-  const copy = bytes.slice().buffer as ArrayBuffer;
+  // A fresh copy: `bytes` may be a view into a larger buffer (a Node Buffer's slice() is not a copy).
+  const copy = new Uint8Array(bytes).buffer as ArrayBuffer;
   const img = await decodeWasm(copy, { preserveOrientation: false });
   return { data: img.data, width: img.width, height: img.height };
 }
