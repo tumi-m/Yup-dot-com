@@ -71,6 +71,10 @@ export type EditorSource =
   | { kind: "cloud"; doc: DocumentRecord }
   | { kind: "local"; id: string };
 
+/** Zoom limits. Low enough to fit a poster-size page on a phone. */
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 3;
+
 /** Phone-width layout, where side panels become overlays. */
 const narrow = () => window.matchMedia("(max-width: 767px)").matches;
 
@@ -182,7 +186,7 @@ export function PdfEditor({
             (wide && showSidebarRef.current ? 176 : 0) -
             (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
           if (available > 0 && vp.width * 1.3 > available) {
-            setScale(Math.max(0.4, Math.min(1.3, available / vp.width)));
+            setScale(Math.max(MIN_ZOOM, Math.min(1.3, available / vp.width)));
           }
         }
         setLoaded(local);
@@ -477,7 +481,7 @@ export function PdfEditor({
     const vp = await loaded.getPageViewport(page + 1, 1);
     const available =
       canvasArea.current.clientWidth - (window.matchMedia("(min-width: 640px)").matches ? 64 : 32);
-    setScale(Math.max(0.4, Math.min(3, available / vp.baseWidth)));
+    setScale(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, available / vp.baseWidth)));
   }, [loaded, page]);
 
   // Phones: start without the page panel. The page panel and the properties
@@ -766,7 +770,8 @@ export function PdfEditor({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setScale((s) => Math.max(0.4, +(s - 0.2).toFixed(2)))}
+                  onClick={() => setScale((s) => Math.max(MIN_ZOOM, +(s - 0.2).toFixed(2)))}
+                  disabled={scale <= MIN_ZOOM}
                   aria-label="Zoom out"
                 >
                   <ZoomOut />
@@ -777,7 +782,8 @@ export function PdfEditor({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setScale((s) => Math.min(3, +(s + 0.2).toFixed(2)))}
+                  onClick={() => setScale((s) => Math.min(MAX_ZOOM, +(s + 0.2).toFixed(2)))}
+                  disabled={scale >= MAX_ZOOM}
                   aria-label="Zoom in"
                 >
                   <ZoomIn />
