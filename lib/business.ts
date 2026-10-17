@@ -96,4 +96,4 @@ export const BUSINESS: Business = resolveBusiness(
 );
 
 /** When the legal pages last changed (YYYY-MM-DD). Update it with every material change. */
-export const LEGAL_UPDATED = "2026-10-10";
+export const LEGAL_UPDATED = "2026-10-17";

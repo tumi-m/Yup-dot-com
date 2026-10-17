@@ -134,6 +134,13 @@ export default function PrivacyPage() {
           amount and payment reference). We never send it your files, document text, name or email address.
         </p>
 
+        <h3>Browser extension</h3>
+        <p>
+          Our X (Twitter) extension adds a Download button to posts with a video. It collects nothing, stores nothing
+          and sends nothing. When you click Download, it opens our site with that post&apos;s link, and the rest works as
+          described on this page.
+        </p>
+
         <h3>Messages to us</h3>
         <p>If you contact us, we keep your message and our reply so we can help you.</p>
 

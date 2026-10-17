@@ -1,0 +1,80 @@
+/* Sits in X's action bar and takes its colour, so it fits light, dim and dark themes. */
+.pdfwizard-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pdfwizard-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(113, 118, 123);
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.pdfwizard-btn:hover,
+.pdfwizard-btn[aria-expanded="true"] {
+  color: rgb(124, 58, 237);
+  background: rgba(124, 58, 237, 0.12);
+}
+.pdfwizard-btn:focus-visible,
+.pdfwizard-item:focus-visible {
+  outline: 2px solid rgb(124, 58, 237);
+  outline-offset: 2px;
+}
+.pdfwizard-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 2147483000;
+  display: grid;
+  min-width: 160px;
+  padding: 6px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.pdfwizard-menu[hidden] {
+  display: none;
+}
+.pdfwizard-item {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #0f1419;
+  text-align: left;
+  font: 600 14px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  cursor: pointer;
+}
+.pdfwizard-item:hover {
+  background: rgba(124, 58, 237, 0.1);
+  color: rgb(109, 40, 217);
+}
+.pdfwizard-menu.pdfwizard-dark {
+  background: #16181c;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.pdfwizard-dark .pdfwizard-item {
+  color: #e7e9ea;
+}
+.pdfwizard-dark .pdfwizard-item:hover {
+  color: rgb(196, 181, 253);
+}
+@media (max-width: 500px) {
+  .pdfwizard-btn span {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pdfwizard-btn {
+    transition: none;
+  }
+}
