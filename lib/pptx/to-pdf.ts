@@ -3,6 +3,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { toCanvas } from "html-to-image";
 import { SlideView } from "@/components/slides/SlideView";
+import { screenRatio } from "@/lib/image-fit";
+import { encodeRender } from "@/lib/pdf/embed-image";
 import { buildSearchablePdf, type OcrPage, type OcrWord } from "@/lib/pdf/ocr-layer";
 import type { Deck } from "./parse";
 
@@ -10,11 +12,14 @@ import type { Deck } from "./parse";
  * Deck -> PDF, entirely in the browser (browser-only module; import it
  * dynamically from client code).
  *
- * Each slide is rendered with <SlideView> into one offscreen container,
- * rasterised with html-to-image and encoded as JPEG (slides always have an
- * opaque background, so PNG's alpha is never needed), then its canvas is
- * released before the next slide, so memory stays flat on long decks. Pages
- * are exactly the slide size in points.
+ * Each slide is rendered with <SlideView> into one offscreen container and
+ * rasterised with html-to-image at 1080p (a 16:9 slide is 1920×1080 pixels),
+ * then its canvas is released before the next slide, so memory stays flat on
+ * long decks. Pages are exactly the slide size in points.
+ *
+ * Slides with photos are stored as JPEG (MozJPEG). Flat slides (text, shapes,
+ * charts) are also encoded losslessly and keep that when it is no bigger than
+ * the JPEG: crisp text edges, often in fewer bytes.
  *
  * The words' on-screen boxes are measured while each slide is mounted and
  * written as an invisible text layer (the same one OCR uses, see
@@ -24,7 +29,7 @@ import type { Deck } from "./parse";
  */
 
 export interface DeckPdfOptions {
-  /** Canvas pixels per point (default 2, i.e. ~144 dpi). */
+  /** Canvas pixels per point (default: what fits the slide in 1920×1080). */
   pixelRatio?: number;
   /** JPEG quality (default 0.92). */
   quality?: number;
@@ -86,7 +91,8 @@ export async function deckToPdf(deck: Deck, opts: DeckPdfOptions = {}): Promise<
   const slides = deck.slides.filter((s) => opts.includeHidden || !s.hidden);
   const list = slides.length ? slides : deck.slides;
   const quality = opts.quality ?? 0.92;
-  const ratio = Math.min(opts.pixelRatio ?? 2, MAX_CANVAS_SIDE / Math.max(deck.width, deck.height));
+  // Slides are watched on screens: 1080p is plenty (a 16:9 slide is 1920×1080).
+  const ratio = Math.min(opts.pixelRatio ?? screenRatio(deck.width, deck.height), MAX_CANVAS_SIDE / Math.max(deck.width, deck.height));
   const withText = opts.textLayer ?? true;
 
   // Offscreen but laid out, so fonts, images and text metrics are real.
@@ -125,19 +131,23 @@ export async function deckToPdf(deck: Deck, opts: DeckPdfOptions = {}): Promise<
         skipFonts: true,
         cacheBust: false,
       });
-      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", quality));
       const imageWidth = canvas.width;
       const imageHeight = canvas.height;
-      // Free the backing store now rather than whenever GC runs.
-      canvas.width = 0;
-      canvas.height = 0;
-      if (!blob) throw new Error("Couldn't render a slide.");
+      let encoded: Awaited<ReturnType<typeof encodeRender>>;
+      try {
+        encoded = await encodeRender(canvas, quality);
+      } finally {
+        // Free the backing store now rather than whenever GC runs.
+        canvas.width = 0;
+        canvas.height = 0;
+      }
 
       pages.push({
         widthPt: deck.width,
         heightPt: deck.height,
-        image: new Uint8Array(await blob.arrayBuffer()),
-        imageType: "jpeg",
+        ...("jpeg" in encoded
+          ? { imageType: "jpeg" as const, image: encoded.jpeg }
+          : { imageType: "flate" as const, image: encoded.flate }),
         imageWidth,
         imageHeight,
         words: withText ? measureWords(node, imageWidth / deck.width) : [],

@@ -169,7 +169,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         ],
       },
     ],
-    run: async (files, o) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }),
+    run: async (files, o, ctx) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }, ctx),
   },
   "pdf-to-text": {
     accept: "application/pdf",

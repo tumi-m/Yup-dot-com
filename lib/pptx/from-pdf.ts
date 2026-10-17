@@ -1,5 +1,8 @@
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { configureWorker } from "../pdf/worker";
+import { encodeRender } from "../pdf/embed-image";
+import { flateToPng } from "../pdf/flate-image";
+import { sniffImage } from "../pdf/images";
 import type { ToolContext, ToolFile } from "../pdf/toolkit";
 import {
   EMU_PER_PT,
@@ -18,9 +21,16 @@ import {
 
 export type PptxQuality = "standard" | "high";
 
-export const QUALITY: Record<PptxQuality, { dpi: number; jpeg: number }> = {
-  standard: { dpi: 150, jpeg: 0.85 },
-  high: { dpi: 220, jpeg: 0.92 },
+/**
+ * Pixels per page and JPEG quality. A slide fills the screen whatever the
+ * page's paper size, so each option is a pixel count rather than a DPI:
+ * standard is a 1080p screen's worth (about 150 DPI on Letter or A4), high
+ * about 220 DPI on those. Posters no longer turn into huge images, and small
+ * pages still look sharp full screen.
+ */
+export const QUALITY: Record<PptxQuality, { pixels: number; jpeg: number }> = {
+  standard: { pixels: 1920 * 1080, jpeg: 0.85 },
+  high: { pixels: 2816 * 1584, jpeg: 0.92 },
 };
 
 /** Browsers (iOS Safari especially) refuse canvases much larger than this. */
@@ -55,9 +65,9 @@ export function fitFrame(pageW: number, pageH: number, slideW: number, slideH: n
   return { x: Math.round((slideW - cx) / 2), y: Math.round((slideH - cy) / 2), cx, cy };
 }
 
-/** Render scale for a DPI, reduced when the canvas would be too large. */
-export function renderScale(widthPt: number, heightPt: number, dpi: number): number {
-  let scale = dpi / 72;
+/** Render scale that gives a page about `pixels` pixels, reduced when the canvas would be too large. */
+export function renderScale(widthPt: number, heightPt: number, pixels: number): number {
+  let scale = Math.sqrt(pixels / (widthPt * heightPt));
   const w = widthPt * scale;
   const h = heightPt * scale;
   const shrink = Math.min(1, MAX_CANVAS_SIDE / w, MAX_CANVAS_SIDE / h, Math.sqrt(MAX_CANVAS_PIXELS / (w * h)));
@@ -109,14 +119,14 @@ export function pageText(items: TextItemLike[], max = ALT_TEXT_MAX): string {
   return text;
 }
 
-/** Turns a rendered page into image bytes. Swappable so Node tests can use node-canvas. */
+/** Turns a rendered page into JPEG or PNG bytes. Swappable so Node tests can use node-canvas. */
 export type PageRasterizer = (
   page: PDFPageProxy,
   scale: number,
   jpegQuality: number
 ) => Promise<Uint8Array>;
 
-/** Browser rasterizer: pdf.js onto a canvas, then JPEG. */
+/** Browser rasterizer: pdf.js onto a canvas, then JPEG, or PNG for flat pages when no bigger. */
 export const canvasRasterizer: PageRasterizer = async (page, scale, jpegQuality) => {
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
@@ -127,13 +137,13 @@ export const canvasRasterizer: PageRasterizer = async (page, scale, jpegQuality)
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport }).promise;
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", jpegQuality)
-  );
-  // Free the backing store right away; 40-page decks otherwise pile up memory.
-  canvas.width = canvas.height = 0;
-  if (!blob) throw new Error("Couldn't render a page of this PDF.");
-  return new Uint8Array(await blob.arrayBuffer());
+  try {
+    const encoded = await encodeRender(canvas, jpegQuality);
+    return "jpeg" in encoded ? encoded.jpeg : flateToPng(encoded.flate);
+  } finally {
+    // Free the backing store right away; 40-page decks otherwise pile up memory.
+    canvas.width = canvas.height = 0;
+  }
 };
 
 export interface PdfToPptxOptions {
@@ -177,7 +187,7 @@ export async function pdfToPptx(data: Uint8Array, opts: PdfToPptxOptions = {}): 
       const base = page.getViewport({ scale: 1 });
       if (!size) size = slideSizeFor(base.width, base.height);
 
-      const image = await rasterize(page, renderScale(base.width, base.height, quality.dpi), quality.jpeg);
+      const image = await rasterize(page, renderScale(base.width, base.height, quality.pixels), quality.jpeg);
       let altText = "";
       try {
         altText = pageText((await page.getTextContent()).items as TextItemLike[]);
@@ -188,7 +198,7 @@ export async function pdfToPptx(data: Uint8Array, opts: PdfToPptxOptions = {}): 
 
       slides.push({
         image,
-        format: "jpeg",
+        format: sniffImage(image) === "png" ? "png" : "jpeg",
         frame: fitFrame(base.width, base.height, size.cx, size.cy),
         altText: altText || `Page ${i}`,
       });

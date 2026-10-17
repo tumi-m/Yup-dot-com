@@ -11,8 +11,11 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  type PDFRef,
 } from "pdf-lib";
 import type { Annotation } from "@/lib/editor/types";
+import { embedImage } from "./embed-image";
+import { drawOrientedImage, imageSize, sniffImage } from "./images";
 import { pageFrame } from "./page-frame";
 import { stampWatermark } from "./watermark";
 
@@ -28,6 +31,55 @@ function displayToUser(page: PDFPage): [number, number, number, number, number, 
       return [0, -1, 1, 0, bx, by + H];
     default:
       return [1, 0, 0, 1, bx, by];
+  }
+}
+
+function dataUrlBytes(url: string): Uint8Array | null {
+  const m = /^data:[^,]*;base64,(.*)$/s.exec(url);
+  if (!m) return null;
+  const bin = atob(m[1]);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** An embedded picture and its pixel size as stored (for its proportions). */
+interface Picture {
+  ref: PDFRef;
+  width: number;
+  height: number;
+}
+
+/** Scale that fits `size` inside `box`, keeping its proportions (CSS object-contain). */
+const containScale = (size: { width: number; height: number }, box: { width: number; height: number }) =>
+  Math.min(box.width / size.width, box.height / size.height);
+
+/**
+ * A picture placed in `boxes`, right-sized for the largest of them; null
+ * when it can't be read.
+ */
+async function embedPicture(
+  doc: PDFDocument,
+  dataUrl: string,
+  boxes: { width: number; height: number }[]
+): Promise<Picture | null> {
+  try {
+    const bytes = dataUrlBytes(dataUrl);
+    const kind = bytes && sniffImage(bytes);
+    const size = kind && imageSize(bytes, kind);
+    if (bytes && kind && size) {
+      const scale = Math.max(...boxes.map((box) => containScale(size, box)));
+      const { ref } = await embedImage(doc, bytes, kind, size, { widthPt: size.width * scale, heightPt: size.height * scale });
+      return { ref, ...size };
+    }
+  } catch {
+    // Try pdf-lib directly below.
+  }
+  try {
+    const img = dataUrl.startsWith("data:image/jpeg") ? await doc.embedJpg(dataUrl) : await doc.embedPng(dataUrl);
+    return { ref: img.ref, width: img.width, height: img.height };
+  } catch {
+    return null;
   }
 }
 
@@ -192,6 +244,22 @@ export async function bakeAnnotations(
     byPage.set(ann.page, [...(byPage.get(ann.page) ?? []), ann]);
   }
 
+  // Each picture is embedded once however often it is placed (a signature on
+  // every page), sized for its largest placement: a phone photo shown a few
+  // inches wide is scaled down to 300 DPI instead of carried at full size.
+  const pictures = new Map<string, { boxes: { width: number; height: number }[]; embedded?: Promise<Picture | null> }>();
+  for (const ann of annotations) {
+    if (ann.type !== "image") continue;
+    const entry = pictures.get(ann.dataUrl) ?? { boxes: [] };
+    entry.boxes.push({ width: ann.width, height: ann.height });
+    pictures.set(ann.dataUrl, entry);
+  }
+  const picture = (dataUrl: string) => {
+    const entry = pictures.get(dataUrl)!;
+    entry.embedded ??= embedPicture(doc, dataUrl, entry.boxes);
+    return entry.embedded;
+  };
+
   for (const [pageIndex, pageAnnotations] of byPage) {
     const page = pages[pageIndex];
     const frame = pageFrame(page);
@@ -253,23 +321,19 @@ export async function bakeAnnotations(
         }
 
         case "image": {
-          try {
-            const embed = ann.dataUrl.startsWith("data:image/jpeg")
-              ? await doc.embedJpg(ann.dataUrl)
-              : await doc.embedPng(ann.dataUrl);
-            // Fit inside the box, centred, as the editor shows it (object-contain).
-            const fit = Math.min(ann.width / embed.width, ann.height / embed.height);
-            const width = embed.width * fit;
-            const height = embed.height * fit;
-            page.drawImage(embed, {
-              x: ann.x + (ann.width - width) / 2,
-              y: bottom + (ann.height - height) / 2,
-              width,
-              height,
-            });
-          } catch {
-            // Skip an unreadable image rather than failing the whole export.
-          }
+          const embed = await picture(ann.dataUrl);
+          // An unreadable image is skipped rather than failing the whole export.
+          if (!embed) break;
+          // Fit inside the box, centred, as the editor shows it (object-contain).
+          const fit = containScale(embed, ann);
+          const width = embed.width * fit;
+          const height = embed.height * fit;
+          drawOrientedImage(page, embed, 1, {
+            x: ann.x + (ann.width - width) / 2,
+            y: bottom + (ann.height - height) / 2,
+            width,
+            height,
+          });
           break;
         }
 

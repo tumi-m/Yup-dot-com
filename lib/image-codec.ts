@@ -35,6 +35,11 @@ export interface JpegOptions {
    * and older PDF readers only handle baseline JPEGs.
    */
   progressive?: boolean;
+  /**
+   * Colour at full resolution (4:4:4) instead of halved both ways (4:2:0).
+   * Browsers do this at quality 1: sharp coloured text and lines stay clean.
+   */
+  fullChroma?: boolean;
 }
 
 const vendorUrl = (file: string) => `${globalThis.location?.origin ?? ""}/vendor/jsquash-jpeg/${JSQUASH_JPEG_VERSION}/${file}`;
@@ -174,9 +179,9 @@ async function encodeWithWasm(image: RawImage, opts: JpegOptions): Promise<Uint8
     optimize_coding: true,
     // MozJPEG's colour-space enum: 1 = grayscale, 3 = YCbCr.
     color_space: opts.gray ? 1 : 3,
-    // 4:2:0 chroma: the eye barely sees colour detail, and it halves the colour data twice over.
+    // 4:2:0 chroma unless asked otherwise: the eye barely sees colour detail, and it quarters the colour data.
     auto_subsample: false,
-    chroma_subsample: 2,
+    chroma_subsample: opts.fullChroma ? 1 : 2,
   });
   return new Uint8Array(out);
 }
@@ -195,13 +200,45 @@ export async function decodeJpeg(bytes: Uint8Array): Promise<RawImage> {
   );
 }
 
-/** Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if the wasm can't load. */
-export async function canvasToJpeg(canvas: HTMLCanvasElement, browserQuality: number): Promise<Uint8Array> {
+/** True when every pixel is a shade of grey: such a JPEG needs only one channel. */
+export function isGray(img: RawImage): boolean {
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) if (d[i] !== d[i + 1] || d[i] !== d[i + 2]) return false;
+  return true;
+}
+
+/** A canvas's pixels, or null where they can't be read. */
+export function canvasPixels(canvas: HTMLCanvasElement): RawImage | null {
   try {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (ctx) {
-      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      return await encodeJpeg({ data, width, height }, { quality: mozQuality(browserQuality) });
+    if (!ctx) return null;
+    const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { data, width, height };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if
+ * the wasm can't load. Pass `pixels` when they have been read already.
+ * Grey renders get a one-channel JPEG; at quality 1 colour is kept at full
+ * resolution, as the browser does.
+ */
+export async function canvasToJpeg(
+  canvas: HTMLCanvasElement,
+  browserQuality: number,
+  opts: { progressive?: boolean; pixels?: RawImage | null } = {}
+): Promise<Uint8Array> {
+  try {
+    const pixels = opts.pixels ?? canvasPixels(canvas);
+    if (pixels) {
+      return await encodeJpeg(pixels, {
+        quality: mozQuality(browserQuality),
+        progressive: opts.progressive,
+        gray: isGray(pixels),
+        fullChroma: browserQuality >= 1,
+      });
     }
   } catch {
     // Fall back below.

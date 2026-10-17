@@ -1,10 +1,12 @@
 import {
   concatTransformationMatrix,
+  degrees,
+  drawImage,
   drawObject,
   popGraphicsState,
   pushGraphicsState,
-  type PDFImage,
   type PDFPage,
+  type PDFRef,
 } from "pdf-lib";
 
 /** Identifies an image by its bytes, not its name: renamed files are common. */
@@ -13,6 +15,45 @@ export function sniffImage(bytes: Uint8Array): "png" | "jpeg" | null {
     return "png";
   }
   if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
+  return null;
+}
+
+/** Pixel size of a JPEG or PNG as stored (before any EXIF rotation), or null if unreadable. */
+export function imageSize(bytes: Uint8Array, kind: "png" | "jpeg"): { width: number; height: number } | null {
+  if (kind === "png") {
+    if (bytes.length < 24) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16);
+    const height = view.getUint32(20);
+    return width && height ? { width, height } : null;
+  }
+  const sof = jpegFrame(bytes);
+  return sof && sof.width && sof.height ? { width: sof.width, height: sof.height } : null;
+}
+
+/** Colour channels of a JPEG: 1 grey, 3 colour, 4 CMYK; 0 if unreadable. */
+export function jpegChannels(bytes: Uint8Array): number {
+  return jpegFrame(bytes)?.channels ?? 0;
+}
+
+/** The JPEG's frame header (SOF): size and number of channels. */
+function jpegFrame(bytes: Uint8Array): { width: number; height: number; channels: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 2;
+  while (offset + 10 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    if (marker === 0xff) {
+      offset++; // fill byte
+      continue;
+    }
+    // SOF0–SOF15, except DHT (C4), JPG (C8) and DAC (CC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7), channels: bytes[offset + 9] };
+    }
+    if (marker === 0xda || marker === 0xd9) return null;
+    offset += 2 + view.getUint16(offset + 2);
+  }
   return null;
 }
 
@@ -66,13 +107,15 @@ export function orientedSize(img: { width: number; height: number }, orientation
  */
 export function drawOrientedImage(
   page: PDFPage,
-  img: PDFImage,
+  img: { ref: PDFRef },
   orientation: number,
   rect: { x: number; y: number; width: number; height: number }
 ) {
   const { x, y, width: w, height: h } = rect;
-  if (orientation === 1 || orientation < 1 || orientation > 8) {
-    page.drawImage(img, rect);
+  const name = page.node.newXObject("Image", img.ref);
+  if (!(orientation >= 2 && orientation <= 8)) {
+    // Upright: the same operators as pdf-lib's page.drawImage.
+    page.pushOperators(...drawImage(name, { x, y, width: w, height: h, rotate: degrees(0), xSkew: degrees(0), ySkew: degrees(0) }));
     return;
   }
   const m: Record<number, [number, number, number, number, number, number]> = {
@@ -84,7 +127,6 @@ export function drawOrientedImage(
     7: [0, h, w, 0, x, y],
     8: [0, h, -w, 0, x + w, y],
   };
-  const name = page.node.newXObject("Image", img.ref);
   page.pushOperators(
     pushGraphicsState(),
     concatTransformationMatrix(...m[orientation]),
