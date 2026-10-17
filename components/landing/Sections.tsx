@@ -50,7 +50,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
               className="group inline-flex min-h-11 items-center gap-1 rounded-lg font-medium text-violet-700"
             >
               <Sparkles className="h-4 w-4" /> Browse all {TOOLS.length} tools
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 group-hover:duration-150" />
             </Link>
             {isAuthed && (
               <Link
@@ -75,7 +75,7 @@ export function FinalCta() {
       <Starfield />
       <div className="container relative">
         <Reveal>
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-2xl shadow-primary/40 transition-transform duration-300 ease-out hover:-rotate-6 hover:scale-105 motion-reduce:transform-none">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-2xl shadow-primary/40 transition-transform duration-200 ease-out hover:-rotate-6 hover:scale-105 hover:duration-150 motion-reduce:transform-none">
             <WizardHat className="h-8 w-8" />
           </div>
           <h2 className="text-balance text-4xl font-extrabold tracking-tight sm:text-5xl">
@@ -84,7 +84,7 @@ export function FinalCta() {
           <Button
             asChild
             size="lg"
-            className="mt-9 h-12 px-8 text-base shadow-xl shadow-primary/30 transition-transform active:scale-[0.97]"
+            className="mt-9 h-12 px-8 text-base shadow-xl shadow-primary/30"
           >
             <a
               href="#start"
