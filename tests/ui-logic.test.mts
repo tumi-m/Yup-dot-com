@@ -29,6 +29,7 @@ import {
   TOOL_PILLS,
 } from "../components/tool-filter.ts";
 import { isNavActive } from "../components/nav-utils.ts";
+import { needsScrollIntoView, reservedHeight, RESERVE_MAX } from "../components/motion/focus.ts";
 import { safeRedirect } from "../components/auth-redirect.ts";
 import { TOOLS } from "../lib/tools.tsx";
 
@@ -67,6 +68,12 @@ check("progress: full bar at 1", progressTranslate(1) === "translateX(0.00%)");
 check("progress: half way", progressTranslate(0.5) === "translateX(-50.00%)");
 check("progress: never quite empty", progressTranslate(0) === "translateX(-96.00%)" && progressTranslate(-1) === progressTranslate(0));
 check("progress: the gradient counter-slides by the same amount", progressTranslate(0.3, -1) === "translateX(70.00%)" && progressTranslate(1, -1) === "translateX(0.00%)");
+check("result in view: under the sticky header scrolls", needsScrollIntoView(40, 900) && needsScrollIntoView(-300, 900));
+check("result in view: comfortably placed stays put", !needsScrollIntoView(120, 900) && !needsScrollIntoView(360, 900));
+check("result in view: low on the screen scrolls", needsScrollIntoView(361, 900));
+check("reserve: keeps the current height", reservedHeight(500, 900) === 500);
+check("reserve: at least the floor", reservedHeight(300, 900, 0.7) === 630);
+check("reserve: never more than most of a screen", reservedHeight(2000, 900) === Math.round(900 * RESERVE_MAX) && reservedHeight(100, 900, 1) === Math.round(900 * RESERVE_MAX));
 check("progress: clamps and survives NaN", progressTranslate(7) === progressTranslate(1) && progressTranslate(NaN) === progressTranslate(0));
 
 // Category pills: Optimize folds into Organize
