@@ -97,16 +97,22 @@ interface RawItem {
   fontName?: string;
 }
 
+// Characters XML 1.0 forbids (C0 controls, U+FFFE/U+FFFF, lone surrogates).
+// Broken font maps can produce them, and one is enough to corrupt a .docx.
+const XML_ILLEGAL =
+  /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function toSpans(items: RawItem[]): ParsedSpan[] {
   const spans: ParsedSpan[] = [];
   for (const item of items) {
-    if (!item.str || !item.str.trim()) continue;
+    const text = item.str?.replace(XML_ILLEGAL, "");
+    if (!text || !text.trim()) continue;
     const [a, b, , , e, f] = item.transform;
     // For unrotated text a == d == fontSize; hypot covers rotated runs.
     const fontSize = Math.hypot(a, b) || item.height || 12;
     const fontName = item.fontName ?? "";
     spans.push({
-      text: item.str,
+      text,
       x: e,
       y: f,
       width: item.width,
