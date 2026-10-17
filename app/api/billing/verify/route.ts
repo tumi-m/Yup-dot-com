@@ -27,7 +27,9 @@ export async function GET(request: Request) {
     return json({ status: "pending" }, 202);
   }
   if (parseMetadata(tx.metadata).user_id !== account.user.id) {
-    return json({ error: "Unknown payment." }, 404);
+    // Paid from another account (a shared device, say): the return page
+    // must not claim nothing was charged.
+    return json({ status: "other-account" }, 404);
   }
   if (tx.status !== "success") {
     // abandoned, failed, ongoing, pending…
@@ -37,8 +39,9 @@ export async function GET(request: Request) {
   try {
     const result = await applyCharge(tx, { store: supabaseBillingStore(), planForCode: (c) => planForCode(c) });
     if (result.status === "ignored") {
+      // Paystack took the money but it doesn't match a plan we sell.
       console.error("payment not applied", reference, result.reason);
-      return json({ status: "failed" }, 422);
+      return json({ status: "not-applied" }, 422);
     }
     return json({ status: "success", purchase: purchaseSummary(tx) });
   } catch (err) {

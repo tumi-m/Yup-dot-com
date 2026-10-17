@@ -1,7 +1,8 @@
 /**
- * What the pricing cards offer a signed-in customer and why a checkout is
- * refused. Works from the billing summary, without Node APIs, so the
- * checkout route, the browser and the tests share one set of rules.
+ * What the pricing cards offer a signed-in customer, why a checkout is
+ * refused, and how the payment return page reads the verify response. Works
+ * from the billing summary, without Node APIs, so the checkout route, the
+ * browser and the tests share one set of rules.
  */
 import { PLANS, formatBillingDate, type PaidPlanId } from "./plans";
 import type { BillingSummary } from "./billing";
@@ -73,4 +74,29 @@ export function cardOffer(plan: PaidPlanId, current: PlanId | undefined, billing
     payOnce: !payOnceBlock(plan, billing),
     payOnceNote: pre?.active && pre.plan !== plan ? `Your ${PLANS[pre.plan].name} time left carries over.` : null,
   };
+}
+
+export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "retry" | "unknown";
+
+/**
+ * Reads a /api/billing/verify response. "failed" (nothing was charged) only
+ * when Paystack says so; anything unexpected is "unknown", not "failed".
+ */
+export function paymentOutcome(httpStatus: number, status: unknown): PaymentOutcome {
+  switch (status) {
+    case "success":
+    case "other-account":
+    case "not-applied":
+      return status;
+    case "failed":
+    case "abandoned":
+    case "reversed":
+      return "failed";
+    case "ongoing":
+    case "pending":
+    case "processing":
+    case "queued":
+      return "retry";
+  }
+  return httpStatus === 202 ? "retry" : "unknown";
 }

@@ -5,7 +5,7 @@
 import {
   hasLiveSubscription, resolveAccess, summarize, type BillingRow,
 } from "../lib/billing.ts";
-import { cardOffer, payOnceBlock, subscribeBlock } from "../lib/billing-ui.ts";
+import { cardOffer, payOnceBlock, paymentOutcome, subscribeBlock } from "../lib/billing-ui.ts";
 import type { PaidPlanId } from "../lib/plans.ts";
 
 const results: boolean[] = [];
@@ -130,6 +130,20 @@ for (const v of [{ plan: undefined, billing: undefined }, viewer(row())]) {
     }
   }
   check("a live subscription always blocks a second one", ok);
+}
+
+// Payment return: "you weren't charged" only when Paystack says so.
+{
+  check("verify success", paymentOutcome(200, "success") === "success");
+  check("abandoned / failed / reversed → not charged",
+    ["abandoned", "failed", "reversed"].every((s) => paymentOutcome(200, s) === "failed"));
+  check("paid from another account is not 'not charged'", paymentOutcome(404, "other-account") === "other-account");
+  check("paid but not applied is not 'not charged'", paymentOutcome(422, "not-applied") === "not-applied");
+  check("in flight → retry", ["ongoing", "pending", "processing", "queued"].every((s) => paymentOutcome(200, s) === "retry") &&
+    paymentOutcome(202, "pending") === "retry" && paymentOutcome(202, undefined) === "retry");
+  check("errors without a payment status are unknown, not 'not charged'",
+    [[400, undefined], [401, undefined], [404, undefined], [422, "failed-ish"], [500, undefined], [503, undefined]]
+      .every(([code, s]) => paymentOutcome(code as number, s) === "unknown"));
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
