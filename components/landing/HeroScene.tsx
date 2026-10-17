@@ -20,7 +20,15 @@ import {
   Sheet,
   Sparkles,
 } from "lucide-react";
-import { DUR, EASE_IN, EASE_OUT, SPRING_LAYOUT, useAmbient } from "@/components/motion/primitives";
+import {
+  DUR,
+  EASE_IN,
+  EASE_OUT,
+  SPRING_LAYOUT,
+  SPRING_TILT,
+  staggerDelay,
+  useAmbient,
+} from "@/components/motion/primitives";
 
 /** Deterministic PRNG so server and client render identical particles. */
 function seeded(seed: number) {
@@ -31,8 +39,10 @@ function seeded(seed: number) {
   };
 }
 
+// A quiet sky: 12 stars, 6 of them on phones, so the ambient layer never
+// competes with the one thing to do on the page.
 const rand = seeded(42);
-const STARS = Array.from({ length: 24 }, () => ({
+const STARS = Array.from({ length: 12 }, () => ({
   left: rand() * 100,
   top: rand() * 100,
   size: 1.2 + rand() * 2.2,
@@ -76,7 +86,7 @@ function Orbit({ half }: { half: "front" | "back" }) {
               <div className="motion-safe:animate-spin-slow-reverse">
                 <div
                   className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-background/95 shadow-lg motion-safe:animate-pop"
-                  style={{ color: tint, animationDelay: `${0.3 + i * 0.05}s` }}
+                  style={{ color: tint, animationDelay: `${0.2 + staggerDelay(i)}s` }}
                 >
                   <Icon className="h-5 w-5" />
                 </div>
@@ -97,7 +107,7 @@ export function Starfield({ className = "" }: { className?: string }) {
       {STARS.map((s, i) => (
         <span
           key={i}
-          className="absolute rounded-full bg-primary/60 motion-safe:animate-twinkle"
+          className={`absolute rounded-full bg-primary/60 motion-safe:animate-twinkle ${i % 2 ? "hidden md:block" : ""}`}
           style={{
             left: `${s.left}%`,
             top: `${s.top}%`,
@@ -180,6 +190,27 @@ const DEMOS = [
   { from: "offer-letter.pdf", fromMeta: "unsigned", to: "offer-letter.pdf", toMeta: "signed · fields filled", spell: "Fill & Sign" },
 ];
 
+function DemoRow({ demo, className = "" }: { demo: (typeof DEMOS)[number]; className?: string }) {
+  return (
+    <div aria-hidden={className.includes("invisible") || undefined} className={`flex items-center gap-3 ${className}`}>
+      <div className="min-w-0 flex-1 rounded-xl bg-secondary px-3 py-2 text-left">
+        <p className="text-xs font-semibold [overflow-wrap:anywhere]">{demo.from}</p>
+        <p className="text-[11px] text-muted-foreground">{demo.fromMeta}</p>
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-0.5">
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground motion-safe:animate-pop [animation-delay:0.1s]">
+          <Sparkles className="h-3.5 w-3.5" />
+        </div>
+        <span className="text-[9px] font-semibold uppercase tracking-wide text-primary">{demo.spell}</span>
+      </div>
+      <div className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 motion-safe:animate-fade [animation-delay:0.2s]">
+        <p className="text-xs font-semibold text-emerald-800 [overflow-wrap:anywhere]">{demo.to}</p>
+        <p className="text-[11px] text-emerald-700">{demo.toMeta}</p>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Cycles through real before → after transformations once, then rests on the
  * first. Hover, focus or picking an example stops it.
@@ -210,31 +241,25 @@ function SpellDemo() {
       onFocus={() => setHeld(true)}
       onBlur={() => setHeld(false)}
     >
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={index}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
-          transition={{ duration: DUR.base, ease: EASE_OUT }}
-          className="flex items-center gap-3"
-        >
-          <div className="min-w-0 flex-1 rounded-xl bg-secondary px-3 py-2 text-left">
-            <p className="text-xs font-semibold [overflow-wrap:anywhere]">{demo.from}</p>
-            <p className="text-[11px] text-muted-foreground">{demo.fromMeta}</p>
-          </div>
-          <div className="flex shrink-0 flex-col items-center gap-0.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground motion-safe:animate-pop [animation-delay:0.1s]">
-              <Sparkles className="h-3.5 w-3.5" />
-            </div>
-            <span className="text-[9px] font-semibold uppercase tracking-wide text-primary">{demo.spell}</span>
-          </div>
-          <div className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 motion-safe:animate-fade [animation-delay:0.2s]">
-            <p className="text-xs font-semibold text-emerald-800 [overflow-wrap:anywhere]">{demo.to}</p>
-            <p className="text-[11px] text-emerald-700">{demo.toMeta}</p>
-          </div>
-        </motion.div>
-      </AnimatePresence>
+      {/* Every example sits in one grid cell, so the card is always as tall as
+          the tallest and nothing below it moves as they change. */}
+      <div className="grid">
+        {DEMOS.map((d) => (
+          <DemoRow key={d.spell} demo={d} className="invisible col-start-1 row-start-1 [&_*]:!animate-none" />
+        ))}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={index}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, transition: { duration: DUR.fast, ease: EASE_IN } }}
+            transition={{ duration: DUR.base, ease: EASE_OUT }}
+            className="col-start-1 row-start-1 flex"
+          >
+            <DemoRow demo={demo} className="flex-1" />
+          </motion.div>
+        </AnimatePresence>
+      </div>
       <div className="-mb-3 mt-0 flex justify-center">
         {DEMOS.map((_, i) => (
           <button
@@ -270,8 +295,8 @@ export function HeroScene() {
   const ambient = useAmbient<HTMLDivElement>();
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
-  const sx = useSpring(mx, { stiffness: 60, damping: 18 });
-  const sy = useSpring(my, { stiffness: 60, damping: 18 });
+  const sx = useSpring(mx, SPRING_TILT);
+  const sy = useSpring(my, SPRING_TILT);
   const rotateY = useTransform(sx, [-1, 1], [-10, 10]);
   const rotateX = useTransform(sy, [-1, 1], [8, -8]);
   const hatX = useTransform(sx, [-1, 1], [-14, 14]);
@@ -294,10 +319,10 @@ export function HeroScene() {
       style={{ perspective: 1000 }}
     >
       <motion.div style={{ rotateX, rotateY }} className="relative aspect-square w-full max-w-[220px] md:max-w-[420px]">
-        {/* halo: a gradient, pulsing in opacity only */}
+        {/* halo: a still glow; the hat is the moving thing here */}
         <div
           aria-hidden
-          className="absolute inset-[10%] rounded-full bg-[radial-gradient(closest-side,hsl(var(--primary)/0.3),transparent)] motion-safe:animate-pulse-slow"
+          className="absolute inset-[10%] rounded-full bg-[radial-gradient(closest-side,hsl(var(--primary)/0.3),transparent)]"
         />
 
         {/* orbit ring */}
@@ -330,10 +355,7 @@ export function HeroScene() {
         ].map((c) => (
           <div key={c.label} aria-hidden className={`absolute hidden md:block ${c.cls}`} style={{ transform: `rotate(${c.rot}deg)` }}>
             <div className="motion-safe:animate-rise" style={{ animationDelay: `${c.delay}s` }}>
-              <div
-                className="w-24 rounded-xl border border-white/60 bg-background/95 p-2.5 shadow-xl motion-safe:animate-bob"
-                style={{ animationDelay: `${c.delay}s` }}
-              >
+              <div className="w-24 rounded-xl border border-white/60 bg-background/95 p-2.5 shadow-xl">
                 <div className="flex items-center gap-1 text-[9px] font-semibold text-red-600">
                   <FileText className="h-3 w-3" /> PDF
                 </div>

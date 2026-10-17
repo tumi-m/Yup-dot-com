@@ -13,12 +13,13 @@ export function ToolHeader({ slug }: { slug: string }) {
   return (
     <div className="text-center">
       <div className="relative mx-auto h-16 w-16 motion-safe:animate-pop">
-        <span aria-hidden className={cn("absolute inset-0 rounded-2xl opacity-60 blur-xl motion-safe:animate-pulse-slow", tool.tint)} />
+        <span aria-hidden className={cn("absolute inset-0 rounded-2xl opacity-60 blur-xl", tool.tint)} />
         <span className={cn("relative flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg", tool.tint)}>
           <tool.icon className="h-8 w-8" />
         </span>
       </div>
-      <h1 className="mt-5 text-4xl font-extrabold tracking-tight motion-safe:animate-rise [animation-delay:0.05s]">
+      {/* The page's largest text: moves in, but is visible from the first frame. */}
+      <h1 className="mt-5 text-4xl font-extrabold tracking-tight motion-safe:animate-rise-soft">
         {tool.name}
       </h1>
       <p className="mx-auto mt-3 max-w-lg text-muted-foreground motion-safe:animate-rise [animation-delay:0.1s]">
@@ -45,13 +46,13 @@ export function RelatedTools({ slug }: { slug: string }) {
           <Reveal key={t.slug}>
             <Link
               href={`/tools/${t.slug}`}
-              className="group flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card p-3 transition-all hover:-translate-y-[3px] hover:border-primary/40 hover:shadow-md"
+              className="group flex min-h-14 items-center gap-3 rounded-xl border border-border bg-card p-3 transition-[transform,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md hover:duration-150 motion-reduce:transform-none"
             >
               <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", t.tint)}>
                 <t.icon className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
-              <ArrowRight className="h-4 w-4 -translate-x-1 text-muted-foreground opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+              <ArrowRight className="h-4 w-4 -translate-x-1 text-muted-foreground opacity-0 transition-[transform,opacity] duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100 group-hover:duration-150" />
             </Link>
           </Reveal>
         ))}

@@ -27,8 +27,12 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
           <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl short:!text-4xl">
             <WordReveal text="Cast spells on" />{" "}
             <span className="sr-only">your PDFs, slides and videos.</span>
-            <span aria-hidden className="block motion-safe:animate-rise [animation-delay:0.15s]">
-              <RotatingWord words={["your PDFs.", "your slides.", "your videos."]} className={GRADIENT_WORD} />
+            {/* The page's largest text: painted from the first frame and only
+                moved (out of a mask), never faded in or delayed. */}
+            <span aria-hidden className="block overflow-hidden pb-[0.12em]">
+              <span className="block motion-safe:animate-rise-mask">
+                <RotatingWord words={["your PDFs.", "your slides.", "your videos."]} className={GRADIENT_WORD} />
+              </span>
             </span>
           </h1>
 
