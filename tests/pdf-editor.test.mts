@@ -1,5 +1,5 @@
 import { crc32, deflateSync, inflateSync } from "node:zlib";
-import { PDFArray, PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
+import { PDFArray, PDFDocument, PDFName, PDFRadioGroup, PDFRawStream } from "pdf-lib";
 import { bakeAnnotations } from "../lib/pdf/bake.ts";
 import { detectFormFields, fillFormFields } from "../lib/pdf/forms.ts";
 import { createAnnotation, resizeDraft } from "../lib/editor/factory.ts";
@@ -99,6 +99,17 @@ const placed = await placements(await bakeAnnotations(blankBytes, [wide, sig]));
 check("image keeps its aspect ratio", JSON.stringify(placed[0]) === JSON.stringify([50, 792 - 50 - 125, 200, 100]), placed);
 // Signature box 160x70 at (50, 300): 460x180 fits as 160x63, centred.
 check("signature keeps its aspect ratio", JSON.stringify(placed[1]) === JSON.stringify([50, 792 - 300 - 70 + 4, 160, 63]), placed);
+
+// Radio buttons: each button's "Value when chosen" is its option in the group
+const radio = (x: number, value: string, name?: string) => {
+  const r = createAnnotation("field-radio", DEFAULT_SETTINGS, x, 500) as Extract<Annotation, { type: "field" }>;
+  return { ...r, width: 16, height: 16, value, ...(name ? { name } : {}) };
+};
+const radioForm = (await PDFDocument.load(
+  await bakeAnnotations(blankBytes, [radio(50, "Yes"), radio(100, "No"), radio(150, ""), radio(300, "Red", "colour")])
+)).getForm();
+const groups = radioForm.getFields().map((f) => [f.getName(), (f as PDFRadioGroup).getOptions().join("|")].join(":"));
+check("radio values become the group's options", groups.join() === "radio_1:Yes|No|Option 3,colour:Red", groups);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

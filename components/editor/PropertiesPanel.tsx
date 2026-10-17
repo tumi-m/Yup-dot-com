@@ -259,7 +259,21 @@ export function PropertiesPanel({
                 Checked by default
               </label>
             )}
-            {(annotation.field === "dropdown" || annotation.field === "radio") && (
+            {annotation.field === "radio" && (
+              <>
+                <Field label="Value when chosen">
+                  <Input
+                    value={annotation.value}
+                    placeholder="e.g. Yes"
+                    onChange={(e) => onChange({ ...annotation, value: e.target.value })}
+                  />
+                </Field>
+                <p className="text-xs text-muted-foreground">
+                  Radio buttons with the same field name are one group.
+                </p>
+              </>
+            )}
+            {annotation.field === "dropdown" && (
               <Field label="Options (one per line)">
                 <OptionsField
                   options={annotation.options}
