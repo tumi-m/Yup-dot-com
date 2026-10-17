@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { cssEase, DUR, EASE_OUT, ENTER, EXIT, GLOW_FADE, InlineError, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
-import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, scrollBehavior, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
 import { SlideView } from "@/components/slides/SlideView";
@@ -280,7 +280,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       setMeta({ width: deck.width, height: deck.height, themeColors: deck.themeColors });
       setSnap(first);
       setStatus("ready");
-      requestAnimationFrame(() => barRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      requestAnimationFrame(() => barRef.current?.scrollIntoView({ block: "start", behavior: scrollBehavior() }));
     } catch (err) {
       if (id !== job.current) return;
       const { parse } = await getLibs();

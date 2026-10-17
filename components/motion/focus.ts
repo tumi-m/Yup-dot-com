@@ -43,13 +43,17 @@ export function needsScrollIntoView(top: number, viewportHeight: number, header 
   return top < header || top > viewportHeight * 0.4;
 }
 
+/** Smooth scrolling, unless the visitor asked for reduced motion. */
+export function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 /** Brings a newly shown block into view, deliberately and once. */
 export function scrollIntoViewIfNeeded(el: HTMLElement | null) {
   if (!el) return;
   const top = el.getBoundingClientRect().top;
   if (!needsScrollIntoView(top, window.innerHeight)) return;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+  el.scrollIntoView({ block: "start", behavior: scrollBehavior() });
 }
 
 /** The most a reserved block may take: most of a screen, never more. */

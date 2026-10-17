@@ -7,6 +7,7 @@ import { ArrowUp, FileText, RotateCcw, Sparkles, Square, UploadCloud } from "luc
 import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, ENTER_T, InlineError, SUCCESS, staggerDelay } from "@/components/motion/primitives";
+import { scrollBehavior } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { useSearchParams } from "next/navigation";
 import type { Tier } from "@/lib/limits";
@@ -132,7 +133,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   }, [docLoaded]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: scrollBehavior() });
   }, [messages]);
 
   async function loadFile(file: File | undefined) {
