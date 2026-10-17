@@ -26,3 +26,8 @@ export function authErrorMessage(search: string): string | null {
     ? "That link has expired or was opened in another browser. Log in, or sign up again to get a new link."
     : null;
 }
+
+/** The login page, coming back to `path` (with its query) afterwards. */
+export function loginHref(path: string): string {
+  return `/login?redirect=${encodeURIComponent(path)}`;
+}

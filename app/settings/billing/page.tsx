@@ -14,6 +14,7 @@ import { isAdminConfigured, listTeamMembers } from "@/lib/billing-store";
 import { isOurReference } from "@/lib/paystack";
 import { displayPrice } from "@/lib/currency";
 import { getPriceDisplay } from "@/lib/local-prices";
+import { loginHref } from "@/components/auth-redirect";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Billing" };
@@ -23,13 +24,14 @@ export default async function BillingPage({
 }: {
   searchParams: Promise<{ ref?: string; reference?: string; currency?: string }>;
 }) {
+  const sp = await searchParams;
+  const reference = [sp.ref, sp.reference].find(isOurReference) ?? null;
   const account = await getAccount();
-  if (!account) redirect("/login?redirect=/settings/billing");
+  // Back here after login, still confirming the payment.
+  if (!account) redirect(loginHref(reference ? `/settings/billing?ref=${reference}` : "/settings/billing"));
   const { profile, row } = account;
   const { billing } = profile;
-  const sp = await searchParams;
   const display = await getPriceDisplay(sp.currency);
-  const reference = [sp.ref, sp.reference].find(isOurReference) ?? null;
 
   const plan = PLANS[profile.plan];
   const sub = billing.subscription;

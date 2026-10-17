@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { loginHref } from "@/components/auth-redirect";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, isSupabaseConfigured } from "./config";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
@@ -10,6 +11,16 @@ function isProtected(path: string) {
   return PROTECTED_PREFIXES.some((p) => path.startsWith(p));
 }
 
+/**
+ * To the login page, then back to this exact URL. The query goes inside
+ * ?redirect, so a payment reference on return from Paystack survives the
+ * login.
+ */
+function toLogin(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+  return NextResponse.redirect(new URL(loginHref(pathname + search), request.url));
+}
+
 /** Refreshes the Supabase session and guards protected routes. */
 export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
@@ -17,12 +28,7 @@ export async function updateSession(request: NextRequest) {
   // Without credentials there is no session to refresh. Let public pages and
   // the browser-only tools through rather than failing every request.
   if (!isSupabaseConfigured()) {
-    if (isProtected(path)) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("redirect", path);
-      return NextResponse.redirect(url);
-    }
+    if (isProtected(path)) return toLogin(request);
     return NextResponse.next({ request });
   }
 
@@ -52,12 +58,7 @@ export async function updateSession(request: NextRequest) {
     if (!isProtected(path)) return response;
   }
 
-  if (isProtected(path) && !user) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("redirect", path);
-    return NextResponse.redirect(url);
-  }
+  if (isProtected(path) && !user) return toLogin(request);
 
   return response;
 }
