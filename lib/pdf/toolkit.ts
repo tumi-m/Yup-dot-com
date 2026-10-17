@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts, type PDFImage } from "pdf-lib";
+import { PDFDocument, rgb, degrees, StandardFonts, type PDFPage } from "pdf-lib";
 import { loadForRender } from "./render";
 import {
   parseDocument,
@@ -10,7 +10,10 @@ import {
 } from "./parse";
 import { friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
-import { drawOrientedImage, jpegOrientation, orientedSize, sniffImage } from "./images";
+import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
+import { embedImage, type EmbeddedImage } from "./embed-image";
+import { canvasToJpeg } from "../image-codec";
+import type { OcrProgress } from "./ocr";
 
 /** A processed result ready to hand to the browser for download. */
 export interface ToolFile {
@@ -198,9 +201,9 @@ export async function pdfToImagesTool(
     ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
     const canvas = document.createElement("canvas");
     await loaded.renderPage(i, canvas, 2, { pixelRatio: 1 });
-    const blob = new Blob([(await canvasBytes(canvas, `image/${format}`, quality)) as unknown as BlobPart], {
-      type: `image/${format}`,
-    });
+    // JPEGs through MozJPEG; progressive, since every image viewer reads it and it is smaller.
+    const bytes = format === "jpeg" ? await canvasToJpeg(canvas, quality, { progressive: true }) : await canvasBytes(canvas, "image/png");
+    const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: `image/${format}` });
     canvas.width = canvas.height = 0;
     results.push({
       blob,
@@ -228,36 +231,40 @@ export async function imagesToPdfTool(
     const data = await buf(file);
     const kind = sniffImage(data);
     if (!kind) throw new Error(`${file.name}: use a JPG or PNG image.`);
-    let img: PDFImage;
-    try {
-      img = kind === "png" ? await out.embedPng(data) : await out.embedJpg(data);
-    } catch {
-      throw new Error(`${file.name}: this image looks damaged.`);
-    }
+    const size = imageSize(data, kind);
+    if (!size) throw new Error(`${file.name}: this image looks damaged.`);
     const orientation = kind === "jpeg" ? jpegOrientation(data) : 1;
-    const shown = orientedSize(img, orientation);
+    const shown = orientedSize(size, orientation);
 
+    let page: PDFPage;
+    let rect: { x: number; y: number; width: number; height: number };
     if (opts.pageSize === "fit") {
       // 1 px = 1 pt, capped at the 200-inch page limit PDF viewers enforce.
       const scale = Math.min(1, (MAX_PAGE_PT - margin * 2) / Math.max(shown.width, shown.height));
       const w = shown.width * scale;
       const h = shown.height * scale;
-      const page = out.addPage([w + margin * 2, h + margin * 2]);
-      drawOrientedImage(page, img, orientation, { x: margin, y: margin, width: w, height: h });
+      page = out.addPage([w + margin * 2, h + margin * 2]);
+      rect = { x: margin, y: margin, width: w, height: h };
     } else {
-      const page = out.addPage([A4.w, A4.h]);
+      page = out.addPage([A4.w, A4.h]);
       const maxW = A4.w - margin * 2;
       const maxH = A4.h - margin * 2;
       const ratio = Math.min(maxW / shown.width, maxH / shown.height);
       const w = shown.width * ratio;
       const h = shown.height * ratio;
-      drawOrientedImage(page, img, orientation, {
-        x: (A4.w - w) / 2,
-        y: (A4.h - h) / 2,
-        width: w,
-        height: h,
-      });
+      rect = { x: (A4.w - w) / 2, y: (A4.h - h) / 2, width: w, height: h };
     }
+
+    // Size on the page in the image's stored orientation, for right-sizing.
+    const sideways = orientation >= 5;
+    const fit = { widthPt: sideways ? rect.height : rect.width, heightPt: sideways ? rect.width : rect.height };
+    let img: EmbeddedImage;
+    try {
+      img = await embedImage(out, data, kind, size, fit);
+    } catch {
+      throw new Error(`${file.name}: this image looks damaged.`);
+    }
+    drawOrientedImage(page, img, orientation, rect);
   }
   return { blob: pdfBlob(await out.save()), filename: "images.pdf" };
 }
@@ -523,26 +530,42 @@ export async function ocrTool(
   ctx: ToolContext = {}
 ): Promise<ToolFile> {
   const { ocrDocument, ocrText } = await import("./ocr");
-  const pages = await ocrDocument(await buf(files[0]), {
-    lang: opts.lang,
-    onProgress: (p) => {
-      const label =
-        p.stage === "loading"
-          ? "Loading the OCR engine…"
-          : `Reading page ${p.page} of ${p.total}…`;
-      ctx.progress?.(((p.page - 1) + p.pageProgress) / p.total, label);
-    },
-  });
+  const bytes = await buf(files[0]);
   const base = files[0].name.replace(/\.pdf$/i, "");
+  const onProgress = (p: OcrProgress) => {
+    const label =
+      p.stage === "loading"
+        ? "Loading the OCR engine…"
+        : `Reading page ${p.page} of ${p.total}…`;
+    ctx.progress?.(((p.page - 1) + p.pageProgress) / p.total, label);
+  };
   if (opts.output === "text") {
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress });
     return {
       blob: new Blob([ocrText(pages)], { type: "text/plain" }),
       filename: `${base}-ocr.txt`,
     };
   }
+
+  // Keep the original pages and add only the text, so the file stays as
+  // sharp and about as small as it came. A PDF pdf-lib can't edit (encrypted)
+  // is rebuilt from page images instead.
+  let original: PDFDocument | null = null;
+  try {
+    original = await PDFDocument.load(bytes);
+  } catch {
+    // Rebuilt from images below.
+  }
+  const { addTextLayer, buildSearchablePdf } = await import("./ocr-layer");
+  if (!original) {
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, images: true });
+    ctx.progress?.(1, "Building searchable PDF…");
+    return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
+  }
+  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, skipPagesWithText: true });
+  if (pages.every((p) => !p)) throw new Error("This PDF already has text you can search and copy.");
   ctx.progress?.(1, "Building searchable PDF…");
-  const { buildSearchablePdf } = await import("./ocr-layer");
-  return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
+  return { blob: pdfBlob(await addTextLayer(original, pages)), filename: `${base}-searchable.pdf` };
 }
 
 // ---------------------------------------------------------------------------

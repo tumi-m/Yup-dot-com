@@ -11,8 +11,11 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  type PDFRef,
 } from "pdf-lib";
 import type { Annotation } from "@/lib/editor/types";
+import { embedImage } from "./embed-image";
+import { drawOrientedImage, imageSize, sniffImage } from "./images";
 import { pageFrame } from "./page-frame";
 import { stampWatermark } from "./watermark";
 
@@ -28,6 +31,36 @@ function displayToUser(page: PDFPage): [number, number, number, number, number, 
       return [0, -1, 1, 0, bx, by + H];
     default:
       return [1, 0, 0, 1, bx, by];
+  }
+}
+
+function dataUrlBytes(url: string): Uint8Array | null {
+  const m = /^data:[^,]*;base64,(.*)$/s.exec(url);
+  if (!m) return null;
+  const bin = atob(m[1]);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** A placed picture, right-sized for `fit` points; null when it can't be read. */
+async function embedPicture(
+  doc: PDFDocument,
+  dataUrl: string,
+  fit: { widthPt: number; heightPt: number }
+): Promise<{ ref: PDFRef } | null> {
+  try {
+    const bytes = dataUrlBytes(dataUrl);
+    const kind = bytes && sniffImage(bytes);
+    const size = kind && imageSize(bytes, kind);
+    if (bytes && kind && size) return await embedImage(doc, bytes, kind, size, fit);
+  } catch {
+    // Try pdf-lib directly below.
+  }
+  try {
+    return dataUrl.startsWith("data:image/jpeg") ? await doc.embedJpg(dataUrl) : await doc.embedPng(dataUrl);
+  } catch {
+    return null;
   }
 }
 
@@ -192,6 +225,24 @@ export async function bakeAnnotations(
     byPage.set(ann.page, [...(byPage.get(ann.page) ?? []), ann]);
   }
 
+  // Each picture is embedded once however often it is placed (a signature on
+  // every page), sized for its largest placement: a phone photo shown a few
+  // inches wide is scaled down to 300 DPI instead of carried at full size.
+  const pictures = new Map<string, { widthPt: number; heightPt: number; embedded?: Promise<{ ref: PDFRef } | null> }>();
+  for (const ann of annotations) {
+    if (ann.type !== "image") continue;
+    const seen = pictures.get(ann.dataUrl);
+    pictures.set(ann.dataUrl, {
+      widthPt: Math.max(seen?.widthPt ?? 0, ann.width),
+      heightPt: Math.max(seen?.heightPt ?? 0, ann.height),
+    });
+  }
+  const picture = (dataUrl: string) => {
+    const entry = pictures.get(dataUrl)!;
+    entry.embedded ??= embedPicture(doc, dataUrl, entry);
+    return entry.embedded;
+  };
+
   for (const [pageIndex, pageAnnotations] of byPage) {
     const page = pages[pageIndex];
     const frame = pageFrame(page);
@@ -253,19 +304,9 @@ export async function bakeAnnotations(
         }
 
         case "image": {
-          try {
-            const embed = ann.dataUrl.startsWith("data:image/jpeg")
-              ? await doc.embedJpg(ann.dataUrl)
-              : await doc.embedPng(ann.dataUrl);
-            page.drawImage(embed, {
-              x: ann.x,
-              y: bottom,
-              width: ann.width,
-              height: ann.height,
-            });
-          } catch {
-            // Skip an unreadable image rather than failing the whole export.
-          }
+          const embed = await picture(ann.dataUrl);
+          // An unreadable image is skipped rather than failing the whole export.
+          if (embed) drawOrientedImage(page, embed, 1, { x: ann.x, y: bottom, width: ann.width, height: ann.height });
           break;
         }
 

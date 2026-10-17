@@ -23,7 +23,7 @@ export interface RawImage {
 }
 
 export interface JpegOptions {
-  /** 1–100, MozJPEG's scale (about 5 points below the browser's for the same look). */
+  /** 1–100, MozJPEG's scale (a few points above the browser's for the same look; see mozQuality). */
   quality: number;
   /** One channel instead of three; for pictures with no colour. */
   gray?: boolean;
@@ -77,9 +77,16 @@ function loadDecoder() {
   });
 }
 
-/** The quality setting for MozJPEG that looks like `browserQuality` (0–1) from canvas.toBlob. */
+/**
+ * The quality setting for MozJPEG that looks like `browserQuality` (0–1) from
+ * canvas.toBlob. Measured against Chrome on photos, slides and document pages
+ * (same SSIM and PSNR): MozJPEG needs a slightly higher number, about 94 for
+ * the browser's 0.92 and 90 for 0.85, and then makes files of about the same
+ * size on photos and smaller ones on text and flat graphics.
+ */
 export function mozQuality(browserQuality: number): number {
-  return Math.max(1, Math.min(100, Math.round(browserQuality * 100) - 5));
+  const q = 100 - 0.7 * (100 - browserQuality * 100);
+  return Math.max(1, Math.min(100, Math.round(q)));
 }
 
 /** RGBA → JPEG. Alpha is ignored (flatten onto a background first if it matters). */
@@ -107,14 +114,30 @@ export async function decodeJpeg(bytes: Uint8Array): Promise<RawImage> {
   return { data: img.data, width: img.width, height: img.height };
 }
 
-/** Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if the wasm can't load. */
-export async function canvasToJpeg(canvas: HTMLCanvasElement, browserQuality: number): Promise<Uint8Array> {
+/** A canvas's pixels, or null where they can't be read. */
+export function canvasPixels(canvas: HTMLCanvasElement): RawImage | null {
   try {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (ctx) {
-      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      return await encodeJpeg({ data, width, height }, { quality: mozQuality(browserQuality) });
-    }
+    if (!ctx) return null;
+    const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { data, width, height };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if
+ * the wasm can't load. Pass `pixels` when they have been read already.
+ */
+export async function canvasToJpeg(
+  canvas: HTMLCanvasElement,
+  browserQuality: number,
+  opts: { progressive?: boolean; pixels?: RawImage | null } = {}
+): Promise<Uint8Array> {
+  try {
+    const pixels = opts.pixels ?? canvasPixels(canvas);
+    if (pixels) return await encodeJpeg(pixels, { quality: mozQuality(browserQuality), progressive: opts.progressive });
   } catch {
     // Fall back below.
   }

@@ -34,6 +34,8 @@ export interface LoadedPdf {
     scale: number,
     opts?: { pixelRatio?: number }
   ) => Promise<void>;
+  /** The page's own text layer, as plain text. */
+  pageText: (pageNumber: number) => Promise<string>;
   destroy: () => void;
 }
 
@@ -100,6 +102,11 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
       });
       slot.done = run.catch(() => {});
       return run;
+    },
+    async pageText(pageNumber) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
     },
     destroy() {
       doc.destroy();

@@ -7,19 +7,28 @@ import {
   StandardFonts,
   TextRenderingMode,
   beginText,
+  concatTransformationMatrix,
   endText,
+  popGraphicsState,
+  pushGraphicsState,
   setFontAndSize,
   setTextMatrix,
   setTextRenderingMode,
   showText,
+  type PDFFont,
 } from "pdf-lib";
+import { embedFlate, type FlateImage } from "./flate-image";
+import { drawOrientedImage } from "./images";
+import { pageFrame, visibleBox } from "./page-frame";
 
 /**
- * Builds a *searchable* PDF from OCR output: each page is the scanned image
- * with an invisible text layer laid exactly over the recognised words — the
- * same technique Acrobat's "Recognize Text" uses. The text is drawn in render
- * mode 3 (invisible), so it can be selected, searched, and copied without
- * changing how the page looks.
+ * Makes a PDF *searchable* from OCR output: an invisible text layer laid
+ * exactly over the recognised words — the same technique Acrobat's "Recognize
+ * Text" uses. The text is drawn in render mode 3 (invisible), so it can be
+ * selected, searched, and copied without changing how the page looks.
+ *
+ * addTextLayer puts it on the pages of an existing PDF; buildSearchablePdf
+ * makes new pages from page images (slides, or PDFs that can't be edited).
  *
  * Kept free of browser APIs so it can be unit-tested in Node.
  */
@@ -34,21 +43,78 @@ export interface OcrWord {
   confidence: number;
 }
 
-export interface OcrPage {
+/** Words recognised on one page, measured on a render of the page as displayed. */
+export interface OcrText {
   /** Page size in PDF points. */
   widthPt: number;
   heightPt: number;
-  /** Rendered page image (JPEG or PNG bytes) and its pixel size. */
-  image: Uint8Array;
-  imageType: "jpeg" | "png";
+  /** Pixel size of the render the word boxes refer to. */
   imageWidth: number;
   imageHeight: number;
   words: OcrWord[];
 }
 
+/** The rendered page itself: JPEG or PNG bytes, or lossless pixels ready for the PDF. */
+export type PageImage = { imageType: "jpeg" | "png"; image: Uint8Array } | { imageType: "flate"; image: FlateImage };
+
+export type OcrPage = OcrText & PageImage;
+
+const wordsOf = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [];
+
+/**
+ * True when a page's own text layer has most of the words OCR read off it,
+ * i.e. it is real text, not garbled by a broken font encoding.
+ */
+export function textAgrees(ocrWords: { text: string }[], pageText: string): boolean {
+  const read = ocrWords.flatMap((w) => wordsOf(w.text));
+  if (!read.length) return true;
+  const own = new Set(wordsOf(pageText));
+  return read.filter((w) => own.has(w)).length >= read.length * 0.5;
+}
+
 /** The standard fonts are WinAnsi-only; skip words they cannot encode. */
 function encodable(text: string) {
   return /^[\x20-\x7E\xA0-\xFF]+$/.test(text);
+}
+
+/**
+ * Invisible-text operators for one page, in displayed coordinates (points
+ * from the bottom-left of the page as the reader sees it).
+ */
+function textLayer(
+  font: PDFFont,
+  fontKey: string | PDFName,
+  src: OcrText,
+  minConfidence: number
+): PDFOperator[] {
+  const sx = src.widthPt / src.imageWidth;
+  const sy = src.heightPt / src.imageHeight;
+  const ops: PDFOperator[] = [beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];
+
+  for (const w of src.words) {
+    const text = w.text.trim();
+    if (!text || w.confidence < minConfidence || !encodable(text)) continue;
+
+    const boxW = (w.x1 - w.x0) * sx;
+    const boxH = (w.y1 - w.y0) * sy;
+    if (boxW <= 0 || boxH <= 0) continue;
+
+    const size = Math.max(1, boxH * 0.9);
+    const natural = font.widthOfTextAtSize(text, size);
+    // Stretch horizontally so the selection box matches the word on the image.
+    const scalePct = natural > 0 ? (boxW / natural) * 100 : 100;
+
+    ops.push(
+      setFontAndSize(fontKey, size),
+      PDFOperator.of(Ops.SetTextHorizontalScaling, [PDFNumber.of(scalePct)]),
+      // Baseline sits near the bottom of the box (~20% descender allowance).
+      setTextMatrix(1, 0, 0, 1, w.x0 * sx, src.heightPt - w.y1 * sy + boxH * 0.2),
+      showText(font.encodeText(text + " "))
+    );
+  }
+
+  ops.push(endText());
+  return ops;
 }
 
 export async function buildSearchablePdf(
@@ -63,41 +129,48 @@ export async function buildSearchablePdf(
   for (const src of pages) {
     const page = doc.addPage([src.widthPt, src.heightPt]);
     const img =
-      src.imageType === "jpeg" ? await doc.embedJpg(src.image) : await doc.embedPng(src.image);
-    page.drawImage(img, { x: 0, y: 0, width: src.widthPt, height: src.heightPt });
+      src.imageType === "flate"
+        ? { ref: embedFlate(doc, src.image) }
+        : src.imageType === "jpeg"
+          ? await doc.embedJpg(src.image)
+          : await doc.embedPng(src.image);
+    drawOrientedImage(page, img, 1, { x: 0, y: 0, width: src.widthPt, height: src.heightPt });
 
     // Register the font on the page so raw operators can reference it by name.
     page.node.setFontDictionary(PDFName.of(fontKey), font.ref);
-
-    const sx = src.widthPt / src.imageWidth;
-    const sy = src.heightPt / src.imageHeight;
-    const ops: PDFOperator[] = [beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];
-
-    for (const w of src.words) {
-      const text = w.text.trim();
-      if (!text || w.confidence < minConfidence || !encodable(text)) continue;
-
-      const boxW = (w.x1 - w.x0) * sx;
-      const boxH = (w.y1 - w.y0) * sy;
-      if (boxW <= 0 || boxH <= 0) continue;
-
-      const size = Math.max(1, boxH * 0.9);
-      const natural = font.widthOfTextAtSize(text, size);
-      // Stretch horizontally so the selection box matches the word on the image.
-      const scalePct = natural > 0 ? (boxW / natural) * 100 : 100;
-
-      ops.push(
-        setFontAndSize(fontKey, size),
-        PDFOperator.of(Ops.SetTextHorizontalScaling, [PDFNumber.of(scalePct)]),
-        // Baseline sits near the bottom of the box (~20% descender allowance).
-        setTextMatrix(1, 0, 0, 1, w.x0 * sx, src.heightPt - w.y1 * sy + boxH * 0.2),
-        showText(font.encodeText(text + " "))
-      );
-    }
-
-    ops.push(endText());
-    page.pushOperators(...ops);
+    page.pushOperators(...textLayer(font, fontKey, src, minConfidence));
   }
 
+  return doc.save();
+}
+
+/**
+ * Adds the invisible text to the original PDF and leaves everything else as
+ * it was, so size and sharpness match the input. `pages[i]` is page i + 1;
+ * null leaves that page alone. Word boxes are measured on a render of the
+ * page as displayed (pdf.js: CropBox clipped to the MediaBox, /Rotate
+ * applied), and mapped back to the page's own coordinates here.
+ */
+export async function addTextLayer(
+  doc: PDFDocument,
+  pages: (OcrText | null)[],
+  opts: { minConfidence?: number } = {}
+): Promise<Uint8Array> {
+  const minConfidence = opts.minConfidence ?? 30;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  doc.getPages().forEach((page, i) => {
+    const src = pages[i];
+    if (!src || !src.words.length) return;
+    const frame = pageFrame(page, visibleBox(page));
+    const fontKey = page.node.newFontDictionary("OcrF", font.ref);
+    // The render's size in points is the displayed box, whatever pdf.js measured.
+    const shown = { ...src, widthPt: frame.width, heightPt: frame.height };
+    page.pushOperators(
+      pushGraphicsState(),
+      concatTransformationMatrix(...frame.matrix),
+      ...textLayer(font, fontKey, shown, minConfidence),
+      popGraphicsState()
+    );
+  });
   return doc.save();
 }

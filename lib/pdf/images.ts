@@ -3,8 +3,8 @@ import {
   drawObject,
   popGraphicsState,
   pushGraphicsState,
-  type PDFImage,
   type PDFPage,
+  type PDFRef,
 } from "pdf-lib";
 
 /** Identifies an image by its bytes, not its name: renamed files are common. */
@@ -13,6 +13,35 @@ export function sniffImage(bytes: Uint8Array): "png" | "jpeg" | null {
     return "png";
   }
   if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
+  return null;
+}
+
+/** Pixel size of a JPEG or PNG as stored (before any EXIF rotation), or null if unreadable. */
+export function imageSize(bytes: Uint8Array, kind: "png" | "jpeg"): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (kind === "png") {
+    if (bytes.length < 24) return null;
+    const width = view.getUint32(16);
+    const height = view.getUint32(20);
+    return width && height ? { width, height } : null;
+  }
+  let offset = 2;
+  while (offset + 9 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1];
+    if (marker === 0xff) {
+      offset++; // fill byte
+      continue;
+    }
+    // SOF0–SOF15, except DHT (C4), JPG (C8) and DAC (CC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const height = view.getUint16(offset + 5);
+      const width = view.getUint16(offset + 7);
+      return width && height ? { width, height } : null;
+    }
+    if (marker === 0xda || marker === 0xd9) return null;
+    offset += 2 + view.getUint16(offset + 2);
+  }
   return null;
 }
 
@@ -66,16 +95,13 @@ export function orientedSize(img: { width: number; height: number }, orientation
  */
 export function drawOrientedImage(
   page: PDFPage,
-  img: PDFImage,
+  img: { ref: PDFRef },
   orientation: number,
   rect: { x: number; y: number; width: number; height: number }
 ) {
   const { x, y, width: w, height: h } = rect;
-  if (orientation === 1 || orientation < 1 || orientation > 8) {
-    page.drawImage(img, rect);
-    return;
-  }
   const m: Record<number, [number, number, number, number, number, number]> = {
+    1: [w, 0, 0, h, x, y],
     2: [-w, 0, 0, h, x + w, y],
     3: [-w, 0, 0, -h, x + w, y + h],
     4: [w, 0, 0, -h, x, y + h],
@@ -87,7 +113,7 @@ export function drawOrientedImage(
   const name = page.node.newXObject("Image", img.ref);
   page.pushOperators(
     pushGraphicsState(),
-    concatTransformationMatrix(...m[orientation]),
+    concatTransformationMatrix(...(m[orientation] ?? m[1])),
     drawObject(name),
     popGraphicsState()
   );

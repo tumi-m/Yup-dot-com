@@ -1,7 +1,8 @@
 "use client";
 
 import { loadForRender } from "./render";
-import type { OcrPage, OcrWord } from "./ocr-layer";
+import { canvasToJpeg } from "../image-codec";
+import { textAgrees, type OcrPage, type OcrText, type OcrWord } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 
 /** Engine, WebAssembly core, and language models are all self-hosted. */
@@ -26,18 +27,28 @@ export interface OcrProgress {
 
 const RENDER_SCALE = 2; // ~144 DPI — a good accuracy/speed balance for OCR.
 
-async function canvasToBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/jpeg", 0.85)
-  );
-  if (!blob) throw new Error("Could not encode page image.");
-  return new Uint8Array(await blob.arrayBuffer());
+/** Pages with fewer characters than this have no real text layer of their own. */
+const HAS_TEXT = 40;
+
+export interface OcrOptions {
+  lang?: string;
+  onProgress?: (p: OcrProgress) => void;
+  /**
+   * Null for pages whose own text already says what OCR reads: a second copy
+   * would turn up twice in search and copy. Pages whose text is garbled
+   * (broken font encodings) still get the OCR'd words.
+   */
+  skipPagesWithText?: boolean;
 }
 
+/** Recognised words per page, measured on a render of each page as displayed. */
+export async function ocrDocument(bytes: Uint8Array, opts?: OcrOptions & { images?: false }): Promise<(OcrText | null)[]>;
+/** The same with each page's render as a JPEG, to rebuild the PDF from (for PDFs that can't be edited). */
+export async function ocrDocument(bytes: Uint8Array, opts: OcrOptions & { images: true }): Promise<OcrPage[]>;
 export async function ocrDocument(
   bytes: Uint8Array,
-  opts: { lang?: string; onProgress?: (p: OcrProgress) => void } = {}
-): Promise<OcrPage[]> {
+  opts: OcrOptions & { images?: boolean } = {}
+): Promise<(OcrText | OcrPage | null)[]> {
   const { createWorker } = await import("tesseract.js");
   const loaded = await loadForRender(bytes);
   const total = loaded.numPages;
@@ -55,7 +66,7 @@ export async function ocrDocument(
     },
   });
 
-  const pages: OcrPage[] = [];
+  const pages: (OcrText | OcrPage | null)[] = [];
   try {
     for (let i = 1; i <= total; i++) {
       current = i;
@@ -78,15 +89,24 @@ export async function ocrDocument(
         }
       }
 
-      pages.push({
+      if (opts.skipPagesWithText && !opts.images) {
+        const own = await loaded.pageText(i);
+        if (own.replace(/\s+/g, "").length >= HAS_TEXT && textAgrees(words, own)) {
+          canvas.width = canvas.height = 0;
+          pages.push(null);
+          continue;
+        }
+      }
+
+      const text: OcrText = {
         widthPt: vp.baseWidth,
         heightPt: vp.baseHeight,
-        image: await canvasToBytes(canvas),
-        imageType: "jpeg",
         imageWidth: canvas.width,
         imageHeight: canvas.height,
         words,
-      });
+      };
+      pages.push(opts.images ? { ...text, imageType: "jpeg", image: await canvasToJpeg(canvas, 0.85) } : text);
+      canvas.width = canvas.height = 0;
     }
   } finally {
     await worker.terminate();
@@ -96,9 +116,10 @@ export async function ocrDocument(
 }
 
 /** Plain text from OCR results, one block per page. */
-export function ocrText(pages: OcrPage[]): string {
+export function ocrText(pages: (OcrText | null)[]): string {
   return pages
     .map((p, i) => {
+      if (!p) return `--- Page ${i + 1} ---\n`;
       // Rebuild lines by grouping words with overlapping vertical extents.
       const sorted = [...p.words].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
       const lines: OcrWord[][] = [];

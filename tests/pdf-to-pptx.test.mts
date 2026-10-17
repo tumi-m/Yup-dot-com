@@ -14,6 +14,7 @@ import {
   fitFrame,
   pageText,
   renderScale,
+  QUALITY,
   MAX_CANVAS_PIXELS,
   type PageRasterizer,
 } from "../lib/pptx/from-pdf.ts";
@@ -253,9 +254,21 @@ check(
   f.x === 0 && f.cx === 7772400 && Math.abs(f.cy - 6005945) <= 1 && Math.abs(f.y * 2 + f.cy - 10058400) <= 1,
   JSON.stringify(f)
 );
-const s = renderScale(14400, 14400, 220);
+const s = renderScale(14400, 14400, QUALITY.high.pixels * 100);
 check("renderScale caps huge pages below the canvas pixel limit", (14400 * s) ** 2 <= MAX_CANVAS_PIXELS + 1, s.toFixed(3));
-check("renderScale keeps the requested DPI for normal pages", Math.abs(renderScale(612, 792, 150) - 150 / 72) < 1e-9);
+{
+  // Every page gets about the same pixels, whatever its paper size.
+  const px = (w: number, h: number, q: "standard" | "high") => w * h * renderScale(w, h, QUALITY[q].pixels) ** 2;
+  const letter = renderScale(612, 792, QUALITY.standard.pixels) * 72;
+  check("renderScale: standard is about 150 DPI on Letter", letter > 145 && letter < 152, letter.toFixed(1));
+  const letterHi = renderScale(612, 792, QUALITY.high.pixels) * 72;
+  check("renderScale: high is about 220 DPI on Letter", letterHi > 214 && letterHi < 222, letterHi.toFixed(1));
+  check("renderScale: a 16:9 slide-sized page is 1080p", Math.round(960 * renderScale(960, 540, QUALITY.standard.pixels)) === 1920);
+  const poster = px(2592, 3456, "standard");
+  check("renderScale: a poster no longer becomes a huge image", Math.abs(poster - QUALITY.standard.pixels) < 10, `${Math.round(poster)} px`);
+  const card = renderScale(252, 144, QUALITY.standard.pixels) * 72;
+  check("renderScale: a business card stays sharp full screen", card > 500, `${card.toFixed(0)} DPI`);
+}
 const txt = pageText([
   { str: "Title", transform: [20, 0, 0, 20, 50, 700] },
   { str: "Body", transform: [11, 0, 0, 11, 50, 660] },
@@ -349,12 +362,12 @@ if (canvasMod) {
   const sof = img1.indexOf(Buffer.from([0xff, 0xc0]));
   const pxH = img1.readUInt16BE(sof + 5);
   const pxW = img1.readUInt16BE(sof + 7);
-  check("PDF->PPTX: standard quality renders at 150 DPI", pxW === 1275 && pxH === 1650, `${pxW}x${pxH}`);
+  check("PDF->PPTX: standard quality renders about 150 DPI (1080p worth of pixels)", pxW === 1266 && pxH === 1638, `${pxW}x${pxH}`);
 
   const hi = await pdfToPptx(pdfBytes, { quality: "high", rasterize: nodeRasterizer, standardFontDataUrl: FONTS });
   const hiImg = await (await JSZip.loadAsync(hi)).file("ppt/media/image1.jpeg")!.async("nodebuffer");
   const hsof = hiImg.indexOf(Buffer.from([0xff, 0xc0]));
-  check("PDF->PPTX: high quality renders at 220 DPI", hiImg.readUInt16BE(hsof + 7) === 1870, `${hiImg.readUInt16BE(hsof + 7)}px wide`);
+  check("PDF->PPTX: high quality renders about 220 DPI", hiImg.readUInt16BE(hsof + 7) === 1857, `${hiImg.readUInt16BE(hsof + 7)}px wide`);
 
   if (hasSoffice) {
     const lo = libreOfficeToPdf(out);
