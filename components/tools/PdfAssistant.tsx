@@ -21,6 +21,7 @@ import type { Tier } from "@/lib/limits";
 import { handoffToFile, takeHandoff } from "@/lib/local-store";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { trackToolUsed } from "@/lib/analytics";
+import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -170,6 +171,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
 
   async function ask(question: string) {
     if (!doc || !question.trim() || streaming) return;
+    if (question.trim().length > MAX_MESSAGE_CHARS) {
+      setError({ message: `Questions can be up to ${MAX_MESSAGE_CHARS.toLocaleString("en")} characters.` });
+      return;
+    }
     setError(null);
     const history: ChatMessage[] = [...messages, { role: "user", content: question.trim() }];
     setMessages([...history, { role: "assistant", content: "" }]);
@@ -184,7 +189,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentName: doc.name, documentText: doc.text, messages: history }),
+        // Long chats are trimmed to the newest turns the server accepts.
+        body: JSON.stringify({ documentName: doc.name, documentText: doc.text, messages: fitHistory(history) }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -198,7 +204,13 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             return;
           }
         }
-        setError({ message: data.error ?? "Something went wrong.", needsLogin: res.status === 401 });
+        setError({
+          message:
+            res.status === 400
+              ? "Couldn't send that question. Try a shorter one."
+              : data.error ?? "Something went wrong.",
+          needsLogin: res.status === 401,
+        });
         return;
       }
       const left = res.headers.get("x-ai-remaining");
@@ -413,10 +425,16 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(draft); }
           }}
           rows={1}
+          maxLength={MAX_MESSAGE_CHARS}
           placeholder="Ask anything about this PDF…"
           aria-label="Your question"
           className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
+        {draft.length > MAX_MESSAGE_CHARS * 0.9 && (
+          <span data-testid="ai-char-count" className="shrink-0 self-center text-[11px] tabular-nums text-muted-foreground">
+            {draft.length.toLocaleString("en")}/{MAX_MESSAGE_CHARS.toLocaleString("en")}
+          </span>
+        )}
         {streaming ? (
           <Button type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
             <Square className="h-4 w-4" />

@@ -4,6 +4,7 @@ import { resolveTier } from "@/lib/tier";
 import { aiRemaining, claimAiAnswer, usageSubject } from "@/lib/usage";
 import { ollamaConfig, streamChat, userMessage, OllamaError, type ChatMessage } from "@/lib/ai/ollama";
 import { fitDocument } from "@/lib/ai/document";
+import { MAX_MESSAGE_CHARS, MAX_MESSAGES } from "@/lib/ai/history";
 
 /**
  * Chat with / summarize a PDF. Open to guests with a small daily allowance,
@@ -22,8 +23,6 @@ import { fitDocument } from "@/lib/ai/document";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const MAX_TURNS = 40;
-
 const bodySchema = z.object({
   documentName: z.string().max(300),
   documentText: z.string().min(1),
@@ -31,11 +30,11 @@ const bodySchema = z.object({
     .array(
       z.object({
         role: z.enum(["user", "assistant"]),
-        content: z.string().min(1).max(8000),
+        content: z.string().min(1).max(MAX_MESSAGE_CHARS),
       })
     )
     .min(1)
-    .max(MAX_TURNS),
+    .max(MAX_MESSAGES),
 });
 
 // Stable across every request so the cached prefix is never invalidated.
