@@ -422,7 +422,9 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(draft); }
+            // Enter while an IME is composing (Japanese, Chinese, Korean) picks a candidate.
+            const composing = e.nativeEvent.isComposing || e.keyCode === 229;
+            if (e.key === "Enter" && !e.shiftKey && !composing) { e.preventDefault(); ask(draft); }
           }}
           rows={1}
           maxLength={MAX_MESSAGE_CHARS}
