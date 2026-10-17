@@ -140,7 +140,7 @@ export function cssMs(seconds: number): string {
  * A determinate fill is a full-width bar slid left, so updates move a layer
  * instead of re-laying out the track. Never quite empty, so the start shows.
  */
-export function progressTranslate(value: number): string {
+export function progressTranslate(value: number, direction: 1 | -1 = 1): string {
   const v = Math.min(1, Math.max(0.04, Number.isFinite(value) ? value : 0));
-  return `translateX(${((v - 1) * 100).toFixed(2)}%)`;
+  return `translateX(${(direction * (v - 1) * 100).toFixed(2)}%)`;
 }

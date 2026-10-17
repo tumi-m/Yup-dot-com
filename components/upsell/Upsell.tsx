@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { Cloud, Crown, Film, Infinity as InfinityIcon, Sparkles, Stamp, X, Zap } from "lucide-react";
@@ -16,7 +16,7 @@ import { formatLimitBytes, LIMITS, type Tier } from "@/lib/limits";
 import { PLANS, formatPrice } from "@/lib/plans";
 import { displayPrice } from "@/lib/currency";
 import { useLocalPrices } from "@/components/LocalPrice";
-import { DUR, EASE_OUT, SPRING_POP, STAGGER } from "@/components/motion/tokens";
+import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 
 export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits";
 
@@ -125,9 +125,9 @@ export function UpgradeDialog({
       >
         <div className="relative bg-gradient-to-br from-violet-600 via-fuchsia-600 to-amber-500 px-6 pb-8 pt-7 text-white">
           <motion.div
-            initial={{ scale: 0.4, rotate: -20 }}
+            initial={{ scale: 0.6, rotate: -12 }}
             animate={{ scale: 1, rotate: 0 }}
-            transition={SPRING_POP}
+            transition={SPRING}
             className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20"
           >
             {offerFreeAccount ? <Sparkles className="h-6 w-6" /> : <Crown className="h-6 w-6" />}
@@ -144,7 +144,7 @@ export function UpgradeDialog({
                 key={b.text}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: DUR.base, ease: EASE_OUT, delay: 0.1 + i * STAGGER }}
+                transition={{ ...ENTER_T, delay: 0.1 + staggerDelay(i) }}
                 className="flex items-center gap-2.5"
               >
                 <b.icon className="h-4 w-4 text-primary" /> {b.text}
@@ -197,9 +197,9 @@ export function UpsellCard({
   const guest = tier === "guest";
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.9, duration: DUR.slow, ease: EASE_OUT }}
+      transition={{ ...ENTER_T, delay: SUCCESS.upsell }}
       className="relative mx-auto mt-6 flex max-w-md items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left"
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
@@ -229,4 +229,56 @@ export function UpsellCard({
       </button>
     </motion.div>
   );
+}
+
+/**
+ * The guest sign-up nudge after a finished task, timed so it never covers the
+ * success moment: it opens after a quiet pause only if the visitor hasn't
+ * touched anything, otherwise once they've downloaded the result.
+ */
+export function useSuccessNudge(open: () => void) {
+  const openRef = useRef(open);
+  openRef.current = open;
+  const pending = useRef(false);
+  const stop = useRef<(() => void) | null>(null);
+
+  const disarm = useCallback(() => {
+    pending.current = false;
+    stop.current?.();
+    stop.current = null;
+  }, []);
+
+  /** Call when the task finishes and a nudge is due. */
+  const arm = useCallback(() => {
+    disarm();
+    pending.current = true;
+    let idle = true;
+    const timer = window.setTimeout(() => {
+      if (idle && pending.current) {
+        disarm();
+        openRef.current();
+      }
+    }, NUDGE_DELAY_MS);
+    const onInput = () => {
+      idle = false;
+      window.clearTimeout(timer);
+    };
+    window.addEventListener("pointerdown", onInput, true);
+    window.addEventListener("keydown", onInput, true);
+    stop.current = () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pointerdown", onInput, true);
+      window.removeEventListener("keydown", onInput, true);
+    };
+  }, [disarm]);
+
+  /** Call when the result is downloaded: a waiting nudge opens now. */
+  const downloaded = useCallback(() => {
+    if (!pending.current) return;
+    disarm();
+    window.setTimeout(() => openRef.current(), DUR.slow * 1000);
+  }, [disarm]);
+
+  useEffect(() => disarm, [disarm]);
+  return { arm, downloaded, cancel: disarm };
 }

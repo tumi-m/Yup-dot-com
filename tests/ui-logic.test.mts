@@ -66,6 +66,7 @@ check("css ms", cssMs(DUR.base) === "240ms" && cssMs(DUR.fast) === "150ms" && cs
 check("progress: full bar at 1", progressTranslate(1) === "translateX(0.00%)");
 check("progress: half way", progressTranslate(0.5) === "translateX(-50.00%)");
 check("progress: never quite empty", progressTranslate(0) === "translateX(-96.00%)" && progressTranslate(-1) === progressTranslate(0));
+check("progress: the gradient counter-slides by the same amount", progressTranslate(0.3, -1) === "translateX(70.00%)" && progressTranslate(1, -1) === "translateX(0.00%)");
 check("progress: clamps and survives NaN", progressTranslate(7) === progressTranslate(1) && progressTranslate(NaN) === progressTranslate(0));
 
 // Category pills: Optimize folds into Organize
