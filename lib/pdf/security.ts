@@ -17,7 +17,10 @@ import {
 export interface ProtectOptions {
   /** Required to open the document. */
   userPassword: string;
-  /** Grants full access; defaults to the user password when omitted. */
+  /**
+   * Grants full access. When omitted a random one is used, so the open
+   * password alone can't lift the print/copy/edit restrictions.
+   */
   ownerPassword?: string;
   allowPrinting?: boolean;
   allowCopying?: boolean;
@@ -32,7 +35,7 @@ export async function protectPdf(
   const doc = await SecurePDFDocument.load(bytes);
   doc.encrypt({
     userPassword: opts.userPassword,
-    ownerPassword: opts.ownerPassword || opts.userPassword,
+    ownerPassword: opts.ownerPassword || randomPassword(),
     permissions: {
       printing: opts.allowPrinting ? "highResolution" : false,
       copying: !!opts.allowCopying,
@@ -44,6 +47,11 @@ export async function protectPdf(
     },
   });
   return doc.save({ useObjectStreams: false });
+}
+
+function randomPassword(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Opens an encrypted PDF with its password and saves an unencrypted copy. */
