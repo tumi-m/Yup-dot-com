@@ -603,6 +603,34 @@ export interface Chunk {
 }
 
 /**
+ * Splits text longer than `max` into pieces that fit, breaking at the last
+ * line break (table row, list item), sentence end or space that fits.
+ */
+function splitToFit(text: string, max: number): string[] {
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const head = rest.slice(0, max + 1);
+    const min = max / 2; // a break this early would leave a tiny piece
+    let cut = head.lastIndexOf("\n");
+    if (cut < min) {
+      cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("? "), head.lastIndexOf("! ")) + 1;
+    }
+    if (cut < min) cut = head.lastIndexOf(" ");
+    if (cut < 1) {
+      cut = Math.max(1, max);
+      // Don't split a surrogate pair.
+      if (cut > 1 && /[\uD800-\uDBFF]/.test(rest[cut - 1])) cut--;
+    }
+    const piece = rest.slice(0, cut).trim();
+    if (piece) pieces.push(piece);
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
+/**
  * Split into retrieval-sized chunks that carry their heading path, so each
  * chunk stays semantically self-contained for RAG.
  */
@@ -640,11 +668,13 @@ export function toChunks(doc: ParsedDocument, maxChars = 1200): Chunk[] {
     else if (block.type === "table") text = block.rows.map((r) => r.join(" | ")).join("\n");
 
     if (!text) continue;
-    if (buffer.length + text.length > maxChars) {
-      flush();
-      bufferPage = block.page;
+    for (const piece of splitToFit(text, maxChars)) {
+      if (buffer && buffer.length + 2 + piece.length > maxChars) {
+        flush();
+        bufferPage = block.page;
+      }
+      buffer += (buffer ? "\n\n" : "") + piece;
     }
-    buffer += (buffer ? "\n\n" : "") + text;
   }
   flush();
   return chunks;
