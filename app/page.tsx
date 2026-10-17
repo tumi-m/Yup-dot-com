@@ -2,7 +2,7 @@ import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { ToolGrid } from "@/components/ToolGrid";
 import { Reveal } from "@/components/motion/primitives";
-import { FinalCta, Hero } from "@/components/landing/Sections";
+import { AfterHero, FinalCta, Hero, HeroFlow } from "@/components/landing/Sections";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 export const metadata = { alternates: { canonical: "/" } };
@@ -14,8 +14,10 @@ export default async function HomePage() {
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
       <main id="main" className="flex-1">
+        <HeroFlow>
         <Hero isAuthed={!!user} />
 
+        <AfterHero>
         <section className="border-t border-border py-16 sm:py-24">
           <div className="container">
             <Reveal className="mx-auto max-w-xl text-center">
@@ -28,6 +30,8 @@ export default async function HomePage() {
         </section>
 
         <FinalCta />
+        </AfterHero>
+        </HeroFlow>
       </main>
       <SiteFooter />
     </div>

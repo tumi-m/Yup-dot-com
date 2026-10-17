@@ -213,6 +213,7 @@ const config: Config = {
     // Touch screens: bigger targets where a finger, not a mouse, is the pointer.
     ({ addVariant }: { addVariant: (name: string, def: string) => void }) => {
       addVariant("pointer-coarse", "@media (pointer: coarse)");
+      addVariant("pointer-fine", "@media (pointer: fine)");
       addVariant("hover-none", "@media (hover: none)");
       // Landscape phones vs. tablets and up: the editor toolbar's two layouts.
       addVariant("short", "@media (max-height: 500px)");

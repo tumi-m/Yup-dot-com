@@ -64,6 +64,13 @@ export function staggerDelay(index: number, step: number = STAGGER, cap: number 
   return Math.min(Math.max(index, 0), cap) * step;
 }
 
+/**
+ * A panel resizing (motion's layout, so transform only) and everything below
+ * it following in step: on the entrance curve, so the container leads the
+ * content that is fading in.
+ */
+export const RESIZE_T = { duration: DUR.base, ease: EASE_OUT } as const;
+
 /** The common entrance transition. */
 export const ENTER_T = { duration: DUR.base, ease: EASE_OUT } as const;
 /** The common exit transition. */

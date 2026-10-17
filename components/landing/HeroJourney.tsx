@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -22,10 +22,11 @@ import {
 } from "lucide-react";
 import {
   DUR,
-  EASE_IN_OUT,
+  EASE_IN,
   ENTER_T,
   FADE_EXIT,
   InlineError,
+  RESIZE_T,
   SPRING,
   SPRING_POP,
   staggerDelay,
@@ -59,6 +60,17 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   MP3: Music2,
   Playlist: ListVideo,
 };
+
+/**
+ * Swapping the question for a branch (and back): the old view fades in `tap`
+ * where it stands while the panel already resizes around the new one, which
+ * fades in once the old has gone. Exit plus entrance stay under 0.4s, and the
+ * two never overlap.
+ */
+const SWAP_EXIT = { opacity: 0, transition: { duration: DUR.tap, ease: EASE_IN } } as const;
+const SWAP_ENTER_T = { ...ENTER_T, delay: DUR.tap } as const;
+/** The panel's resize: transform only (motion's layout), leading the content. */
+const PANEL_T = { layout: RESIZE_T } as const;
 
 function setHash(choice: JourneyChoice | null) {
   const { pathname, search } = window.location;
@@ -132,17 +144,6 @@ export function HeroJourney() {
     if (target !== choice) choose(target);
   }
 
-  // Animate the panel's height as its content changes.
-  const inner = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number | "auto">("auto");
-  useLayoutEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const active = choice ? CHOICES[choice] : null;
   const fileBranchEmpty =
     (choice === "pdf" && pdfFiles.length === 0) || (choice === "pptx" && !pptxFile);
@@ -173,22 +174,26 @@ export function HeroJourney() {
       data-testid="journey"
       data-choice={choice ?? ""}
     >
+      {/* The panel resizes with motion's layout animation (transform, scale
+          corrected for the content and the radius), so nothing re-lays out
+          per frame; the content below follows in the same LayoutGroup. */}
       <motion.div
-        animate={{ height }}
-        transition={reduce ? { duration: 0 } : { duration: DUR.base, ease: EASE_IN_OUT }}
-        className="relative overflow-hidden rounded-3xl border border-primary/20 bg-background/90 text-left shadow-2xl shadow-primary/10"
+        layout
+        transition={reduce ? { layout: { duration: 0 } } : PANEL_T}
+        style={{ borderRadius: 24 }}
+        className="relative overflow-hidden border border-primary/20 bg-background/90 text-left shadow-2xl shadow-primary/10"
       >
-        <div ref={inner} className="p-3 sm:p-4">
-          {/* "wait": the old state fades out before the new one enters, so the
-              two never overlap. */}
-          <AnimatePresence mode="wait" initial={false}>
+        <motion.div layout="position" transition={reduce ? { layout: { duration: 0 } } : PANEL_T} className="relative p-3 sm:p-4">
+          {/* "popLayout": the old view leaves the flow at once, so the panel
+              starts resizing on the click; the new view waits for it to fade. */}
+          <AnimatePresence mode="popLayout" initial={false}>
             {choice === null || !active ? (
               <motion.div
                 key="question"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={FADE_EXIT}
-                transition={ENTER_T}
+                exit={SWAP_EXIT}
+                transition={SWAP_ENTER_T}
               >
                 <p id="journey-question" className="px-1 pb-3 pt-1 text-sm font-semibold">
                   What are you working on?
@@ -260,14 +265,14 @@ export function HeroJourney() {
                 key={choice}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={FADE_EXIT}
-                transition={ENTER_T}
+                exit={SWAP_EXIT}
+                transition={SWAP_ENTER_T}
               >
                 <div className="flex items-center gap-3 pb-3">
                   <motion.span
                     initial={{ scale: 0.6, rotate: -12 }}
                     animate={{ scale: 1, rotate: 0 }}
-                    transition={SPRING_POP}
+                    transition={{ ...SPRING_POP, delay: DUR.tap }}
                     className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", active.tint)}
                   >
                     <active.icon className="h-5 w-5" />
@@ -342,7 +347,7 @@ export function HeroJourney() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </motion.div>
 
         {/* Drop overlay for states without their own dropzone. */}
         <AnimatePresence>
@@ -406,7 +411,11 @@ function LinkBranch({
   }
 
   return (
-    <form
+    // A layout node, so a re-render here (the actions appearing) has the
+    // panel and the page below resize smoothly with it.
+    <motion.form
+      layout="position"
+      transition={PANEL_T}
       onSubmit={(e) => {
         e.preventDefault();
         if (actions[0]) router.push(actions[0].href);
@@ -495,6 +504,6 @@ function LinkBranch({
           </motion.div>
         )}
       </AnimatePresence>
-    </form>
+    </motion.form>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { LayoutGroup, motion } from "motion/react";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardHat } from "@/components/WizardLogo";
 import { TOOLS } from "@/lib/tools";
-import { Reveal, STAGGER_HERO, WordReveal } from "@/components/motion/primitives";
+import { Reveal, RESIZE_T, STAGGER_HERO, WordReveal } from "@/components/motion/primitives";
 import { Aurora, HeroScene, Starfield } from "./HeroScene";
 import { HeroJourney } from "./HeroJourney";
 import { RotatingWord } from "./RotatingWord";
@@ -18,11 +19,36 @@ const GRADIENT_WORD =
 
 const LINE_1 = "Cast spells on";
 
+const FOLLOW_T = { layout: RESIZE_T } as const;
+
+/**
+ * Groups the hero with what comes after it on the page, so when the journey
+ * panel resizes, the content below glides with it (transform only) instead of
+ * jumping or re-laying out every frame.
+ */
+export function HeroFlow({ children }: { children: React.ReactNode }) {
+  return <LayoutGroup>{children}</LayoutGroup>;
+}
+
+/** Content below the hero: follows the journey's resize. */
+export function AfterHero({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.div layout="position" transition={FOLLOW_T}>
+      {children}
+    </motion.div>
+  );
+}
+
 export function Hero({ isAuthed }: { isAuthed: boolean }) {
   return (
     <section className="relative overflow-hidden">
-      <Aurora />
-      <Starfield />
+      <LayoutGroup>
+      {/* The sky stretches with the section as the journey resizes, so the
+          stars and the low glow glide rather than jump. */}
+      <motion.div layout transition={FOLLOW_T} aria-hidden className="pointer-events-none absolute inset-0">
+        <Aurora />
+        <Starfield />
+      </motion.div>
       {/* items-start: the headline stays put while the journey changes height. */}
       <div className="container relative grid grid-cols-1 items-start gap-12 py-16 short:py-6 lg:grid-cols-[1.05fr_1fr] lg:py-24">
         <div className="min-w-0 text-center lg:pt-4 lg:text-left">
@@ -50,7 +76,12 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
             <HeroJourney />
           </div>
 
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm lg:justify-start">
+          {/* The links under the journey glide with it as it resizes. */}
+          <motion.div
+            layout="position"
+            transition={FOLLOW_T}
+            className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm lg:justify-start"
+          >
             <Link
               href="/tools"
               className="group inline-flex min-h-11 items-center gap-1 rounded-lg font-medium text-violet-700"
@@ -66,11 +97,15 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
                 Open your library
               </Link>
             )}
-          </div>
+          </motion.div>
         </div>
 
-        <HeroScene />
+        {/* Below the journey on phones, so it follows the resize too. */}
+        <motion.div layout="position" transition={FOLLOW_T} className="min-w-0">
+          <HeroScene />
+        </motion.div>
       </div>
+      </LayoutGroup>
     </section>
   );
 }

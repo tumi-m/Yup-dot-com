@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { DropTile } from "@/components/ui/dropzone";
 import { fileToHandoff, setHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
-import { ENTER_T, EXIT, InlineError, staggerDelay } from "@/components/motion/primitives";
+import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { cn, formatBytes } from "@/lib/utils";
 
 const PDF_ACTIONS = [
@@ -37,12 +37,15 @@ const ACCEPT = {
 /**
  * Each branch keeps one height whether it shows the drop zone or the tools
  * for a chosen file: the tallest of the two (for PDFs, the nine-tool grid).
- * A file picked in the system dialog isn't "recent input", so growing then
- * would shift the page under the visitor.
+ * A file picked in the system dialog or dropped isn't "recent input", so
+ * growing then would shift the page under the visitor. Wherever a file can
+ * be dropped (a mouse, or a wide screen) the room is held from the start; on
+ * a phone, where the only way in is the Choose file button, it is taken at
+ * that tap (`armed`), so the drop zone isn't padded with empty space.
  */
 const RESERVE = {
-  pdf: "min-h-[342px] sm:min-h-[332px]",
-  pptx: "min-h-[244px] sm:min-h-[160px]",
+  pdf: { always: "sm:min-h-[332px] max-sm:pointer-fine:min-h-[342px]", armed: "min-h-[342px] sm:min-h-[332px]" },
+  pptx: { always: "sm:min-h-[160px] max-sm:pointer-fine:min-h-[244px]", armed: "min-h-[244px] sm:min-h-[160px]" },
 };
 
 /**
@@ -74,6 +77,7 @@ export function HeroDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const chooseRef = useRef<HTMLButtonElement>(null);
   const [going, setGoing] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
 
   useEffect(() => {
     if (autoFocus && files.length === 0) chooseRef.current?.focus({ preventScroll: true });
@@ -99,7 +103,8 @@ export function HeroDropzone({
   const FileIcon = mode === "pptx" ? Presentation : FileText;
 
   return (
-    <div className={cn("flex flex-col", RESERVE[mode])}>
+    // A layout node, so taking the room at the tap resizes the panel smoothly.
+    <motion.div layout="position" transition={{ layout: RESIZE_T }} className={cn("flex flex-col", RESERVE[mode].always, armed && RESERVE[mode].armed)}>
     <AnimatePresence mode="wait" initial={false}>
       {files.length === 0 ? (
         <motion.div
@@ -145,7 +150,10 @@ export function HeroDropzone({
               ref={chooseRef}
               size="lg"
               className={cn("h-12 w-full px-6 shadow-lg shadow-primary/25 sm:w-auto", dragging && "invisible")}
-              onClick={() => inputRef.current?.click()}
+              onClick={() => {
+                setArmed(true);
+                inputRef.current?.click();
+              }}
             >
               Choose file
             </Button>
@@ -226,6 +234,6 @@ export function HeroDropzone({
         </motion.div>
       )}
     </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
