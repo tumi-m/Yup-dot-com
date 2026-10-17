@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { motion } from "motion/react";
-import { UploadCloud, Loader2, FilePlus2 } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { FilePlus2 } from "lucide-react";
 import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
 import { limitsFor, type Tier } from "@/lib/limits";
-import { uuid, cn } from "@/lib/utils";
+import { uuid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { SPRING } from "@/components/motion/primitives";
+import { ToolDropzone } from "@/components/ui/dropzone";
+import { InlineError } from "@/components/motion/primitives";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 
 /**
@@ -22,7 +23,6 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [upsell, setUpsell] = useState(false);
   const limits = limitsFor(tier);
 
@@ -111,24 +111,11 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
 
   return (
     <div className="space-y-4">
-      <motion.div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          const f = e.dataTransfer.files[0];
-          if (f) openFile(f);
-        }}
-        animate={{ scale: dragging ? 1.02 : 1 }}
-        transition={SPRING}
-        className={cn(
-          "rounded-3xl border-2 border-dashed bg-card p-10 text-center transition-colors",
-          dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/60"
-        )}
+      <ToolDropzone
+        label={busy ? "Opening the editor…" : "Drop a PDF to start editing"}
+        dragLabel="Release to open"
+        busy={busy}
+        onFiles={(files) => files[0] && openFile(files[0])}
       >
         <input
           ref={inputRef}
@@ -141,14 +128,6 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
             e.target.value = "";
           }}
         />
-        <motion.div
-          animate={busy ? { rotate: 360 } : { y: [0, -5, 0] }}
-          transition={busy ? { duration: 1.1, repeat: Infinity, ease: "linear" } : { duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-          className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"
-        >
-          {busy ? <Loader2 className="h-7 w-7" /> : <UploadCloud className="h-7 w-7" />}
-        </motion.div>
-        <p className="mt-4 text-lg font-semibold">{busy ? "Opening the editor…" : "Drop a PDF to start editing"}</p>
         <div className="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
           <Button className="h-11" onClick={() => inputRef.current?.click()} disabled={busy}>
             Choose PDF
@@ -157,12 +136,8 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
             <FilePlus2 /> Blank page
           </Button>
         </div>
-      </motion.div>
-      {error && (
-        <p role="alert" data-testid="tool-error" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      </ToolDropzone>
+      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
       <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="file-size" tier={tier} />
     </div>
   );

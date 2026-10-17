@@ -322,7 +322,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           initial={ENTER.initial}
           animate={ENTER.animate}
           exit={EXIT}
-          onAnimationComplete={(def) => def !== EXIT && flow.release()}
+          onAnimationStart={(def) => def !== EXIT && flow.release()}
           className="space-y-5"
         >
           <ToolDropzone label={`Drop ${proc.multiple ? "files" : "a file"} here`} onFiles={addFiles}>
