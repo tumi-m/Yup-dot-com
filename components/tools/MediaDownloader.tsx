@@ -148,6 +148,14 @@ function duration(s?: number | null) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+/**
+ * The preview card's height with a two-line title and no notes (its buttons
+ * stack below sm), measured at 360–1440px.
+ */
+function previewHeight() {
+  return window.innerWidth < 640 ? 407 : 379;
+}
+
 export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tier: Tier }) {
   const params = useSearchParams();
   const pathname = usePathname();
@@ -237,6 +245,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     }
     const seq = ++lookupSeq.current;
     setPhase("loading");
+    // Room for the preview, taken now while the click explains it: the
+    // answer can take a second or two, and the page below shouldn't move then.
+    if (!auto) flow.reserve(previewHeight());
     const res = await fetch("/api/media/info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -248,6 +259,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     if (!res?.ok) {
       setError(data?.error ?? (res ? "Couldn't read that link." : "You're offline. Check your connection."));
       if (!auto) focusNext.current = "url";
+      flow.release();
       setPhase("input");
       return;
     }

@@ -90,6 +90,11 @@ export function useHeightLock<T extends HTMLElement>() {
     const el = ref.current;
     if (el) setMinHeight(reservedHeight(el.offsetHeight, window.innerHeight, floor));
   }, []);
+  /** Reserve room for a block of a known height that is on its way. */
+  const reserve = useCallback((px: number) => {
+    const el = ref.current;
+    if (el) setMinHeight(reservedHeight(Math.max(el.offsetHeight, px), window.innerHeight));
+  }, []);
   const release = useCallback(() => setMinHeight(undefined), []);
-  return { ref, minHeight, lock, release };
+  return { ref, minHeight, lock, reserve, release };
 }
