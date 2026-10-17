@@ -625,7 +625,7 @@ export function PdfEditor({
             <span className="hidden sm:inline">Download</span>
           </Button>
           <Button onClick={handleSave} disabled={busy || !bytes} aria-label="Save">
-            {busy ? <Loader2 className="animate-spin" /> : <Save />}
+            {busy ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
             <span className="hidden sm:inline">Save</span>
           </Button>
         </div>
@@ -671,7 +671,7 @@ export function PdfEditor({
             </div>
           ) : !loaded ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              <Loader2 className="mr-2 animate-spin" /> Loading document…
+              <Loader2 className="mr-2 motion-safe:animate-spin" /> Loading document…
             </div>
           ) : (
             <div className="flex justify-center p-4 sm:p-8">

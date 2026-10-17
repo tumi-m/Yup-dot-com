@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
-import { DUR, EASE_OUT, ENTER, EXIT, InlineError, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
+import { cssEase, DUR, EASE_OUT, ENTER, EXIT, GLOW_FADE, InlineError, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
 import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
@@ -591,7 +591,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
         const s = stageScale || 1;
         node?.animate(
           [{ boxShadow: `0 0 0 ${6 / s}px hsl(262 83% 58% / 0.45)` }, { boxShadow: `0 0 0 ${6 / s}px hsl(262 83% 58% / 0)` }],
-          { duration: 900, easing: "ease-out" }
+          { duration: GLOW_FADE * 1000, easing: cssEase(EASE_OUT) }
         );
       });
     }

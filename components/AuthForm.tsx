@@ -152,7 +152,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           )}
 
           <Button type="submit" className="h-11 w-full" disabled={loading || !configured}>
-            {loading && <Loader2 className="animate-spin" />}
+            {loading && <Loader2 className="motion-safe:animate-spin" />}
             {isSignup ? "Sign up" : "Log in"}
           </Button>
           {isSignup && (

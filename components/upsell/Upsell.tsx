@@ -144,7 +144,7 @@ export function UpgradeDialog({
                 key={b.text}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ ...ENTER_T, delay: 0.1 + staggerDelay(i) }}
+                transition={{ ...ENTER_T, delay: DUR.tap + staggerDelay(i) }}
                 className="flex items-center gap-2.5"
               >
                 <b.icon className="h-4 w-4 text-primary" /> {b.text}

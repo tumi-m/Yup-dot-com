@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Loader2, UploadCloud, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EASE_OUT, SPRING_POP } from "@/components/motion/tokens";
+import { GULP_T, SPRING_POP } from "@/components/motion/tokens";
 import { cn } from "@/lib/utils";
 
 /**
@@ -64,7 +64,7 @@ export function DropTile({
   return (
     <motion.div
       animate={dragging ? { scale: 1.1, y: -4 } : gulp ? { scale: [1.1, 0.92, 1], y: 0 } : { scale: 1, y: 0 }}
-      transition={gulp && !dragging ? { duration: 0.25, ease: EASE_OUT } : SPRING_POP}
+      transition={gulp && !dragging ? GULP_T : SPRING_POP}
       onAnimationComplete={() => gulp && setGulping(drops)}
       className="relative mx-auto w-fit"
     >

@@ -8,7 +8,8 @@ import { PLAN_LIST, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { startCheckout, type CheckoutRequest } from "@/components/BillingClient";
 import { Button } from "@/components/ui/button";
-import { STAGGER_HERO, staggerDelay, useAmbient } from "@/components/motion/primitives";
+import { AnimatePresence } from "motion/react";
+import { InlineError, STAGGER_HERO, staggerDelay, useAmbient } from "@/components/motion/primitives";
 import { cn } from "@/lib/utils";
 import type { PlanId } from "@/lib/types";
 
@@ -109,7 +110,7 @@ export function PricingCards({
                   disabled={isCurrent || loading !== null}
                   onClick={() => choose(plan.id)}
                 >
-                  {loading === `${plan.id}:subscription` && <Loader2 className="animate-spin" />}
+                  {loading === `${plan.id}:subscription` && <Loader2 className="motion-safe:animate-spin" />}
                   {isCurrent
                     ? "Current plan"
                     : plan.id === "free"
@@ -132,7 +133,7 @@ export function PricingCards({
                             title={display && !display.local ? `Billed as ${formatPrice(prepaidPrice(req.plan, months))}` : undefined}
                             className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg px-2 font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                           >
-                            {loading === loadingKey(req) && <Loader2 className="h-3 w-3 animate-spin" />}
+                            {loading === loadingKey(req) && <Loader2 className="h-3 w-3 motion-safe:animate-spin" />}
                             {months === 1 ? "1 month" : "1 year"} {displayPrice(display, prepaidPrice(req.plan, months))}
                             {months === 12 && (
                               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
@@ -145,11 +146,9 @@ export function PricingCards({
                     </>
                   )}
                 </div>
-                {error?.plan === plan.id && (
-                  <p role="alert" className="mt-2 rounded-lg bg-destructive/10 px-4 py-3 text-center text-sm text-destructive">
-                    {error.message}
-                  </p>
-                )}
+                <AnimatePresence>
+                  {error?.plan === plan.id && <InlineError key="error" message={error.message} className="mt-2" />}
+                </AnimatePresence>
               </div>
             </div>
           );

@@ -40,8 +40,6 @@ export const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 export const EASE_IN = [0.4, 0, 1, 1] as const;
 /** On-screen moves between two states: progress fill, height, indicators. */
 export const EASE_IN_OUT = [0.65, 0, 0.35, 1] as const;
-/** @deprecated Name the direction: EASE_OUT, EASE_IN or EASE_IN_OUT. */
-export const EASE = EASE_OUT;
 
 /** Press, hover and drag response. No overshoot. */
 export const SPRING = { type: "spring", stiffness: 380, damping: 30 } as const;
@@ -92,6 +90,12 @@ export const SHAKE_T = { duration: 0.32, ease: EASE_IN_OUT, delay: 0.05 } as con
 /** Inline messages fade and slide in a little quicker than a panel. */
 export const NOTICE_T = { duration: 0.2, ease: EASE_OUT } as const;
 
+/** A file tile swallowing a drop: a quick squash from its lifted size. */
+export const GULP_T = { duration: 0.25, ease: EASE_OUT } as const;
+
+/** How long a "this changed" glow takes to fade (colour only, no movement). */
+export const GLOW_FADE = 0.9;
+
 /** Determinate progress fill: one smooth glide per update. */
 export const PROGRESS_T = 0.3;
 /** The bar holds at 100% this long before the result replaces it. */
@@ -105,6 +109,8 @@ export const SUCCESS = {
   icon: 0,
   title: 0.08,
   check: 0.12,
+  /** How long the check takes to draw itself. */
+  draw: 0.3,
   stats: 0.14,
   actions: 0.2,
   list: 0.24,

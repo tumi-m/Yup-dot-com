@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ExternalLink, Loader2, Trash2, UserPlus, X } from "lucide-react";
+import { ExternalLink, Loader2, Trash2, UserPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SPRING, SparkleBurst } from "@/components/motion/primitives";
+import { ENTER_T, EXIT_T, FADE_EXIT, InlineError, SPRING_LAYOUT, SuccessBadge } from "@/components/motion/primitives";
 import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
@@ -58,10 +58,10 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
   return (
     <div>
       <Button variant={variant} onClick={open} disabled={loading}>
-        {loading ? <Loader2 className="animate-spin" /> : <ExternalLink />}
+        {loading ? <Loader2 className="motion-safe:animate-spin" /> : <ExternalLink />}
         {label}
       </Button>
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
     </div>
   );
 }
@@ -86,7 +86,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
       <div className="flex flex-wrap items-center gap-2">
         {([1, 12] as const).map((m) => (
           <Button key={m} variant={m === 12 ? "default" : "outline"} disabled={loading !== null} onClick={() => extend(m)}>
-            {loading === m && <Loader2 className="animate-spin" />}
+            {loading === m && <Loader2 className="motion-safe:animate-spin" />}
             Extend {m === 1 ? "1 month" : "1 year"} · {displayPrice(display, prepaidPrice(plan, m))}
           </Button>
         ))}
@@ -95,7 +95,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
           {display && !display.local && ` · billed as ${formatPrice(prepaidPrice(plan, 1))} / ${formatPrice(prepaidPrice(plan, 12))}`}
         </span>
       </div>
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
     </div>
   );
 }
@@ -150,31 +150,22 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
     <AnimatePresence mode="wait">
       <motion.div
         key={state}
-        initial={{ opacity: 0, y: -6 }}
+        initial={{ opacity: 0, y: -4 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0 }}
+        exit={FADE_EXIT}
+        transition={ENTER_T}
         role="status"
         className="relative mt-6 flex items-center gap-4 rounded-2xl border border-border bg-card p-5"
       >
         {state === "checking" && (
           <>
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <Loader2 className="h-6 w-6 text-primary motion-safe:animate-spin" />
             <p className="font-medium">Confirming payment…</p>
           </>
         )}
         {state === "success" && (
           <>
-            <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
-              <SparkleBurst />
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={SPRING}
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30"
-              >
-                <Check className="h-6 w-6" />
-              </motion.div>
-            </div>
+            <SuccessBadge size={48} className="mx-0" />
             <div>
               <p className="text-lg font-semibold">Payment received</p>
               <p className="text-sm text-muted-foreground">You&apos;re on {planName}.</p>
@@ -242,18 +233,20 @@ export function TeamSeats({
           {used} of {seats} seats
         </p>
       </div>
-      <ul className="mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
+      <ul className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
         <li className="flex items-center justify-between px-5 py-3 text-sm">
           <span>{ownerEmail}</span>
           <span className="text-muted-foreground">Owner</span>
         </li>
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {members.map((m) => (
             <motion.li
               key={m}
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              layout="position"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, x: 24, transition: EXIT_T }}
+              transition={{ ...ENTER_T, layout: SPRING_LAYOUT }}
               className="flex items-center justify-between px-5 py-3 text-sm"
             >
               <span>{m}</span>
@@ -264,7 +257,7 @@ export function TeamSeats({
                 disabled={busy !== null}
                 onClick={() => send("DELETE", m)}
               >
-                {busy === m ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {busy === m ? <Loader2 className="motion-safe:animate-spin" /> : <Trash2 />}
               </Button>
             </motion.li>
           ))}
@@ -287,12 +280,12 @@ export function TeamSeats({
             aria-label="Member email"
           />
           <Button type="submit" disabled={busy !== null}>
-            {busy === "add" ? <Loader2 className="animate-spin" /> : <UserPlus />}
+            {busy === "add" ? <Loader2 className="motion-safe:animate-spin" /> : <UserPlus />}
             Add
           </Button>
         </form>
       )}
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
       <p className="mt-3 text-xs text-muted-foreground">Ask them to sign in with this email.</p>
     </div>
   );

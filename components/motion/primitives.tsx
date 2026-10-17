@@ -323,7 +323,7 @@ export function SuccessBadge({
             d="M5 12.5l4.5 4.5L19 7.5"
             initial={reduce ? false : { pathLength: 0 }}
             animate={{ pathLength: 1 }}
-            transition={{ duration: 0.3, ease: EASE_OUT, delay: SUCCESS.check }}
+            transition={{ duration: SUCCESS.draw, ease: EASE_OUT, delay: SUCCESS.check }}
           />
         </svg>
       </motion.div>

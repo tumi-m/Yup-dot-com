@@ -49,7 +49,7 @@ export default async function PricingPage({
                 <details key={f.q} className="group rounded-2xl border border-border bg-card transition-shadow open:shadow-md">
                   <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-4 font-medium [&::-webkit-details-marker]:hidden">
                     {f.q}
-                    <span aria-hidden className="text-xl leading-none text-primary transition-transform duration-300 group-open:rotate-45">+</span>
+                    <span aria-hidden className="text-xl leading-none text-primary transition-transform duration-base ease-in-out group-open:rotate-45 motion-reduce:transition-none">+</span>
                   </summary>
                   <p className="px-5 pb-4 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
                 </details>
