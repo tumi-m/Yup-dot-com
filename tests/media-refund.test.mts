@@ -19,6 +19,7 @@ import { signingSecret, signToken, verifyToken } from "../lib/media-server.ts";
 import { consumeDaily, memoryUsageStore } from "../lib/usage.ts";
 
 const results: boolean[] = [];
+const now = () => Math.floor(Date.now() / 1000);
 const check = (name: string, ok: boolean, extra = "") => {
   results.push(ok);
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && extra ? "  — " + extra : ""}`);
@@ -28,8 +29,9 @@ const check = (name: string, ok: boolean, extra = "") => {
 {
   const c = newGrantRef();
   check("new grant refs are random and URL-safe", /^[\w-]{16}$/.test(c) && c !== newGrantRef(), c);
-  check("grantRef reads s and c", JSON.stringify(grantRef({ s: "ip:abc", c, u: "x" })) === JSON.stringify({ s: "ip:abc", c }));
-  check("grantRef rejects old or odd grants", grantRef({ u: "x" }) === null && grantRef({ s: "ip:a", c: "../../x" }) === null && grantRef(null) === null);
+  check("grantRef reads s, c and t", JSON.stringify(grantRef({ s: "ip:abc", c, t: 1700000000, u: "x" })) === JSON.stringify({ s: "ip:abc", c, t: 1700000000 }));
+  check("grantRef rejects old or odd grants",
+    grantRef({ u: "x" }) === null && grantRef({ s: "ip:a", c: "../../x", t: 1 }) === null && grantRef({ s: "ip:a", c }) === null && grantRef(null) === null);
 }
 
 // Refund once, then the grant is dead.
@@ -38,13 +40,13 @@ const check = (name: string, ok: boolean, extra = "") => {
   const subject = "ip:guest";
   for (let i = 0; i < 5; i++) await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   check("guest has used all 5", (await consumeDaily(subject, MEDIA_BUCKET, 5, store)) === -1);
-  const ref = { s: subject, c: newGrantRef() };
+  const ref = { s: subject, c: newGrantRef(), t: now() };
   check("not refunded yet", !(await wasRefunded(store, ref)));
   check("first refund gives the download back", (await refundGrant(store, ref)) === true && (await store.count(subject, MEDIA_BUCKET, "day")) === 4);
   check("second refund of the same grant does nothing", (await refundGrant(store, ref)) === false && (await store.count(subject, MEDIA_BUCKET, "day")) === 4);
   check("refunded grant is marked dead", await wasRefunded(store, ref));
   check("the guest can download again", (await consumeDaily(subject, MEDIA_BUCKET, 5, store)) === 0);
-  const other = { s: "ip:someone-else", c: ref.c };
+  const other = { ...ref, s: "ip:someone-else" };
   check("refund bookkeeping is per subject", !(await wasRefunded(store, other)));
 }
 
@@ -83,21 +85,21 @@ const check = (name: string, ok: boolean, extra = "") => {
   const subject = "ip:attacker";
   const used = () => store.count(subject, MEDIA_BUCKET, "day");
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
-  const ref = { s: subject, c: newGrantRef() };
+  const ref = { s: subject, c: newGrantRef(), t: now() };
   const serve = await startServing(store, ref);
   check("first send of a grant", serve.ok && serve.first);
   check("a second send is not the first", (await startServing(store, ref)).first === false);
   check("no refund after the file was sent", (await refundUnserved(store, ref)) === false && (await used()) === 1);
   check("grant still usable after a refused refund", !(await wasRefunded(store, ref)));
 
-  const unsent = { s: subject, c: newGrantRef() };
+  const unsent = { s: subject, c: newGrantRef(), t: now() };
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   check("a grant that never sent is refunded", (await refundUnserved(store, unsent)) === true && (await used()) === 1);
   check("and can't send afterwards", (await startServing(store, unsent)).ok === false);
 
   // Race: the refund checks before the send marks, the send checks before
   // the refund lands. One of them must lose.
-  const raced = { s: subject, c: newGrantRef() };
+  const raced = { s: subject, c: newGrantRef(), t: now() };
   await consumeDaily(subject, MEDIA_BUCKET, 5, store);
   const before = await used();
   let marked = false;

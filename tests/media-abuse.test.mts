@@ -113,6 +113,42 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
   check("a CDN refusal is still refunded", r.status === 502 && before === 1 && after === 0, `${r.status} ${before} → ${after}`);
 }
 
+// Refund and served markers used to live in the daily window, so at 00:00
+// UTC a sent grant could be refunded and a refunded one worked again.
+{
+  const { refundGrant, refundUnserved, startServing, wasRefunded } = await import("../lib/media-refund.ts");
+  let now = Date.UTC(2026, 9, 17, 23, 50);
+  const store = memoryUsageStore(() => now);
+  const s = "ip:midnight";
+  const made = () => Math.floor(now / 1000);
+  const used = () => store.count(s, MEDIA_BUCKET, "day");
+
+  await store.consume(s, MEDIA_BUCKET, 5, "day");
+  const sent = { s, c: "grantAAAA1111", t: made() };
+  const unsent = { s, c: "grantCCCC3333", t: made() };
+  await store.consume(s, MEDIA_BUCKET, 5, "day");
+  check("23:50: the grant's file is sent", (await startServing(store, sent, now)).first);
+  now = Date.UTC(2026, 9, 18, 0, 5);
+  for (let i = 0; i < 3; i++) await store.consume(s, MEDIA_BUCKET, 5, "day");
+  check("00:05: a grant sent before midnight isn't refunded", !(await refundUnserved(store, sent, now)) && (await used()) === 3);
+  check("00:05: nor is yesterday's unsent grant, from today's count", !(await refundUnserved(store, unsent, now)) && (await used()) === 3);
+
+  now = Date.UTC(2026, 9, 18, 23, 50);
+  const dead = { s, c: "grantBBBB2222", t: made() };
+  await store.consume(s, MEDIA_BUCKET, 5, "day");
+  now = Date.UTC(2026, 9, 18, 23, 55);
+  check("23:55: the same day, a grant is still refunded", await refundGrant(store, dead, now));
+  now = Date.UTC(2026, 9, 19, 0, 1);
+  check("00:01: a grant refunded before midnight stays dead",
+    (await wasRefunded(store, dead, now)) && !(await startServing(store, dead, now)).ok);
+
+  now = Date.UTC(2026, 9, 31, 23, 50);
+  const lastOfMonth = { s, c: "grantDDDD4444", t: made() };
+  await refundGrant(store, lastOfMonth, now);
+  now = Date.UTC(2026, 10, 1, 0, 1);
+  check("a grant from last month can't be checked, so it's dead", !(await startServing(store, lastOfMonth, now)).ok);
+}
+
 setUsageStore(null);
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

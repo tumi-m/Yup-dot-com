@@ -3,7 +3,7 @@ import { maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/m
 import { sealToken, signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
-import { MEDIA_BUCKET, newGrantRef } from "@/lib/media-refund";
+import { MEDIA_BUCKET, newGrantRef, type GrantRef } from "@/lib/media-refund";
 import { consumeDaily, usageSubject } from "@/lib/usage";
 import { directFilename, DirectResolveError, failureMessage, grantHeaders, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
 import { audioSourceVariant, pickXVariant, variantQuality } from "@/lib/x-video";
@@ -27,8 +27,8 @@ const bodySchema = z.object({
  * encrypted, so the file can only be had through that route.
  * YouTube: the token goes to the media worker, which verifies it itself.
  *
- * Each grant records who it was counted against and a random reference, so
- * a download that fails is given back (lib/media-refund.ts).
+ * Each grant records who it was counted against, when, and a random
+ * reference, so a download that fails is given back (lib/media-refund.ts).
  */
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   }
 
   // Resolve (X) or check configuration (YouTube) before spending the quota.
-  let grant: (ref: { s: string; c: string }) => Record<string, unknown>;
+  let grant: (ref: GrantRef) => Record<string, unknown>;
   if (isDirectPlatform(media.platform)) {
     const platform = media.platform;
     let video;
@@ -107,6 +107,7 @@ export async function POST(request: Request) {
   }
 
   const subject = usageSubject(request, user);
+  const made = Math.floor(Date.now() / 1000);
   const remaining = await consumeDaily(subject, MEDIA_BUCKET, limitsFor(tier).mediaDownloadsPerDay);
   if (remaining < 0) {
     const paid = tier === "pro" || tier === "team";
@@ -115,5 +116,5 @@ export async function POST(request: Request) {
       { status: 429 }
     );
   }
-  return Response.json({ ...grant({ s: subject, c: newGrantRef() }), remaining });
+  return Response.json({ ...grant({ s: subject, c: newGrantRef(), t: made }), remaining });
 }
