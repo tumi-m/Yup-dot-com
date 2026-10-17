@@ -615,7 +615,8 @@ export function toChunks(doc: ParsedDocument, maxChars = 1200): Chunk[] {
   const flush = () => {
     if (buffer.trim()) {
       chunks.push({
-        path: headings.join(" > "),
+        // Skip unset levels, e.g. when the first heading is an h3.
+        path: headings.filter(Boolean).join(" > "),
         text: buffer.trim(),
         page: bufferPage,
       });
