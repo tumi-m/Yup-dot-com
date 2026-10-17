@@ -312,6 +312,8 @@ export function PdfEditor({
 
   // ---- export ----
   const pristine = !!bytes && bytes === savedRef.current.bytes && !annotations.length && !Object.keys(formValues).length;
+  /** Page operations change the bytes, so they count as unsaved too. */
+  const dirty = !!bytes && !pristine;
 
   /**
    * One edit a day on Free: asks the server right before building a file.
@@ -524,8 +526,6 @@ export function PdfEditor({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, selectedId, deleteAnnotation, handleSave, placementImage]);
-
-  const dirty = annotations.length > 0 || Object.keys(formValues).length > 0;
 
   // Don't let a stray tab close throw away unsaved edits.
   useEffect(() => {
