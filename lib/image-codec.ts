@@ -9,7 +9,9 @@
  * an image stream too.
  *
  * In the browser the .wasm files are served from /vendor (scripts/copy-vendor.mjs).
- * Node tests hand the compiled modules in with useJpegWasm().
+ * Node tests hand the compiled modules in with useJpegWasm(). When the
+ * WebAssembly can't load (blocked, offline, or turned off as in Safari's
+ * Lockdown Mode), a browser falls back to its own canvas codec.
  */
 import encodeWasm, { init as initEncoder } from "@jsquash/jpeg/encode.js";
 import decodeWasm, { init as initDecoder } from "@jsquash/jpeg/decode.js";
@@ -86,9 +88,85 @@ export function mozQuality(browserQuality: number): number {
   return Math.max(1, Math.min(100, Math.round(browserQuality * 72 + 29)));
 }
 
-/** RGBA → JPEG. Alpha is ignored (flatten onto a background first if it matters). */
+// ---------------------------------------------------------------------------
+// The browser's own codec, for when the WebAssembly can't load
+// ---------------------------------------------------------------------------
+
+/** Set once the WebAssembly failed to load here and a canvas can stand in. */
+let useCanvas = false;
+
+const canvasAvailable = () => typeof OffscreenCanvas !== "undefined" || typeof document !== "undefined";
+
+function context2d(width: number, height: number) {
+  let canvas: OffscreenCanvas | HTMLCanvasElement;
+  if (typeof OffscreenCanvas !== "undefined") canvas = new OffscreenCanvas(width, height);
+  else {
+    canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!ctx) throw new Error("This image is too large to process on this device.");
+  return { canvas, ctx };
+}
+
+async function canvasEncode(image: RawImage, quality: number): Promise<Uint8Array> {
+  const { canvas, ctx } = context2d(image.width, image.height);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0);
+  // Inverse of mozQuality.
+  const browserQuality = Math.max(0.05, Math.min(1, (quality - 29) / 72));
+  // (HTMLCanvasElement doesn't exist in a worker, so test for the offscreen kind.)
+  const blob =
+    "convertToBlob" in canvas
+      ? await canvas.convertToBlob({ type: "image/jpeg", quality: browserQuality })
+      : await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", browserQuality));
+  if (!blob) throw new Error("This image is too large to process on this device.");
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function canvasDecode(bytes: Uint8Array): Promise<RawImage> {
+  const blob = new Blob([bytes.slice() as unknown as BlobPart], { type: "image/jpeg" });
+  let bitmap: ImageBitmap;
+  try {
+    // As a PDF viewer shows it: no EXIF rotation, no colour profile.
+    bitmap = await createImageBitmap(blob, { imageOrientation: "none", colorSpaceConversion: "none", premultiplyAlpha: "none" });
+  } catch {
+    bitmap = await createImageBitmap(blob);
+  }
+  const { width, height } = bitmap;
+  const { ctx } = context2d(width, height);
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return { data: ctx.getImageData(0, 0, width, height).data, width, height };
+}
+
+/** Runs `wasm` once its module has loaded, or the canvas codec if it can't load. */
+async function withFallback<T>(load: () => Promise<void>, wasm: () => Promise<T>, canvas: () => Promise<T>): Promise<T> {
+  if (!useCanvas) {
+    try {
+      await load();
+    } catch (err) {
+      if (!canvasAvailable()) throw err;
+      useCanvas = true;
+    }
+    if (!useCanvas) return wasm();
+  }
+  return canvas();
+}
+
+/**
+ * RGBA → JPEG. Alpha is ignored (flatten onto a background first if it matters).
+ * The canvas fallback always writes colour (three-channel) JPEGs.
+ */
 export async function encodeJpeg(image: RawImage, opts: JpegOptions): Promise<Uint8Array> {
-  await loadEncoder();
+  return withFallback(
+    loadEncoder,
+    () => encodeWithWasm(image, opts),
+    () => canvasEncode(image, opts.quality)
+  );
+}
+
+async function encodeWithWasm(image: RawImage, opts: JpegOptions): Promise<Uint8Array> {
   const out = await encodeWasm(image as ImageData, {
     quality: Math.max(1, Math.min(100, Math.round(opts.quality))),
     baseline: !opts.progressive,
@@ -105,11 +183,16 @@ export async function encodeJpeg(image: RawImage, opts: JpegOptions): Promise<Ui
 
 /** JPEG → RGBA. Throws on CMYK and damaged files. */
 export async function decodeJpeg(bytes: Uint8Array): Promise<RawImage> {
-  await loadDecoder();
-  // A fresh copy: `bytes` may be a view into a larger buffer (a Node Buffer's slice() is not a copy).
-  const copy = new Uint8Array(bytes).buffer as ArrayBuffer;
-  const img = await decodeWasm(copy, { preserveOrientation: false });
-  return { data: img.data, width: img.width, height: img.height };
+  return withFallback(
+    loadDecoder,
+    async () => {
+      // A fresh copy: `bytes` may be a view into a larger buffer (a Node Buffer's slice() is not a copy).
+      const copy = new Uint8Array(bytes).buffer as ArrayBuffer;
+      const img = await decodeWasm(copy, { preserveOrientation: false });
+      return { data: img.data, width: img.width, height: img.height };
+    },
+    () => canvasDecode(bytes)
+  );
 }
 
 /** Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if the wasm can't load. */

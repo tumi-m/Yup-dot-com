@@ -111,6 +111,52 @@ function chart(w: number, h: number): Uint8Array {
   return out;
 }
 
+/**
+ * A UI screenshot: a shaded title bar, then rows of small glyphs on white,
+ * pixel-sharp with anti-aliased (many-shaded) edge pixels.
+ */
+function screenshot(w: number, h: number, seed = 11): Uint8Array {
+  const rand = random(seed);
+  const out = new Uint8Array(w * h * 3).fill(255);
+  for (let y = 0; y < 40 && y < h; y++) {
+    for (let x = 0; x < w; x++) out.set([30 + Math.round((x / w) * 40), 90 + (y >> 2), 180], (y * w + x) * 3);
+  }
+  const dot = (x: number, y: number, c: number[]) => x < w && y < h && out.set(c, (y * w + x) * 3);
+  for (let row = 52; row + 12 < h; row += 22) {
+    const ink = row % 66 === 52 ? [200, 30, 30] : [40, 40, 40];
+    for (let x = 10; x + 8 < w; x += 8) {
+      if (rand() < 0.18) continue; // a space
+      for (let s = 0; s < 3; s++) {
+        const vertical = rand() < 0.5;
+        const x0 = x + Math.floor(rand() * 5);
+        const y0 = row + Math.floor(rand() * 6);
+        for (let k = 0; k < (vertical ? 8 : 5); k++) {
+          const [px, py] = vertical ? [x0, y0 + k] : [x0 + k, y0];
+          dot(px, py, ink);
+          const t = 0.3 + rand() * 0.6; // edge coverage
+          const edge = ink.map((c) => Math.round(c * t + 255 * (1 - t)));
+          if (vertical) dot(px + 1, py, edge);
+          else dot(px, py + 1, edge);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Gray, paper-like noise: a scanned page with no colour. */
+function paper(w: number, h: number, seed = 3): Uint8Array {
+  const rand = random(seed);
+  const out = new Uint8Array(w * h * 3);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = Math.max(0, Math.min(255, 200 + 40 * Math.sin(x / 37) * Math.cos(y / 53) + (rand() - 0.5) * 50));
+      out.fill(v, (y * w + x) * 3, (y * w + x) * 3 + 3);
+    }
+  }
+  return out;
+}
+
 const rgba = (rgb: Uint8Array) => {
   const out = new Uint8ClampedArray((rgb.length / 3) * 4);
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
@@ -251,13 +297,25 @@ const TARGET = [px(300), px(200)];
   page.drawText("Quarterly report: revenue up 12%", { x: 50, y: 780, size: 14, font });
   const input = await doc.save();
   const labels: string[] = [];
-  const out = await compressPdf(input, { preset: "balanced", onProgress: (_f, label) => labels.push(label) });
+  const fractions: number[] = [];
+  const out = await compressPdf(input, {
+    preset: "balanced",
+    onProgress: (f, label) => {
+      labels.push(label);
+      fractions.push(f);
+    },
+  });
   const { found } = await imagesOf(out);
   const [w, h] = dims(found[0].stream);
   check("photo: downsampled to what the placement needs", near(w, TARGET[0]) && near(h, TARGET[1]), [w, h, TARGET]);
   check("photo: still a JPEG", filterOf(found[0].stream) === "/DCTDecode");
   check("photo: file much smaller", out.length < input.length * 0.2, [input.length, out.length]);
   check("photo: progress names the image", labels.includes("Image 1 of 1"), labels);
+  check(
+    "progress: moves within an image and ends with saving",
+    new Set(fractions).size >= 4 && fractions.every((f, i) => !i || f >= fractions[i - 1]) && labels.at(-1) === "Saving…",
+    [fractions, labels]
+  );
   check("text: still extractable after compression", (await pageText(out)).includes("Quarterly report: revenue up 12%"));
 
   const small = await compressPdf(input, { preset: "smallest" });
@@ -421,6 +479,67 @@ const TARGET = [px(300), px(200)];
   const { found } = await imagesOf(out);
   check("tokenizer: decoys don't change the image size", near(dims(found[0].stream)[0], TARGET[0]), dims(found[0].stream));
 }
+{
+  // Where inline image data ends, with the photo drawn after it at 300 × 200 pt.
+  const enc = (s: string) => new Uint8Array([...s].map((c) => c.charCodeAt(0)));
+  const cat = (parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    parts.reduce((o, p) => (out.set(p, o), o + p.length), 0);
+    return out;
+  };
+  const icon = (seed: number) => {
+    const r = random(seed);
+    return zlibSync(new Uint8Array(8 * 8 * 3).map(() => r() * 255));
+  };
+  // A JPEG whose comment segment holds a decoy "EI" followed by operators.
+  const tinyJpeg = await jpeg(photo(8, 8, 4), 8, 8);
+  const comment = enc(" EI Q q 9000 0 0 9000 0 0 cm /Im0 Do Q q 9000 0 0 9000 0 0 cm /Im0 Do Q % ");
+  const decoyJpeg = cat([tinyJpeg.subarray(0, 2), new Uint8Array([0xff, 0xfe, 0, comment.length + 2]), comment, tinyJpeg.subarray(2)]);
+  const cases: [string, Uint8Array][] = [
+    [
+      "two Flate icons inside q/Q",
+      cat([
+        enc("q 0.24 0 0 0.24 0 0 cm BI /W 8 /H 8 /BPC 8 /CS /RGB /F /Fl ID "),
+        icon(1),
+        enc("\nEI Q BI /W 8 /H 8 /BPC 8 /CS /RGB /F /Fl ID "),
+        icon(2),
+        enc("\nEI\n"),
+      ]),
+    ],
+    [
+      "binary text after EI",
+      cat([
+        enc("q 0.1 0 0 0.1 0 0 cm BI /W 8 /H 8 /BPC 8 /CS /RGB /F /Fl ID "),
+        icon(3),
+        enc("\nEI Q\nBT /F1 12 Tf 60 700 Td ("),
+        new Uint8Array([0, 0x24, 0, 0x48, 0x80, 0xff, 0, 0x4f]),
+        enc(") Tj ET\n"),
+      ]),
+    ],
+    ["DCT data holding a decoy EI", cat([enc("q 0.1 0 0 0.1 0 0 cm BI /W 8 /H 8 /BPC 8 /CS /RGB /F /DCT ID "), decoyJpeg, enc(" EI Q\n")])],
+  ];
+  for (const [label, prefix] of cases) {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    page.node.setXObject(PDFName.of("Im0"), jpegImage(doc.context, BIG_W, BIG_H, bigJpeg));
+    page.node.addContentStream(doc.context.register(doc.context.stream(cat([prefix, enc("q 300 0 0 200 50 50 cm /Im0 Do Q\n")]))));
+    const ops: string[] = [];
+    scanContent(cat([prefix, enc("q 300 0 0 200 50 50 cm /Im0 Do Q\n")]), (op) => ops.push(op));
+    const { found } = await imagesOf(await compressPdf(await doc.save(), { preset: "balanced" }));
+    check(`inline image (${label}): sized for its real placement`, near(dims(found[0].stream)[0], TARGET[0]), [dims(found[0].stream), ops.join(" ")]);
+  }
+
+  // Data with no end marker at all: sizes can't be trusted, so images are only capped at page size.
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  page.node.setXObject(PDFName.of("Im0"), jpegImage(doc.context, BIG_W, BIG_H, bigJpeg));
+  const junk = new Uint8Array(200).map((_, i) => (i * 53 + 7) % 256).map((b) => (b === 0x45 ? 0x46 : b));
+  const unclear = cat([enc("BI /W 40 /H 40 /IM true /F /CCF ID "), junk, enc("\nq 90 0 0 60 50 50 cm /Im0 Do Q\n")]);
+  page.node.addContentStream(doc.context.register(doc.context.stream(unclear)));
+  check("inline image without an end: scan reports it", scanContent(unclear, () => {}) === false);
+  const { found } = await imagesOf(await compressPdf(await doc.save(), { preset: "balanced" }));
+  check("inline image without an end: page-size cap, not the small placement", near(dims(found[0].stream)[0], px(842)), dims(found[0].stream));
+}
 
 // ---------------------------------------------------------------------------
 // 6. Gray pictures, and the rest of the document
@@ -436,6 +555,51 @@ const TARGET = [px(300), px(200)];
   const s = found[0].stream;
   check("gray: stored as DeviceGray", s.dict.lookup(PDFName.of("ColorSpace")) === PDFName.of("DeviceGray"));
   check("gray: one-channel JPEG", jpegComponents(s.contents) === 1, jpegComponents(s.contents));
+}
+{
+  // A gray scan with one small red stamp (0.05% of the page) keeps its colour.
+  const w = 1240;
+  const h = 1754;
+  const scan = paper(w, h);
+  for (let y = h - 90; y < h - 50; y++) for (let x = w - 90; x < w - 50; x++) scan.set([220, 20, 30], (y * w + x) * 3);
+  const doc = await PDFDocument.create();
+  const im = jpegImage(doc.context, w, h, await jpeg(scan, w, h, 85));
+  addPage(doc, [595, 842], "q 595 0 0 842 0 0 cm /Im0 Do Q", { Im0: im });
+  const input = await doc.save();
+  for (const preset of ["smallest", "balanced"] as const) {
+    const { found } = await imagesOf(await compressPdf(input, { preset }));
+    const cs = found[0].stream.dict.lookup(PDFName.of("ColorSpace"));
+    check(`small stamp on a gray scan: still colour (${preset})`, cs === PDFName.of("DeviceRGB"), String(cs));
+  }
+}
+{
+  // A letter page scanned at 200 PPI, a common scanner setting: Recommended brings it to 144 PPI.
+  const doc = await PDFDocument.create();
+  const im = jpegImage(doc.context, 1700, 2200, await jpeg(paper(1700, 2200, 5), 1700, 2200, 85));
+  addPage(doc, [612, 792], "q 612 0 0 792 0 0 cm /Im0 Do Q", { Im0: im });
+  const { found } = await imagesOf(await compressPdf(await doc.save(), { preset: "balanced" }));
+  check("200 PPI scan: Recommended downsamples to 144 PPI", near(dims(found[0].stream)[0], px(612)), dims(found[0].stream));
+}
+{
+  // A PNG screenshot with a small photo in it stays lossless, so its text gets no JPEG halos.
+  const w = 1600;
+  const h = 1000;
+  const shot = screenshot(w, h);
+  const pic = photo(260, 180, 8);
+  for (let y = 0; y < 180; y++) shot.set(pic.subarray(y * 260 * 3, (y + 1) * 260 * 3), ((700 + y) * w + 1300) * 3);
+  const doc = await PDFDocument.create();
+  const im = flateImage(doc.context, w, h, shot, "DeviceRGB");
+  addPage(doc, [842, 595], "q 800 0 0 500 20 50 cm /Im0 Do Q", { Im0: im });
+  const { doc: outDoc, found } = await imagesOf(await compressPdf(await doc.save(), { preset: "balanced" }));
+  check("screenshot with a photo: lossless", filterOf(found[0].stream) === "/FlateDecode", filterOf(found[0].stream));
+  check("screenshot with a photo: pixels identical", sameBytes(samples(outDoc.context, found[0].stream).data, shot));
+
+  // A JPEG screenshot shown at 200 PPI: Smallest stops at 125 PPI, where small type still reads.
+  const jdoc = await PDFDocument.create();
+  const jim = jpegImage(jdoc.context, 1400, 900, await jpeg(screenshot(1400, 900), 1400, 900, 90));
+  addPage(jdoc, [595, 842], "q 504 0 0 324 40 400 cm /Im0 Do Q", { Im0: jim });
+  const small = await imagesOf(await compressPdf(await jdoc.save(), { preset: "smallest" }));
+  check("jpeg screenshot: Smallest keeps 125 PPI", near(dims(small.found[0].stream)[0], px(504, "smallest", 1.25)), dims(small.found[0].stream));
 }
 {
   const doc = await PDFDocument.create();
@@ -502,6 +666,20 @@ const TARGET = [px(300), px(200)];
     message = (err as Error).message;
   }
   check("encrypted: friendly message", message === "This PDF is password-protected. Unlock it first.", message);
+
+  // Restricted with an owner password only: it opens without one, so it compresses.
+  const restricted = await (async () => {
+    const d = await SecurePDFDocument.load(textOnly);
+    d.encrypt({ userPassword: "", ownerPassword: "owner", permissions: { printing: false, copying: false, modifying: false } });
+    return d.save({ useObjectStreams: false });
+  })();
+  const opened = await compressTool([file(restricted, "statement.pdf")], { quality: "balanced" });
+  const openedBytes = new Uint8Array(await opened.blob.arrayBuffer());
+  check(
+    "owner password only: compressed, text kept",
+    opened.filename === "statement-compressed.pdf" && openedBytes.length < restricted.length && (await pageText(openedBytes)).includes("Line 40 of page 3"),
+    [opened.filename, restricted.length, openedBytes.length]
+  );
 
   // PDF/A-1 (PDF 1.4) has no object streams; a PDF/A-1 file keeps plain objects.
   const pdfa = await PDFDocument.load(textOnly);

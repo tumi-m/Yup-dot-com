@@ -143,7 +143,7 @@ export function findPlacements(context: PDFContext, pages: PageInfo[]): Placemen
 
   const compile = (bytes: Uint8Array): Step[] => {
     const steps: Step[] = [];
-    scanContent(bytes, (op, args) => {
+    const whole = scanContent(bytes, (op, args) => {
       switch (op) {
         case "q":
           steps.push({ k: "q" });
@@ -170,6 +170,8 @@ export function findPlacements(context: PDFContext, pages: PageInfo[]): Placemen
         }
       }
     });
+    // Sizes read past an inline image of uncertain length could be wrong.
+    if (!whole) throw new Error("unclear inline image");
     return steps;
   };
 

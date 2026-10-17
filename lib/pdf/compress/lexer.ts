@@ -4,6 +4,7 @@
  * image data, so text such as "(Do cm)" or binary image bytes never read as
  * operators.
  */
+import { unzlibSync } from "fflate";
 
 /** A number, a name (without the slash), or null for anything else. */
 export type Operand = number | string | null;
@@ -75,6 +76,8 @@ const END = 6;
 /** Reads one token at a time; `value` holds the number, name or word. */
 class Lexer {
   pos = 0;
+  /** Where the last token began. */
+  start = 0;
   value: number | string = 0;
   constructor(readonly d: Uint8Array) {}
 
@@ -91,6 +94,7 @@ class Lexer {
       if (d[i] !== 0x25) break;
       while (i < n && d[i] !== 10 && d[i] !== 13) i++; // comment
     }
+    this.start = i;
     const c = d[i];
     if (c === 0x28) {
       this.pos = skipLiteral(d, i);
@@ -140,8 +144,12 @@ class Lexer {
  * Calls `onOp` for every operator in a content stream, in order. Operands are
  * only the simple values directly before it (numbers and names); strings,
  * arrays and dictionaries count as null.
+ *
+ * Returns false when the end of an inline image couldn't be found with
+ * confidence; the rest of the stream is then skipped and the operators seen
+ * may be incomplete.
  */
-export function scanContent(data: Uint8Array, onOp: (op: string, operands: Operand[]) => void): void {
+export function scanContent(data: Uint8Array, onOp: (op: string, operands: Operand[]) => void): boolean {
   const lx = new Lexer(data);
   let operands: Operand[] = [];
   let depth = 0;
@@ -152,7 +160,7 @@ export function scanContent(data: Uint8Array, onOp: (op: string, operands: Opera
   };
   for (;;) {
     const kind = lx.next();
-    if (kind === END) return;
+    if (kind === END) return true;
     if (kind === OPEN) depth++;
     else if (kind === CLOSE) {
       if (depth && --depth === 0) push(null);
@@ -162,7 +170,9 @@ export function scanContent(data: Uint8Array, onOp: (op: string, operands: Opera
       const word = lx.value as string;
       if (word === "true" || word === "false" || word === "null") push(null);
       else if (word === "BI") {
-        lx.pos = skipInlineImage(lx);
+        const end = skipInlineImage(lx);
+        if (end < 0) return false;
+        lx.pos = end;
         operands = [];
       } else {
         onOp(word, operands);
@@ -185,7 +195,28 @@ const COMPONENTS: Record<string, number> = {
   Indexed: 1,
 };
 
-/** Steps over "BI <dict> ID <data> EI", returning the index just past EI. */
+const FILTER_NAMES: Record<string, string> = {
+  AHx: "ASCIIHexDecode",
+  A85: "ASCII85Decode",
+  Fl: "FlateDecode",
+  RL: "RunLengthDecode",
+  DCT: "DCTDecode",
+  LZW: "LZWDecode",
+  CCF: "CCITTFaxDecode",
+};
+
+/** Every operator in PDF 32000 (Table A.1). */
+const OPERATORS = new Set(
+  (
+    "b B b* B* BDC BI BMC BT BX c cm CS cs d d0 d1 Do DP EI EMC ET EX f F f* G g gs h i ID j J K k l m M MP n q Q " +
+    "re RG rg ri s S SC sc SCN scn sh T* Tc Td TD Tf Tj TJ TL Tm Tr Ts Tw Tz v w W W* y ' \""
+  ).split(" ")
+);
+
+/**
+ * Steps over "BI <dict> ID <data> EI", returning the index just past EI, or
+ * -1 when its end can't be found with confidence.
+ */
 function skipInlineImage(lx: Lexer): number {
   const d = lx.d;
   const entries: Record<string, Operand | Operand[]> = {};
@@ -237,32 +268,123 @@ function skipInlineImage(lx: Lexer): number {
     const family = Array.isArray(cs) ? cs[0] : cs;
     if (typeof family === "string") comps = COMPONENTS[family] ?? NaN;
   }
-  const noFilter = filter === undefined || (Array.isArray(filter) && filter.length === 0);
-  if (noFilter && w > 0 && h > 0 && bpc > 0 && comps > 0) {
-    let i = start + h * Math.ceil((w * comps * bpc) / 8);
-    while (i < d.length && WHITESPACE[d[i]]) i++;
-    if (d[i] === 0x45 && d[i + 1] === 0x49 && (i + 2 >= d.length || !isRegular(d[i + 2]))) return i + 2;
+  // The outermost filter decides how the data ends.
+  const filters = (Array.isArray(filter) ? filter : filter === undefined ? [] : [filter]).map((f) =>
+    typeof f === "string" ? (FILTER_NAMES[f] ?? f) : ""
+  );
+  const length = num("L", "Length");
+  let dataEnd = -1;
+  if (length >= 0) dataEnd = start + length;
+  else if (!filters.length) {
+    if (w > 0 && h > 0 && bpc > 0 && comps > 0) dataEnd = start + h * Math.ceil((w * comps * bpc) / 8);
+  } else if (filters[0] === "ASCIIHexDecode") {
+    const gt = d.indexOf(0x3e, start);
+    if (gt >= 0) dataEnd = gt + 1;
+  } else if (filters[0] === "ASCII85Decode") {
+    for (let i = d.indexOf(0x7e, start); i >= 0; i = d.indexOf(0x7e, i + 1)) {
+      if (d[i + 1] === 0x3e) {
+        dataEnd = i + 2;
+        break;
+      }
+    }
+  } else if (filters[0] === "DCTDecode") dataEnd = jpegEnd(d, start);
+  else if (filters[0] === "RunLengthDecode") dataEnd = runLengthEnd(d, start);
+  if (dataEnd >= 0) {
+    const end = endMarkerAt(d, dataEnd);
+    if (end >= 0) return end;
   }
-  return findEndOfImage(d, start);
+  return findEndOfImage(d, start, filters[0] === "FlateDecode");
 }
 
-/** Finds "EI" between whitespace that is followed by ordinary operator text. */
-function findEndOfImage(d: Uint8Array, start: number): number {
+/** Index just past an "EI" that follows `i` after optional whitespace, or -1. */
+function endMarkerAt(d: Uint8Array, i: number): number {
+  while (i < d.length && WHITESPACE[d[i]]) i++;
+  return d[i] === 0x45 && d[i + 1] === 0x49 && (i + 2 >= d.length || !isRegular(d[i + 2])) ? i + 2 : -1;
+}
+
+/** Index just past a JPEG's end-of-image marker, or -1. */
+function jpegEnd(d: Uint8Array, i: number): number {
+  if (d[i] !== 0xff || d[i + 1] !== 0xd8) return -1;
+  i += 2;
+  while (i + 1 < d.length) {
+    if (d[i] !== 0xff) {
+      i++; // entropy-coded data
+      continue;
+    }
+    const m = d[i + 1];
+    if (m === 0xd9) return i + 2;
+    if (m === 0xff) i++;
+    else if (m === 0x00 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) i += 2; // stuffing, TEM, restarts
+    else if (i + 3 < d.length) i += 2 + ((d[i + 2] << 8) | d[i + 3]);
+    else return -1;
+  }
+  return -1;
+}
+
+/** Index just past RunLengthDecode data (its 128 end marker), or -1. */
+function runLengthEnd(d: Uint8Array, i: number): number {
+  while (i < d.length) {
+    const n = d[i];
+    if (n === 128) return i + 1;
+    i += n < 128 ? n + 2 : 2;
+  }
+  return -1;
+}
+
+/** Start of each "EI" from `start` on with whitespace before it and a delimiter after. */
+function* endMarkers(d: Uint8Array, start: number): Generator<number> {
   for (let i = d.indexOf(0x45, start); i >= 0 && i + 1 < d.length; i = d.indexOf(0x45, i + 1)) {
     if (d[i + 1] !== 0x49) continue;
     if (i > start && !WHITESPACE[d[i - 1]]) continue;
-    const after = i + 2;
-    if (after < d.length && isRegular(d[after])) continue;
-    if (looksLikeText(d, after)) return after;
+    if (i + 2 < d.length && isRegular(d[i + 2])) continue;
+    yield i;
   }
-  return d.length;
 }
 
-function looksLikeText(d: Uint8Array, from: number): boolean {
-  const end = Math.min(d.length, from + 48);
-  for (let i = from; i < end; i++) {
-    const c = d[i];
-    if (c > 0x7e || (c < 0x20 && c !== 9 && c !== 10 && c !== 12 && c !== 13)) return false;
+/**
+ * Finds the "EI" that ends image data of unknown length. Flate data is
+ * complete only at the real end; otherwise what follows must read as content.
+ */
+function findEndOfImage(d: Uint8Array, start: number, flate: boolean): number {
+  if (flate) {
+    let tries = 0;
+    for (const i of endMarkers(d, start)) {
+      if (++tries > 64) break;
+      if (inflates(d.subarray(start, i))) return i + 2;
+    }
+  }
+  for (const i of endMarkers(d, start)) if (followedByContent(d, i + 2)) return i + 2;
+  return -1;
+}
+
+function inflates(data: Uint8Array): boolean {
+  try {
+    unzlibSync(data);
+    return true;
+  } catch {
+    return false; // cut short: not the end yet
+  }
+}
+
+const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+
+/** True when the bytes from `from` read as content-stream syntax: operands and known operators. */
+function followedByContent(d: Uint8Array, from: number): boolean {
+  const lx = new Lexer(d);
+  lx.pos = from;
+  let ops = 0;
+  for (let n = 0; n < 1024; n++) {
+    const kind = lx.next();
+    if (kind === END) return true;
+    if (kind === NUM) {
+      if (!NUMBER.test(ascii(d, lx.start, lx.pos))) return false;
+    } else if (kind === WORD) {
+      const word = lx.value as string;
+      if (word === "true" || word === "false" || word === "null") continue;
+      if (!OPERATORS.has(word)) return false;
+      // Two operators in a row, or the start of the next inline image's data.
+      if (++ops === 2 || word === "ID") return true;
+    }
   }
   return true;
 }

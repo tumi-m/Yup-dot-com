@@ -16,9 +16,11 @@ import { decodeFully } from "./streams";
 export type Preset = "smallest" | "balanced" | "high";
 
 // Tuned on photo, scan and slide PDFs by size against SSIM of 150 DPI renders.
+// The two smaller presets also resample images only a little too sharp, such
+// as the 200 PPI pages common from scanners and phone scanning apps.
 export const PRESETS: Record<Preset, ImageSettings> = {
-  smallest: { dpi: 100, quality: 40, threshold: 1.4 },
-  balanced: { dpi: 144, quality: 45, threshold: 1.4 },
+  smallest: { dpi: 100, quality: 40, threshold: 1.2 },
+  balanced: { dpi: 144, quality: 45, threshold: 1.2 },
   high: { dpi: 200, quality: 70, threshold: 1.4 },
 };
 
@@ -46,14 +48,30 @@ function isPdfA1(context: PDFContext): boolean {
   return /pdfaid:part\s*(=\s*["']1["']|>\s*1\s*<)/.test(xmp);
 }
 
-export async function compressPdf(bytes: Uint8Array, opts: CompressOptions): Promise<Uint8Array> {
-  let doc: PDFDocument;
+async function open(bytes: Uint8Array): Promise<PDFDocument> {
   try {
-    doc = await PDFDocument.load(bytes, { updateMetadata: false });
+    return await PDFDocument.load(bytes, { updateMetadata: false });
   } catch (err) {
-    if (/encrypted/i.test(err instanceof Error ? err.message : "")) throw err;
-    throw new UnreadablePdfError("unreadable");
+    if (!/encrypted/i.test(err instanceof Error ? err.message : "")) throw new UnreadablePdfError("unreadable");
+    // Restricted but not locked (an owner password only): it opens with an empty password.
+    let plain: Uint8Array;
+    try {
+      const { PDFDocument: SecureDocument } = await import("@cantoo/pdf-lib");
+      plain = await (await SecureDocument.load(bytes, { password: "", updateMetadata: false })).save();
+    } catch (decryptErr) {
+      if (/password/i.test(decryptErr instanceof Error ? decryptErr.message : "")) throw err;
+      throw new UnreadablePdfError("unreadable");
+    }
+    try {
+      return await PDFDocument.load(plain, { updateMetadata: false });
+    } catch {
+      throw new UnreadablePdfError("unreadable");
+    }
   }
+}
+
+export async function compressPdf(bytes: Uint8Array, opts: CompressOptions): Promise<Uint8Array> {
+  const doc = await open(bytes);
   const context = doc.context;
   if (!listPages(context).length) throw new UnreadablePdfError("no pages");
 
@@ -65,9 +83,10 @@ export async function compressPdf(bytes: Uint8Array, opts: CompressOptions): Pro
   const pages = listPages(context);
   const placements = findPlacements(context, pages);
   const report = await optimiseImages(context, pages, placements, PRESETS[opts.preset], (done, total) => {
-    if (total) opts.onProgress?.((done / total) * 0.9, `Image ${Math.min(done + 1, total)} of ${total}`);
+    if (total) opts.onProgress?.((done / total) * 0.9, `Image ${Math.min(Math.floor(done) + 1, total)} of ${total}`);
   });
   opts.onProgress?.(0.92, "Saving…");
+  await new Promise((r) => setTimeout(r, 0)); // let the label show before the save runs
   recompressStreams(context, report.rewritten);
   dropUnreachable(context);
   return doc.save({ useObjectStreams: !isPdfA1(context), addDefaultPage: false, updateFieldAppearances: false });

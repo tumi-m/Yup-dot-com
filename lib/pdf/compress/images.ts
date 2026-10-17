@@ -59,6 +59,7 @@ const MIN_GAIN_LOSSLESS = 0.97;
 // Flat graphics (text, lines) blur when resampled, so they keep more pixels.
 const FLAT_DPI_FACTOR = 1.5;
 const FLAT_THRESHOLD = 1.5;
+const TEXT_DPI = 125;
 // Larger images would need hundreds of megabytes to decode in a browser tab.
 const MAX_PIXELS = 50_000_000;
 
@@ -198,6 +199,29 @@ export function jpegHeader(b: Uint8Array): JpegHeader | null {
   return null;
 }
 
+/** Neither the JPEG codec nor a browser stand-in could run. */
+export class CodecUnavailableError extends Error {
+  constructor() {
+    super("The image encoder didn't load. Check your connection and try again.");
+  }
+}
+
+let codecCheck: Promise<void> | null = null;
+
+/** Checks once that JPEGs can be written and read, rather than quietly keeping every image. */
+function codecReady(): Promise<void> {
+  codecCheck ??= (async () => {
+    try {
+      const tiny = await encodeJpeg({ data: new Uint8ClampedArray(8 * 8 * 4).fill(128), width: 8, height: 8 }, { quality: 50 });
+      await decodeJpeg(tiny);
+    } catch {
+      codecCheck = null;
+      throw new CodecUnavailableError();
+    }
+  })();
+  return codecCheck;
+}
+
 const tableSums = new Map<number, number>();
 
 /** Luminance table sum of our encoder at a quality, read from a tiny test encode. */
@@ -278,41 +302,91 @@ interface Stats {
   colors: number;
   /** Share of pixels equal to their left neighbour: high for drawings and screenshots. */
   flatness: number;
+  /**
+   * Pixel-sharp text or line art on a plain background (a screenshot, a chart,
+   * a crisp scan), even under JPEG noise. Resampling it costs legibility.
+   */
+  sharp: boolean;
 }
 
+// Colour in any 8×8 block above this (mean channel difference) is real: a
+// highlight, a stamp, a signature. Compression noise averages out far below it.
+const BLOCK = 8;
+const BLOCK_CHROMA = 12;
+
 function analyse(px: Pixels, countColors: boolean): Stats {
-  const { data, ch, width } = px;
-  const n = px.width * px.height;
+  const { data, ch, width, height } = px;
+  const n = width * height;
   let colored = 0;
   let strong = 0;
   let chroma = 0;
   let same = 0;
+  let colorBlock = false;
+  // Steps in brightness to the left neighbour: near zero, edges, and edges done in one pixel.
+  let still = 0;
+  let edges = 0;
+  let hardEdges = 0;
   const seen = new Set<number>();
+  // Per block in the current band of rows: sums of R−G and B−G.
+  const blocks = Math.ceil(width / BLOCK);
+  const rg = new Float64Array(ch === 1 ? 0 : blocks);
+  const bg = new Float64Array(ch === 1 ? 0 : blocks);
   let prev = -1;
-  for (let i = 0, p = 0; i < n; i++, p += ch) {
-    let key: number;
-    if (ch === 1) key = data[p];
-    else {
-      const r = data[p];
-      const g = data[p + 1];
-      const b = data[p + 2];
-      const diff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
-      if (diff) {
-        colored++;
-        chroma += diff;
-        if (diff > 16) strong++;
+  let prevY = 0;
+  for (let y = 0, p = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, p += ch) {
+      let key: number;
+      let luma: number;
+      if (ch === 1) key = luma = data[p];
+      else {
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const diff = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
+        if (diff) {
+          colored++;
+          chroma += diff;
+          if (diff > 16) strong++;
+          const k = (x / BLOCK) | 0;
+          rg[k] += r - g;
+          bg[k] += b - g;
+        }
+        key = (r << 16) | (g << 8) | b;
+        luma = (r * 77 + g * 150 + b * 29) >> 8;
       }
-      key = (r << 16) | (g << 8) | b;
+      if (x) {
+        if (key === prev) same++;
+        const step = Math.abs(luma - prevY);
+        if (step <= 2) still++;
+        else if (step >= 32) {
+          edges++;
+          if (step >= 96) hardEdges++;
+        }
+      }
+      prev = key;
+      prevY = luma;
+      if (countColors && seen.size <= 4096) seen.add(key);
     }
-    if (i % width && key === prev) same++;
-    prev = key;
-    if (countColors && seen.size <= 4096) seen.add(key);
+    if (ch !== 1 && ((y + 1) % BLOCK === 0 || y === height - 1)) {
+      const rows = (y % BLOCK) + 1;
+      for (let k = 0; k < blocks; k++) {
+        const area = rows * (Math.min(width, (k + 1) * BLOCK) - k * BLOCK);
+        const mrg = rg[k] / area;
+        const mbg = bg[k] / area;
+        if (Math.max(Math.abs(mrg), Math.abs(mbg), Math.abs(mrg - mbg)) > BLOCK_CHROMA) colorBlock = true;
+      }
+      rg.fill(0);
+      bg.fill(0);
+    }
   }
+  const pairs = Math.max(1, n - height);
   return {
     exactGray: colored === 0,
-    nearGray: strong <= n * 0.001 && chroma <= n * 3,
+    nearGray: !colorBlock && strong <= n * 0.001 && chroma <= n * 3,
     colors: countColors ? seen.size : 4097,
-    flatness: same / Math.max(1, n - px.height),
+    flatness: same / pairs,
+    // Photos and soft scans step through mid tones; text and lines jump.
+    sharp: still >= pairs * 0.6 && edges >= pairs * 0.005 && hardEdges >= edges * 0.25,
   };
 }
 
@@ -359,12 +433,15 @@ async function toJpeg(context: PDFContext, px: Pixels, quality: number, colorSpa
     { data: new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), width: px.width, height: px.height },
     { quality, gray: px.ch === 1 }
   );
+  // The browser's fallback encoder writes colour JPEGs even for gray pictures.
+  const components = jpegHeader(bytes)?.components;
+  if (components !== 1 && components !== 3) throw new Error("unexpected JPEG");
   return {
     bytes,
     entries: [
       [N.Filter, N.DCTDecode],
       [N.DecodeParms, undefined],
-      [N.ColorSpace, colorSpace],
+      [N.ColorSpace, components === 3 && px.ch === 1 ? N.DeviceRGB : colorSpace],
       [N.BitsPerComponent, context.obj(8)],
     ],
   };
@@ -527,6 +604,7 @@ export async function optimiseImages(
   pages: PageInfo[],
   placements: Placements,
   settings: ImageSettings,
+  /** `done` counts finished images, with a fraction for the one being worked on. */
   progress?: (done: number, total: number) => void
 ): Promise<ImageReport> {
   const rewritten = new Set<PDFRef>();
@@ -538,11 +616,11 @@ export async function optimiseImages(
   const pageMax = Math.max(1, ...pages.map((p) => Math.max(p.width, p.height)));
   const { dpi, quality, threshold } = settings;
 
-  /** The scale (≤ 1 shrinks) that brings an image down to `dpi` for its largest use. */
-  const needed = (ref: PDFRef, w: number, h: number): number => {
+  /** The scale (≤ 1 shrinks) that brings an image down to `res` for its largest use. */
+  const needed = (ref: PDFRef, w: number, h: number, res = dpi): number => {
     const shown = placements.complete ? placements.shown.get(ref) : undefined;
-    let s = shown ? Math.max(((shown.w / 72) * dpi) / w, ((shown.h / 72) * dpi) / h) : 0;
-    if (!shown || elsewhere.has(ref)) s = Math.max(s, ((pageMax / 72) * dpi) / Math.max(w, h));
+    let s = shown ? Math.max(((shown.w / 72) * res) / w, ((shown.h / 72) * res) / h) : 0;
+    if (!shown || elsewhere.has(ref)) s = Math.max(s, ((pageMax / 72) * res) / Math.max(w, h));
     return s;
   };
 
@@ -576,12 +654,18 @@ export async function optimiseImages(
   };
 
   for (let i = 0; i < parents.length; i++) {
-    progress?.(i, parents.length);
+    // Each step reports and yields, so the page can show progress between heavy steps.
+    const step = async (part: number) => {
+      progress?.(i + part, parents.length);
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    await step(0);
     const ref = parents[i];
     let factors: [number, number] = [1, 1];
     try {
-      factors = await optimiseOne(ref);
-    } catch {
+      factors = await optimiseOne(ref, step);
+    } catch (err) {
+      if (err instanceof CodecUnavailableError) throw err;
       // A damaged or unusual image stays as it was.
     }
     const stream = context.lookup(ref);
@@ -599,18 +683,18 @@ export async function optimiseImages(
         }
       }
     }
-    await new Promise((r) => setTimeout(r, 0));
   }
   progress?.(parents.length, parents.length);
   return { rewritten, images: parents.length };
 
   /** Returns how much the image was scaled along x and y ([1, 1] when kept). */
-  async function optimiseOne(ref: PDFRef): Promise<[number, number]> {
+  async function optimiseOne(ref: PDFRef, step: (part: number) => Promise<void>): Promise<[number, number]> {
     const kept: [number, number] = [1, 1];
     const stream = context.lookup(ref);
     if (!(stream instanceof PDFRawStream)) return kept;
     const info = inspect(context, stream);
     if (!info) return kept;
+    await codecReady();
     const s = needed(ref, info.width, info.height);
     const oldSize = stream.contents.length;
     // Written back as found (often a reference shared with other images).
@@ -631,6 +715,7 @@ export async function optimiseImages(
     if (!loaded) return kept;
     const source = loaded.px;
     const stats = analyse(source, !info.jpeg);
+    await step(0.35);
     const size = (f: number) => ({
       width: Math.max(1, Math.round(source.width * f)),
       height: Math.max(1, Math.round(source.height * f)),
@@ -640,10 +725,16 @@ export async function optimiseImages(
       rewritten.add(ref);
       return [px.width / source.width, px.height / source.height];
     };
+    // Resized when well above the preset's resolution. Below TEXT_DPI small type
+    // in a picture breaks up, so sharp text and lines stop there (if that still
+    // saves more than a few pixels).
+    const sj = stats.sharp && dpi < TEXT_DPI ? needed(ref, info.width, info.height, TEXT_DPI) : s;
+    const fit = s * threshold < 1 && sj < 0.9 ? sj : 1;
     const photo = async () => {
       const gray = info.comps === 1 || stats.nearGray || stats.exactGray;
-      const target = s * threshold < 1 ? size(s) : size(1);
+      const target = size(fit);
       const px = scaled(gray ? toGray(source) : source, target.width, target.height);
+      await step(0.6);
       return { px, enc: await toJpeg(context, px, q, gray ? grayCS : colorSpace) };
     };
 
@@ -652,11 +743,12 @@ export async function optimiseImages(
       const sf = s * FLAT_DPI_FACTOR;
       const target = sf * FLAT_THRESHOLD < 1 ? size(sf) : size(1);
       const px = scaled(stats.exactGray ? toGray(source) : source, target.width, target.height);
+      await step(0.6);
       const resized = px !== source && (px.width !== source.width || px.height !== source.height);
       const enc = toLossless(context, px, stats.exactGray ? grayCS : colorSpace, { mask: false });
       // Mostly flat but with photographic parts (a photo on a white page): JPEG may be far
-      // smaller. Screenshots and drawings have far fewer colours and stay lossless.
-      if (stats.colors > 4096) {
+      // smaller. Screenshots, charts and drawings stay lossless: JPEG rings around their edges.
+      if (stats.colors > 4096 && !stats.sharp) {
         const alt = await photo();
         if (alt.enc.bytes.length < enc.bytes.length * 0.5 && alt.enc.bytes.length < oldSize * MIN_GAIN) return apply(alt.px, alt.enc);
       }
@@ -664,7 +756,7 @@ export async function optimiseImages(
       return kept;
     }
 
-    const resized = s * threshold < 1;
+    const resized = fit < 1;
     const regray = info.comps === 3 && (stats.nearGray || stats.exactGray);
     if (info.jpeg && !resized && !regray && sourceQ <= quality) return kept;
     const { px, enc } = await photo();

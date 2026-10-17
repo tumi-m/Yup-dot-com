@@ -148,26 +148,26 @@ export async function compressTool(
   opts: { quality: string },
   ctx: ToolContext = {}
 ): Promise<ToolFile> {
-  const bytes = await buf(files[0]);
-  const { compressPdf, presetFrom } = await import("./compress");
+  const file = files[0];
+  const [{ presetFrom }, { compressFile }] = await Promise.all([import("./compress"), import("./compress/off-thread")]);
   const preset = presetFrom(opts.quality);
   let compressed: Uint8Array;
   try {
-    compressed = await compressPdf(bytes, { preset, onProgress: ctx.progress });
+    compressed = await compressFile(file, preset, ctx.progress);
   } catch (err) {
     if (friendlyPdfError(err).message === ENCRYPTED_MESSAGE) throw friendlyPdfError(err);
     // A file pdf-lib can't read: pdf.js may still render it.
     try {
-      compressed = await rasterCompress(bytes, { smallest: 0.4, balanced: 0.6, high: 0.8 }[preset], ctx);
+      compressed = await rasterCompress(await buf(file), { smallest: 0.4, balanced: 0.6, high: 0.8 }[preset], ctx);
     } catch (fallbackErr) {
       throw friendlyPdfError(fallbackErr);
     }
   }
   // Never hand back a bigger file, nor one that is barely smaller.
-  if (compressed.length > bytes.length * 0.98) {
-    return { blob: pdfBlob(bytes), filename: files[0].name.replace(/\.pdf$/i, "") + ".pdf" };
+  if (compressed.length > file.size * 0.98) {
+    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf" };
   }
-  return { blob: pdfBlob(compressed), filename: suffixed(files[0], "compressed") };
+  return { blob: pdfBlob(compressed), filename: suffixed(file, "compressed") };
 }
 
 /** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
