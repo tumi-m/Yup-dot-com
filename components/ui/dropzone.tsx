@@ -68,10 +68,12 @@ export function DropTile({
       onAnimationComplete={() => gulp && setGulping(drops)}
       className="relative mx-auto w-fit"
     >
+      {/* The bob pauses where it is rather than stopping, so a drag lifts
+          the tile from wherever it was instead of snapping it home first. */}
       <div
         className={cn(
-          "flex h-14 w-14 items-center justify-center rounded-2xl",
-          !dragging && !busy && "motion-safe:animate-bob",
+          "flex h-14 w-14 items-center justify-center rounded-2xl motion-safe:animate-bob",
+          (dragging || busy) && "motion-safe:[animation-play-state:paused]",
           className
         )}
       >
