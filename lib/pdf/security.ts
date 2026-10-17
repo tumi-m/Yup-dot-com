@@ -1,4 +1,9 @@
-import { PDFDocument as SecurePDFDocument } from "@cantoo/pdf-lib";
+import {
+  PDFDocument as SecurePDFDocument,
+  PDFDict,
+  PDFInvalidObject,
+  PDFName,
+} from "@cantoo/pdf-lib";
 
 /**
  * Password protection and removal.
@@ -52,8 +57,32 @@ export async function unlockPdf(
   } catch {
     throw new Error("That password didn't work. Check it and try again.");
   }
+  dropEncryptionLeftovers(doc);
   // Saving without calling encrypt() writes the document in the clear.
   return doc.save();
+}
+
+/**
+ * Decrypting leaves the source's old security dictionary in the document, and
+ * an old cross-reference stream (kept as raw bytes that still name /Encrypt).
+ * Written back out, they make the copy read as encrypted again.
+ */
+function dropEncryptionLeftovers(doc: SecurePDFDocument) {
+  const ctx = doc.context;
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    let leftover = false;
+    if (obj instanceof PDFInvalidObject) {
+      const raw = new Uint8Array(obj.sizeInBytes());
+      obj.copyBytesInto(raw, 0);
+      leftover = /\/Type\s*\/XRef\b/.test(new TextDecoder("latin1").decode(raw));
+    } else if (obj instanceof PDFDict) {
+      leftover =
+        obj.get(PDFName.of("Filter")) === PDFName.of("Standard") &&
+        obj.has(PDFName.of("O")) &&
+        obj.has(PDFName.of("U"));
+    }
+    if (leftover) ctx.delete(ref);
+  }
 }
 
 /** True when the document carries an /Encrypt dictionary. */
