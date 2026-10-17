@@ -8,6 +8,7 @@ import { PLAN_LIST, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { startCheckout, type CheckoutRequest } from "@/components/BillingClient";
 import { Button } from "@/components/ui/button";
+import { STAGGER_HERO, staggerDelay, useAmbient } from "@/components/motion/primitives";
 import { cn } from "@/lib/utils";
 import type { PlanId } from "@/lib/types";
 
@@ -27,6 +28,8 @@ export function PricingCards({
   const [loading, setLoading] = useState<string | null>(null);
   /** A failed checkout, shown in the card whose button was pressed. */
   const [error, setError] = useState<{ plan: PlanId; message: string } | null>(null);
+  // The turning ring on the recommended plan stops while it is offscreen.
+  const ring = useAmbient<HTMLDivElement>();
 
   async function choose(plan: PlanId, req?: CheckoutRequest) {
     setError(null);
@@ -60,10 +63,11 @@ export function PricingCards({
         {PLAN_LIST.map((plan, i) => {
           const isCurrent = currentPlan === plan.id;
           return (
-            <div key={plan.id} className="motion-safe:animate-rise" style={{ animationDelay: `${i * 0.06}s` }}>
+            <div key={plan.id} className="motion-safe:animate-rise" style={{ animationDelay: `${staggerDelay(i, STAGGER_HERO)}s` }}>
               <div
+                ref={plan.highlighted ? ring : undefined}
                 className={cn(
-                  "relative flex h-full flex-col rounded-3xl border bg-card p-8 transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-[3px] motion-reduce:transform-none",
+                  "relative flex h-full flex-col rounded-3xl border bg-card p-8 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:duration-150 motion-reduce:transform-none",
                   plan.highlighted
                     ? "border-transparent shadow-2xl shadow-primary/20 lg:-my-3 lg:py-11"
                     : "border-border hover:shadow-lg"
@@ -71,7 +75,7 @@ export function PricingCards({
               >
                 {plan.highlighted && (
                   <>
-                    {/* Gradient border; the angle turns, the shape never moves. */}
+                    {/* Gradient border: a painted layer turns behind a 1px mask. */}
                     <span aria-hidden className="pricing-ring" />
                     <span className="absolute -top-3 left-8 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md shadow-primary/30">
                       Most popular

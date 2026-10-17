@@ -89,31 +89,40 @@
   }
 }
 
-/* The recommended plan's turning gradient border (PricingCards). */
-@property --ring-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-@keyframes ring-turn {
+/*
+ * The recommended plan's turning gradient border (PricingCards). The gradient
+ * is painted once on an oversized square that rotates, so each frame is a
+ * composite, not a repaint; the mask leaves a 1px ring of it.
+ */
+@keyframes ring-spin {
   to {
-    --ring-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 .pricing-ring {
   position: absolute;
   inset: -1px;
   padding: 1px;
+  overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  background: conic-gradient(from var(--ring-angle), hsl(var(--primary)), #e879f9, #fbbf24, hsl(var(--primary)));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
 }
+.pricing-ring::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 250%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: conic-gradient(hsl(var(--primary)), #e879f9, #fbbf24, hsl(var(--primary)));
+}
 @media (prefers-reduced-motion: no-preference) {
-  .pricing-ring {
-    animation: ring-turn 9s linear infinite;
+  .pricing-ring::before {
+    animation: ring-spin 9s linear infinite;
   }
 }
 
