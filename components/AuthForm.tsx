@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
-import { safeRedirect } from "@/components/auth-redirect";
+import { authErrorMessage, authSwitchHref, safeRedirect } from "@/components/auth-redirect";
 import { track } from "@/lib/analytics";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
@@ -23,6 +23,18 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const [message, setMessage] = useState<string | null>(null);
 
   const isSignup = mode === "signup";
+  const otherPage = isSignup ? "/login" : "/signup";
+  const [switchHref, setSwitchHref] = useState<string>(otherPage);
+
+  // Read after load, like the submit handler, so the page stays static:
+  // keep ?redirect on the link to the other page, and explain a failed
+  // confirmation link (?error=auth).
+  useEffect(() => {
+    const search = window.location.search;
+    setSwitchHref(authSwitchHref(otherPage, search));
+    const linkError = authErrorMessage(search);
+    if (linkError) setError(linkError);
+  }, [otherPage]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -173,7 +185,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         <p className="mt-4 text-center text-sm text-muted-foreground">
           {isSignup ? "Already have an account? " : "Don't have an account? "}
           <Link
-            href={isSignup ? "/login" : "/signup"}
+            href={switchHref}
             className="inline-flex h-11 items-center rounded font-medium text-primary hover:underline"
           >
             {isSignup ? "Log in" : "Sign up"}
