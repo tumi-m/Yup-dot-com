@@ -16,7 +16,7 @@ import {
   PROGRESS_HOLD_MS,
 } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
-import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
 import { SlideView } from "@/components/slides/SlideView";
@@ -157,6 +157,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       setResult(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       setElapsed(seconds);
       if (hadFocus || document.activeElement === document.body) focusNext.current = "done";
+      settleSlot(flow.ref.current);
       setStatus("done");
       trackToolUsed("pptx-to-pdf");
       setShowCard(!upsellCardDismissed());
@@ -194,6 +195,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
   }
 
   async function continueWith(nextSlug: string) {
+    nudge.cancel();
     if (!result || !file) return;
     await setHandoff([await fileToHandoff(result, pdfName(file.name))]);
     router.push(`/tools/${nextSlug}?handoff=1`);

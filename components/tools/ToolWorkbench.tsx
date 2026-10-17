@@ -36,7 +36,7 @@ import {
   SUCCESS,
 } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
-import { resultFloor, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { PROCESSORS, type ToolField } from "./processors";
 import { SuccessCard } from "./SuccessCard";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
@@ -186,6 +186,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       setResults(Array.isArray(out) ? out : [out]);
       setElapsed(elapsedSeconds);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "done";
+      settleSlot(flow.ref.current);
       setStatus("done");
       trackToolUsed(slug);
       setShowCard(!upsellCardDismissed());
@@ -217,6 +218,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** Hands the result to another tool without a download/re-upload round trip. */
   async function continueWith(nextSlug: string) {
+    nudge.cancel();
     const r = results[0];
     await setHandoff([await fileToHandoff(r.blob, r.filename)]);
     router.push(`/tools/${nextSlug}?handoff=1`);
@@ -485,7 +487,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       initial={HANDOFF.in.initial}
                       animate={HANDOFF.in.animate}
                       exit={FADE_EXIT}
-                      className="w-full max-w-md outline-none"
+                      className="w-full max-w-md rounded-xl outline-none ring-offset-4 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <motion.div initial={HANDOFF.track.initial} animate={HANDOFF.track.animate}>
                         <ProgressBar value={progress?.fraction} label="Progress" />

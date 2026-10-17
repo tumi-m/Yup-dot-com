@@ -31,7 +31,7 @@ import {
   SuccessBadge,
 } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent } from "@/components/motion/Progress";
-import { scrollIntoViewIfNeeded, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
   parseMediaUrl,
@@ -190,7 +190,6 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
    */
   const flow = useHeightLock<HTMLDivElement>();
   const slot = useHeightLock<HTMLDivElement>();
-  const readyCard = useRef<HTMLDivElement>(null);
 
   const stopPolling = () => {
     if (poll.current) clearTimeout(poll.current);
@@ -360,6 +359,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     job.current = null;
     setFile(next);
     focusNext.current = "ready";
+    // The page settles while the progress leaves, so the card lands in view.
+    settleSlot(flow.ref.current);
     setPhase("ready");
     saveAs(next.href, sameOrigin(next.href) ? next.name : undefined);
     trackToolUsed();
@@ -559,9 +560,6 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   useLayoutEffect(() => {
     if (phase === "preview") releaseSlot();
   }, [phase, releaseSlot]);
-  useEffect(() => {
-    if (phase === "ready") scrollIntoViewIfNeeded(readyCard.current);
-  }, [phase]);
 
   const platformName = PLATFORM_LABEL[config.platform];
   const loading = phase === "loading";
@@ -870,7 +868,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0, transition: NOTICE_T }}
                 exit={FADE_EXIT}
-                className="flex flex-1 flex-col justify-center p-4 outline-none sm:p-5"
+                className="flex flex-1 flex-col justify-center p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-5"
               >
                 <ProgressBar value={progress.value} label="Download progress" />
                 <p className="mt-2 text-center text-sm text-muted-foreground" aria-hidden>
@@ -901,15 +899,14 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
         {phase === "ready" && file && (
           <motion.div
             key="ready"
-            ref={readyCard}
             initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, transition: EXIT_T }}
             transition={{ duration: DUR.slow, ease: EASE_OUT, opacity: ENTER_T }}
-            className="relative flex flex-1 scroll-mt-24 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
+            className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
           >
             <SuccessBadge icon={kind === "mp3" ? Music2 : Film} />
-            <h2 ref={focusRef("ready")} tabIndex={-1} className="mt-5 text-2xl font-bold outline-none">
+            <h2 ref={focusRef("ready")} tabIndex={-1} className="mx-auto mt-5 rounded-lg px-2 text-2xl font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Your download has started
             </h2>
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground">

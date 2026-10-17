@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { Download, File as FileIcon } from "lucide-react";
 import {
@@ -12,7 +11,6 @@ import {
   SuccessBadge,
   staggerDelay,
 } from "@/components/motion/primitives";
-import { scrollIntoViewIfNeeded } from "@/components/motion/focus";
 import { getTool, type ToolMeta } from "@/lib/tools";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -28,8 +26,9 @@ const at = (delay: number) => ({ ...ENTER_T, delay });
 /**
  * The finished-task card shared by every file tool. One choreography, timed
  * from the card's mount: badge, title, stats, then the primary action (ready
- * by 0.45s), then next steps, and only later the quiet upsell. It brings
- * itself into view if the page had scrolled away, so the moment is seen.
+ * by 0.45s), then next steps, and only later the quiet upsell. The caller
+ * settles the page (settleSlot) as the work view leaves, so the card enters
+ * already in view and the page never moves under it.
  */
 export function SuccessCard({
   title = "Spell complete",
@@ -53,20 +52,16 @@ export function SuccessCard({
   upsell?: React.ReactNode;
   className?: string;
 }) {
-  const card = useRef<HTMLDivElement>(null);
-  useEffect(() => scrollIntoViewIfNeeded(card.current), []);
-
   const tools = (next?.slugs ?? []).map((slug) => getTool(slug)).filter((t): t is ToolMeta => !!t);
 
   return (
     <motion.div
-      ref={card}
       initial={{ opacity: 0, scale: 0.98, y: 8 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98, transition: EXIT_T }}
       transition={SUCCESS_CARD_T}
       className={cn(
-        "relative flex scroll-mt-24 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-6 text-center shadow-xl shadow-primary/5 sm:p-10",
+        "relative flex flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-6 text-center shadow-xl shadow-primary/5 sm:p-10",
         className
       )}
     >
@@ -79,7 +74,7 @@ export function SuccessCard({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={at(SUCCESS.title)}
-        className="relative mt-5 text-2xl font-bold outline-none"
+        className="relative mx-auto mt-5 rounded-lg px-2 text-2xl font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {title}
       </motion.h2>

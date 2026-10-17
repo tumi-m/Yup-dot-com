@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { cssEase, DUR, EASE_OUT, ENTER, EXIT, GLOW_FADE, InlineError, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
-import { resultFloor, scrollBehavior, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, scrollBehavior, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
 import { SlideView } from "@/components/slides/SlideView";
@@ -686,6 +686,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       if (controller.signal.aborted) return;
       setPdf(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
       if (hadFocus || document.activeElement === document.body) focusNext.current = "done";
+      settleSlot(flow.ref.current);
       setStatus("done");
       trackToolUsed();
       setShowCard(!upsellCardDismissed());
@@ -711,6 +712,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   }
 
   async function continueWith(nextSlug: string) {
+    nudge.cancel();
     if (!pdf || !file) return;
     await setHandoff([await fileToHandoff(pdf, `${baseName(file.name)}.pdf`)]);
     router.push(`/tools/${nextSlug}?handoff=1`);

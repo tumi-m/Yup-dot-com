@@ -276,7 +276,12 @@ export function useSuccessNudge(open: () => void) {
   const downloaded = useCallback(() => {
     if (!pending.current) return;
     disarm();
-    window.setTimeout(() => openRef.current(), DUR.slow * 1000);
+    // Kept in `stop`, so Start over, a next tool or leaving the page still cancels it.
+    const timer = window.setTimeout(() => {
+      stop.current = null;
+      openRef.current();
+    }, DUR.slow * 1000);
+    stop.current = () => window.clearTimeout(timer);
   }, [disarm]);
 
   useEffect(() => disarm, [disarm]);

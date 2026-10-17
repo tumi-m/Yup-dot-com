@@ -18,7 +18,7 @@ import {
   SuccessBadge,
 } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
-import { scrollIntoViewIfNeeded, useHeightLock } from "@/components/motion/focus";
+import { settleSlot, useHeightLock } from "@/components/motion/focus";
 import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
@@ -67,7 +67,6 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   const [url, setUrl] = useState("");
   /** Keeps the form's footprint while the result replaces it. */
   const flow = useHeightLock<HTMLDivElement>();
-  const readyCard = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>("input");
   const [action, setAction] = useState<Action>("download");
   const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
@@ -179,10 +178,13 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         }
         // Too big to edit on this plan: keep the file, say why.
         setError({ message: `Editing takes files up to ${formatLimitBytes(max)} on your plan.`, upgrade: true });
+        settleSlot(flow.ref.current);
         setPhase("ready");
         return;
       }
       setFile({ ...f, saved: true });
+      // The page settles while the form leaves, so the card lands in view.
+      settleSlot(flow.ref.current);
       setPhase("ready");
       saveAs(f.href, f.name);
       trackDownload(f.name);
@@ -238,11 +240,6 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   }
 
   const fraction = progress.total ? Math.min(1, progress.received / progress.total) : 0;
-
-  // The result brings itself into view if the page had scrolled away.
-  useEffect(() => {
-    if (phase === "ready") scrollIntoViewIfNeeded(readyCard.current);
-  }, [phase]);
 
   return (
     <div className="space-y-4">
@@ -347,12 +344,11 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         {phase === "ready" && file && (
           <motion.div
             key="ready"
-            ref={readyCard}
             initial={{ opacity: 0, scale: 0.98, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98, transition: EXIT_T }}
             transition={{ duration: DUR.slow, ease: EASE_OUT, opacity: ENTER_T }}
-            className="relative flex flex-1 scroll-mt-24 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
+            className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
           >
             <SuccessBadge icon={Presentation} />
             <h2 className="mt-5 text-2xl font-bold">{file.saved ? "Downloaded" : "Ready"}</h2>

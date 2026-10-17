@@ -9,6 +9,9 @@ import {
   EXIT,
   HANDOFF,
   POP_IN,
+  PROGRESS_HOLD_MS,
+  PROGRESS_REST,
+  PROGRESS_T,
   progressTranslate,
   SHAKE_T,
   SPRING,
@@ -30,7 +33,7 @@ import {
   TOOL_PILLS,
 } from "../components/tool-filter.ts";
 import { isNavActive } from "../components/nav-utils.ts";
-import { needsScrollIntoView, reservedHeight, RESERVE_MAX } from "../components/motion/focus.ts";
+import { needsScrollIntoView, reservedHeight, RESERVE_MAX, SETTLE_TOP, settleTarget } from "../components/motion/focus.ts";
 import { safeRedirect } from "../components/auth-redirect.ts";
 import { TOOLS } from "../lib/tools.tsx";
 
@@ -80,6 +83,13 @@ check("reserve: keeps the current height", reservedHeight(500, 900) === 500);
 check("reserve: at least the floor", reservedHeight(300, 900, 0.7) === 630);
 check("reserve: never more than most of a screen", reservedHeight(2000, 900) === Math.round(900 * RESERVE_MAX) && reservedHeight(100, 900, 1) === Math.round(900 * RESERVE_MAX));
 check("progress: clamps and survives NaN", progressTranslate(7) === progressTranslate(1) && progressTranslate(NaN) === progressTranslate(0));
+check("progress: a full bar is seen at rest before the result replaces it", PROGRESS_HOLD_MS >= (PROGRESS_T + 0.1) * 1000 && PROGRESS_REST >= 0.1, PROGRESS_HOLD_MS);
+check("progress: the hold stays short", PROGRESS_HOLD_MS <= 450, PROGRESS_HOLD_MS);
+check("settle: a slot above the screen comes down under the header", settleTarget(-86, 435, 900) === 435 - 86 - SETTLE_TOP);
+check("settle: a slot low on the screen comes up", settleTarget(500, 0, 900) === 500 - SETTLE_TOP);
+check("settle: a comfortably placed slot stays put", settleTarget(349, 0, 900) === null && settleTarget(120, 300, 900) === null);
+check("settle: never above the top of the page", settleTarget(-50, 20, 900) === 0);
+check("settle: lands clear of the 64px header", SETTLE_TOP > 64 + 16);
 
 // Category pills: Optimize folds into Organize
 check("8 pills, no optimize", TOOL_PILLS.length === 8 && !TOOL_PILLS.includes("optimize" as never), TOOL_PILLS);

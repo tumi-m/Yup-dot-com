@@ -48,12 +48,29 @@ export function scrollBehavior(): ScrollBehavior {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 }
 
-/** Brings a newly shown block into view, deliberately and once. */
-export function scrollIntoViewIfNeeded(el: HTMLElement | null) {
+/** Where a settled result's top sits: clear of the 64px header, with room to breathe. */
+export const SETTLE_TOP = 96;
+
+/**
+ * The scroll position that puts a block whose top is at `top` (on screen) at
+ * SETTLE_TOP, or null when it is already comfortably in view.
+ */
+export function settleTarget(top: number, scrollY: number, viewportHeight: number): number | null {
+  if (!needsScrollIntoView(top, viewportHeight)) return null;
+  return Math.max(0, Math.round(scrollY + top - SETTLE_TOP));
+}
+
+/**
+ * Brings the slot a result is about to fill into view. Call it in the same
+ * tick as the state change that sends the old view out: the page settles
+ * while that view fades, so the result enters already in place and nothing
+ * moves under it once it has arrived.
+ */
+export function settleSlot(el: HTMLElement | null) {
   if (!el) return;
-  const top = el.getBoundingClientRect().top;
-  if (!needsScrollIntoView(top, window.innerHeight)) return;
-  el.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+  const target = settleTarget(el.getBoundingClientRect().top, window.scrollY, window.innerHeight);
+  if (target === null || Math.abs(target - window.scrollY) < 2) return;
+  window.scrollTo({ top: target, behavior: scrollBehavior() });
 }
 
 /** The most a reserved block may take: most of a screen, never more. */
