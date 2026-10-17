@@ -305,6 +305,7 @@ function FormFieldOverlay({
       <input
         aria-label={field.name}
         value={value}
+        maxLength={field.maxLength}
         onChange={(e) => onChange(e.target.value)}
         className={`h-full w-full rounded-sm px-1 ${shared}`}
         data-fit-text

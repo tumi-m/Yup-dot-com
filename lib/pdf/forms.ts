@@ -45,6 +45,8 @@ export interface DetectedField {
   options: string[];
   /** For radio widgets: which option this particular button selects. */
   exportValue?: string;
+  /** Text fields: the most characters the field takes. */
+  maxLength?: number;
   readOnly: boolean;
 }
 
@@ -100,10 +102,13 @@ export async function detectFormFields(
     const name = field.getName();
     let value = "";
     let options: string[] = [];
+    let maxLength: number | undefined;
 
     try {
-      if (field instanceof PDFTextField) value = field.getText() ?? "";
-      else if (field instanceof PDFCheckBox) value = field.isChecked() ? "true" : "";
+      if (field instanceof PDFTextField) {
+        value = field.getText() ?? "";
+        maxLength = field.getMaxLength();
+      } else if (field instanceof PDFCheckBox) value = field.isChecked() ? "true" : "";
       else if (field instanceof PDFRadioGroup) {
         value = field.getSelected() ?? "";
         options = field.getOptions();
@@ -153,6 +158,7 @@ export async function detectFormFields(
         value,
         options,
         exportValue,
+        maxLength,
         readOnly,
       });
     });
@@ -183,7 +189,10 @@ export async function fillFormFields(
     }
     try {
       if (field instanceof PDFTextField) {
-        field.setText(value.replace(/[^\x00-\xFF]/g, "?"));
+        // Keep what fits: a value over the field's limit would be dropped whole.
+        const max = field.getMaxLength();
+        const text = value.replace(/[^\x00-\xFF]/g, "?");
+        field.setText(max === undefined ? text : text.slice(0, max));
       } else if (field instanceof PDFCheckBox) {
         if (value === "true") field.check();
         else field.uncheck();
