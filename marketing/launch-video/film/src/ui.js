@@ -171,7 +171,14 @@
     const glow = h("div", "abs", root, { left: 0, top: 0, right: 0, height: "190px", borderRadius: "24px 24px 0 0", background: "linear-gradient(180deg, rgba(16, 185, 129, 0.13), rgba(16, 185, 129, 0))" });
     const check = h("div", "", root, { width: "68px", height: "68px", position: "relative" });
     const title = h("div", "", root, { fontSize: "26px", fontWeight: 700, letterSpacing: "-0.01em", marginTop: "20px", position: "relative" }, "Spell complete");
-    const btns = h("div", "row", root, { gap: "12px", marginTop: "26px", position: "relative" });
+    // the result line (ToolWorkbench): output size and the saving, measured by running the
+    // app's Compress PDF on the demo proposal.pdf (2.0 MB, two photos). The timer chip is left out.
+    const stats = h("div", "row", root, { gap: "8px", marginTop: "14px", position: "relative", justifyContent: "center" });
+    const fileStat = h("span", "stat", stats, null, "1 file · 120.8 KB");
+    const smaller = h("span", "stat good", stats);
+    icon("trending-down", 15, 2.2, smaller);
+    h("span", "", smaller, null, "94% smaller");
+    const btns = h("div", "row", root, { gap: "12px", marginTop: "24px", position: "relative" });
     const dl = h("div", "btn primary", btns, { width: "176px", height: "48px", fontSize: "17px" });
     icon("download", 18, 2, dl); h("span", "", dl, null, "Download");
     const so = h("div", "btn outline", btns, { width: "148px", height: "48px", fontSize: "17px" });
@@ -185,7 +192,7 @@
       h("span", "", c, null, n.label);
       chips[n.id] = c;
     }
-    return { root, glow, check, title, btns, dl, so, nextLbl, row, chips, w: W0 };
+    return { root, glow, check, title, stats, fileStat, smaller, btns, dl, so, nextLbl, row, chips, w: W0 };
   }
 
   function checkFace(size = 68, sw = 3) {
@@ -292,6 +299,8 @@
       icon(n, 19, 2, b);
       tools[n] = b;
     }
+    // centre the floating bar by its measured width, not a transform (tool boxes are read from offsets)
+    if (bar.offsetWidth) { bar.style.transform = ""; bar.style.left = px((W0 - bar.offsetWidth) / 2); }
     return { root, top, save, tools, pgWrap, page: pgi, bar, w: W0 };
   }
 
@@ -308,8 +317,14 @@
   }
 
   // ------------------------------------------------------------------ Ask your PDF
+  /**
+   * The answer the film streams for the made-up demo proposal. The app cites pages inline,
+   * "(p. 2)", as its chat instructions ask for.
+   */
+  const AI_ANSWER = "A plan to rebuild the company website, covering the scope, timeline and budget (p. 2).";
+
   function aiPanel(parent, mobile) {
-    const W0 = mobile ? 420 : 600, H0 = mobile ? 520 : 470;
+    const W0 = mobile ? 420 : 600, H0 = mobile ? 470 : 470;
     const root = h("div", "abs", parent, { left: 0, top: 0, width: px(W0), height: px(H0), borderRadius: "24px", overflow: "hidden" });
     const hd = h("div", "row", root, { height: "62px", gap: "12px", padding: "0 20px", background: "rgba(244, 242, 248, 0.6)", borderBottom: "1px solid var(--line)" });
     h("span", "", hd, { color: "#7c3aed", display: "flex" }).appendChild(icon("file-text", 20, 2));
@@ -327,13 +342,29 @@
     }
     const thread = h("div", "abs", root, { left: "20px", right: "20px", top: "86px" });
     const bubble = h("div", "", thread, { marginLeft: "auto", width: "max-content", background: "#7c3aed", color: "#fff", borderRadius: "16px 16px 6px 16px", padding: "10px 16px", fontSize: "15px" }, "Summarize");
-    const think = h("div", "row", thread, { marginTop: "14px", width: "max-content", background: "var(--wash)", borderRadius: "16px 16px 16px 6px", padding: "15px 16px", gap: "6px" });
-    const dots = [0, 1, 2].map(() => h("span", "", think, { width: "8px", height: "8px", borderRadius: "50%", background: "rgba(124, 58, 237, 0.6)", display: "block" }));
+    // the reply bubble: thinking dots, then the answer streams in and the bubble grows to fit
+    const think = h("div", "", thread, { marginTop: "14px", position: "relative", background: "var(--wash)", borderRadius: "16px 16px 16px 6px", overflow: "hidden" });
+    const dotRow = h("div", "row abs", think, { left: "16px", top: "15px", gap: "6px" });
+    const dots = [0, 1, 2].map(() => h("span", "", dotRow, { width: "8px", height: "8px", borderRadius: "50%", background: "rgba(124, 58, 237, 0.6)", display: "block" }));
+    const ansMax = Math.round((W0 - 40) * 0.85) - 32;
+    const ans = h("div", "abs", think, { left: "16px", top: "10px", width: px(ansMax), fontSize: "15px", lineHeight: "24px", whiteSpace: "normal", color: "var(--ink)" });
+    const words = AI_ANSWER.split(" ").map((w, i) => { if (i) ans.appendChild(document.createTextNode(" ")); return h("span", "", ans, null, w); });
     const form = h("div", "abs row", root, { left: 0, right: 0, bottom: 0, height: "68px", gap: "8px", padding: "0 12px", borderTop: "1px solid var(--line)" });
     h("div", "muted", form, { flex: "1", height: "44px", border: "1px solid var(--line)", borderRadius: "12px", display: "flex", alignItems: "center", padding: "0 14px", fontSize: "14.5px", opacity: 0.85 }, "Ask anything about this PDF…");
     const send = h("div", "ico", form, { width: "44px", height: "44px", borderRadius: "12px", background: "#c4b5fd", color: "#fff" });
     icon("arrow-up", 18, 2, send);
-    return { root, empty, cite, chips, thread, bubble, think, dots, w: W0, h: H0 };
+    /** Sizes of the reply bubble: thinking (dots) and with the whole answer (measured once laid out). */
+    const sizes = () => {
+      if (!think._m && ans.offsetWidth) {
+        let w = 0;
+        const r0 = ans.getBoundingClientRect();
+        for (const s of words) { const r = s.getBoundingClientRect(); w = Math.max(w, r.right - r0.left); }
+        const k = r0.width / ans.offsetWidth || 1;
+        think._m = { w0: 16 + 3 * 8 + 2 * 6 + 16, h0: 38, w1: Math.ceil(w / k) + 32 + 2, h1: ans.offsetHeight + 20 };
+      }
+      return think._m;
+    };
+    return { root, empty, cite, chips, thread, bubble, think, dots, dotRow, ans, words, sizes, w: W0, h: H0 };
   }
 
   // ------------------------------------------------------------------ PowerPoint branch
@@ -361,10 +392,11 @@
   }
 
   // ------------------------------------------------------------------ Edit PPTX
+  // "What we ship" starts out of place, so dragging it up puts the deck in order
   const SLIDES = [
     { title: "Q4 Plan", lines: [0.66, 0.52, 0.6, 0.38] },
-    { title: "What we ship", lines: [0.7, 0.55, 0.6] },
     { title: "Thank you", lines: [0.45] },
+    { title: "What we ship", lines: [0.7, 0.55, 0.6] },
   ];
 
   function slideBody(parent, s, k, titleText) {
@@ -404,6 +436,7 @@
     return { root, top, pdfBtn, side, thumbs, main, band, k, w: W0, h: H0 };
   }
 
+  const PITCH_V = 140;
   function pptxEditorMobile(parent) {
     const W0 = 420;
     const root = h("div", "abs", parent, { left: 0, top: 0, width: px(W0) });
@@ -412,15 +445,16 @@
     h("div", "", top, { fontSize: "16px", fontWeight: 600, flex: "1" }, "q4-plan.pptx");
     const pdfBtn = h("div", "btn primary", top, { height: "40px", width: "82px", fontSize: "15px" });
     icon("file-down", 17, 2, pdfBtn); h("span", "", pdfBtn, null, "PDF");
-    const stack = h("div", "", root, { position: "relative", height: "690px", marginTop: "16px" });
+    // compact slide cards, so the whole list stays in frame while one is dragged
+    const stack = h("div", "", root, { position: "relative", height: px(2 * PITCH_V + 128), marginTop: "14px" });
     const k = 420 / 520 * 0.8;
     const thumbs = SLIDES.map((s, i) => {
-      const th = h("div", "abs thumb", stack, { left: 0, top: px(i * 230), width: "420px", height: "214px", borderRadius: "14px", boxShadow: "0 8px 20px -10px rgba(46,16,101,0.18)" });
+      const th = h("div", "abs thumb", stack, { left: 0, top: px(i * PITCH_V), width: "420px", height: "128px", borderRadius: "14px", boxShadow: "0 8px 20px -10px rgba(46,16,101,0.18)" });
       const band = slideBody(th, s, k);
       const badge = h("div", "abs", th, { left: "10px", bottom: "10px", width: "24px", height: "24px", borderRadius: "50%", background: i === 0 ? "#7c3aed" : "#64748b", color: "#fff", fontSize: "12px", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }, String(i + 1));
       return { th, band, badge, i };
     });
-    return { root, top, pdfBtn, thumbs, band: thumbs[0].band, k, stack, w: W0 };
+    return { root, top, pdfBtn, thumbs, band: thumbs[0].band, k, stack, pitch: PITCH_V, w: W0 };
   }
 
   function bandFace(k, w, hgt) {
@@ -461,7 +495,8 @@
     h("span", "muted", f, { display: "flex" }).appendChild(icon("link-2", 17, 2));
     const txt = h("div", "", f, { flex: "1", position: "relative", height: "22px", overflow: "hidden", WebkitMaskImage: "linear-gradient(90deg, #000 82%, transparent)", maskImage: "linear-gradient(90deg, #000 82%, transparent)" });
     const ph = h("div", "abs muted", txt, { left: 0, top: 0, opacity: 0.7 }, "Paste a link");
-    const links = ["https://x.com/example/status/", "https://www.tiktok.com/@example/video/", "https://www.instagram.com/reel/example/"].map((s) => h("div", "abs", txt, { left: 0, top: 0 }, s));
+    // well-formed example links (lib/media.ts accepts each); the ids are placeholders
+    const links = ["https://x.com/example/status/1234567890123456789", "https://www.tiktok.com/@example/video/7312345678901234567", "https://www.instagram.com/reel/C1a2B3c4D5e/"].map((s) => h("div", "abs", txt, { left: 0, top: 0, whiteSpace: "nowrap" }, s));
     const paste = h("div", "row", f, { height: "44px", gap: "7px", padding: "0 13px", borderRadius: "12px", background: "var(--wash)", fontSize: "14.5px", fontWeight: 500 });
     icon("clipboard-paste", 16, 2, paste); h("span", "", paste, null, "Paste");
     return { f, ph, links, paste };

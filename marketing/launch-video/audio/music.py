@@ -1,6 +1,7 @@
 """Original score for "Cast a spell": 120 BPM, A major, 38 s, made entirely in code.
 
-Shape (from timeline.json "music"): intro 0-4 (pad, plucked arpeggio), groove 4-8 (kick,
+Shape (from timeline.json "music"): intro 0-4 (a hit on 0.0 as the logo starts writing, then
+pad, plucked arpeggio, a half-time kick and soft hats), groove 4-8 (kick,
 filtered bass), build 8-10 (accelerating snare roll, rising sweep that ends on 10.0),
 drop 10-30 (full beat, ducked bass, bell melody, a change every 4 bars), half-time
 30-33.5 (pad opens), near-silence 33.5-34, deep hit and final chord on 34.0, ring-out.
@@ -128,7 +129,7 @@ def render(tl):
         tt = t0 + times(n)
         cutoff = np.interp(tt, [0, 4, 8, 10, 10.01, 30, 33.5, 34, 37], [900, 1300, 1600, 3800, 2400, 2600, 6500, 4000, 1400])
         vel = 1.25 if b < 2 else 1.0
-        att = 0.35 if b in (0, 17) else 0.08
+        att = 0.35 if b == 17 else 0.012 if b == 0 else 0.08
         ch_notes = PAD[ch] + ([45] if b >= 17 else [])
         p = pad_chord(ch_notes, dur, cutoff, attack=att, release=1.2 if b == 17 else 0.45 if b != 16 else 0.12) * vel
         i0 = n_of(t0)
@@ -153,6 +154,10 @@ def render(tl):
     def k_at(t, vel=1.0):
         place(drums, t, kick(vel), 0.95, 0, align="start")
         kicks.append(t)
+    # intro: the hit on 0.0, then a half-time pulse that the groove doubles at 4.0
+    k_at(0.0, 1.0)
+    for t in (1.0, 2.0, 3.0, 3.5):
+        k_at(t, 0.62 if t < 3.5 else 0.5)
     for i in range(int(4 / BEAT), int(8 / BEAT)):  # groove: four on the floor
         k_at(i * BEAT, 0.85)
     for t in (8.0, 8.5, 9.0):  # build: the kick thins out
@@ -190,11 +195,18 @@ def render(tl):
     for k in range(int(4 / S16), int(8 / S16)):  # groove hats, quieter
         if k % 2 == 1:
             place(drums, k * S16, hat(False, 0.35), 0.22, 0.35, align="start")
+    for k in range(int(2 / S16), int(4 / S16)):  # intro hats from bar 2, offbeat 8ths
+        if k % 4 == 2:
+            place(drums, k * S16, hat(False, 0.3), 0.2, 0.3, align="start")
+    place(drums, 2.0 - 0.25, hat(True, 0.45), 0.22, -0.3, align="start")
     # fill into the half-time at 29.5
     for j, t in enumerate(np.arange(29.5, 30.0, 0.0625)):
         place(drums, t, snare(0.4 + 0.08 * j, 210), 0.4, -0.3 + 0.08 * j, align="start")
 
-    # --- bass: filtered in the groove, open and ducked in the drop, long notes in half-time
+    # --- bass: a held, dark root under the intro; filtered in the groove, open and ducked in
+    # the drop, long notes in half-time
+    for b in range(0, 2):
+        place(bassb, b * BAR, bass_note(ROOT[PROG[b]], 1.9, 260, 0.75), 1.0, 0, align="start")
     for b in range(2, 5):
         root = ROOT[PROG[b]]
         for q in range(4):
@@ -239,6 +251,21 @@ def render(tl):
     r[-n_of(0.008):] *= np.linspace(1, 0, n_of(0.008))
     place(fx, 8.0, pan2(r, 0) * np.array([[1.0], [0.92]]), 0.55, align="start")
 
+    # --- the opening hit on 0.0: a short low boom and a bright chord, smaller than the 34.0 slam
+    n = n_of(1.2)
+    tt = times(n)
+    boom0 = np.sin(2 * np.pi * np.cumsum(44 + 70 * np.exp(-tt / 0.05)) / SR) * np.exp(-tt / 0.35)
+    place(fx, 0.0, np.tanh(boom0 * 1.3), 0.55, 0, align="start")
+    for j, m in enumerate([69, 73, 76, 81]):
+        place(bel, 0.0 + j * 0.008, bell(m, 1.6, 0.42), 1.0, pan=-0.45 + 0.3 * j, align="start")
+        place(dly_send, 0.0, bell(m, 1.2, 0.3), 0.4, 0, align="start")
+    # a soft swell into the groove at 4.0
+    n = n_of(0.6)
+    tt = times(n)
+    sw = sweep_filter(noise(n), "bandpass", 400 * (8 ** (tt / 0.6)), q_bw=0.7) * (tt / 0.6) ** 2.5
+    sw[-n_of(0.01):] *= np.linspace(1, 0, n_of(0.01))
+    place(fx, 3.4, pan2(sw, 0), 0.22, align="start")
+
     # --- the hit on 34.0: deep boom, final chord bells, star melody
     n = n_of(3.5)
     tt = times(n)
@@ -253,6 +280,12 @@ def render(tl):
         place(bel, 34.5 + j * 0.125, x, 1.0, pan=-0.3 + 0.2 * j, align="start")
         place(dly_send, 34.5 + j * 0.125, x, 0.6, 0, align="start")
     place(bassb, 34.0, bass_note(33, 3.2, 300, 0.9), 1.0, 0, align="start")
+
+    # --- the intro bed is lifted (with the hit, about 8 dB more than a bare pad and pluck), so
+    # sound-on autoplay starts with energy; the groove keeps a little of the lift
+    g = np.interp(np.arange(padb.shape[1]) / SR, [0, 3.5, 4.0, 7.5, 8.0], [1.6, 1.6, 1.3, 1.3, 1.0])
+    padb *= g
+    plk *= g
 
     # --- sidechain: bass and pad duck under each kick
     duck = np.ones(bassb.shape[1])

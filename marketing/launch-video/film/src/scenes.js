@@ -79,7 +79,7 @@
     // ---------------------------------------------------------------- layout per format
     const L = V
       ? {
-          head: 120, caret: 0.73, lockTile: 210, wm: 118, url: 46, tag: 34,
+          head: 108, head2: 138, caret: 0.73, lockTile: 250, wm: 140, url: 54, tag: 44,
           cap: { fs: 74, x: 510, y: 1500, anchor: "bc", align: "center" },
           act: { fs: 124, x: 510, y: 440, anchor: "cc", align: "center" },
           ui: { x: 60, y: 320, w: 920, h: 930 },
@@ -88,7 +88,7 @@
           price: { x: 60, y: 280, w: 920, h: 980 },
         }
       : {
-          head: 150, caret: 0.73, lockTile: 168, wm: 108, url: 42, tag: 30,
+          head: 176, caret: 0.73, lockTile: 196, wm: 126, url: 48, tag: 38,
           cap: { fs: 86, x: 150, y: 540, anchor: "cl", align: "left" },
           act: { fs: 140, x: 150, y: 540, anchor: "cl", align: "left" },
           ui: { x: 760, y: 100, w: 1040, h: 880 },
@@ -116,7 +116,7 @@
     {
       const wmW = wm.offsetWidth, wmH = wm.offsetHeight, uW = url.offsetWidth, uH = url.offsetHeight;
       if (V) {
-        tileHome = { x: -T0 / 2, y: -T0 / 2 - 190, w: T0, h: T0 };
+        tileHome = { x: -T0 / 2, y: -T0 / 2 - 335, w: T0, h: T0 };
         wmBox = { x: -wmW / 2, y: tileHome.y + T0 + 54, w: wmW, h: wmH };
         urlBox = { x: -uW / 2, y: wmBox.y + wmH + 40, w: uW, h: uH };
       } else {
@@ -157,8 +157,7 @@
       const ul = t < 20 ? 1 - smooth((t - O.lockupOut) / 0.2) : stepR(t - EN.underline, { w: 11, z: 1 });
       show(underline, ul > 0.003);
       underline.style.transform = `scaleX(${clamp(ul).toFixed(4)})`;
-      const tg = vis(t, EN.tag, EN.tagOut, { dOut: 0.3 });
-      applyVis(tag, tg);
+      applyVis(tag, endWin(t, EN.tag));
     });
 
     // ---------------------------------------------------------------- the Spell Tile
@@ -189,7 +188,9 @@
       if (i) l1.appendChild(document.createTextNode(" "));
       return h("span", "", l1, { display: "inline-block" }, w);
     });
-    const l2 = h("div", "display abs", headG.el, { fontSize: fs + "px", left: 0, top: fs * 1.08 + "px" });
+    // vertical: "your PDFs." is set larger than the first line, so the promise fills the frame
+    const fs2 = L.head2 || fs;
+    const l2 = h("div", "display abs", headG.el, { fontSize: fs2 + "px", left: 0, top: fs * 1.08 + "px" });
     const l2words = ["your", "PDFs"].map((w, i) => {
       if (i) l2.appendChild(document.createTextNode(" "));
       const o = h("span", "word", l2);
@@ -200,15 +201,15 @@
     const base1 = h("span", "", l1, { display: "inline-block", width: 0, height: 0, verticalAlign: "baseline" });
     // centre the block on the origin (slightly above the card centre line)
     const l1w = l1.offsetWidth, l2w = l2.offsetWidth;
-    const headW = Math.max(l1w, l2w), headH = fs * 2.08;
+    const headW = Math.max(l1w, l2w), headH = fs * 1.08 + fs2;
     l1.style.left = (headW - l1w) / 2 + "px";
     l2.style.left = (headW - l2w) / 2 + "px";
-    centre(headG, { offsetWidth: headW, offsetHeight: headH }, 0, V ? -60 : -10);
+    // (vertical: centred on x 510, left of the right-hand overlay strip, like the captions)
+    centre(headG, { offsetWidth: headW, offsetHeight: headH }, V ? -30 : 0, V ? -60 : -10);
     // gradient continuous across "your PDFs"
-    {
-      const x0 = l2words[0].outer.offsetLeft, x1 = l2words[1].outer.offsetLeft + l2words[1].outer.offsetWidth;
-      for (const w of l2words) { w.inner.style.backgroundSize = `${x1 - x0}px 100%`; w.inner.style.backgroundPosition = `${x0 - w.outer.offsetLeft}px 0`; }
-    }
+    const gradX0 = l2words[0].outer.offsetLeft, gradW = l2words[1].outer.offsetLeft + l2words[1].outer.offsetWidth - gradX0;
+    const sheenW = fs * 1.6;
+    for (const w of l2words) { w.inner.style.backgroundSize = `${gradW}px 100%`; w.inner.style.backgroundPosition = `${gradX0 - w.outer.offsetLeft}px 0`; }
     const capH = fs * L.caret;
     const baseY1 = headG.y + boxIn(base1, headG.el).y;
     const baseY2 = headG.y + boxIn(base2, headG.el).y;
@@ -216,14 +217,16 @@
     const gapC = fs * 0.16;
     const caretAt = (x) => ({ x, y: baseY1 - capH, w: capH, h: capH });
     const dotB = boxIn(dotSpan, headG.el);
-    const dotS = fs * 0.178;
+    const dotS = fs2 * 0.178;
     const dotRect = { x: headG.x + dotB.x + (dotB.w - dotS) / 2 - fs * 0.005, y: baseY2 - dotS + fs * 0.005, w: dotS, h: dotS };
     const P = { x: dotRect.x + dotS / 2, y: dotRect.y + dotS / 2 };
 
-    // the tile: centre stage, then caret before "Cast", then after each word, then the full stop
+    // the tile: straight off the end card to the caret before "Cast" on the first hit, then
+    // after each word, then the full stop. The promise is on screen by 1.5 s.
     const caretSp = { w: 21, z: 1 };
     // (no outline left behind while it writes: the words are what it leaves)
-    tile.go(O.caret, { rect: caretAt(wb[0].x - gapC - capH), r: capH * 0.25, sp: { w: 11, z: 1 }, ghost: false });
+    tile.go(O.caret, { rect: caretAt(wb[0].x - (V ? capH * 0.6 : gapC + capH)), r: capH * 0.25, sp: { w: 15, z: 1 }, ghost: false });
+    cue(O.caret, "whoosh", { gain: 0.5, dur: 0.3, x: -0.3 });
     const wordTimes = [O.w1, O.w2, O.w3];
     wordTimes.forEach((tw, i) => {
       tile.go(tw - 0.2, { rect: caretAt(wb[i].x + wb[i].w + gapC), sp: caretSp, lead: "r", ghost: false });
@@ -249,14 +252,32 @@
         w.outer.style.opacity = (clamp(e * 1.6) * out.o).toFixed(3);
         w.outer.style.filter = e < 0.995 || out.b > 0.05 ? `blur(${((1 - clamp(e)) * 6 + out.b).toFixed(2)}px)` : "";
       });
+      // one light sweep across the gradient words while the line holds
+      const ks = (t - O.sheen) / 0.9;
+      l2words.forEach((w) => {
+        const off = w.outer.offsetLeft;
+        if (ks > 0 && ks < 1) {
+          const sx = lerp(-sheenW, gradW + sheenW, smooth(ks)) - sheenW / 2;
+          w.inner.style.backgroundImage = `linear-gradient(100deg, rgba(255,255,255,0), rgba(255,255,255,0.7) 50%, rgba(255,255,255,0)), var(--grad)`;
+          w.inner.style.backgroundSize = `${sheenW}px 100%, ${gradW}px 100%`;
+          w.inner.style.backgroundPosition = `${(sx + gradX0 - off).toFixed(2)}px 0, ${gradX0 - off}px 0`;
+          w.inner.style.backgroundRepeat = "no-repeat";
+        } else if (w.inner.style.backgroundRepeat) {
+          w.inner.style.backgroundImage = w.inner.style.backgroundRepeat = "";
+          w.inner.style.backgroundSize = `${gradW}px 100%`;
+          w.inner.style.backgroundPosition = `${gradX0 - off}px 0`;
+        }
+      });
       show(headG.el, t > O.caret - 0.1 && t < O.out + 0.5);
     });
     void fadeStarts;
+    cue(O.sheen, "shimmer", { gain: 0.22, dur: 0.6, x: 0.2 });
+    tile.sheen(O.sheen + 0.6, 0.5);
     tile.go(O.line2 - 0.02, { rect: dotRect, r: dotS * 0.42, fill: "#b45309", shadow: 0.25, face: null, sp: { w: 13, z: 0.86 }, ghost: false });
     cue(O.line2, "whoosh", { gain: 0.55, dur: 0.35, x: 0.2 });
-    cue(O.line2 + 0.32, "pop", { note: 0, gain: 0.8, x: 0.3 });
-    // camera: hold the end card, then a slow push into the headline
-    cam.to(O.push, { cx: 0, cy: V ? -40 : -12, z: V ? 1.04 : 1.07 }, { w: 2.6, z: 1 });
+    cue(O.line2 + 0.25, "pop", { note: 0, gain: 0.8, x: 0.3 });
+    // camera: a slow, steady push into the headline from the first frame to the dive
+    cam.to(O.push, { cx: 0, cy: V ? -40 : -12, z: V ? 1.06 : 1.1 }, { w: 1.3, z: 1 });
 
     // ---------------------------------------------------------------- the card frame (PDF act)
     const frame = new Frame();
@@ -265,12 +286,12 @@
     const chBox = centre(ch, chUI.root, P.x, P.y);
     ch.el.style.overflow = "visible";
     frame.init(sq(P, dotS * 0.6), dotS * 0.3);
-    frame.go(CH.in, chBox, { w: 15, z: 0.86 }, 24);
+    frame.go(CH.in, chBox, { w: 19, z: 0.86 }, 24);
     frame.life(CH.in, AI.open + 0.04, { sp: { w: 30, z: 1 }, dy: 0, blur: 6, dOut: 0.16 });
     const optBox = (id) => ch.box(chUI.opts[id]);
     // the full stop grows into the PDF option; the other choices follow on half-beats
     const pdfOptFace = UI.optFace(UI.CHOICES[0], chUI.opts.pdf.offsetWidth, chUI.opts.pdf.offsetHeight);
-    tile.go(CH.in + 0.02, { rect: optBox("pdf"), r: 16, fill: "#ffffff", border: "#e7e2ee", bw: 1, shadow: 0.35, face: { el: pdfOptFace, anchor: "c" }, faceIn: CH.pdf - CH.in, sp: { w: 14, z: 0.84 } });
+    tile.go(CH.in + 0.02, { rect: optBox("pdf"), r: 16, fill: "#ffffff", border: "#e7e2ee", bw: 1, shadow: 0.35, face: { el: pdfOptFace, anchor: "c" }, faceIn: CH.pdf - CH.in, sp: { w: 17, z: 0.84 } });
     cue(CH.in, "whoosh", { gain: 0.5, dur: 0.4, x: 0.1 });
     show(chUI.opts.pdf, false);
     chUI.opts.pdf.style.visibility = "hidden";
@@ -288,7 +309,7 @@
 
     // camera dives into the full stop: the card fills the frame
     const regA = L.full;
-    cam.to(CH.in - 0.05, Camera.fit(inflate(chBox, pad(40)), V ? L.ui : regA), { w: 7, z: 1 });
+    cam.to(CH.in - 0.05, Camera.fit(inflate(chBox, pad(40)), V ? L.ui : regA), { w: 8.5, z: 1 });
 
     // cursor
     const offscreen = (sx, sy) => (t) => toWorld({ x: sx, y: sy }, cam.at(t));
@@ -340,7 +361,8 @@
       c.place(o.x ?? L.cap.x, o.y ?? L.cap.y, o.anchor || L.cap.anchor);
       return c;
     };
-    caption(V ? ["Stays on", "your device."] : ["Stays on", "your device."], PD.caption, PD.captionOut);
+    // it arrives as Compress is picked, so it is about that tool; the vertical cut keeps it through the drop
+    caption(["Stays on", "your device."], PD.caption, V ? DN.click - 0.15 : PD.captionOut);
     cue(PD.caption, "whoosh", { gain: 0.35, dur: 0.3, x: -0.6 });
 
     cam.to(PD.out - 0.05, Camera.fit(inflate(brBox, pad(24)), L.ui), SP.camMed);
@@ -402,23 +424,31 @@
     cam.to(DN.check - 0.12, Camera.fit(inflate(dnBox, pad(30)), V ? L.ui : L.full), { w: 9, z: 1 });
     cam.punch(DN.check, V ? 0.06 : 0.08, 0.5);
     // static check, shown once the tile moves on
-    const ckStatic = h("div", "abs ico", dnUI.check, { inset: 0, borderRadius: "50%", background: "#10b981", color: "#fff", boxShadow: "0 10px 24px -10px rgba(16,185,129,0.6)" });
+    // (same shadow as the tile at 0.3, so the hand-over is invisible)
+    const ckStatic = h("div", "abs ico", dnUI.check, { inset: 0, borderRadius: "50%", background: "#10b981", color: "#fff", boxShadow: "0 5.4px 13.2px -3px rgba(124, 58, 237, 0.126), 0 2px 6px rgba(46, 16, 101, 0.024)" });
     icon("check", 32, 3, ckStatic);
-    const dnItems = [[dnUI.glow, DN.check], [dnUI.title, DN.title], [dnUI.dl, DN.buttons], [dnUI.so, DN.buttons + 0.08], [dnUI.nextLbl, DN.next]];
+    const dnItems = [[dnUI.glow, DN.check], [dnUI.title, DN.title], [dnUI.fileStat, DN.stats], [dnUI.smaller, DN.smaller], [dnUI.dl, DN.buttons], [dnUI.so, DN.buttons + 0.08], [dnUI.nextLbl, DN.next]];
     UI.NEXT.forEach((n, i) => dnItems.push([dnUI.chips[n.id], DN.chips + i * DN.chipStep]));
     dn.on((t) => {
       show(ckStatic, t > DN.toChip - 0.05);
       for (const [el, tin] of dnItems) {
-        applyVis(el, vis(t, tin, ED.open + 0.02, { sp: SP.ui, dy: 14, blur: 7, ds: el === dnUI.glow ? 0 : -0.04, dOut: 0.12 }));
+        // the size saving is the proof: it pops in on its own beat
+        const o = el === dnUI.smaller ? { sp: SP.pop, dy: 10, blur: 6, ds: -0.35, dOut: 0.12 } : { sp: SP.ui, dy: 14, blur: 7, ds: el === dnUI.glow ? 0 : -0.04, dOut: 0.12 };
+        applyVis(el, vis(t, tin, ED.open + 0.02, o));
       }
     });
+    // (sounds sit on the 16th-note grid, where each chip's spring peaks)
+    cue(DN.stats + 0.05, "tick", { gain: 0.5, x: -0.1 });
+    cue(DN.smaller + 0.075, "pop", { note: 5, gain: 0.75, x: 0.15 });
     UI.NEXT.forEach((n, i) => cue(DN.chips + i * DN.chipStep, "pop", { note: 2 + i, gain: 0.45, x: -0.35 + i * 0.23 }));
     cue(DN.title, "whoosh", { gain: 0.2, dur: 0.2, x: 0 });
 
-    // Edit PDF chip
+    // Edit PDF chip: no flight across the buttons. The tile hands the check over to the
+    // static one and takes the chip's place, then lifts as the cursor arrives (a hover).
     const editChipFace = UI.pillFace(UI.NEXT[0]);
-    tile.go(DN.toChip, { rect: dn.box(dnUI.chips.edit), r: 22, fill: "#ffffff", border: "#e7e2ee", bw: 1, shadow: 0.35, face: { el: editChipFace, anchor: "c" }, sp: { w: 14, z: 0.84 } });
-    cue(DN.toChip + 0.1, "whoosh", { gain: 0.25, dur: 0.22, x: -0.2 });
+    const chipBox = dn.box(dnUI.chips.edit);
+    const chipLift = (t) => { const r = chipBox(t); return { x: r.x - 2, y: r.y - 5, w: r.w + 4, h: r.h + 4 }; };
+    tile.go(DN.toChip, { cut: true, from: chipBox, rect: chipLift, r: 22, fill: "#ffffff", border: "#e7e2ee", borderTo: "#c4b5fd", bw: 1, shadow: 0.42, face: { el: editChipFace, anchor: "c", sp: { w: 400, z: 1 }, dy: 0, blur: 0, ds: 0 }, faceIn: 0, sp: SP.uiSoft });
     moveTo(DN.toChip - 0.15, at(dn.box(dnUI.chips.edit), 0.6, 0.62), { w: 7, z: 1 });
     click(DN.click, -0.25);
     tile.press(DN.click);
@@ -447,8 +477,12 @@
     // editing: Type tool, the Status field, the signature
     const toolT = UI.toolFaceIcon("type", V ? 19 : 18);
     const toolS = UI.toolFaceIcon("signature", V ? 19 : 18);
-    tile.go(ED.tool, { rect: ed.box(edUI.tools.type), r: V ? 19 : 9, fill: "#7c3aed", shadow: 0.5, face: { el: toolT, anchor: "c" }, faceIn: 0.12, sp: { w: 13, z: 0.86 } });
-    cue(ED.tool + 0.18, "tick", { gain: 0.6, x: -0.3 });
+    // the page window matches the real page under it, so the tile can leave it on the spot
+    // and light up the Type tool as the selected tool (it never covers the toolbar)
+    tile.go(ED.tool, { cut: true, rect: ed.box(edUI.tools.type), popFrom: 0.35, r: V ? 19 : 9, fill: "#7c3aed", shadow: 0.5, face: { el: toolT, anchor: "c", sp: SP.pop }, faceIn: 0.03, sp: SP.pop });
+    cue(ED.tool - 0.0083, "tick", { gain: 0.6, x: -0.3 });
+    // vertical: the floating toolbar sits on the page, under the page window; it fades in as the tile leaves
+    if (V) ed.on((t) => applyVis(edUI.bar, vis(t, ED.tool - 0.01, null, { sp: { w: 34, z: 1 }, dy: 0, blur: 5 })));
     const fieldBox = ed.box(edUI.page.field);
     const typed = h("div", "abs", edUI.page.field, { left: 10 * edUI.page.k + "px", top: 0, bottom: 0, display: "flex", alignItems: "center", fontSize: 17 * edUI.page.k + "px", fontWeight: 600, color: "#1e1b4b", whiteSpace: "nowrap" });
     const typedTxt = h("span", "", typed);
@@ -482,7 +516,7 @@
     ed.on((t) => sigPath.setAttribute("stroke-dashoffset", (1000 * (1 - clamp(sigProg(t)))).toFixed(1)));
     const sigBox = ed.box(edUI.page.sigArea);
     tile.go(ED.toSign, { rect: ed.box(edUI.tools.signature), face: { el: toolS, anchor: "c" }, faceIn: 0.1, sp: { w: 14, z: 0.86 }, lead: V ? "r" : "r" });
-    cue(ED.toSign + 0.15, "tick", { gain: 0.55, x: 0.1 });
+    cue(ED.toSign + 0.125, "tick", { gain: 0.55, x: 0.1 });
     // pen follows the stroke
     const sigPt = (t) => {
       const r = sigBox(t);
@@ -534,25 +568,39 @@
       applyVis(ui.empty, vis(t, null, AI.bubble, { dOut: 0.12 }));
       applyVis(ui.bubble, vis(t, AI.bubble + 0.04, null, { sp: SP.ui, dy: 12, ds: -0.04 }));
       applyVis(ui.think, vis(t, AI.think, null, { sp: SP.ui, dy: 12 }));
+      const m = ui.sizes();
+      if (m) {
+        // the bubble grows from the dots to the whole answer as it streams in
+        const g = clamp(stepR(t - AI.stream, SP.uiSoft), 0, 1.04);
+        ui.think.style.width = lerp(m.w0, m.w1, g).toFixed(2) + "px";
+        ui.think.style.height = lerp(m.h0, m.h1, clamp(g)).toFixed(2) + "px";
+      }
+      ui.dotRow.style.opacity = (1 - clamp((t - AI.stream) / 0.08)).toFixed(3);
       ui.dots.forEach((d, i) => {
         const ph = (t - AI.think) * 2 * Math.PI / 0.9 - i * 1.05;
         d.style.transform = `translateY(${(t > AI.think ? -3 * Math.max(0, Math.sin(ph)) : 0).toFixed(2)}px)`;
         d.style.opacity = t > AI.think ? (0.45 + 0.55 * Math.max(0, Math.sin(ph))).toFixed(3) : 0.5;
       });
+      const n = ui.words.length, step = (AI.streamEnd - AI.stream) / n;
+      ui.words.forEach((w, i) => { w.style.opacity = clamp((t - AI.stream - i * step) / 0.09).toFixed(3); });
     };
     const aiFace = { el: aiCopy.root, anchor: "c", w: aiBox.w, h: aiBox.h, draw: (t) => aiState(aiCopy, t), sp: SP.uiSoft };
     tile.go(AI.open, { rect: aiBox, r: 24, fill: "#ffffff", border: "#e7e2ee", bw: 1, shadow: 0.5, face: aiFace, faceIn: 0.12, sp: { w: 10, z: 0.88 } });
     cue(AI.open + 0.02, "whoosh", { gain: 0.5, dur: 0.4, x: 0.3 });
     cam.to(AI.open, Camera.fit(inflate(aiBox, pad(30)), L.ui), { w: 6.5, z: 1 });
+    // as the answer streams, ease in on the conversation (the empty lower panel leaves the frame)
+    cam.to(AI.stream - 0.15, Camera.fit(inflate({ x: aiBox.x, y: aiBox.y, w: aiBox.w, h: 300 }, 12), V ? L.ui : { x: 660, y: 170, w: 1160, h: 740 }), { w: 4, z: 1 });
     aiG.on((t) => aiState(aiUI, t));
     show(aiG.el, false);
     aiG.life(AI.collapse - 0.04, null, { sp: { w: 60, z: 1 }, dy: 0, blur: 0 });
     aiG.on((t) => show(aiG.el, t > AI.collapse - 0.04 && t < SL.pan + 1.0));
-    moveTo(AI.open + 0.1, (t) => toWorld({ x: V ? W * 0.72 : W * 0.86, y: V ? H * 0.62 : H * 0.8 }, cam.at(t)), { w: 5, z: 1 });
-    moveTo(AI.click - 0.55, at(aiG.box(aiUI.chips.Summarize), 0.55, 0.62), { w: 8, z: 1 });
+    // straight to Summarize, then out of the way of the answer
+    moveTo(AI.open + 0.02, at(aiG.box(aiUI.chips.Summarize), 0.55, 0.62), { w: 9, z: 1 });
     click(AI.click, 0.1);
-    cue(AI.bubble + 0.05, "pop", { note: 4, gain: 0.5, x: 0.4 });
-    for (let i = 0; i < 3; i++) cue(AI.think + 0.1 + i * 0.15, "blip", { note: i, gain: 0.25, x: -0.1 });
+    moveTo(AI.click + 0.2, (t) => toWorld({ x: V ? W * 0.8 : W * 0.88, y: V ? H * 0.6 : H * 0.84 }, cam.at(t)), { w: 5, z: 1 });
+    cue(AI.click + 0.125, "pop", { note: 4, gain: 0.5, x: 0.4 });
+    cue(AI.think + 0.025, "blip", { note: 0, gain: 0.22, x: -0.1 });
+    for (let i = 0; i < 4; i++) cue(AI.stream + 0.025 + i * 0.125, "blip", { note: 2 + i, gain: 0.16, x: -0.15 + 0.1 * i });
     caption(V ? ["Ask your PDF."] : ["Ask your", "PDF."], AI.caption, AI.captionOut);
     cue(AI.caption, "whoosh", { gain: 0.3, dur: 0.25, x: -0.6 });
     // collapse into the tile's own violet form, which rides through the pan
@@ -566,7 +614,8 @@
     // ---------------------------------------------------------------- SLIDES (after the pan)
     FILM.pan.to(SL.pan, 1, { w: 8.2, z: 1 });
     cue(SL.pan, "whip", { gain: 1, dur: 0.5, x: V ? 0 : -0.6 });
-    caption(null, SL.title, SL.titleOut, { raw: V ? [[{ text: "your", cls: "grad-text" }, { text: "slides.", cls: "grad-text" }]] : [[{ text: "your", cls: "grad-text" }], [{ text: "slides.", cls: "grad-text" }]], fs: L.act.fs, x: L.act.x, y: L.act.y, anchor: L.act.anchor, align: L.act.align, lh: 1.0 });
+    // vertical: the title is gone before the editor's top bar rises into its band
+    caption(null, SL.title, V ? SL.titleOutV : SL.titleOut, { raw: V ? [[{ text: "your", cls: "grad-text" }, { text: "slides.", cls: "grad-text" }]] : [[{ text: "your", cls: "grad-text" }], [{ text: "slides.", cls: "grad-text" }]], fs: L.act.fs, x: L.act.x, y: L.act.y, anchor: L.act.anchor, align: L.act.align, lh: 1.0 });
     const frame2 = new Frame();
     const pp = new Group("pptx", 0, 0, { z: 10 });
     const ppUI = UI.pptxCard(pp.el, V);
@@ -579,7 +628,7 @@
     cam.to(SL.pan, Camera.fit(inflate(ppBox, pad(30)), L.uiAct), { w: 6, z: 1 });
     const edPpFace = UI.editPptxFace(ppUI.edit.offsetWidth, ppUI.edit.offsetHeight);
     tile.go(SL.toEdit, { rect: pp.box(ppUI.edit), r: 16, fill: "#ffffff", border: "#e7e2ee", bw: 1, shadow: 0.35, face: { el: edPpFace, anchor: "c" }, faceIn: 0.1, sp: { w: 12, z: 0.84 } });
-    cue(SL.toEdit + 0.15, "pop", { note: 1, gain: 0.55, x: 0.3 });
+    cue(SL.toEdit + 0.175, "pop", { note: 1, gain: 0.55, x: 0.3 });
     moveTo(SL.toEdit - 0.15, at(pp.box(ppUI.edit), 0.6, 0.66), { w: 6, z: 1 });
     click(SL.click, 0.3);
     tile.press(SL.click);
@@ -598,19 +647,15 @@
       bandF.sel.style.opacity = sel ? 1 : 0;
       bandF.d4.style.visibility = t < SL.type1 ? "" : "hidden";
       bandF.d1.style.visibility = t < SL.type1 ? "hidden" : "";
-      const blink = t > SL.type1 ? Math.floor((t - SL.type1) * 2.4) % 2 === 0 : false;
-      bandF.caret.style.opacity = blink || (t > SL.type1 && t < SL.type1 + 0.4) ? 1 : 0;
-      if (t > SL.toPdf) bandF.caret.style.opacity = 0;
+      // the caret shows while the digit is typed, then the field is left (before the drag)
+      bandF.caret.style.opacity = t > SL.type1 && t < SL.type1 + 0.3 ? 1 : 0;
     } };
     tile.go(SL.band, { rect: bandBox, r: V ? 13 : 14, fill: "#7c3aed", border: null, bw: 0, shadow: 0.4, face: bandFace, faceIn: 0.2, sp: { w: 10, z: 0.88 } });
     cue(SL.band + 0.05, "whoosh", { gain: 0.5, dur: 0.4, x: 0.2 });
     if (V) {
-      // vertical: the stacked slides get their own moves (title edit, the drag, then the PDF button)
-      const topBar = pe.box(peUI.top)(SL.click + 1), th = peUI.thumbs.map((x) => pe.box(x.th)(SL.click + 1));
-      const span = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.max(a.x + a.w, b.x + b.w) - Math.min(a.x, b.x), h: Math.max(a.y + a.h, b.y + b.h) - Math.min(a.y, b.y) });
-      cam.to(SL.click, Camera.fit(inflate(span(topBar, th[0]), 16), L.ui), { w: 6, z: 1 });
-      cam.to(SL.dragPress - 0.3, Camera.fit(inflate(span(th[1], th[2]), 16), L.ui), { w: 6, z: 1 });
-      cam.to(SL.toPdf - 0.1, Camera.fit(inflate(span(topBar, th[1]), 16), L.ui), { w: 6, z: 1 });
+      // vertical: one framing for the whole editor (file bar and all three slides), held
+      // still through the title edit, the drag and the PDF button
+      cam.to(SL.click, Camera.fit(inflate(pe.box(pe.el)(SL.click + 1), 14), { x: 60, y: 300, w: 920, h: 950 }), { w: 6, z: 1 });
     } else cam.to(SL.click, Camera.fit(inflate(peBox, pad(16)), L.uiAct), { w: 6, z: 1 });
     // the title edit lands everywhere it shows
     const titleNodes = [peUI.thumbs[0].band];
@@ -631,10 +676,10 @@
     // drag slide 3 up to second place: the top edge leads, the bottom follows
     {
       const th = peUI.thumbs;
-      const pitch = V ? 230 : 100;
-      const top3 = new Seq(0).to(SL.dragMove, -pitch, { w: 17, z: 0.9 }).to(SL.dragRelease, -pitch, SP.ui);
-      const bot3 = new Seq(0).to(SL.dragMove + 0.02, -pitch, { w: 9.5, z: 1 });
-      const shift2 = new Seq(0).to(SL.dragMove + 0.16, pitch, { w: 15, z: 0.82 });
+      const pitch = V ? peUI.pitch : 100;
+      const top3 = new Seq(0).to(SL.dragMove, -pitch, { w: 18, z: 0.9 });
+      const bot3 = new Seq(0).to(SL.dragMove + 0.02, -pitch, { w: 12, z: 1 });
+      const shift2 = new Seq(0).to(SL.dragMove + 0.12, pitch, { w: 16, z: 0.82 });
       const lift = new Seq(0).to(SL.dragPress, 1, SP.pop).to(SL.dragRelease, 0, SP.ui);
       const h3 = th[2].th.offsetHeight;
       pe.on((t) => {
@@ -645,7 +690,7 @@
         th[2].th.style.zIndex = 3;
         th[2].th.style.boxShadow = `0 ${(16 * l).toFixed(1)}px ${(30 * l).toFixed(1)}px -10px rgba(46,16,101,${(0.35 * l).toFixed(3)})`;
         th[1].th.style.transform = `translateY(${shift2.at(t).toFixed(2)}px)`;
-        const swapped = t > SL.dragMove + 0.25;
+        const swapped = t > SL.dragMove + 0.2;
         th[2].badge.textContent = swapped ? "2" : "3";
         th[1].badge.textContent = swapped ? "3" : "2";
       });
@@ -655,7 +700,7 @@
       moveTo(SL.dragPress - 0.02, grip, { w: 30, z: 1 });
       cursor.click(SL.dragPress);
       cue(SL.dragPress, "click", { gain: 0.6, x: -0.4 });
-      cue(SL.dragMove + 0.05, "drag", { gain: 0.6, dur: 0.45, x: -0.4 });
+      cue(SL.dragMove + 0.025, "drag", { gain: 0.6, dur: 0.35, x: -0.4 });
       cue(SL.dragRelease, "drop", { gain: 0.55, x: -0.4 });
     }
 
@@ -705,6 +750,9 @@
     tile.go(VD.field, { rect: md.box(mdUI.field), r: 16, fill: "#ffffff", border: "#8b5cf6", bw: 2, shadow: 0.4, face: linkFace, faceIn: 0.15, sp: { w: 11, z: 0.86 } });
     cue(VD.field + 0.05, "whoosh", { gain: 0.45, dur: 0.35, x: 0 });
     cam.to(VD.field - 0.05, Camera.fit(inflate(mdBox, pad(26)), L.uiAct), { w: 6, z: 1 });
+    // vertical: once the act title has gone, the card moves up into the empty top half
+    const mdCam = Camera.fit(inflate(mdBox, pad(26)), { x: 60, y: 330, w: 920, h: 780 });
+    if (V) cam.to(VD.reframeV, mdCam, { w: 5, z: 1 });
     const pasteBox = (t) => { const r = md.box(mdUI.field)(t); return { x: r.x + r.w - 62, y: r.y + r.h / 2 }; };
     moveTo(VD.field + 0.1, pasteBox, { w: 7, z: 1 });
     click(VD.paste, 0.4);
@@ -727,12 +775,14 @@
     cue(VD.buttons, "pop", { note: 1, gain: 0.5, x: -0.2 });
     cue(VD.buttons + 0.125, "pop", { note: 2, gain: 0.5, x: 0.2 });
     caption(["MP4 or MP3."], VD.caption, VD.captionOut);
-    const printLines = V ? [["Only download videos you have permission to use."]] : [["Only download videos you"], ["have permission to use."]];
+    // the site's own line, at a size a phone can read; in the vertical cut it sits under the
+    // card (as on the site), clear of the bottom overlay zone
+    const printLines = [["Only download videos you"], ["have permission to use."]];
     {
-      const pr = new Caption(printLines.map((l) => l[0].split(" ").map((w) => ({ text: w }))), { size: V ? 27 : 28, tin: VD.print, tout: VD.captionOut, align: L.cap.align, stagger: 0.012, lh: 1.35, sp: SP.text });
+      const pr = new Caption(printLines.map((l) => l[0].split(" ").map((w) => ({ text: w }))), { size: V ? 42 : 36, tin: VD.print, tout: VD.captionOut, align: L.cap.align, stagger: 0.012, lh: 1.3, sp: SP.text });
       pr.el.classList.add("small-print");
       pr.el.classList.remove("display");
-      if (V) pr.place(L.cap.x, L.cap.y + 52, "bc"); else pr.place(L.cap.x + 4, L.cap.y + 80, "tl");
+      if (V) pr.place(L.cap.x, toScreen({ x: 0, y: mdBox.y + mdBox.h }, mdCam).y + 44, "tc"); else pr.place(L.cap.x + 4, L.cap.y + 84, "tl");
     }
     // MP4
     const mp4F = UI.mp4Face();
@@ -842,7 +892,7 @@
         lastP = v;
       }
     }
-    cam.to(PR.upgrade - 0.05, Camera.fit(inflate(prBox, pad(30)), L.price), { w: 4.5, z: 1 });
+    cam.to(PR.upgrade - 0.05, Camera.fit(inflate(prBox, pad(30)), L.price), { w: 6.5, z: 1 });
     caption(["Start free."], PR.caption, PR.captionOut, V ? {} : { x: 960, y: 158, anchor: "cc", align: "center", fs: 92 });
     cue(PR.caption, "whoosh", { gain: 0.3, dur: 0.25, x: 0 });
     const startFreeBtn = V ? freeEl : freeUI.cta;
@@ -865,9 +915,10 @@
       if (t < EN.twinkle) g.setAttribute("transform", `translate(12 9.6) scale(${clamp(st, 0, 2).toFixed(4)}) translate(-12 -9.6)`);
       else twEnd(t);
     };
-    tile.go(EN.collapse, { rect: tileHome, r: T0 * 0.25, fill: "#7c3aed", border: null, bw: 0, shadow: 0.85, face: { ...endHat, anchor: "c", blur: 0, ds: 0, dy: 0 }, faceIn: 0.06, sp: { w: 10, z: 0.88 } });
+    tile.go(EN.collapse, { rect: tileHome, r: T0 * 0.25, fill: "#7c3aed", border: null, bw: 0, shadow: 0.85, face: { ...endHat, anchor: "c", blur: 0, ds: 0, dy: 0 }, faceIn: 0.06, sp: { w: 13, z: 0.86 } });
     tile.sheen(EN.twinkle - 0.05, 0.75);
-    cam.to(EN.collapse, cam0, { w: 5.5, z: 1 });
+    // the camera keeps up with the collapse, so the logo never swings off-centre
+    cam.to(EN.collapse, cam0, { w: 9, z: 1 });
     cue(EN.collapse, "impact", { gain: 1, x: 0 });
     cue(EN.twinkle, "chime", { note: "star", gain: 0.9, x: V ? 0 : -0.3 });
     cue(EN.word, "whoosh", { gain: 0.35, dur: 0.3, x: 0.2 });

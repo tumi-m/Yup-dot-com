@@ -24,7 +24,7 @@ const node = (script, a) => new Promise((res, rej) => {
 });
 
 await mkdir(deliver, { recursive: true });
-const STILLS = { "16x9": [3.5, 10.9, 13.9, 31.9], "9x16": [3.5, 10.9, 14.4, 32.0] };
+const STILLS = { "16x9": [2.5, 10.9, 17.9, 31.9], "9x16": [2.5, 10.9, 17.9, 32.0] };
 for (const fmt of ["16x9", "9x16"]) {
   const video = resolve(ROOT, `out/video-${fmt}.mp4`);
   if (!existsSync(video)) { console.log(`skip ${fmt}: no ${video}`); continue; }

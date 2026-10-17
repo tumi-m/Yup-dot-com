@@ -14,7 +14,7 @@ signature minimize-2 file-sliders messages-square scan-text scissors lock sparkl
 check cloud-upload mouse-pointer-2 type sticky-note highlighter underline strikethrough pen eraser
 square circle minus arrow-up-right image link-2 text-cursor-input square-check circle-dot undo-2
 redo-2 save panel-left arrow-up pencil-ruler file-down film music-2 clipboard-paste copy trash-2
-arrow-down file-plus-2 chevron-left chevron-right zoom-in zoom-out`.split(/\s+/).filter(Boolean);
+arrow-down file-plus-2 chevron-left chevron-right zoom-in zoom-out trending-down`.split(/\s+/).filter(Boolean);
 
 const out = {};
 for (const name of NAMES) {

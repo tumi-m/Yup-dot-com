@@ -82,6 +82,8 @@ loads them from `node_modules`, and the rendered frames contain the type as pixe
 - FFmpeg 4.1 static build from `@ffmpeg-installer/linux-x64` 4.1.0: GPLv3. Used to blend,
   encode and measure. It is never distributed with the app or the videos.
 - numpy, scipy, matplotlib (BSD-style licences): synthesize the sound and plot checks.
+- pdf-lib (MIT), the app's own dependency: `scripts/demo-pdf.mjs` uses it to build the demo
+  proposal.pdf behind the Compress result. The PDF is not shipped.
 
 ## Sound
 

@@ -16,6 +16,7 @@
     "master": "node scripts/master.mjs",
     "qa": "node scripts/qa.mjs",
     "icons": "node scripts/icons.mjs",
+    "demo-pdf": "node scripts/demo-pdf.mjs",
     "timeline:fmt": "node scripts/fmt-timeline.mjs"
   },
   "dependencies": {

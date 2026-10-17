@@ -68,14 +68,16 @@ console.log("subframes per chunk:", chunks.map((c) => c.n).join(" "));
 async function tmixLag(N) {
   const raw = await new Promise((res, rej) => {
     const p = spawn(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-      `color=c=black:s=8x8:r=24:d=2,format=gray,geq=lum='N*4',tmix=frames=${N}:weights='${Array(N).fill(1).join(" ")}'`,
+      `color=c=black:s=8x8:r=24:d=5,format=gray,geq=lum='N*2',tmix=frames=${N}:weights='${Array(N).fill(1).join(" ")}'`,
       "-f", "rawvideo", "-pix_fmt", "gray", "-"]);
     const out = [];
     p.stdout.on("data", (d) => out.push(d));
     p.on("close", (c) => (c === 0 ? res(Buffer.concat(out)) : rej(new Error("tmix probe failed"))));
   });
+  // (120 probe frames, brightness 2 per frame, so up to 16 subframes is measured well inside the range)
   const m = 2 * N;
-  const meanIdx = raw[m * 64] / 4;
+  if (raw.length < (m + 1) * 64) throw new Error(`tmix probe too short for ${N} subframes`);
+  const meanIdx = raw[m * 64] / 2;
   return Math.round(meanIdx + (N - 1) / 2 - m);
 }
 
@@ -93,6 +95,7 @@ async function countFrames(file) {
 const lags = {};
 for (const n of new Set(chunks.map((c) => c.n))) if (n > 1) lags[n] = await tmixLag(n);
 if (Object.keys(lags).length) console.log("tmix lag per subframe count:", JSON.stringify(lags));
+for (const [n, l] of Object.entries(lags)) if (!Number.isInteger(l) || l < 0) throw new Error(`bad tmix lag ${l} for ${n} subframes`);
 
 function encoder(chunk, file) {
   const n = chunk.n;

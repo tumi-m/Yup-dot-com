@@ -99,6 +99,8 @@ body { font-family: "Inter", system-ui, sans-serif; color: var(--ink); -webkit-f
 .btn.outline { background: #fff; border: 1px solid var(--line); color: var(--ink); }
 .pill { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 8px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 15px; font-weight: 500; white-space: nowrap; }
 .pill .ico { width: 28px; height: 28px; border-radius: 999px; }
+.stat { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--wash); color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
+.stat.good { background: #d1fae5; color: #047857; }
 .badge { display: inline-flex; align-items: center; border-radius: 999px; font-weight: 500; white-space: nowrap; }
 .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .lines { display: flex; flex-direction: column; }

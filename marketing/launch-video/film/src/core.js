@@ -173,6 +173,7 @@
   class ColorSeq {
     constructor(hex, a = 1) { const c = hexRGB(hex); this.r = new Seq(c[0]); this.g = new Seq(c[1]); this.b = new Seq(c[2]); this.a = new Seq(a); }
     to(t, hex, sp, a = 1) { const c = hexRGB(hex); this.r.to(t, c[0], sp); this.g.to(t, c[1], sp); this.b.to(t, c[2], sp); this.a.to(t, a, sp); return this; }
+    set(t, hex, a = 1) { const c = hexRGB(hex); this.r.set(t, c[0]); this.g.set(t, c[1]); this.b.set(t, c[2]); this.a.set(t, a); return this; }
     css(t) {
       const r = clamp(this.r.at(t), 0, 255), g = clamp(this.g.at(t), 0, 255), b = clamp(this.b.at(t), 0, 255), a = clamp(this.a.at(t));
       return `rgba(${r.toFixed(1)}, ${g.toFixed(1)}, ${b.toFixed(1)}, ${a.toFixed(3)})`;
@@ -293,8 +294,9 @@
 
   // ---------------------------------------------------------------- the Spell Tile
   /**
-   * The one shape that never cuts. Its four edges, radius, fill, border and
-   * shadow are springs between states; its content swaps with a short blur.
+   * The one continuous shape. Its four edges, radius, fill, border and shadow
+   * are springs between states; its content swaps with a short blur. Where a
+   * flight would cross other UI it hands over in place instead (see cut()).
    */
   class Tile {
     constructor() {
@@ -327,6 +329,7 @@
      * moving element). lead: "l" | "r" | "t" | "b" stretches that edge ahead.
      */
     go(t, st) {
+      if (st.cut) return this.cut(t, st);
       const sp = st.sp || SP.tile;
       const fast = { w: sp.w * 1.5, z: Math.max(sp.z, 0.86) };
       const slow = { w: sp.w * 0.62, z: 1 };
@@ -358,6 +361,39 @@
         const el = h("div", "abs", world, { zIndex: 4, border: "1.5px dashed rgba(124, 58, 237, 0.45)", pointerEvents: "none" });
         this.ghosts.push({ t, el });
       }
+      return this;
+    }
+    /**
+     * Leave without travelling: where the shape was it matches what lies under it, so it can
+     * vanish there and reappear on the next target, growing out of `from` (default: the
+     * target scaled by `popFrom`). Used where a flight would cross other UI.
+     */
+    cut(t, st) {
+      const sp = st.sp || SP.ui;
+      const csp = st.csp || { w: sp.w * 1.6, z: 1 };
+      const r = st.rect;
+      const f = typeof r === "function";
+      const k = st.popFrom ?? 0.6;
+      const scaled = (q) => ({ x: q.x + (q.w * (1 - k)) / 2, y: q.y + (q.h * (1 - k)) / 2, w: q.w * k, h: q.h * k });
+      const from = st.from || (f ? (u) => scaled(r(u)) : scaled(r));
+      const ff = typeof from === "function";
+      const get = (src, isF, key) => (isF ? (u) => key(src(u)) : key(src));
+      const X0 = (q) => q.x, Y0 = (q) => q.y, X1 = (q) => q.x + q.w, Y1 = (q) => q.y + q.h;
+      this.x0.set(t, get(from, ff, X0)).to(t, get(r, f, X0), sp);
+      this.y0.set(t, get(from, ff, Y0)).to(t, get(r, f, Y0), sp);
+      this.x1.set(t, get(from, ff, X1)).to(t, get(r, f, X1), sp);
+      this.y1.set(t, get(from, ff, Y1)).to(t, get(r, f, Y1), sp);
+      if (st.r != null) this.rad.set(t, st.r);
+      if (st.fill) this.fill.set(t, st.fill);
+      if (st.fillTo) this.fill.to(t, st.fillTo, csp);
+      if (st.border !== undefined) this.border.set(t, st.border || "#ffffff", st.border ? 1 : 0);
+      if (st.borderTo) this.border.to(t, st.borderTo, csp, 1);
+      if (st.bw != null) this.bw.set(t, st.bw);
+      this.shadow.set(t, st.shadowFrom ?? 0).to(t, st.shadow ?? 0.3, csp);
+      for (const fc of this.faces) if (fc.tout == null && fc.tin < t) { fc.tout = t; fc.cut = true; }
+      if (st.face) this.addFace(st.face, t + (st.faceIn ?? 0), st);
+      this.states.push({ t, ...st, prev: this.states[this.states.length - 1] });
+      (this.cuts ||= []).push(t);
       return this;
     }
     addFace(face, tin, st) {
@@ -440,6 +476,8 @@
     }
     /** Speed of the tile centre in world px/s (for adaptive motion blur). */
     speed(t) {
+      // a cut is a jump, not motion: it needs no extra blur samples
+      for (const c of this.cuts || []) if (c >= t - 1 / 240 && c < t) return 0;
       const a = this.rect(t), b = this.rect(t - 1 / 240);
       return Math.hypot(a.x - b.x, a.y - b.y, a.w - b.w, a.h - b.h) * 240;
     }
