@@ -108,9 +108,9 @@ export function NavShell({
                   )}
                 >
                   {hovered === l.href && (
-                    <motion.span layoutId="nav-hover" className="absolute inset-0 rounded-full bg-accent" transition={SPRING_LAYOUT} />
+                    <motion.span layoutId="nav-hover" className="absolute inset-0 bg-accent" style={{ borderRadius: 9999 }} transition={SPRING_LAYOUT} />
                   )}
-                  <span className="relative">{l.label}</span>
+                  <span className="relative z-[1]">{l.label}</span>
                 </Link>
               );
             })}

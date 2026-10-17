@@ -27,6 +27,7 @@ import {
   FADE_EXIT,
   InlineError,
   NOTICE_T,
+  PillLabel,
   SPRING_LAYOUT,
   SuccessBadge,
 } from "@/components/motion/primitives";
@@ -190,6 +191,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
    */
   const flow = useHeightLock<HTMLDivElement>();
   const slot = useHeightLock<HTMLDivElement>();
+  /** Set once a quality is picked here, so the chosen chip's label animates from then on. */
+  const qualityPicked = useRef(false);
 
   const stopPolling = () => {
     if (poll.current) clearTimeout(poll.current);
@@ -296,6 +299,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       setUpsell("quality");
       return;
     }
+    qualityPicked.current = true;
     setHeight(q.height);
   }
 
@@ -575,6 +579,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     e.preventDefault();
     const next: MediaKind = kind === "mp4" ? "mp3" : "mp4";
     if (next === "mp3" && info?.hasAudio === false) return;
+    slot.lock();
     setKind(next);
     setNote(null);
     (e.currentTarget.parentElement?.querySelector(`[data-kind="${next}"]`) as HTMLElement | null)?.focus();
@@ -717,9 +722,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1, transition: NOTICE_T }}
                 exit={FADE_EXIT}
-                className="space-y-4 p-4 sm:p-5"
+                className="flex flex-1 flex-col gap-4 p-4 sm:p-5"
               >
-                <div className="inline-flex rounded-xl bg-secondary p-1" role="radiogroup" aria-label="Format">
+                <div className="inline-flex self-start rounded-xl bg-secondary p-1" role="radiogroup" aria-label="Format">
                   {(["mp4", "mp3"] as const).map((k) => (
                     <button
                       key={k}
@@ -730,6 +735,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       tabIndex={kind === k ? 0 : -1}
                       disabled={k === "mp3" && info.hasAudio === false}
                       onClick={() => {
+                        if (k !== kind) slot.lock();
                         setKind(k);
                         setNote(null);
                       }}
@@ -741,9 +747,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       )}
                     >
                       {kind === k && (
-                        <motion.span layoutId="kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />
+                        <motion.span layoutId="kind-pill" className="absolute inset-0 bg-background shadow" style={{ borderRadius: 12 }} transition={SPRING_LAYOUT} />
                       )}
-                      <span className="relative flex items-center gap-1.5">
+                      {/* Above every pill, so the pill never covers a label it passes. */}
+                      <span className="relative z-[1] flex items-center gap-1.5">
                         {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
                         {k.toUpperCase()} {k === "mp4" ? "video" : "audio"}
                       </span>
@@ -751,49 +758,78 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   ))}
                 </div>
 
-                {kind === "mp4" && (
-                  <div role="group" aria-labelledby="quality-label">
-                    <p id="quality-label" className="mb-2 text-sm font-medium">
-                      Quality
-                    </p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {info.qualities.map((q) => (
-                        <motion.button
-                          key={q.height}
-                          type="button"
-                          whileTap={q.available ? { scale: 0.97 } : undefined}
-                          onClick={() => pickQuality(q)}
-                          disabled={!q.available}
-                          aria-pressed={height === q.height && !q.locked}
-                          aria-label={q.locked && q.available ? `${q.height}p (Pro)` : undefined}
-                          title={!q.available ? "Not available for this video" : q.locked ? "Pro" : undefined}
-                          className={cn(
-                            "relative h-11 rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-35",
-                            focusRing,
-                            height === q.height && !q.locked
-                              ? "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25"
-                              : "border-border bg-background hover:border-primary/50"
-                          )}
-                        >
-                          {q.height}p
-                          {q.locked && q.available && (
-                            <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-fuchsia-500 text-white shadow">
-                              <Crown className="h-3 w-3" />
-                            </span>
-                          )}
-                        </motion.button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* MP3 has no quality: the block fades out of the space it
+                    held (the card keeps its height, the buttons their place). */}
+                <AnimatePresence initial={false}>
+                  {kind === "mp4" && (
+                    <motion.div
+                      key="quality"
+                      role="group"
+                      aria-labelledby="quality-label"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0, transition: ENTER_T }}
+                      exit={FADE_EXIT}
+                    >
+                      <p id="quality-label" className="mb-2 text-sm font-medium">
+                        Quality
+                      </p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {info.qualities.map((q) => {
+                          const chosen = height === q.height && !q.locked;
+                          return (
+                            <motion.button
+                              key={q.height}
+                              type="button"
+                              whileTap={q.available ? { scale: 0.97 } : undefined}
+                              onClick={() => pickQuality(q)}
+                              disabled={!q.available}
+                              aria-pressed={chosen}
+                              aria-label={q.locked && q.available ? `${q.height}p (Pro)` : undefined}
+                              title={!q.available ? "Not available for this video" : q.locked ? "Pro" : undefined}
+                              className={cn(
+                                "relative h-11 rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-35",
+                                focusRing,
+                                // Same sliding pill as the format toggle; the
+                                // label turns white as the pill arrives.
+                                // No fill of their own: the sliding pill shows through
+                                // the chips it passes, under their labels.
+                                chosen ? "border-primary" : "border-border hover:border-primary/50"
+                              )}
+                            >
+                              {chosen && (
+                                <motion.span
+                                  layoutId="quality-pill"
+                                  className="absolute -inset-px bg-primary shadow-md shadow-primary/25"
+                                  style={{ borderRadius: 12 }}
+                                  transition={SPRING_LAYOUT}
+                                />
+                              )}
+                              <PillLabel chosen={chosen} slide={qualityPicked.current} off="hsl(var(--foreground))" className="z-[1]">
+                                {q.height}p
+                              </PillLabel>
+                              {q.locked && q.available && (
+                                <span className="absolute -right-1.5 -top-1.5 z-[1] flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-fuchsia-500 text-white shadow">
+                                  <Crown className="h-3 w-3" />
+                                </span>
+                              )}
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {note && <p className="text-sm text-muted-foreground">{note}</p>}
 
+                <AnimatePresence initial={false}>
                 {kind === "mp4" && (wantedLocked || allLocked) && (
                   <motion.button
+                    key="pro"
                     type="button"
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
+                    exit={FADE_EXIT}
                     transition={NOTICE_T}
                     onClick={() => setUpsell("quality")}
                     className={cn(
@@ -806,6 +842,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                     <span className="font-semibold underline">Unlock</span>
                   </motion.button>
                 )}
+                </AnimatePresence>
 
                 <AnimatePresence>
                   {limit?.upgrade && (
@@ -828,7 +865,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   )}
                 </AnimatePresence>
 
-                <div className="flex flex-col gap-2 sm:flex-row">
+                {/* Anchored to the card's foot, so the options above can come
+                    and go without moving them; they glide if the card grows. */}
+                <motion.div layout="position" transition={{ layout: SPRING_LAYOUT }} className="mt-auto flex flex-col gap-2 sm:flex-row">
                   <div className="flex-1">
                     {allLocked && info.hasAudio !== false ? (
                       <Button
@@ -836,6 +875,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                         size="lg"
                         className="w-full shadow-lg shadow-primary/25"
                         onClick={() => {
+                          slot.lock();
                           setKind("mp3");
                           setNote(null);
                         }}
@@ -858,7 +898,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   <Button size="lg" variant="outline" onClick={reset}>
                     <RotateCcw /> Different link
                   </Button>
-                </div>
+                </motion.div>
               </motion.div>
             ) : (
               <motion.div

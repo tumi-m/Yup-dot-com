@@ -529,8 +529,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                           scope === s ? "text-foreground" : "text-muted-foreground"
                         )}
                       >
-                        {scope === s && <motion.span layoutId="scope-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />}
-                        <span className="relative flex items-center gap-1.5">
+                        {scope === s && <motion.span layoutId="scope-pill" className="absolute inset-0 bg-background shadow" style={{ borderRadius: 12 }} transition={SPRING_LAYOUT} />}
+                        <span className="relative z-[1] flex items-center gap-1.5">
                           {s === "playlist" ? <ListVideo className="h-4 w-4" /> : <Film className="h-4 w-4" />}
                           {s === "playlist" ? "Whole playlist" : "This video"}
                         </span>
@@ -631,8 +631,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                       kind === k ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    {kind === k && <motion.span layoutId="pl-kind-pill" className="absolute inset-0 rounded-lg bg-background shadow" transition={SPRING_LAYOUT} />}
-                    <span className="relative flex items-center gap-1.5">
+                    {kind === k && <motion.span layoutId="pl-kind-pill" className="absolute inset-0 bg-background shadow" style={{ borderRadius: 12 }} transition={SPRING_LAYOUT} />}
+                    <span className="relative z-[1] flex items-center gap-1.5">
                       {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
                       {k.toUpperCase()}
                     </span>

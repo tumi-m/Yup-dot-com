@@ -275,7 +275,7 @@ function SpellDemo() {
           >
             <span className="relative block h-1.5 w-6 overflow-hidden rounded-full bg-secondary">
               {i === index && (
-                <motion.span layoutId="demo-pip" className="absolute inset-0 rounded-full bg-primary" transition={SPRING_LAYOUT} />
+                <motion.span layoutId="demo-pip" className="absolute inset-0 bg-primary" style={{ borderRadius: 9999 }} transition={SPRING_LAYOUT} />
               )}
             </span>
           </button>

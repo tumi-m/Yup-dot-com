@@ -9,6 +9,7 @@ import {
   DUR,
   ENTER_T,
   EXIT_T,
+  PillLabel,
   POP_IN,
   Reveal,
   SPRING_LAYOUT,
@@ -80,6 +81,8 @@ function FilterableGrid() {
   const [query, setQuery] = useState("");
   const [pill, setPill] = useState<ToolPill>("all");
   const pillRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** True once a pill has been chosen here, so the first render doesn't animate. */
+  const slid = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -115,6 +118,7 @@ function FilterableGrid() {
 
   function select(next: ToolPill) {
     holdHeight();
+    slid.current = true;
     setPill(next);
     const url = new URL(window.location.href);
     if (next === "all") url.searchParams.delete("c");
@@ -222,18 +226,24 @@ function FilterableGrid() {
                 tabIndex={active ? 0 : -1}
                 onClick={() => select(p)}
                 className={cn(
-                  "relative h-11 shrink-0 snap-center whitespace-nowrap rounded-full px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:pointer-coarse:h-11",
-                  active ? "text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  "relative h-11 shrink-0 snap-center whitespace-nowrap rounded-full px-4 text-sm font-medium transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:pointer-coarse:h-11",
+                  !active && "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 {active && (
                   <motion.span
                     layoutId="category-pill"
-                    className="absolute inset-0 rounded-full bg-primary shadow-md shadow-primary/30"
+                    className="absolute inset-0 bg-primary shadow-md shadow-primary/30"
+                    // Radius in style, so motion keeps the ends round while the pill stretches.
+                    style={{ borderRadius: 9999 }}
                     transition={SPRING_LAYOUT}
                   />
                 )}
-                <span className="relative">{pillLabel(p)}</span>
+                {/* Turns white as the pill arrives under it, not before (white
+                    on the page would vanish mid-slide). */}
+                <PillLabel chosen={active} slide={slid.current} className="z-[1]">
+                  {pillLabel(p)}
+                </PillLabel>
               </button>
             );
           })}

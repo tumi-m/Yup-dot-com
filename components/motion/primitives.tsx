@@ -15,6 +15,7 @@ import { useEffect, useRef } from "react";
 import { AlertTriangle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+  DUR,
   EASE_OUT,
   FADE_EXIT,
   NOTICE_T,
@@ -145,6 +146,43 @@ export function WordReveal({
         </span>
       ))}
     </span>
+  );
+}
+
+/**
+ * The label on a sliding pill (a layoutId). It turns to the on-pill colour as
+ * the pill arrives under it, on motion's clock so the two stay in step even
+ * while the page is busy, and switches back at once when it is no longer the
+ * chosen one. `slide`: false on first render, when no pill is moving.
+ */
+export function PillLabel({
+  chosen,
+  slide = true,
+  off = "hsl(var(--muted-foreground))",
+  on = "hsl(var(--primary-foreground))",
+  className,
+  children,
+}: {
+  chosen: boolean;
+  slide?: boolean;
+  /** CSS colours before and after the pill arrives. */
+  off?: string;
+  on?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const reduce = useReducedMotion();
+  if (!chosen) return <span className={cn("relative", className)}>{children}</span>;
+  return (
+    <motion.span
+      className={cn("relative", className)}
+      initial={slide && !reduce ? { "--on": 0 } : false}
+      animate={{ "--on": 1 }}
+      transition={{ delay: DUR.tap, duration: DUR.fast, ease: EASE_OUT }}
+      style={{ color: `color-mix(in srgb, ${on} calc(var(--on, 1) * 100%), ${off})` }}
+    >
+      {children}
+    </motion.span>
   );
 }
 
