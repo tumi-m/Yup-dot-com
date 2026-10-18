@@ -1,13 +1,20 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
 import { EmailLink, LegalPage, Section } from "@/components/legal/LegalPage";
 
-export const metadata: Metadata = {
-  title: "Security",
-  description: "How your files, account and payments are protected, how we test it, and how to report a security problem.",
-  alternates: { canonical: "/security" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Security",
+      description: "How your files, account and payments are protected, how we test it, and how to report a security problem.",
+      path: "/security",
+    },
+    parent
+  );
+}
 
 export default function SecurityPage() {
   return (

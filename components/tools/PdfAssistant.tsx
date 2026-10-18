@@ -15,6 +15,8 @@ import { handoffToFile, takeHandoff } from "@/lib/local-store";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { trackToolUsed } from "@/lib/analytics";
 import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
+import { documentToSend } from "@/lib/ai/document";
+import { parseMarkdown, type MdBlock } from "@/lib/ai/markdown";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -25,7 +27,10 @@ interface LoadedDoc {
   name: string;
   size: number;
   pages: number;
+  /** What each question sends: whole pages, up to what any plan reads. */
   text: string;
+  /** The page count, sent when `text` leaves pages out. */
+  totalPages?: number;
 }
 
 const SUGGESTIONS = [
@@ -34,7 +39,7 @@ const SUGGESTIONS = [
   "Action items",
 ];
 
-/** Minimal, safe Markdown: headings, bullets, numbered lists, bold, inline code. */
+/** Minimal, safe Markdown (lib/ai/markdown.ts): headings, lists, tables, bold, inline code. */
 function Inline({ text }: { text: string }) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return (
@@ -53,42 +58,55 @@ function Inline({ text }: { text: string }) {
 }
 
 function Markdown({ text }: { text: string }) {
-  const lines = text.split("\n");
-  const out: React.ReactNode[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-  const flush = () => {
-    if (!list) return;
-    const Tag = list.ordered ? "ol" : "ul";
-    out.push(
-      <Tag key={out.length} className={cn("my-2 space-y-1 pl-5", list.ordered ? "list-decimal" : "list-disc")}>
-        {list.items.map((it, i) => (
-          <li key={i}><Inline text={it} /></li>
-        ))}
-      </Tag>
-    );
-    list = null;
-  };
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (bullet || numbered) {
-      const ordered = !!numbered;
-      if (list && list.ordered !== ordered) flush();
-      list ??= { ordered, items: [] };
-      list.items.push((bullet ?? numbered)![1]);
-      continue;
-    }
-    flush();
-    if (heading) {
-      out.push(<p key={out.length} className="mt-3 font-semibold"><Inline text={heading[2]} /></p>);
-    } else if (line.trim()) {
-      out.push(<p key={out.length} className="my-1.5 leading-relaxed"><Inline text={line} /></p>);
-    }
-  }
-  flush();
-  return <>{out}</>;
+  return <Blocks blocks={parseMarkdown(text)} />;
+}
+
+function Blocks({ blocks, nested = false }: { blocks: MdBlock[]; nested?: boolean }) {
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === "heading") return <p key={i} className="mt-3 font-semibold"><Inline text={b.text} /></p>;
+        if (b.type === "paragraph") return <p key={i} className="my-1.5 leading-relaxed"><Inline text={b.text} /></p>;
+        if (b.type === "table") {
+          return (
+            <div key={i} className="my-2 overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border">
+                    {b.head.map((c, j) => (
+                      <th key={j} scope="col" className="px-2 py-1.5 font-semibold"><Inline text={c} /></th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.rows.map((row, j) => (
+                    <tr key={j} className="border-b border-border/60 last:border-0">
+                      {row.map((c, k) => (
+                        <td key={k} className="px-2 py-1.5 align-top"><Inline text={c} /></td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        const className = cn(nested ? "my-1" : "my-2", "space-y-1 pl-5", b.ordered ? "list-decimal" : "list-disc");
+        const items = b.items.map((it, j) => (
+          <li key={j}>
+            <Inline text={it.text} />
+            {it.children.length > 0 && <Blocks blocks={it.children} nested />}
+          </li>
+        ));
+        // The model's own first number, so a list split by a paragraph keeps counting.
+        return b.ordered ? (
+          <ol key={i} start={b.start} className={className}>{items}</ol>
+        ) : (
+          <ul key={i} className={className}>{items}</ul>
+        );
+      })}
+    </>
+  );
 }
 
 export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
@@ -152,7 +170,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         setError({ message: "This PDF is a scan. Run OCR PDF first." });
         return;
       }
-      setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: toPagedText(parsed) });
+      const sent = documentToSend(toPagedText(parsed), parsed.pageCount);
+      setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: sent.documentText, totalPages: sent.totalPages });
       setMessages([]);
     } catch {
       setError({ message: "Couldn't read that PDF. It may be damaged or password-protected." });
@@ -182,13 +201,16 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Long chats are trimmed to the newest turns the server accepts.
-        body: JSON.stringify({ documentName: doc.name, documentText: doc.text, messages: fitHistory(history) }),
+        body: JSON.stringify({
+          documentName: doc.name,
+          documentText: doc.text,
+          totalPages: doc.totalPages,
+          messages: fitHistory(history),
+        }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
-        setMessages(history.slice(0, -1));
-        setDraft(question);
         if (res.status === 429 && data.reason === "ai") {
           setRemaining(0);
           if (data.upgrade) {
@@ -205,8 +227,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         });
         return;
       }
+      // A turn counts once its answer starts: one that never arrives is refunded.
       const left = res.headers.get("x-ai-remaining");
-      if (left !== null) setRemaining(Number(left));
       setPagesRead(res.headers.get("x-ai-pages"));
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -222,6 +244,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           if (!line) continue;
           const event = JSON.parse(line) as { type: string; text?: string; message?: string };
           if (event.type === "text" && event.text) {
+            if (!answer && left !== null) setRemaining(Number(left));
             answer += event.text;
             setMessages((m) => {
               const next = [...m];
@@ -237,13 +260,19 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       if ((e as Error).name !== "AbortError") setError({ message: "Connection lost. Please try again." });
     } finally {
       setStreaming(false);
+      // "New PDF" clears this while the answer comes in: that conversation is gone.
+      const current = abortRef.current === controller;
+      if (current) abortRef.current = null;
       if (answer) {
         setAnnounce(answer.replace(/[*_`#>]+/g, ""));
         trackToolUsed("chat-with-pdf");
+      } else if (current) {
+        // No answer came (refused, failed or stopped first), so the question
+        // leaves the conversation, where it would be sent again with the next
+        // one, and goes back in the box.
+        setMessages(history.slice(0, -1));
+        setDraft((d) => d || question);
       }
-      abortRef.current = null;
-      // Drop an assistant bubble that never received text.
-      setMessages((m) => (m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m));
     }
   }
 
@@ -295,7 +324,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {remaining} left today
           </span>
         )}
-        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
+        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); abortRef.current = null; setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
           <RotateCcw /> New PDF
         </Button>
       </div>
@@ -404,12 +433,14 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {draft.length.toLocaleString("en")}/{MAX_MESSAGE_CHARS.toLocaleString("en")}
           </span>
         )}
+        {/* Separate buttons (keys): Stop puts the question back in the box at
+            once, and the same element turned into Send would then submit it. */}
         {streaming ? (
-          <Button type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
+          <Button key="stop" type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
             <Square className="h-4 w-4" />
           </Button>
         ) : (
-          <Button type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
+          <Button key="send" type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
             <ArrowUp />
           </Button>
         )}

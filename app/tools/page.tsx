@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { ToolGrid } from "@/components/ToolGrid";
@@ -7,13 +8,19 @@ import { WordReveal } from "@/components/motion/primitives";
 import { YOUTUBE_ENABLED } from "@/lib/media";
 import { getCurrentUser } from "@/lib/supabase/server";
 
-export const metadata: Metadata = {
-  title: "All PDF tools",
-  description: `Merge, split, compress, convert, OCR, protect, edit and sign PDFs. PPTX to PDF, Google Slides downloads, and ${
-    YOUTUBE_ENABLED ? "YouTube, X, TikTok and Instagram" : "X, TikTok and Instagram"
-  } to MP4 or MP3.`,
-  alternates: { canonical: "/tools" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "All PDF tools",
+      description: `Merge, split, compress, convert, OCR, protect, edit and sign PDFs. PPTX to PDF, Google Slides downloads, and ${
+        YOUTUBE_ENABLED ? "YouTube, X, TikTok and Instagram" : "X, TikTok and Instagram"
+      } to MP4 or MP3.`,
+      path: "/tools",
+    },
+    parent
+  );
+}
 
 export default async function ToolsPage() {
   const user = await getCurrentUser();

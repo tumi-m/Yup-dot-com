@@ -3,7 +3,7 @@ import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
 import { aiRemaining, claimAiAnswer, usageSubject } from "@/lib/usage";
 import { ollamaConfig, streamChat, userMessage, OllamaError, type ChatMessage } from "@/lib/ai/ollama";
-import { fitDocument } from "@/lib/ai/document";
+import { fitSentDocument } from "@/lib/ai/document";
 import { refuseCrossSite } from "@/lib/cross-site";
 import { MAX_MESSAGE_CHARS, MAX_MESSAGES } from "@/lib/ai/history";
 
@@ -27,6 +27,8 @@ export const maxDuration = 120;
 const bodySchema = z.object({
   documentName: z.string().max(300),
   documentText: z.string().min(1),
+  // Set when the browser left pages out (lib/ai/document.ts documentToSend).
+  totalPages: z.number().int().positive().optional(),
   messages: z
     .array(
       z.object({
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return json(400, "Invalid request.");
-  const { documentName, documentText, messages } = parsed.data;
+  const { documentName, documentText, totalPages, messages } = parsed.data;
 
   if (messages[0].role !== "user" || messages[messages.length - 1].role !== "user") {
     return json(400, "Conversation must start and end with a user message.");
@@ -77,7 +79,7 @@ export async function POST(request: Request) {
 
   // Long documents are cut at a page boundary to the plan's budget, and the
   // model is told which pages it has, so answers stay honest about coverage.
-  const fitted = fitDocument(documentText, limitsFor(tier).aiDocumentChars);
+  const fitted = fitSentDocument(documentText, limitsFor(tier).aiDocumentChars, totalPages);
 
   // Count only requests that will actually reach the model.
   const claim = await claimAiAnswer(usageSubject(request, user), tier);
@@ -128,15 +130,19 @@ export async function POST(request: Request) {
           send({ type: "text", text: result.value });
           result = await stream.next();
         }
+        // An answer that never arrived shouldn't cost the user a turn. The
+        // browser counts a turn only once text arrives, so the two agree.
+        if (!delivered) await claim.refund().catch(() => {});
         if (result.value.doneReason === "length") {
           send({ type: "error", message: "The answer was cut short. Ask a narrower question." });
+        } else if (!delivered) {
+          send({ type: "error", message: userMessage(null) });
         }
         send({ type: "done", stopReason: result.value.doneReason });
       } catch (error) {
         if (!(error instanceof OllamaError) || (error.kind !== "aborted" && error.kind !== "rate_limit")) {
           console.error("ai/chat error:", error instanceof Error ? error.message : error);
         }
-        // An answer that never arrived shouldn't cost the user a turn.
         if (!delivered) await claim.refund().catch(() => {});
         try {
           send({ type: "error", message: userMessage(error) });

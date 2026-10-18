@@ -156,3 +156,13 @@ export async function isEncrypted(bytes: Uint8Array | ArrayBuffer): Promise<bool
   const doc = await SecurePDFDocument.load(bytes, { ignoreEncryption: true });
   return doc.isEncrypted;
 }
+
+/**
+ * Pages in an encrypted PDF that opens without a password: one an owner
+ * password only restricts (printing, copying, editing). Throws when it needs
+ * a password to open.
+ */
+export async function pageCountWithoutPassword(bytes: Uint8Array | ArrayBuffer): Promise<number> {
+  const doc = await SecurePDFDocument.load(bytes, { password: "" });
+  return doc.getPageCount();
+}

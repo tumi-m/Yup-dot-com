@@ -16,6 +16,7 @@ import {
   type PDFObject,
 } from "pdf-lib";
 import { openPdf } from "./open";
+import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
 
 /**
  * Structural page operations. Annotation flattening lives in `bake.ts`.
@@ -32,6 +33,26 @@ export async function loadPdf(bytes: ArrayBuffer | Uint8Array): Promise<PDFDocum
 export async function getPageCount(bytes: ArrayBuffer | Uint8Array): Promise<number> {
   const doc = await openPdf(bytes);
   return doc.getPageCount();
+}
+
+/**
+ * Number of pages in a PDF for the cloud library, which keeps the file as it
+ * is. One that an owner password only restricts opens without a password,
+ * so it is counted; one that needs a password to open is refused. Errors are
+ * messages for people (lib/pdf/errors.ts).
+ */
+export async function pageCountToStore(bytes: Uint8Array): Promise<number> {
+  try {
+    return await getPageCount(bytes);
+  } catch (err) {
+    if (!/encrypted/i.test(err instanceof Error ? err.message : "")) throw friendlyPdfError(err);
+  }
+  try {
+    const { pageCountWithoutPassword } = await import("./security");
+    return await pageCountWithoutPassword(bytes);
+  } catch {
+    throw new Error(ENCRYPTED_MESSAGE);
+  }
 }
 
 const Widget = PDFName.of("Widget");

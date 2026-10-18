@@ -389,6 +389,38 @@ create trigger documents_limit
   before insert on public.documents
   for each row execute function public.documents_limit();
 
+-- The stored file itself, whatever size its row claims: Storage records the
+-- size in metadata when it saves a file (as its own role, so no role check).
+-- The bucket allows 500 MB, the Pro limit.
+create or replace function public.documents_file_size()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  folder text := split_part(new.name, '/', 1);
+  bytes text := new.metadata ->> 'size';
+begin
+  if new.bucket_id is distinct from 'documents' or coalesce(bytes, '') !~ '^[0-9]{1,18}$'
+     or folder !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    return new;
+  end if;
+  if bytes::bigint > 52428800 and public.effective_plan(folder::uuid) = 'free' then
+    raise exception 'The Free plan keeps files up to 50 MB. Upgrade for larger files.' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+-- On a project where the SQL editor's role can't add triggers to Storage's
+-- table, the row check above still applies.
+do $$
+begin
+  drop trigger if exists documents_file_size on storage.objects;
+  create trigger documents_file_size
+    before insert or update on storage.objects
+    for each row execute function public.documents_file_size();
+exception when insufficient_privilege then
+  raise warning 'Could not add documents_file_size to storage.objects: %', sqlerrm;
+end $$;
+
 -- ---------- Storage ----------
 
 -- PDFs only, 500 MB at most (the Pro file limit).
@@ -421,10 +453,17 @@ begin
 end;
 $$;
 
-drop trigger if exists documents_file_size on storage.objects;
-create trigger documents_file_size
-  before insert or update on storage.objects
-  for each row execute function public.documents_file_size();
+-- On a project where the SQL editor's role can't add triggers to Storage's
+-- table, the row check above still applies.
+do $$
+begin
+  drop trigger if exists documents_file_size on storage.objects;
+  create trigger documents_file_size
+    before insert or update on storage.objects
+    for each row execute function public.documents_file_size();
+exception when insufficient_privilege then
+  raise warning 'Could not add documents_file_size to storage.objects: %', sqlerrm;
+end $$;
 
 -- Uploads must belong to a document row the user owns, so storage can't be
 -- used past the plan's document limit.

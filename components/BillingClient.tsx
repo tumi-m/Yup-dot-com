@@ -213,10 +213,13 @@ export function TeamSeats({
   ownerEmail,
   initialMembers,
   seats,
+  ended = false,
 }: {
   ownerEmail: string;
   initialMembers: string[];
   seats: number;
+  /** The Team plan has ended: emails can be removed, not added. */
+  ended?: boolean;
 }) {
   const [members, setMembers] = useState(initialMembers);
   const [email, setEmail] = useState("");
@@ -249,9 +252,11 @@ export function TeamSeats({
     <div>
       <div className="flex items-baseline justify-between">
         <h2 className="text-xl font-semibold">Team</h2>
-        <p className="text-sm text-muted-foreground" data-testid="seat-usage">
-          {used} of {seats} seats
-        </p>
+        {!ended && (
+          <p className="text-sm text-muted-foreground" data-testid="seat-usage">
+            {used} of {seats} seats
+          </p>
+        )}
       </div>
       <ul className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
         <li className="flex items-center justify-between px-5 py-3 text-sm">
@@ -283,7 +288,7 @@ export function TeamSeats({
           ))}
         </AnimatePresence>
       </ul>
-      {!full && (
+      {!full && !ended && (
         <form
           className="mt-4 flex gap-2"
           onSubmit={(e) => {
@@ -306,7 +311,11 @@ export function TeamSeats({
         </form>
       )}
       <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
-      <p className="mt-3 text-xs text-muted-foreground">Ask them to sign in with this email.</p>
+      <p className="mt-3 text-xs text-muted-foreground">
+        {ended
+          ? "Your Team plan has ended. These emails get Team again if you renew it, so remove any you no longer want."
+          : "Ask them to sign in with this email."}
+      </p>
     </div>
   );
 }

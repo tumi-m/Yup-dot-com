@@ -366,9 +366,11 @@ pdf-wizard/
 │   ├── privacy, terms, refunds, contact/ ← Legal pages (details from env)
 │   ├── security/                ← Public security summary
 │   ├── login, signup, auth/     ← Auth screens + callbacks
+│   ├── forgot-password/         ← Asks for a password reset link
 │   ├── dashboard/               ← Document library (auth-gated)
 │   ├── editor/[id]/             ← The PDF editor
 │   ├── settings/billing/        ← Plan, renewal, team seats
+│   ├── settings/password/       ← New password (reset links land here)
 │   ├── api/billing/             ← checkout · verify · webhook · manage · team
 │   ├── sitemap.ts, robots.ts    ← SEO
 │   └── icon.svg, error, loading ← Polish
@@ -418,8 +420,8 @@ npm install
    in the SQL editor (creates tables, RLS, the private `documents` bucket and
    the usage counters), and enable Email auth. Under Authentication → URL
    Configuration set the Site URL to your domain and add
-   `https://<your-domain>/**` to the Redirect URLs (sign-up emails link to
-   `/auth/callback`).
+   `https://<your-domain>/**` to the Redirect URLs (sign-up and password
+   reset emails link to `/auth/callback`).
 2. **Paystack** — see [Billing setup](#billing-setup-paystack).
 3. **Env** — copy `.env.example` to `.env.local` and fill in the values.
 4. **Run** — `npm run dev`, then open <http://localhost:3000>.
