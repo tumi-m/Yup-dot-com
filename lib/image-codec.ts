@@ -129,11 +129,50 @@ async function canvasEncode(image: RawImage, quality: number): Promise<Uint8Arra
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+/**
+ * The JPEG without its APP1 segments (EXIF and XMP), so a browser has no
+ * orientation to apply. Browsers rotate by EXIF whatever createImageBitmap is
+ * told (Chromium 141 treats imageOrientation "none" as "from-image"); a PDF
+ * viewer never does. Anything that doesn't parse is returned as it is.
+ */
+export function withoutApp1(bytes: Uint8Array): Uint8Array {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return bytes;
+  const kept: Uint8Array[] = [bytes.subarray(0, 2)];
+  let i = 2;
+  let start = 2;
+  while (i + 4 <= bytes.length) {
+    if (bytes[i] !== 0xff) return bytes;
+    const marker = bytes[i + 1];
+    if (marker === 0xff) {
+      i++;
+      continue;
+    }
+    // Image data from here on: no more metadata.
+    if (marker === 0xda || marker === 0xd9) break;
+    const end = i + 2 + ((bytes[i + 2] << 8) | bytes[i + 3]);
+    if (end > bytes.length) return bytes;
+    if (marker === 0xe1) {
+      kept.push(bytes.subarray(start, i));
+      start = end;
+    }
+    i = end;
+  }
+  if (kept.length === 1) return bytes;
+  kept.push(bytes.subarray(start));
+  const out = new Uint8Array(kept.reduce((n, part) => n + part.length, 0));
+  let at = 0;
+  for (const part of kept) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
 async function canvasDecode(bytes: Uint8Array): Promise<RawImage> {
-  const blob = new Blob([bytes.slice() as unknown as BlobPart], { type: "image/jpeg" });
+  const blob = new Blob([withoutApp1(bytes).slice() as unknown as BlobPart], { type: "image/jpeg" });
   let bitmap: ImageBitmap;
   try {
-    // As a PDF viewer shows it: no EXIF rotation, no colour profile.
+    // As a PDF viewer shows it: no colour profile.
     bitmap = await createImageBitmap(blob, { imageOrientation: "none", colorSpaceConversion: "none", premultiplyAlpha: "none" });
   } catch {
     bitmap = await createImageBitmap(blob);
