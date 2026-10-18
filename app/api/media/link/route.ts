@@ -79,17 +79,20 @@ export async function POST(request: Request) {
     }
     const variant = kind === "mp3" ? audioSourceVariant(video) : pickXVariant(video, height);
     const quality = variantQuality(variant);
-    // Never hand a free user a file above their plan, whatever was asked for.
-    if (kind === "mp4" && quality > maxHeightFor(tier) * 1.15) {
+    // Never hand a free user a file above their plan, whatever was asked for:
+    // an MP3 from such a file is sent as its sound alone (a: audio only).
+    const abovePlan = quality > maxHeightFor(tier) * 1.15;
+    if (kind === "mp4" && abovePlan) {
       return Response.json({ error: `${quality}p downloads are part of Pro.`, upgrade: true, reason: "quality" }, { status: 403 });
     }
+    const audioOnly = kind === "mp3" && abovePlan;
     const mp4Name = directFilename(video, "mp4", kind === "mp4" ? quality : null);
     const headers = grantHeaders(video.fetchHeaders);
     grant = (ref) => ({
       mode: kind === "mp3" ? "convert" : "direct",
       href: `/api/media/file?t=${encodeURIComponent(
         sealToken(
-          { u: variant.url, n: mp4Name, ...(platform === "x" ? {} : { p: platform, h: headers }), ...ref },
+          { u: variant.url, n: mp4Name, ...(audioOnly ? { a: 1 } : {}), ...(platform === "x" ? {} : { p: platform, h: headers }), ...ref },
           signingSecret(),
           30 * 60
         )

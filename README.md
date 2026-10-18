@@ -105,7 +105,10 @@ document again is free.
 through X's public embed endpoint (with FxTwitter and vxTwitter as fallbacks),
 `/api/media/file` streams the MP4 from `video.twimg.com` with a proper filename,
 and MP3 is converted in the browser with ffmpeg.wasm (self-hosted under
-`/vendor`). These endpoints are unofficial and can change without notice.
+`/vendor`). When a post's only file is above the visitor's plan (1080p on
+Free), the browser gets just its sound to convert, an M4A that
+`/api/media/file` copies out of the video (`lib/audio-only.ts`), never the
+video itself. These endpoints are unofficial and can change without notice.
 
 **TikTok** works on the web app alone too (`lib/social/tiktok.ts`, following
 yt-dlp's web method): the server loads the public post page, reads the

@@ -1,3 +1,5 @@
+import { UrlSource } from "mediabunny";
+import { audioOnlyMp4, NoAudioError } from "@/lib/audio-only";
 import { openToken, signingSecret } from "@/lib/media-server";
 import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
@@ -21,6 +23,9 @@ export const maxDuration = 300;
  * per grant), and the grant is dead. Once a grant has sent a file, later
  * failures are not refunded, and a failed Range request never is.
  *
+ * An audio-only grant (an MP3 from a video above the visitor's plan) gets
+ * the sound alone, as an M4A made here; the video never leaves this route.
+ *
  * Redirects are followed by hand, and only to allowed hosts.
  */
 const MAX_REDIRECTS = 3;
@@ -36,9 +41,27 @@ function allowed(url: string, platform: DirectPlatform): boolean {
   }
 }
 
+function attachment(name: string) {
+  return `attachment; filename="${name.replace(/[^\x20-\x7e]|"/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/** fetch() that follows redirects only to allowed hosts; null when one leads elsewhere or too far. */
+async function fetchAllowed(url: string, init: RequestInit, platform: DirectPlatform): Promise<Response | null> {
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await fetch(url, { ...init, cache: "no-store", redirect: "manual" });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) return res;
+    await res.body?.cancel();
+    const next = new URL(location, url).toString();
+    if (!allowed(next, platform)) return null;
+    url = next;
+  }
+  return null;
+}
+
 async function handle(request: Request, method: "GET" | "HEAD") {
   const token = new URL(request.url).searchParams.get("t") ?? "";
-  const grant = openToken<{ u?: unknown; n?: unknown; p?: unknown; h?: unknown }>(token, signingSecret());
+  const grant = openToken<{ u?: unknown; n?: unknown; p?: unknown; h?: unknown; a?: unknown }>(token, signingSecret());
   // Grants without a platform predate TikTok/Instagram and are X.
   const platform: DirectPlatform | null = grant ? (grant.p === undefined ? "x" : isDirectPlatform(String(grant.p)) ? (grant.p as DirectPlatform) : null) : null;
   if (!grant || !platform || typeof grant.u !== "string" || !allowed(grant.u, platform)) {
@@ -64,24 +87,63 @@ async function handle(request: Request, method: "GET" | "HEAD") {
     return refundUnserved(store, ref).catch(() => false);
   };
 
+  /**
+   * Audio-only grants: the M4A is made here from the CDN's file, read in
+   * ranges, and sent whole (a Range request gets all of it).
+   */
+  async function sendAudio(url: string, platform: DirectPlatform, headers: Record<string, string>) {
+    let failed = 0;
+    const source = new UrlSource(url, {
+      requestInit: { headers },
+      getRetryDelay: (attempts) => (attempts < 3 ? 1 : null),
+      fetchFn: async (input, init) => {
+        try {
+          const res = await fetchAllowed(String(input), init ?? {}, platform);
+          if (!res?.ok) failed = res?.status ?? 502;
+          return res ?? new Response(null, { status: 502 });
+        } catch (err) {
+          if (!init?.signal?.aborted) failed = 502;
+          throw err;
+        }
+      },
+    });
+    let audio: Uint8Array;
+    try {
+      audio = await audioOnlyMp4(source, request.signal);
+    } catch (err) {
+      if (!request.signal.aborted) await giveBack();
+      if (failed) {
+        const gone = failed === 403 || failed === 404 || failed === 410;
+        return Response.json(
+          { error: gone ? "That site no longer serves this file. Start the download again." : "The video site didn't send the file. Try again." },
+          { status: 502 }
+        );
+      }
+      if (!(err instanceof NoAudioError)) console.error("audio-only file failed:", err);
+      return Response.json({ error: "This video's audio couldn't be read." }, { status: 422 });
+    }
+    if (ref && method === "GET") {
+      const serving = await startServing(store, ref).catch(() => ({ ok: true, first: false }));
+      if (!serving.ok) return expired();
+    }
+    return new Response(method === "HEAD" ? null : (audio as BodyInit), {
+      headers: {
+        "Content-Type": "audio/mp4",
+        "Content-Disposition": attachment(name.replace(/\.mp4$/i, "") + ".m4a"),
+        "Content-Length": String(audio.byteLength),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
   const headers: Record<string, string> = { "User-Agent": FETCH_UA, ...grantHeaders(grant.h) };
+  if (grant.a === 1) return sendAudio(grant.u, platform, headers);
   if (range) headers.Range = range;
 
   let upstream: Response | null = null;
   try {
-    let url = grant.u;
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const res = await fetch(url, { method, headers, signal: request.signal, cache: "no-store", redirect: "manual" });
-      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!location) {
-        upstream = res;
-        break;
-      }
-      await res.body?.cancel();
-      const next = new URL(location, url).toString();
-      if (!allowed(next, platform)) break;
-      url = next;
-    }
+    upstream = await fetchAllowed(grant.u, { method, headers, signal: request.signal }, platform);
   } catch {
     if (!request.signal.aborted) await giveBack();
     return Response.json({ error: "The video site didn't send the file. Try again." }, { status: 502 });
@@ -110,7 +172,7 @@ async function handle(request: Request, method: "GET" | "HEAD") {
 
   const out = new Headers({
     "Content-Type": "video/mp4",
-    "Content-Disposition": `attachment; filename="${name.replace(/[^\x20-\x7e]|"/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    "Content-Disposition": attachment(name),
     "Cache-Control": "private, no-store",
     "Accept-Ranges": "bytes",
     "X-Content-Type-Options": "nosniff",
