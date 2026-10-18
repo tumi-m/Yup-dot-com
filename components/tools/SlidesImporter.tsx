@@ -18,7 +18,7 @@ import {
   SuccessBadge,
 } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
-import { settleSlot, useHeightLock } from "@/components/motion/focus";
+import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
@@ -78,6 +78,11 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   const autoRan = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const current = useRef<object | null>(null);
+  /** Where focus goes when the form, its progress and the result swap. */
+  const { next: focusNext, focusRef } = useFocusNext<"url" | "progress" | "ready">();
+  /** Focus is in this flow (or was dropped to the page by a view that left it). */
+  const focusHere = () =>
+    document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement);
 
   const releaseBlob = () => {
     if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
@@ -115,6 +120,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         message: data?.error ?? (res ? SLIDES_FAILURE_MESSAGE.unreachable : "You're offline. Check your connection."),
         upgrade: !!data?.upgrade,
       });
+      if (focusHere()) focusNext.current = "url";
       setPhase("input");
       return null;
     }
@@ -133,6 +139,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     } catch {
       if (controller.signal.aborted) return null;
       setError({ message: "The download was interrupted. Try again." });
+      if (focusHere()) focusNext.current = "url";
       setPhase("input");
       return null;
     }
@@ -161,6 +168,8 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     }
     // The form's footprint is kept while the result replaces it.
     flow.lock();
+    // The field is disabled and the buttons give way to the progress: it takes focus.
+    if (flow.ref.current?.contains(document.activeElement)) focusNext.current = "progress";
     busy.current = true;
     const mine = {};
     current.current = mine;
@@ -178,11 +187,14 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
         }
         // Too big to edit on this plan: keep the file, say why.
         setError({ message: `Editing takes files up to ${formatLimitBytes(max)} on your plan.`, upgrade: true });
+        if (focusHere()) focusNext.current = "ready";
         settleSlot(flow.ref.current);
         setPhase("ready");
         return;
       }
       setFile({ ...f, saved: true });
+      // The heading takes focus, which also tells a screen reader it's done.
+      if (focusHere()) focusNext.current = "ready";
       // The page settles while the form leaves, so the card lands in view.
       settleSlot(flow.ref.current);
       setPhase("ready");
@@ -191,6 +203,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     } catch {
       if (alive.current) {
         setError({ message: "Couldn't open this deck for editing. Try again." });
+        if (focusHere()) focusNext.current = "url";
         setPhase("input");
       }
     } finally {
@@ -213,6 +226,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   }, []);
 
   function cancel() {
+    focusNext.current = "url";
     abort.current?.abort();
     abort.current = null;
     current.current = null;
@@ -231,6 +245,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   }
 
   function reset() {
+    if (flow.ref.current?.contains(document.activeElement)) focusNext.current = "url";
     flow.lock();
     releaseBlob();
     setFile(null);
@@ -268,6 +283,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
             <div className="relative">
               <Link2 aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
+                ref={focusRef("url")}
                 id="slides-url"
                 value={url}
                 onChange={(e) => {
@@ -308,13 +324,21 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
             </AnimatePresence>
 
             {phase === "fetching" ? (
-              <div className="mt-4">
+              <div
+                ref={focusRef("progress")}
+                tabIndex={-1}
+                className="-mx-2 mt-2 rounded-xl px-2 pt-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <ProgressBar value={fraction} label="Import progress" />
                 <div className="mt-2 flex items-center justify-center gap-2">
-                  <p className="text-sm text-muted-foreground" aria-live="polite" role="status">
-                    {progress.received ? "Downloading…" : "Exporting from Google…"}
+                  <p className="text-sm text-muted-foreground">
+                    {/* Only the stage is read out; the byte count changes with every chunk. */}
+                    <span role="status">
+                      {progress.received ? "Downloading…" : "Exporting from Google…"}
+                      {action === "edit" && <span className="sr-only"> Opening in the editor</span>}
+                    </span>
                     {progress.received > 0 && (
-                      <span className="ml-1 tabular-nums">
+                      <span aria-hidden className="ml-1 tabular-nums">
                         {formatBytes(progress.received)}
                         {progress.total ? ` / ${formatBytes(progress.total)}` : ""}
                       </span>
@@ -337,7 +361,6 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
                 )}
               </div>
             )}
-            {phase === "fetching" && action === "edit" && <span className="sr-only">Opening in the editor</span>}
           </motion.form>
         )}
 
@@ -351,7 +374,13 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
             className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-xl shadow-primary/5"
           >
             <SuccessBadge icon={Presentation} />
-            <h2 className="mt-5 text-2xl font-bold">{file.saved ? "Downloaded" : "Ready"}</h2>
+            <h2
+              ref={focusRef("ready")}
+              tabIndex={-1}
+              className="mx-auto mt-5 rounded-lg px-2 text-2xl font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {file.saved ? "Downloaded" : "Ready"}
+            </h2>
             <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground" data-testid="slides-file">
               {file.name} · {formatBytes(file.size)}
             </p>
