@@ -24,22 +24,29 @@ function ownPlanOf(billing: Billing): PlanId {
 
 /**
  * Why a monthly subscription to `plan` can't start now, or null when it can.
- * A live subscription would be charged beside the new one, and a new plan
- * would cut short a cancelled one that is paid up, so both have to end first.
+ * A live subscription would be charged beside the new one, a new plan would
+ * cut short a cancelled one that is paid up, and a prepaid term would run
+ * out unused beside it, so each has to end first. (Paying once instead
+ * carries a prepaid term's time over.)
  */
 export function subscribeBlock(plan: PaidPlanId, billing: Billing): string | null {
   const sub = billing?.subscription;
-  if (!sub?.active) return null;
-  const current = PLANS[sub.plan].name;
   const next = PLANS[plan].name;
-  if (sub.renews) {
-    return sub.plan === plan
-      ? `You already subscribe to ${current}.`
-      : `To switch to ${next}, cancel ${current} under Manage subscription on the Billing page. Subscribe to ${next} once it ends.`;
+  if (sub?.active) {
+    const current = PLANS[sub.plan].name;
+    if (sub.renews) {
+      return sub.plan === plan
+        ? `You already subscribe to ${current}.`
+        : `To switch to ${next}, cancel ${current} under Manage subscription on the Billing page. Subscribe to ${next} once it ends.`;
+    }
+    if (sub.status === "non-renewing" || sub.plan !== plan) {
+      const ends = sub.periodEnd ? `ends ${formatBillingDate(sub.periodEnd)}` : "is still running";
+      return `Your ${current} plan ${ends}. Subscribe ${sub.plan === plan ? "again" : `to ${next}`} after that.`;
+    }
   }
-  if (sub.status === "non-renewing" || sub.plan !== plan) {
-    const ends = sub.periodEnd ? `ends ${formatBillingDate(sub.periodEnd)}` : "is still running";
-    return `Your ${current} plan ${ends}. Subscribe ${sub.plan === plan ? "again" : `to ${next}`} after that.`;
+  const pre = billing?.prepaid;
+  if (pre?.active) {
+    return `Your ${PLANS[pre.plan].name} plan is paid until ${formatBillingDate(pre.paidUntil)}. Subscribe to ${next} after that.`;
   }
   return null;
 }
@@ -93,13 +100,16 @@ function renewalNote(plan: PaidPlanId, billing: Billing): string | null {
 /**
  * The lines under the plan name on the Billing page. A renewing
  * subscription is listed even when another plan is in use, so the next
- * charge is never hidden.
+ * charge is never hidden, and so is a prepaid term running beside a
+ * subscription, so paid time is never hidden either.
  */
 export function planStatus(billing: BillingSummary): string[] {
   const { subscription: sub, prepaid } = billing;
   if (billing.source === "subscription" && sub) {
     const label = sub.pastDue ? "Payment due" : sub.renews ? "Renews" : "Ends";
-    return sub.periodEnd ? [`${label} ${formatBillingDate(sub.periodEnd)}`] : [];
+    const lines = sub.periodEnd ? [`${label} ${formatBillingDate(sub.periodEnd)}`] : [];
+    if (prepaid?.active) lines.push(`${PLANS[prepaid.plan].name} paid until ${formatBillingDate(prepaid.paidUntil)}`);
+    return lines;
   }
   const lines: string[] = [];
   if (billing.source === "prepaid" && prepaid) {
