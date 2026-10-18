@@ -1,8 +1,13 @@
 import {
   PDFDocument as SecurePDFDocument,
+  PDFArray,
   PDFDict,
+  PDFHexString,
   PDFInvalidObject,
   PDFName,
+  PDFStream,
+  PDFString,
+  type PDFObject,
 } from "@cantoo/pdf-lib";
 
 /**
@@ -46,7 +51,38 @@ export async function protectPdf(
       documentAssembly: !!opts.allowModifying,
     },
   });
+  encryptStrings(doc);
   return doc.save({ useObjectStreams: false });
+}
+
+/**
+ * The fork encrypts streams but writes strings as they are: the title and
+ * author, bookmarks, link addresses, form values. Readers then "decrypt" them
+ * into noise, and anyone can read them without the password. This encrypts
+ * each one with its object's key, as the standard handler expects. The
+ * security dictionary and a signature's Contents stay as they are.
+ */
+function encryptStrings(doc: SecurePDFDocument) {
+  const ctx = doc.context;
+  const security = ctx.security;
+  if (!security) return;
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (ref === ctx.trailerInfo.Encrypt) continue;
+    const encrypt = security.getEncryptFn(ref.objectNumber, ref.generationNumber);
+    const seal = (value: PDFObject): PDFObject => {
+      if (value instanceof PDFString || value instanceof PDFHexString) return PDFHexString.fromBytes(encrypt(value.asBytes()));
+      if (value instanceof PDFArray) {
+        for (let i = 0; i < value.size(); i++) value.set(i, seal(value.get(i)));
+      } else if (value instanceof PDFDict) {
+        const signature = value.get(PDFName.of("Type")) === PDFName.of("Sig");
+        for (const [key, v] of value.entries()) {
+          if (!(signature && key === PDFName.of("Contents"))) value.set(key, seal(v));
+        }
+      }
+      return value;
+    };
+    seal(obj instanceof PDFStream ? obj.dict : obj);
+  }
 }
 
 function randomPassword(): string {

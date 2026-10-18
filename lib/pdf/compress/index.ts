@@ -57,7 +57,16 @@ async function open(bytes: Uint8Array): Promise<PDFDocument> {
     let plain: Uint8Array;
     try {
       const { PDFDocument: SecureDocument } = await import("@cantoo/pdf-lib");
-      plain = await (await SecureDocument.load(bytes, { password: "", updateMetadata: false })).save();
+      const secure = await SecureDocument.load(bytes, { password: "", updateMetadata: false });
+      // Decrypting a file with a cross-reference stream loses the trailer's
+      // Info (title, author) and ID: take them from the file as stored.
+      const trailer = secure.context.trailerInfo;
+      if (!trailer.Info || !trailer.ID) {
+        const stored = (await SecureDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false })).context.trailerInfo;
+        trailer.Info ??= stored.Info;
+        trailer.ID ??= stored.ID;
+      }
+      plain = await secure.save();
     } catch (decryptErr) {
       if (/password/i.test(decryptErr instanceof Error ? decryptErr.message : "")) throw err;
       throw new UnreadablePdfError("unreadable");

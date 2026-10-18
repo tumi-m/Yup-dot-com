@@ -11,21 +11,7 @@ import { fileToHandoff, setHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
 import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { cn, formatBytes } from "@/lib/utils";
-
-const PDF_ACTIONS = [
-  "edit-pdf",
-  "sign-pdf",
-  "compress-pdf",
-  "pdf-to-word",
-  "pdf-to-pptx",
-  "chat-with-pdf",
-  "ocr-pdf",
-  "split-pdf",
-  "protect-pdf",
-];
-const MULTI_ACTIONS = ["merge-pdf", "compress-pdf", "pdf-to-word", "edit-pdf"];
-const IMAGE_ACTIONS = ["jpg-to-pdf"];
-const PPTX_ACTIONS = ["pptx-to-pdf", "edit-pptx"];
+import { heroActions, MULTI_ACTIONS, TAKES_ALL } from "./hero-actions";
 
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -85,14 +71,11 @@ export function HeroDropzone({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isImages = files.length > 0 && files.every((f) => f.type.startsWith("image/"));
-  const actions =
-    mode === "pptx" ? PPTX_ACTIONS : isImages ? IMAGE_ACTIONS : files.length > 1 ? MULTI_ACTIONS : PDF_ACTIONS;
+  const actions = heroActions(mode, files);
 
   async function go(slug: string) {
     setGoing(slug);
-    const multi = slug === "merge-pdf" || slug === "jpg-to-pdf";
-    const chosen = multi ? files : files.slice(0, 1);
+    const chosen = TAKES_ALL.includes(slug) ? files : files.slice(0, 1);
     // Browsers often leave `type` empty for Office files, and the handoff
     // would otherwise default it to PDF.
     const typed = chosen.map((f) => (mode === "pptx" && !f.type ? new File([f], f.name, { type: PPTX_TYPE }) : f));
@@ -231,6 +214,9 @@ export function HeroDropzone({
               );
             })}
           </div>
+          {actions === MULTI_ACTIONS && (
+            <p className="mt-3 text-center text-xs text-muted-foreground">Other tools take one PDF at a time.</p>
+          )}
         </motion.div>
       )}
     </AnimatePresence>
