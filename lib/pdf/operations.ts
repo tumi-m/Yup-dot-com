@@ -143,19 +143,14 @@ function dropUnreachable(doc: PDFDocument) {
   }
 }
 
-/** Takes the widgets on `dropped` pages out of the form, and fields left with none. */
-function dropFields(doc: PDFDocument, dropped: PDFPage[]) {
+/**
+ * Takes the widgets on dropped pages out of the form, and fields left with
+ * none. A widget is on one when a dropped page lists it (`onDropped`) or it
+ * names one as its page (`droppedRefs`).
+ */
+function dropFields(doc: PDFDocument, onDropped: Set<PDFDict>, droppedRefs: Set<PDFRef>) {
   const acroForm = doc.catalog.getAcroForm();
-  if (!acroForm || !dropped.length) return;
-  const droppedRefs = new Set(dropped.map((p) => p.ref));
-  const onDropped = new Set<PDFDict>();
-  for (const page of dropped) {
-    const annots = page.node.Annots();
-    for (let i = 0; i < (annots?.size() ?? 0); i++) {
-      const annot = annots!.lookup(i);
-      if (annot instanceof PDFDict) onDropped.add(annot);
-    }
-  }
+  if (!acroForm || !droppedRefs.size) return;
   try {
     for (const [field] of acroForm.getAllFields()) {
       if (!(field instanceof PDFAcroTerminal)) continue;
@@ -187,7 +182,16 @@ function arrangePages(doc: PDFDocument, order: number[]) {
   }
   const kept = new Set(order);
   const dropped = pages.filter((_, i) => !kept.has(i));
-  dropFields(doc, dropped);
+  const droppedRefs = new Set(dropped.map((p) => p.ref));
+  const onDropped = new Set<PDFDict>();
+  for (const page of dropped) {
+    const annots = page.node.Annots();
+    for (let i = 0; i < (annots?.size() ?? 0); i++) {
+      const annot = annots!.lookup(i);
+      if (annot instanceof PDFDict) onDropped.add(annot);
+    }
+  }
+  dropFields(doc, onDropped, droppedRefs);
   dropXfa(doc);
   for (const page of pages) {
     // A page can inherit its size, rotation and resources from the page
@@ -200,7 +204,7 @@ function arrangePages(doc: PDFDocument, order: number[]) {
   }
   for (let i = pages.length - 1; i >= 0; i--) doc.removePage(i);
   for (const i of order) doc.addPage(pages[i]);
-  dropLinksTo(doc, dropped);
+  dropLinksTo(doc, droppedRefs);
   // What else still points at a dropped page (a named destination) now
   // points at nothing, which readers ignore; a page left outside the page
   // tree would read as page 1.
@@ -209,12 +213,11 @@ function arrangePages(doc: PDFDocument, order: number[]) {
 }
 
 /**
- * Takes out the links and bookmarks that lead to `dropped` pages. A dropped
+ * Takes out the links and bookmarks that lead to the `gone` pages. A dropped
  * bookmark's own entries move up in its place.
  */
-function dropLinksTo(doc: PDFDocument, dropped: PDFPage[]) {
-  if (!dropped.length) return;
-  const gone = new Set(dropped.map((p) => p.ref));
+function dropLinksTo(doc: PDFDocument, gone: Set<PDFRef>) {
+  if (!gone.size) return;
   const named = once(() => namedDests(doc));
   const leadsAway = (holder: PDFDict) => {
     const target = destination(doc, holder, named)?.get(0);
@@ -441,6 +444,70 @@ export async function extractPages(
 ): Promise<Uint8Array> {
   const doc = await openPdf(bytes);
   arrangePages(doc, pageIndices);
+  return doc.save();
+}
+
+/**
+ * A document with the given (0-indexed) pages of `src`, in that order, made
+ * as extractPages makes it, but copied out of `src` and leaving it as it is:
+ * Split reads the file once for all its parts, instead of reading the whole
+ * file again for each one.
+ */
+export async function extractFrom(src: PDFDocument, order: number[]): Promise<Uint8Array> {
+  const srcPages = src.getPages();
+  if (new Set(order).size !== order.length || order.some((i) => !srcPages[i])) {
+    throw new Error("Invalid page order.");
+  }
+  const doc = await PDFDocument.create({ updateMetadata: false });
+  doc.context.header = src.context.header;
+  const copier = PDFObjectCopier.for(src.context, doc.context);
+  const copied = (copier as unknown as { traversedObjects: Map<PDFObject, PDFObject> }).traversedObjects;
+  // Anything that points at the catalog or page tree gets the new ones, not copies.
+  copied.set(src.context.trailerInfo.Root!, doc.context.trailerInfo.Root!);
+  const tree = src.catalog.get(PDFName.of("Pages"));
+  if (tree) copied.set(tree, doc.catalog.get(PDFName.of("Pages"))!);
+  // What points at a page left out points at nothing, which readers ignore,
+  // and the page itself is never copied.
+  const kept = new Set(order);
+  const gone = doc.context.nextRef();
+  srcPages.forEach((page, i) => {
+    if (!kept.has(i)) copied.set(page.ref, gone);
+  });
+  const refs = order.map((i) => {
+    const ref = doc.context.nextRef();
+    copied.set(srcPages[i].ref, ref);
+    return ref;
+  });
+  // The copier gives each page what it inherits from the page tree.
+  order.forEach((i, k) => {
+    const node = copier.copy(srcPages[i].node) as PDFPageLeaf;
+    doc.context.assign(refs[k], node);
+    doc.addPage(PDFPage.of(node, refs[k], doc));
+  });
+  // The rest of the document: title, form, bookmarks, names, layers.
+  for (const [key, value] of src.catalog.entries()) {
+    if (key !== PDFName.of("Pages")) doc.catalog.set(key, copier.copy(value));
+  }
+  const { Info, ID } = src.context.trailerInfo;
+  if (Info) doc.context.trailerInfo.Info = copier.copy(Info);
+  if (ID) doc.context.trailerInfo.ID = copier.copy(ID);
+
+  const droppedRefs = new Set(kept.size < srcPages.length ? [gone] : []);
+  const onDropped = new Set<PDFDict>();
+  if (droppedRefs.size && doc.catalog.getAcroForm()) {
+    srcPages.forEach((page, i) => {
+      const annots = kept.has(i) ? undefined : page.node.Annots();
+      for (let a = 0; a < (annots?.size() ?? 0); a++) {
+        const copy = copied.get(annots!.get(a));
+        const annot = copy instanceof PDFRef ? doc.context.lookup(copy) : copy;
+        if (annot instanceof PDFDict) onDropped.add(annot);
+      }
+    });
+  }
+  dropFields(doc, onDropped, droppedRefs);
+  dropXfa(doc);
+  dropLinksTo(doc, droppedRefs);
+  dropUnreachable(doc);
   return doc.save();
 }
 

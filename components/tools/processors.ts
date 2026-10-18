@@ -51,6 +51,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files) => (await kit()).mergeTool(files),
   },
   "split-pdf": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -74,7 +75,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         showIf: { key: "mode", value: "ranges" },
       },
     ],
-    run: async (files, o) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }),
+    run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
   },
   "rotate-pdf": {
     accept: "application/pdf",
@@ -96,6 +97,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
   },
   "compress-pdf": {
+    cancellable: true,
     reportsSizeChange: true,
     accept: "application/pdf",
     multiple: false,
@@ -141,6 +143,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     },
   },
   "pdf-to-jpg": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -170,6 +173,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).pdfToImagesTool(files, { format: o.format, quality: o.quality }, ctx),
   },
   "jpg-to-pdf": {
+    cancellable: true,
     accept: "image/jpeg,image/png",
     multiple: true,
     minFiles: 1,

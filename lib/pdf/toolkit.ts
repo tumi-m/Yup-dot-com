@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, degrees, StandardFonts } from "pdf-lib";
 import { loadForRender } from "./render";
 import {
   parseDocument,
@@ -11,9 +11,8 @@ import {
 import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
 import { openPdf } from "./open";
-import { extractPages, mergeDocuments } from "./operations";
-import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
-import { embedImage, type EmbeddedImage } from "./embed-image";
+import { extractFrom, mergeDocuments } from "./operations";
+import { isAbort, stopIfAborted } from "../abort";
 import { canvasToJpeg } from "../image-codec";
 import type { OcrProgress } from "./ocr";
 
@@ -107,10 +106,12 @@ function pageLabel(pages: number[]): string {
 // ---------------------------------------------------------------------------
 export async function splitTool(
   files: File[],
-  opts: { mode: string; ranges: string }
+  opts: { mode: string; ranges: string },
+  ctx: ToolContext = {}
 ): Promise<ToolFile | ToolFile[]> {
-  const bytes = await buf(files[0]);
-  const count = (await openPdf(bytes)).getPageCount();
+  // Read once: every part is copied out of the same document.
+  const src = await openPdf(await buf(files[0]));
+  const count = src.getPageCount();
   const base = files[0].name.replace(/\.pdf$/i, "");
 
   let groups: number[][];
@@ -127,9 +128,11 @@ export async function splitTool(
   const results: ToolFile[] = [];
   const used = new Map<string, number>();
   for (let g = 0; g < groups.length; g++) {
+    stopIfAborted(ctx.signal);
+    if (groups.length > 1) ctx.progress?.(g / groups.length, `File ${g + 1} of ${groups.length}`);
     // The document keeps its form, title, bookmarks and links to the pages
-    // that stay; the other pages and what only they use are dropped.
-    const out = await extractPages(bytes, groups[g]);
+    // that stay; the other pages and what only they use are left out.
+    const out = await extractFrom(src, groups[g]);
     // Repeated ranges ("1, 1") must not overwrite each other in the zip.
     const label = pageLabel(groups[g]);
     const n = (used.get(label) ?? 0) + 1;
@@ -156,8 +159,9 @@ export async function compressTool(
   const preset = presetFrom(opts.quality);
   let compressed: Uint8Array;
   try {
-    compressed = await compressFile(file, preset, ctx.progress);
+    compressed = await compressFile(file, preset, ctx.progress, ctx.signal);
   } catch (err) {
+    if (isAbort(err)) throw err;
     if (friendlyPdfError(err).message === ENCRYPTED_MESSAGE) throw friendlyPdfError(err);
     // A file pdf-lib can't read: pdf.js may still render it.
     try {
@@ -179,17 +183,21 @@ async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolConte
   const loaded = await loadForRender(bytes);
   const out = await PDFDocument.create();
   const scale = 1.5; // ~108 DPI
-  for (let i = 1; i <= loaded.numPages; i++) {
-    ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
-    const vp = await loaded.getPageViewport(i, scale);
-    const canvas = document.createElement("canvas");
-    await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
-    const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
-    canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
-    const page = out.addPage([vp.baseWidth, vp.baseHeight]);
-    page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
+  try {
+    for (let i = 1; i <= loaded.numPages; i++) {
+      stopIfAborted(ctx.signal);
+      ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
+      const vp = await loaded.getPageViewport(i, scale);
+      const canvas = document.createElement("canvas");
+      await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
+      const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
+      canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
+      const page = out.addPage([vp.baseWidth, vp.baseHeight]);
+      page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
+    }
+  } finally {
+    loaded.destroy();
   }
-  loaded.destroy();
   return out.save();
 }
 
@@ -210,83 +218,38 @@ export async function pdfToImagesTool(
   // Zero-pad to the page count so files sort in page order (…-099, …-100).
   const digits = Math.max(2, String(loaded.numPages).length);
 
-  for (let i = 1; i <= loaded.numPages; i++) {
-    ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
-    const canvas = document.createElement("canvas");
-    await loaded.renderPage(i, canvas, 2, { pixelRatio: 1 });
-    // JPEGs through MozJPEG; progressive, since every image viewer reads it and it is smaller.
-    const bytes = format === "jpeg" ? await canvasToJpeg(canvas, quality, { progressive: true }) : await canvasBytes(canvas, "image/png");
-    const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: `image/${format}` });
-    canvas.width = canvas.height = 0;
-    results.push({
-      blob,
-      filename: `${base}-page-${String(i).padStart(digits, "0")}.${format === "jpeg" ? "jpg" : "png"}`,
-    });
+  try {
+    for (let i = 1; i <= loaded.numPages; i++) {
+      stopIfAborted(ctx.signal);
+      ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
+      const canvas = document.createElement("canvas");
+      await loaded.renderPage(i, canvas, 2, { pixelRatio: 1 });
+      // JPEGs through MozJPEG; progressive, since every image viewer reads it and it is smaller.
+      const bytes = format === "jpeg" ? await canvasToJpeg(canvas, quality, { progressive: true }) : await canvasBytes(canvas, "image/png");
+      const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: `image/${format}` });
+      canvas.width = canvas.height = 0;
+      results.push({
+        blob,
+        filename: `${base}-page-${String(i).padStart(digits, "0")}.${format === "jpeg" ? "jpg" : "png"}`,
+      });
+    }
+  } finally {
+    loaded.destroy();
   }
-  loaded.destroy();
   return results;
 }
 
 // ---------------------------------------------------------------------------
 // Images -> PDF
 // ---------------------------------------------------------------------------
-const A4 = { w: 595.28, h: 841.89 };
-const MAX_PAGE_PT = 14400;
-
 export async function imagesToPdfTool(
   files: File[],
   opts: { pageSize: string; margin: string },
   ctx: ToolContext = {}
 ): Promise<ToolFile> {
-  const out = await PDFDocument.create();
-  const margin = Number(opts.margin) || 0;
-
-  for (const [i, file] of files.entries()) {
-    if (files.length > 1) ctx.progress?.(i / files.length, `Image ${i + 1} of ${files.length}`);
-    const data = await buf(file);
-    const kind = sniffImage(data);
-    if (!kind) throw new Error(`${file.name}: use a JPG or PNG image.`);
-    const size = imageSize(data, kind);
-    if (!size) throw new Error(`${file.name}: this image looks damaged.`);
-    const orientation = kind === "jpeg" ? jpegOrientation(data) : 1;
-    const shown = orientedSize(size, orientation);
-
-    let page: PDFPage;
-    let rect: { x: number; y: number; width: number; height: number };
-    // The picture is right-sized for 300 DPI at its drawn size times this.
-    let print = 1;
-    if (opts.pageSize === "fit") {
-      // 1 px = 1 pt, capped at the 200-inch page limit PDF viewers enforce.
-      const scale = Math.min(1, (MAX_PAGE_PT - margin * 2) / Math.max(shown.width, shown.height));
-      const w = shown.width * scale;
-      const h = shown.height * scale;
-      page = out.addPage([w + margin * 2, h + margin * 2]);
-      rect = { x: margin, y: margin, width: w, height: h };
-      // At 1 pt per pixel a phone photo makes a 42-inch page, which no one
-      // prints or views at that size: size it for A4 paper instead.
-      print = Math.min(1, A4.h / Math.max(w, h));
-    } else {
-      page = out.addPage([A4.w, A4.h]);
-      const maxW = A4.w - margin * 2;
-      const maxH = A4.h - margin * 2;
-      const ratio = Math.min(maxW / shown.width, maxH / shown.height);
-      const w = shown.width * ratio;
-      const h = shown.height * ratio;
-      rect = { x: (A4.w - w) / 2, y: (A4.h - h) / 2, width: w, height: h };
-    }
-
-    // Size on the page in the image's stored orientation, for right-sizing.
-    const sideways = orientation >= 5;
-    const fit = { widthPt: (sideways ? rect.height : rect.width) * print, heightPt: (sideways ? rect.width : rect.height) * print };
-    let img: EmbeddedImage;
-    try {
-      img = await embedImage(out, data, kind, size, fit);
-    } catch {
-      throw new Error(`${file.name}: this image looks damaged.`);
-    }
-    drawOrientedImage(page, img, orientation, rect);
-  }
-  return { blob: pdfBlob(await out.save()), filename: "images.pdf" };
+  // Decoding, resizing and encoding phone photos takes seconds each: it runs in a worker.
+  const { imagesToPdfFile } = await import("./images-to-pdf/off-thread");
+  return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename: "images.pdf" };
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +399,7 @@ function requireText(out: string): string {
 
 /** PDF -> text, in correct reading order (handles multi-column layouts). */
 export async function pdfToTextTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const base = files[0].name.replace(/\.pdf$/i, "");
   return {
     blob: new Blob([requireText(toPlainText(doc))], { type: "text/plain" }),
@@ -446,7 +409,7 @@ export async function pdfToTextTool(files: File[], ctx: ToolContext = {}): Promi
 
 /** PDF -> Markdown, preserving headings, lists, and tables. */
 export async function pdfToMarkdownTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const base = files[0].name.replace(/\.pdf$/i, "");
   return {
     blob: new Blob([requireText(toMarkdown(doc))], { type: "text/markdown" }),
@@ -456,7 +419,7 @@ export async function pdfToMarkdownTool(files: File[], ctx: ToolContext = {}): P
 
 /** Detect tables and export each as CSV. */
 export async function extractTablesTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile[]> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
     throw new Error(
@@ -478,7 +441,7 @@ export async function pdfToChunksTool(
   opts: { maxChars: string },
   ctx: ToolContext = {}
 ): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const chunks = toChunks(doc, Number(opts.maxChars) || 1200);
   if (!chunks.length) throw new Error(NO_TEXT);
   const base = files[0].name.replace(/\.pdf$/i, "");
@@ -609,7 +572,7 @@ export async function ocrTool(
 // ---------------------------------------------------------------------------
 
 export async function pdfToWordTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   if (doc.likelyScanned) {
     throw new Error("This looks like a scanned PDF. Run OCR PDF on it first, then convert.");
   }
@@ -619,7 +582,7 @@ export async function pdfToWordTool(files: File[], ctx: ToolContext = {}): Promi
 }
 
 export async function pdfToExcelTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
-  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx));
+  const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
     throw new Error(

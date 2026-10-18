@@ -20,6 +20,7 @@ import { decodeJpeg, encodeJpeg } from "../../image-codec";
 import type { PageInfo, Placements } from "./placement";
 import { resize } from "./resample";
 import { LOSSLESS_FILTERS, decodeFully, decodeLossless, deflate, filterChain, num, predictPng, unpredict } from "./streams";
+import { isAbort } from "../../abort";
 
 export interface ImageSettings {
   /** Resolution images are brought down to, in pixels per inch. */
@@ -665,7 +666,7 @@ export async function optimiseImages(
     try {
       factors = await optimiseOne(ref, step);
     } catch (err) {
-      if (err instanceof CodecUnavailableError) throw err;
+      if (err instanceof CodecUnavailableError || isAbort(err)) throw err;
       // A damaged or unusual image stays as it was.
     }
     const stream = context.lookup(ref);

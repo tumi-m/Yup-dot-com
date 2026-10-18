@@ -18,6 +18,7 @@
 
 import { configureWorker } from "./worker";
 import { showsPictures } from "./page-content";
+import { abortError } from "../abort";
 
 export interface ParsedSpan {
   text: string;
@@ -539,7 +540,9 @@ function median(values: number[]): number {
 /** Parse a PDF into a structured document tree. */
 export async function parseDocument(
   data: Uint8Array,
-  onProgress?: (page: number, total: number) => void
+  onProgress?: (page: number, total: number) => void,
+  /** Stops between pages once aborted. */
+  signal?: AbortSignal
 ): Promise<ParsedDocument> {
   const pdfjsLib = await getPdfjs();
   const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
@@ -550,6 +553,10 @@ export async function parseDocument(
   let scannedPages = 0;
 
   for (let p = 1; p <= doc.numPages; p++) {
+    if (signal?.aborted) {
+      doc.destroy();
+      throw abortError();
+    }
     const page = await doc.getPage(p);
     const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();

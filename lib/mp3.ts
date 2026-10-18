@@ -7,8 +7,12 @@
  * are copied into public/vendor by scripts/copy-vendor.mjs; these versions
  * are pinned in package.json and checked by tests/x-video.test.mts.
  */
+import { readToBlob } from "./read-response";
+
 export const FFMPEG_VERSION = "0.12.15";
 export const FFMPEG_CORE_VERSION = "0.12.10";
+/** Size of that version's ffmpeg-core.wasm, for its download progress. */
+export const FFMPEG_CORE_BYTES = 32_232_419;
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
 
@@ -65,11 +69,46 @@ export interface Mp3Converter {
   dispose(): void;
 }
 
+/** "Downloading the converter… 12 of 31 MB", while the core is on its way (the first time only). */
+export function coreDownloadLabel(received: number): string {
+  const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+  return `Downloading the converter… ${mb(received)} of ${mb(FFMPEG_CORE_BYTES)} MB`;
+}
+
+/**
+ * The converter's core, fetched here so its download can be shown: the first
+ * time, a slow line spent minutes on a bar that didn't move. Handed to the
+ * worker as a blob: URL; null when it can't be fetched here, and the worker
+ * fetches it itself.
+ */
+async function fetchCore(
+  url: string,
+  signal?: AbortSignal,
+  onDownload?: (fraction: number, received: number) => void
+): Promise<string | null> {
+  try {
+    const res = await fetch(url, { signal });
+    if (!res.ok) return null;
+    // Counted against the known size: compressed in transit, the header gives another.
+    const wasm = await readToBlob(res, "application/wasm", (_f, received) =>
+      onDownload?.(Math.min(1, received / FFMPEG_CORE_BYTES), received)
+    );
+    return URL.createObjectURL(wasm);
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return null;
+  }
+}
+
 /**
  * Starts ffmpeg.wasm (a ~31 MB core). Start it while the video downloads,
- * so the conversion can begin as soon as the bytes are in.
+ * so the conversion can begin as soon as the bytes are in. `onDownload`
+ * follows the core's download.
  */
-export async function loadMp3Converter(signal?: AbortSignal): Promise<Mp3Converter> {
+export async function loadMp3Converter(
+  signal?: AbortSignal,
+  onDownload?: (fraction: number, received: number) => void
+): Promise<Mp3Converter> {
   const origin = window.location.origin;
   const worker = new Worker(`${origin}/vendor/ffmpeg/${FFMPEG_VERSION}/worker.js`, { type: "module" });
   const pending = new Map<number, Pending>();
@@ -120,7 +159,12 @@ export async function loadMp3Converter(signal?: AbortSignal): Promise<Mp3Convert
   try {
     if (signal?.aborted) throw new DOMException("Cancelled.", "AbortError");
     const core = `${origin}/vendor/ffmpeg-core/${FFMPEG_CORE_VERSION}`;
-    await send("LOAD", { coreURL: `${core}/ffmpeg-core.js`, wasmURL: `${core}/ffmpeg-core.wasm` });
+    const wasm = await fetchCore(`${core}/ffmpeg-core.wasm`, signal, onDownload);
+    try {
+      await send("LOAD", { coreURL: `${core}/ffmpeg-core.js`, wasmURL: wasm ?? `${core}/ffmpeg-core.wasm` });
+    } finally {
+      if (wasm) URL.revokeObjectURL(wasm);
+    }
   } catch (err) {
     dispose();
     throw err;
