@@ -160,7 +160,8 @@ export interface PdfToPptxOptions {
 }
 
 async function openPdf(data: Uint8Array, standardFontDataUrl?: string): Promise<PDFDocumentProxy> {
-  const pdfjsLib = await import("pdfjs-dist");
+  // The legacy build, for Safari before 17.4 and older iPhones (see pdf/worker.ts).
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
   configureWorker(pdfjsLib);
   try {
     // pdf.js detaches the buffer it is given, so pass a private copy.

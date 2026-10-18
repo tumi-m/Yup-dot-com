@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence } from "motion/react";
 import { FilePlus2 } from "lucide-react";
-import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
+import { saveLocalDoc, takeHandoff, handoffToFile, STORE_FAILED } from "@/lib/local-store";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid } from "@/lib/utils";
 import { isLoadError, loadErrorMessage } from "@/lib/load-error";
@@ -104,11 +104,7 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       doc.addPage([595.28, 841.89]); // A4
       await openLocal(await doc.save(), "Untitled.pdf", 1);
     } catch (err) {
-      setError(
-        isLoadError(err)
-          ? loadErrorMessage("the editor")
-          : "Couldn't store the document on this device. Free up some space or allow site storage, then try again."
-      );
+      setError(isLoadError(err) ? loadErrorMessage("the editor") : STORE_FAILED);
       setBusy(false);
     }
   }

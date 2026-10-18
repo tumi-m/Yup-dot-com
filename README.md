@@ -207,6 +207,10 @@ served from the app's own origin with `immutable` caching. So:
 - an upgrade can never pair a new pdf.js API with a stale cached worker
   (pdf.js refuses to run on a mismatch).
 
+pdf.js runs from its legacy build, in the page and in the worker: the modern
+build needs `Promise.withResolvers`, which Safari only has from 17.4 (iPhones
+stuck on iOS 16 never get it).
+
 `public/vendor` is generated and git-ignored.
 
 ## AI Assistant

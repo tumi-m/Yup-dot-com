@@ -322,8 +322,8 @@ export async function bakeAnnotations(
 
         case "image": {
           const embed = await picture(ann.dataUrl);
-          // An unreadable image is skipped rather than failing the whole export.
-          if (!embed) break;
+          // Stop and say so: left out, the file would lack what the page showed.
+          if (!embed) throw new Error(`Couldn't add the image on page ${pageIndex + 1}. Use a JPG or PNG image.`);
           // Fit inside the box, centred, as the editor shows it (object-contain).
           const fit = containScale(embed, ann);
           const width = embed.width * fit;

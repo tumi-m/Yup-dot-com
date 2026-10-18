@@ -57,7 +57,21 @@ async function tx<T>(
   });
 }
 
-export const saveLocalDoc = (doc: LocalDoc) => tx<IDBValidKey>("docs", "readwrite", (s) => s.put(doc));
+export const STORE_FAILED =
+  "Couldn't store the document on this device. Free up some space or allow site storage, then try again.";
+
+/**
+ * Keeps a document on this device. When the browser won't (site data blocked:
+ * "The operation is insecure.", or storage full), it throws STORE_FAILED
+ * rather than the browser's own words.
+ */
+export async function saveLocalDoc(doc: LocalDoc): Promise<IDBValidKey> {
+  try {
+    return await tx<IDBValidKey>("docs", "readwrite", (s) => s.put(doc));
+  } catch {
+    throw new Error(STORE_FAILED);
+  }
+}
 export const getLocalDoc = (id: string) => tx<LocalDoc | undefined>("docs", "readonly", (s) => s.get(id));
 export const deleteLocalDoc = (id: string) => tx<undefined>("docs", "readwrite", (s) => s.delete(id));
 export async function listLocalDocs(): Promise<LocalDoc[]> {

@@ -1,6 +1,7 @@
 "use client";
 
-import * as pdfjsLib from "pdfjs-dist";
+// The legacy build, for Safari before 17.4 and older iPhones (see worker.ts).
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { configureWorker } from "./worker";
 import { ownText, showsPictures } from "./page-content";
 import type { OwnText } from "./ocr-layer";
@@ -9,9 +10,12 @@ function ensureWorker() {
   configureWorker(pdfjsLib);
 }
 
-/** Conservative limits that hold across desktop and mobile browsers. */
+/**
+ * Conservative limits that hold across desktop and mobile browsers. iOS
+ * Safari leaves a canvas of more than 4096 x 4096 pixels blank.
+ */
 const MAX_CANVAS_SIDE = 8192;
-const MAX_CANVAS_PIXELS = 8192 * 8192 * 0.5;
+const MAX_CANVAS_PIXELS = 4096 * 4096;
 
 const canvasSlots = new WeakMap<
   HTMLCanvasElement,

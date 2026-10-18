@@ -151,11 +151,15 @@ export async function ocrDocument(
       opts.onProgress?.({ page: current, total: count, pageProgress: 0, stage: "rendering" });
       const vp = await until(loaded.getPageViewport(i, RENDER_SCALE));
       const canvas = document.createElement("canvas");
-      // Word boxes are measured against canvas.width/height below, so any
-      // devicePixelRatio applied by renderPage is accounted for automatically.
-      await until(loaded.renderPage(i, canvas, RENDER_SCALE));
+      // 144 DPI on every screen: at a 3x iPhone's pixel ratio it was 432 DPI,
+      // past what Safari will draw. Word boxes are measured against
+      // canvas.width/height below.
+      await until(loaded.renderPage(i, canvas, RENDER_SCALE, { pixelRatio: 1 }));
+      // Tesseract waits forever on a canvas the browser couldn't draw.
+      const image = await until(new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")));
+      if (!image) throw new Error(`Page ${i} is too large to read on this device.`);
 
-      const { data } = await until(worker.recognize(canvas, {}, { blocks: true, text: true }));
+      const { data } = await until(worker.recognize(image, {}, { blocks: true, text: true }));
       const words: OcrWord[] = [];
       for (const block of data.blocks ?? []) {
         for (const para of block.paragraphs) {
