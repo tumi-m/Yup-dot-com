@@ -33,6 +33,7 @@ function origin(url: string | undefined): string | null {
 export interface CspSettings {
   dev: boolean;
   supabaseUrl?: string;
+  /** Only while YouTube downloads are on, so the worker's address isn't in every page's headers. */
   mediaWorkerUrl?: string;
   analytics: boolean;
   turnstile: boolean;
@@ -43,7 +44,7 @@ export function cspSettings(): CspSettings {
   return {
     dev: process.env.NODE_ENV === "development",
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    mediaWorkerUrl: process.env.MEDIA_WORKER_URL,
+    mediaWorkerUrl: process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1" ? process.env.MEDIA_WORKER_URL : undefined,
     analytics: !!process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim(),
     turnstile: !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim(),
   };

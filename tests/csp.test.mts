@@ -24,6 +24,17 @@ check("WebAssembly can compile (PDF, OCR and video tools)", directive("script-sr
 check("connections: this site, Supabase, the media worker and Analytics",
   ["'self'", "https://abc.supabase.co", "wss://abc.supabase.co", "https://media.example.com", "https://*.google-analytics.com"].every((s) => directive("connect-src").split(" ").includes(s)), directive("connect-src"));
 check("and nowhere else", !/https:\/\/\*(\s|$)|\shttps:(\s|$)|\*(\s|$)/.test(directive("connect-src")), directive("connect-src"));
+{
+  const env = process.env as Record<string, string | undefined>;
+  const { cspSettings } = await import("../lib/csp.ts");
+  env.MEDIA_WORKER_URL = "https://media.example.com";
+  delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;
+  check("the media worker is named only while YouTube is on", cspSettings().mediaWorkerUrl === undefined);
+  env.NEXT_PUBLIC_ENABLE_YOUTUBE = "1";
+  check("and is when it is", cspSettings().mediaWorkerUrl === "https://media.example.com");
+  delete env.MEDIA_WORKER_URL;
+  delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;
+}
 check("Analytics hosts only when Analytics is on", !contentSecurityPolicy("x", { ...prod, analytics: false }).includes("google"));
 check("Turnstile only when it's on", contentSecurityPolicy("x", { ...prod, turnstile: true }).includes("https://challenges.cloudflare.com") && !csp.includes("cloudflare"));
 check("no plugins, <base> changes, off-site forms or framing",
