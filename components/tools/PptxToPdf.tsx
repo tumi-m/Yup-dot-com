@@ -26,6 +26,8 @@ import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
+import { isLoadError, loadErrorMessage } from "@/lib/load-error";
+import { pptxErrorMessage } from "@/lib/pptx/errors";
 import type { Deck, DeckSlide } from "@/lib/pptx/parse";
 
 const SLUG = "pptx-to-pdf";
@@ -85,6 +87,8 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<Blob | null>(null);
+  /** The PDF has been downloaded at least once, so leaving doesn't lose it. */
+  const [downloaded, setDownloaded] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [upsell, setUpsell] = useState<UpsellReason | null>(null);
   const [showCard, setShowCard] = useState(false);
@@ -126,7 +130,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       setStatus("ready");
     } catch (err) {
       if (id !== job.current) return;
-      const { pptxErrorMessage } = await import("@/lib/pptx/parse");
+      // Imported up front: the parser's own code may be what didn't load.
       setError(pptxErrorMessage(err));
       setFile(null);
       setStatus("idle");
@@ -158,6 +162,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       if (!reduce) await new Promise((r) => setTimeout(r, PROGRESS_HOLD_MS));
       if (controller.signal.aborted) return;
       setResult(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
+      setDownloaded(false);
       setElapsed(seconds);
       if (hadFocus || document.activeElement === document.body) focusNext.current = "done";
       settleSlot(flow.ref.current);
@@ -165,9 +170,9 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       trackToolUsed("pptx-to-pdf");
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) nudge.arm();
-    } catch {
+    } catch (err) {
       if (controller.signal.aborted) return;
-      setError("Couldn't convert this file.");
+      setError(isLoadError(err) ? loadErrorMessage() : "Couldn't convert this file.");
       if (hadFocus || document.activeElement === document.body) focusNext.current = "convert";
       // The work view stays, so nothing else lets go of the room kept for the result.
       flow.release();
@@ -253,6 +258,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                 <Button
                   onClick={() => {
                     nudge.downloaded();
+                    setDownloaded(true);
                     downloadBlob(result, pdfName(file.name));
                   }}
                   size="lg"
@@ -271,6 +277,8 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
               showCard && (
                 <UpsellCard
                   tier={tier}
+                  returnTo={`/tools/${SLUG}`}
+                  unsaved={!downloaded}
                   onDismiss={() => {
                     dismissUpsellCard();
                     setShowCard(false);

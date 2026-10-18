@@ -102,6 +102,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ToolFile[]>([]);
+  /** The result has been downloaded at least once, so leaving doesn't lose it. */
+  const [downloaded, setDownloaded] = useState(false);
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
@@ -205,6 +207,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       if (!reduce) await new Promise((r) => setTimeout(r, PROGRESS_HOLD_MS));
       if (ctl.signal.aborted) return;
       setResults(Array.isArray(out) ? out : [out]);
+      setDownloaded(false);
       setElapsed(elapsedSeconds);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "done";
       settleSlot(flow.ref.current);
@@ -244,6 +247,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   async function downloadAll() {
     nudge.downloaded();
+    setDownloaded(true);
     if (results.length === 1) {
       downloadBlob(results[0].blob, results[0].filename);
       return;
@@ -338,6 +342,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             size: r.blob.size,
             onDownload: () => {
               nudge.downloaded();
+              setDownloaded(true);
               downloadBlob(r.blob, r.filename);
             },
           }))}
@@ -361,6 +366,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             showCard && (
               <UpsellCard
                 tier={tier}
+                returnTo={`/tools/${slug}`}
+                unsaved={!downloaded}
                 onDismiss={() => {
                   dismissUpsellCard();
                   setShowCard(false);

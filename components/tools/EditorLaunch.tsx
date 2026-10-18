@@ -7,6 +7,7 @@ import { FilePlus2 } from "lucide-react";
 import { saveLocalDoc, takeHandoff, handoffToFile } from "@/lib/local-store";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid } from "@/lib/utils";
+import { isLoadError, loadErrorMessage } from "@/lib/load-error";
 import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { InlineError } from "@/components/motion/primitives";
@@ -49,7 +50,8 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       try {
         const { getPageCount } = await import("@/lib/pdf/operations");
         pageCount = await getPageCount(bytes);
-      } catch {
+      } catch (err) {
+        if (isLoadError(err)) throw err;
         throw new Error("Couldn't open that PDF. It may be damaged or password-protected.");
       }
 
@@ -87,7 +89,8 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       }
       router.push(`/editor/${docId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not open the editor.");
+      // The editor's code didn't arrive (offline): the file is fine.
+      setError(isLoadError(err) ? loadErrorMessage("the editor") : err instanceof Error ? err.message : "Could not open the editor.");
       setBusy(false);
     }
   }
@@ -100,8 +103,12 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
       const doc = await PDFDocument.create();
       doc.addPage([595.28, 841.89]); // A4
       await openLocal(await doc.save(), "Untitled.pdf", 1);
-    } catch {
-      setError("Couldn't store the document on this device. Free up some space or allow site storage, then try again.");
+    } catch (err) {
+      setError(
+        isLoadError(err)
+          ? loadErrorMessage("the editor")
+          : "Couldn't store the document on this device. Free up some space or allow site storage, then try again."
+      );
       setBusy(false);
     }
   }

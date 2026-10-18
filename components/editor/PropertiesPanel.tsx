@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { annotationLabel } from "@/lib/editor/types";
@@ -16,16 +16,34 @@ export function PropertiesPanel({
   onChange,
   onDelete,
   onClose,
+  onCover,
 }: {
   annotation: Annotation;
   pageCount: number;
   onChange: (next: Annotation) => void;
   onDelete: () => void;
   onClose: () => void;
+  /** How much of the screen's bottom the sheet covers: 0 as a side panel. */
+  onCover?: (px: number) => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !onCover) return;
+    const report = () => onCover(getComputedStyle(el).position === "fixed" ? el.offsetHeight : 0);
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      onCover(0);
+    };
+  }, [onCover]);
+
   return (
     // Phones: a bottom sheet over the page. Wider screens: a side panel.
     <aside
+      ref={ref}
       aria-label="Properties"
       className="fixed inset-x-0 bottom-0 z-30 max-h-[50dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-background p-4 shadow-2xl md:static md:z-auto md:max-h-none md:w-64 md:shrink-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none"
     >

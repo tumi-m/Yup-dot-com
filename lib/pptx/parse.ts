@@ -6,6 +6,9 @@ import type {
   Group as PGroup,
 } from "pptxtojson";
 import { analyzeSlide, slideOrder, type ChartInfo, type ParaInfo, type SlideAnalysis, type TableFlags } from "./ooxml";
+import { PptxError, PPTX_MESSAGES } from "./errors";
+
+export { PptxError, PPTX_MESSAGES, pptxErrorMessage } from "./errors";
 
 /**
  * Loads a .pptx into a typed deck model for rendering.
@@ -77,23 +80,6 @@ export interface Deck {
   slides: DeckSlide[];
   themeColors: string[];
 }
-
-export class PptxError extends Error {
-  constructor(
-    message: string,
-    readonly code: "invalid" | "legacy" | "encrypted" | "empty"
-  ) {
-    super(message);
-    this.name = "PptxError";
-  }
-}
-
-export const PPTX_MESSAGES = {
-  invalid: "This file isn't a valid .pptx.",
-  legacy: "Save it as .pptx first.",
-  encrypted: "This file is password-protected. Remove the password first.",
-  empty: "This presentation has no slides.",
-} as const;
 
 const EMPTY_TABLE_STYLES =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -261,9 +247,4 @@ export async function parsePptx(input: ArrayBuffer | Uint8Array): Promise<Deck> 
     slides,
     themeColors: json.themeColors ?? [],
   };
-}
-
-/** A short, user-facing message for any error thrown while parsing. */
-export function pptxErrorMessage(err: unknown): string {
-  return err instanceof PptxError ? err.message : PPTX_MESSAGES.invalid;
 }

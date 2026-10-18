@@ -41,7 +41,8 @@ import {
   type JourneyAction,
   type JourneyChoice,
 } from "@/lib/journey";
-import { parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLED } from "@/lib/media";
+import { linkIn, parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLED } from "@/lib/media";
+import { pasteBlockedMessage } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
 
@@ -326,7 +327,7 @@ export function HeroJourney() {
                     label={YOUTUBE_ENABLED ? "Video link" : "X, TikTok or Instagram link"}
                     placeholder="tiktok.com/… or instagram.com/reel/…"
                     hint={(url) =>
-                      !YOUTUBE_ENABLED && parseMediaUrl(url)?.platform === "youtube"
+                      !YOUTUBE_ENABLED && parseMediaUrl(linkIn(url))?.platform === "youtube"
                         ? "YouTube downloads are paused for now."
                         : YOUTUBE_ENABLED
                           ? "Paste a YouTube, X, TikTok or Instagram video link."
@@ -334,8 +335,8 @@ export function HeroJourney() {
                     }
                     actionsFor={mediaActions}
                     tag={(url) => {
-                      if (parsePlaylistUrl(url)) return "YouTube playlist";
-                      const p = parseMediaUrl(url);
+                      if (parsePlaylistUrl(linkIn(url))) return "YouTube playlist";
+                      const p = parseMediaUrl(linkIn(url));
                       return p ? PLATFORM_LABEL[p.platform] : null;
                     }}
                     autoFocus={interacted}
@@ -403,7 +404,7 @@ function LinkBranch({
     setPasteError(false);
     try {
       const text = await navigator.clipboard.readText();
-      if (text) setUrl(text.trim());
+      if (text) setUrl(linkIn(text));
     } catch {
       setPasteError(true);
       inputRef.current?.focus();
@@ -455,7 +456,7 @@ function LinkBranch({
         {invalid && (
           <p className="px-1 pt-2 text-xs font-medium text-amber-700">{typeof hint === "function" ? hint(url) : hint}</p>
         )}
-        {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700">Clipboard blocked. Paste with Ctrl+V.</p>}
+        {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700">{pasteBlockedMessage()}</p>}
         {platform && <span className="sr-only">{platform} link</span>}
       </div>
 

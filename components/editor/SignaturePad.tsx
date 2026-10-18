@@ -22,6 +22,7 @@ export function SignaturePad({
   onSave: (dataUrl: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const drawing = useRef(false);
   const hasInk = useRef(false);
   const [empty, setEmpty] = useState(true);
@@ -115,7 +116,16 @@ export function SignaturePad({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        ref={contentRef}
+        // Focus the dialog, not the name field: on a phone that would open
+        // the keyboard over the pad. Typing a name is a tap away.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          contentRef.current?.focus({ preventScroll: true });
+        }}
+        className="focus:outline-none"
+      >
         <DialogHeader>
           <DialogTitle>Draw your signature</DialogTitle>
           <DialogDescription>

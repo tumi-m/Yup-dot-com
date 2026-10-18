@@ -30,6 +30,16 @@ export interface ParsedMediaUrl {
 const YT_ID = /^[\w-]{11}$/;
 
 /**
+ * The link in text pasted from a share sheet or a chat ("Check out this
+ * video! https://vm.tiktok.com/…"), or the text itself when it has no
+ * http(s) link. Only the link box uses this; the parsers stay strict.
+ */
+export function linkIn(text: string): string {
+  const found = text.match(/https?:\/\/[^\s<>"']+/i)?.[0];
+  return found ? found.replace(/[.,;:!?)\]]+$/, "") : text.trim();
+}
+
+/**
  * Accepts the link shapes people actually paste and rebuilds a canonical URL,
  * so arbitrary hosts or paths can never reach the worker.
  */

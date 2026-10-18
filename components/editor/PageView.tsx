@@ -6,6 +6,7 @@ import type { LoadedPdf } from "@/lib/pdf/render";
 import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
 import { createAnnotation, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
+import { pageTouchAction } from "@/lib/editor/canvas";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
 
@@ -86,7 +87,10 @@ export function PageView({
 
   function handlePointerDown(e: React.PointerEvent) {
     if (tool === "select") {
-      onSelect(null);
+      // A finger may be starting a swipe that scrolls the page: deselect on
+      // lift, and not when the swipe takes over (pointercancel).
+      if (e.pointerType !== "mouse") tap.current = { x: 0, y: 0, pointerId: e.pointerId };
+      else onSelect(null);
       return;
     }
     const { x, y } = toPoints(e);
@@ -137,7 +141,9 @@ export function PageView({
     const pending = tap.current;
     if (pending && pending.pointerId === e.pointerId) {
       tap.current = null;
-      if (e.type === "pointerup") place(pending.x, pending.y);
+      if (e.type !== "pointerup") return;
+      if (tool === "select") onSelect(null);
+      else place(pending.x, pending.y);
       return;
     }
     try {
@@ -165,7 +171,7 @@ export function PageView({
         <div
           ref={layerRef}
           className="annotation-layer"
-          style={{ width: size.w, height: size.h, cursor, touchAction: "none" }}
+          style={{ width: size.w, height: size.h, cursor, touchAction: pageTouchAction(tool) }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

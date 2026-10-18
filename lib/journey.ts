@@ -3,7 +3,7 @@
  * which branch a dropped file or a URL hash belongs to, and where each
  * pasted link can go. Kept free of React so it can be unit tested.
  */
-import { parseMediaUrl, parsePlaylistUrl, YOUTUBE_ENABLED } from "./media";
+import { linkIn, parseMediaUrl, parsePlaylistUrl, YOUTUBE_ENABLED } from "./media";
 
 export type JourneyChoice = "pdf" | "pptx" | "slides" | "media";
 
@@ -53,8 +53,9 @@ export interface JourneyAction {
 }
 
 export function slidesActions(input: string): JourneyAction[] {
-  if (!isSlidesLink(input)) return [];
-  const url = encodeURIComponent(input.trim());
+  const link = linkIn(input);
+  if (!isSlidesLink(link)) return [];
+  const url = encodeURIComponent(link);
   return [
     { label: "PDF", href: `/tools/google-slides-to-pdf?url=${url}` },
     { label: "PPTX", href: `/tools/google-slides-to-pptx?url=${url}` },
@@ -64,17 +65,19 @@ export function slidesActions(input: string): JourneyAction[] {
 
 /**
  * A playlist link goes to the playlist tool; one that also names a video
- * (watch?v=…&list=…) offers that single video too.
+ * (watch?v=…&list=…) offers that single video too. Text around the link, as
+ * a phone's share sheet copies it, is left behind.
  */
 export function mediaActions(input: string, youtube: boolean = YOUTUBE_ENABLED): JourneyAction[] {
-  const playlist = youtube ? parsePlaylistUrl(input) : null;
-  const parsed = playlist ? playlist.video : parseMediaUrl(input);
+  const link = linkIn(input);
+  const playlist = youtube ? parsePlaylistUrl(link) : null;
+  const parsed = playlist ? playlist.video : parseMediaUrl(link);
   const actions: JourneyAction[] = playlist
     ? [{ label: "Playlist", href: `/tools/youtube-playlist?url=${encodeURIComponent(playlist.canonical)}` }]
     : [];
   if (!parsed) return actions;
   // Single videos are passed on as their canonical link, without the list.
-  const url = encodeURIComponent(playlist ? parsed.canonical : input.trim());
+  const url = encodeURIComponent(playlist ? parsed.canonical : link);
   // YouTube is paused (lib/media.ts): its links get no actions, and the box says why.
   if (parsed.platform === "youtube") {
     if (!youtube) return [];
