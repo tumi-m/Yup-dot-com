@@ -355,15 +355,89 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   events, call the usage functions, keep files past the plan limit) and fails
   if any of it works. Run it locally against any Postgres you can throw away:
   `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
-- `scripts/check-bundle-secrets.mjs` builds with fake values in every server
-  secret and fails if one appears in `.next/static`, `public/` or a
-  prerendered page.
+- Every `npm run build` (on Vercel too) runs `scripts/check-env.mjs` first,
+  which stops the build if a `NEXT_PUBLIC_` variable holds a secret (a
+  service_role or `sb_secret_` key, a Paystack secret key, a private key,
+  a server-only value) or a server-only name, and
+  `scripts/check-bundle-secrets.mjs` after, which fails it if a secret
+  pattern or a server-only value is in `.next/static`, a prerendered page or
+  `public/`. CI builds with fake values in every secret and runs both, then
+  starts the build and checks it from outside with `scripts/check-live.mjs`.
+- React refuses to send a server secret to the browser
+  (`lib/server-secrets.ts`); modules that read secrets import `server-only`.
+- `npm run check:live -- https://pdfwizard.xyz` checks the live site from
+  outside: secrets in its scripts, headers, exposed files, private pages
+  signed out, and what the public Supabase key can read. GitHub runs it
+  weekly and after each push to `main` (`.github/workflows/live-check.yml`).
+  See [SECURITY.md](SECURITY.md#why-the-mybroadband-style-hacks-dont-apply-here).
 - `npm test` covers webhook signatures, billing replay, token signing and
-  refunds, the PPTX sanitiser and URL allow-lists.
+  refunds, the PPTX sanitiser, URL allow-lists, the build checks, the CSP
+  and the live checker (against a made-up safe and unsafe site).
 
-**Settings to keep:** in Supabase, Auth → **Confirm email** must stay on
-(Team seats are granted to confirmed emails only). Set `MEDIA_SIGNING_SECRET`
-in production.
+The free plan's edit watermark and daily edit count are checked in the
+browser, where the file is made, so they are a soft limit. Everything that
+costs money or stores data (AI answers, downloads, cloud documents, team
+seats, plans) is enforced on the server or in the database.
+
+**Settings to keep:** see the [Owner-only checklist](#owner-only-checklist).
+
+## Owner-only checklist
+
+Only the site owner can do these; code can't. Do them once, and again when
+someone leaves or a key changes.
+
+1. Turn on two-factor sign-in (an authenticator app or passkey, not SMS) for
+   Vercel, Supabase, Paystack, Cloudflare, GitHub, Google (Analytics and
+   Search Console), Ollama and the domain registrar.
+2. Never put a secret in a `NEXT_PUBLIC_` variable: those are copied into
+   every visitor's browser. `NEXT_PUBLIC_SUPABASE_ANON_KEY` is the anon (or
+   `sb_publishable_`) key, never the service_role or `sb_secret_` key. The
+   build stops if one is wrong; fix the variable, don't work around it.
+3. Vercel → Project → Settings → Environment Variables: mark
+   `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, `OLLAMA_API_KEY`,
+   `MEDIA_WORKER_SECRET`, `MEDIA_SIGNING_SECRET` and `USAGE_HASH_SALT` as
+   **Sensitive**, and give Preview deployments test keys (Paystack
+   `sk_test_`). Set `MEDIA_SIGNING_SECRET` in production. Settings →
+   Deployment Protection: turn on Vercel Authentication for Preview
+   deployments.
+4. Rotate a key the moment it's exposed (a screenshot, a chat, a commit, a
+   `NEXT_PUBLIC_` variable): [SECURITY.md → If a key leaks](SECURITY.md#if-a-key-leaks)
+   has the steps for each key.
+5. Supabase → Authentication:
+   1. Email sign-in: keep **Confirm email** on (team seats depend on it),
+      and turn on **Secure password change**.
+   2. Passwords: minimum length **10**, letters and digits required, and
+      **leaked-password protection** on (Pro plan).
+   3. Rate limits: keep the defaults or lower; at most one email per
+      address every 60 seconds.
+   4. URL Configuration: Site URL `https://pdfwizard.xyz`; Redirect URLs only
+      `https://pdfwizard.xyz/auth/callback` (plus a preview pattern only if
+      you use one).
+   5. Optional: CAPTCHA protection with Cloudflare Turnstile, at the same
+      time as setting `NEXT_PUBLIC_TURNSTILE_SITE_KEY` in Vercel.
+   6. Custom SMTP from your own domain, so reset emails don't come from the
+      shared sender.
+6. Supabase → Database: Security Advisor shows no "RLS disabled" table, the
+   `documents` bucket is not Public, and each file in `supabase/migrations/`
+   has run once, in date order. Turn off `pg_graphql` if you don't use it.
+7. Cloudflare (DNS): turn on **DNSSEC** and add the DS record at the
+   registrar; add **CAA** records for the certificate authorities Vercel
+   uses (`letsencrypt.org`) plus `iodef` `mailto:security@pdfwizard.xyz`;
+   SPF, DKIM and DMARC for the mail domain; registrar lock on.
+8. Paystack: webhook URL `https://pdfwizard.xyz/api/billing/webhook` only.
+   Webhooks are verified with `PAYSTACK_SECRET_KEY`, so a new secret key goes
+   into Vercel straight away. Two-factor on, least-privilege team roles,
+   test keys outside production.
+9. GitHub (the repository is public): Settings → Code security: secret
+   scanning with push protection, Dependabot alerts and security updates,
+   private vulnerability reporting. Protect `main`: require a pull request
+   and the CI checks `app`, `build`, `database` and `media-worker`; block
+   force pushes. Actions → General: read-only workflow permissions, and
+   approval for workflows from forks. Add the variable `SITE_URL` =
+   `https://pdfwizard.xyz` for the Live check workflow.
+10. Media worker host: `MEDIA_ALLOWED_ORIGINS=https://pdfwizard.xyz`, and
+    `YTDLP_PROXY` credentials only in that host's secret store.
+11. After changing any of these: `npm run check:live -- https://pdfwizard.xyz`.
 
 ---
 
@@ -478,8 +552,8 @@ Variables** and redeploy:
 | Variable | Needed for |
 | -------- | ---------- |
 | `NEXT_PUBLIC_SUPABASE_URL` | accounts, dashboard, editor |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional. Cloudflare Turnstile on log in, sign-up and Forgot password. Set it together with Supabase's CAPTCHA protection (see [Owner checklist](#owner-checklist)) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor. The **anon** (or `sb_publishable_`) key: the build stops if this is the service_role or `sb_secret_` key |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional. Cloudflare Turnstile on log in, sign-up and Forgot password. Set it together with Supabase's CAPTCHA protection (see [Owner-only checklist](#owner-only-checklist)) |
 | `SUPABASE_SERVICE_ROLE_KEY` | billing (records payments, plans, team seats) and usage counters shared by every server instance |
 | `PAYSTACK_SECRET_KEY` | checkout, subscription management, webhook signatures |
 | `PAYSTACK_PLAN_PRO`, `PAYSTACK_PLAN_TEAM` | monthly subscriptions (`PLN_…` codes) |

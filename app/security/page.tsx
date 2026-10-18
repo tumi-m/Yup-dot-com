@@ -49,9 +49,16 @@ export default function SecurityPage() {
         <ul>
           <li>
             Every change runs automated tests that try to read or change another account&apos;s data, the way an
-            attacker would, and a check that no secret key reaches the browser.
+            attacker would.
           </li>
-          <li>Everything travels over HTTPS, and other sites can&apos;t embed our pages.</li>
+          <li>
+            Every build stops if a secret key would reach the browser, and every week an automatic check tests the
+            live site from outside: our scripts, private pages and database, with only what any visitor has.
+          </li>
+          <li>
+            Our pages only run our own scripts, so code slipped into a page can&apos;t run. Everything travels over
+            HTTPS, and other sites can&apos;t embed our pages.
+          </li>
         </ul>
       </Section>
 
