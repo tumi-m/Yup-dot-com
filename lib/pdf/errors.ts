@@ -18,7 +18,10 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   if (ENCRYPTED.test(name) || ENCRYPTED.test(message)) {
     return new Error(prefix + ENCRYPTED_MESSAGE);
   }
-  if (name === "InvalidPDFException" || UNREADABLE.test(message)) {
+  // pdf-lib opens a file that has a header but no document after it, then
+  // fails on the first page lookup with a TypeError ("Cannot read properties
+  // of undefined (reading 'Pages')"). Never a message for people.
+  if (name === "InvalidPDFException" || name === "TypeError" || UNREADABLE.test(message)) {
     return new Error(prefix + UNREADABLE_MESSAGE);
   }
   return err instanceof Error ? err : new Error("Something went wrong.");

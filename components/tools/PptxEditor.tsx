@@ -32,7 +32,7 @@ import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { documentFingerprint, EditCheckError, requestEdit, WATERMARK_TEXT } from "@/lib/edit-usage";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
-import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
+import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
 import type { Deck as RenderDeck, DeckElement, DeckSlide } from "@/lib/pptx/parse";
@@ -183,6 +183,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [pdf, setPdf] = useState<Blob | null>(null);
   const [showCard, setShowCard] = useState(false);
+  /** The next tool the PDF couldn't be passed to. */
+  const [nextFailed, setNextFailed] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
   const [, setTick] = useState(0);
 
@@ -190,7 +192,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const barRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
-  const { next: focusNext, focusRef } = useFocusNext<"done">();
+  const { next: focusNext, focusRef } = useFocusNext<"done" | "export" | "choose">();
   /** Holds the flow's height while the editor and the result swap. */
   const flow = useHeightLock<HTMLDivElement>();
 
@@ -308,6 +310,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
 
   function reset() {
     if (dirty && !window.confirm("Discard changes?")) return;
+    if (flow.ref.current?.contains(document.activeElement)) focusNext.current = "choose";
     abort.current?.abort();
     job.current++;
     pkg.current = null;
@@ -663,6 +666,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     const hadFocus = !!flow.ref.current?.contains(document.activeElement);
     flow.lock(resultFloor());
     setStatus("exporting");
+    setNextFailed(null);
     const visible = current.slides.filter((s) => !s.hidden).length;
     setProgress({ done: 0, total: visible || current.slides.length });
     const controller = new AbortController();
@@ -695,6 +699,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       // A cancelled export has already handed the UI back.
       if (controller.signal.aborted) return;
       setError("Couldn't export this deck.");
+      if (hadFocus || document.activeElement === document.body) focusNext.current = "export";
+      // The editor stays, so nothing else lets go of the room kept for the result.
+      flow.release();
       setStatus("ready");
     } finally {
       if (abort.current === controller) {
@@ -708,14 +715,17 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     abort.current?.abort();
     abort.current = null;
     setProgress(null);
+    focusNext.current = "export";
+    flow.release();
     setStatus("ready");
   }
 
   async function continueWith(nextSlug: string) {
     nudge.cancel();
     if (!pdf || !file) return;
-    await setHandoff([await fileToHandoff(pdf, `${baseName(file.name)}.pdf`)]);
-    router.push(`/tools/${nextSlug}?handoff=1`);
+    setNextFailed(null);
+    if (await tryHandoff([fileToHandoff(pdf, `${baseName(file.name)}.pdf`)])) router.push(`/tools/${nextSlug}?handoff=1`);
+    else setNextFailed(nextSlug);
   }
 
   /* ------------------------------------------------------------ keys */
@@ -819,6 +829,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 <Button
                   onClick={() => {
                     nudge.cancel();
+                    focusNext.current = "export";
                     flow.lock();
                     setStatus("ready");
                   }}
@@ -830,7 +841,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 </Button>
               </>
             }
-            next={{ slugs: NEXT_STEPS, onPick: (next) => void continueWith(next) }}
+            next={{ slugs: NEXT_STEPS, onPick: (next) => void continueWith(next), failed: nextFailed }}
             upsell={
               showCard && (
                 <UpsellCard
@@ -880,7 +891,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 data-testid="dropzone"
               >
                 <p className="text-sm text-muted-foreground">or</p>
-                <Button className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
+                <Button ref={focusRef("choose")} className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
                   Choose file
                 </Button>
                 <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>
@@ -948,6 +959,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                       <Download /> <span className="hidden sm:inline">PPTX</span>
                     </Button>
                     <Button
+                      ref={focusRef("export")}
                       size="sm"
                       className="tap"
                       onClick={exportPdf}

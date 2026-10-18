@@ -23,7 +23,7 @@ import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
-import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
+import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
 import type { Deck, DeckSlide } from "@/lib/pptx/parse";
@@ -88,11 +88,13 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
   const [elapsed, setElapsed] = useState(0);
   const [upsell, setUpsell] = useState<UpsellReason | null>(null);
   const [showCard, setShowCard] = useState(false);
+  /** The next tool the result couldn't be passed to. */
+  const [nextFailed, setNextFailed] = useState<string | null>(null);
   const job = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
-  const { next: focusNext, focusRef } = useFocusNext<"done">();
+  const { next: focusNext, focusRef } = useFocusNext<"done" | "convert" | "choose">();
   /** Holds the flow's height while the work view and the result swap. */
   const flow = useHeightLock<HTMLDivElement>();
 
@@ -138,6 +140,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
     flow.lock(resultFloor());
     setStatus("working");
     setError(null);
+    setNextFailed(null);
     setProgress({ done: 0, total: deck.slides.filter((s) => !s.hidden).length || deck.slides.length });
     const controller = new AbortController();
     abort.current = controller;
@@ -165,6 +168,9 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
     } catch {
       if (controller.signal.aborted) return;
       setError("Couldn't convert this file.");
+      if (hadFocus || document.activeElement === document.body) focusNext.current = "convert";
+      // The work view stays, so nothing else lets go of the room kept for the result.
+      flow.release();
       setStatus("ready");
     } finally {
       // A cancelled run must not clear the state of one started after it.
@@ -179,12 +185,17 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
     abort.current?.abort();
     abort.current = null;
     setProgress(null);
+    focusNext.current = "convert";
+    flow.release();
     setStatus("ready");
   }
 
   function reset() {
     nudge.cancel();
-    flow.lock();
+    if (flow.ref.current?.contains(document.activeElement)) focusNext.current = "choose";
+    // Only the result leaving needs its room held; Remove keeps the work view.
+    if (status === "done") flow.lock();
+    else flow.release();
     abort.current?.abort();
     job.current++;
     setFile(null);
@@ -197,8 +208,9 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
   async function continueWith(nextSlug: string) {
     nudge.cancel();
     if (!result || !file) return;
-    await setHandoff([await fileToHandoff(result, pdfName(file.name))]);
-    router.push(`/tools/${nextSlug}?handoff=1`);
+    setNextFailed(null);
+    if (await tryHandoff([fileToHandoff(result, pdfName(file.name))])) router.push(`/tools/${nextSlug}?handoff=1`);
+    else setNextFailed(nextSlug);
   }
 
   // A file handed over from the homepage dropzone or another tool.
@@ -254,7 +266,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                 </Button>
               </>
             }
-            next={{ slugs: NEXT_STEPS, onPick: (next) => void continueWith(next) }}
+            next={{ slugs: NEXT_STEPS, onPick: (next) => void continueWith(next), failed: nextFailed }}
             upsell={
               showCard && (
                 <UpsellCard
@@ -295,7 +307,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
             {!file ? (
               <ToolDropzone label="Drop a .pptx here" onFiles={open}>
                 <p className="text-sm text-muted-foreground">or</p>
-                <Button className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
+                <Button ref={focusRef("choose")} className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
                   Choose file
                 </Button>
                 <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>
@@ -402,7 +414,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                     animate={{ opacity: 1, scale: 1, transition: NOTICE_T }}
                     exit={HANDOFF.out}
                   >
-                    <Button size="lg" onClick={convert} className="min-w-52 shadow-lg shadow-primary/25" data-testid="convert">
+                    <Button ref={focusRef("convert")} size="lg" onClick={convert} className="min-w-52 shadow-lg shadow-primary/25" data-testid="convert">
                       <Sparkles /> Convert to PDF
                     </Button>
                   </motion.div>

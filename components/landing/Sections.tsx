@@ -52,7 +52,9 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
       {/* items-start: the headline stays put while the journey changes height. */}
       <div className="container relative grid grid-cols-1 items-start gap-12 py-16 short:py-6 lg:grid-cols-[1.05fr_1fr] lg:py-24">
         <div className="min-w-0 text-center lg:pt-4 lg:text-left">
-          <h1 className="text-balance text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl short:!text-4xl">
+          {/* Under 370px the size follows the screen (13vw is 3rem at 369px),
+              so the longest rotating word, "your videos.", still fits its mask. */}
+          <h1 className="text-balance text-5xl font-extrabold tracking-tight max-[369px]:text-[13vw] sm:text-6xl lg:text-7xl short:!text-4xl">
             <WordReveal text={LINE_1} />{" "}
             <span className="sr-only">your PDFs, slides and videos.</span>
             {/* The page's largest text: painted from the first frame and only

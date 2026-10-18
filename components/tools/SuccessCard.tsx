@@ -1,9 +1,11 @@
 "use client";
 
-import { motion } from "motion/react";
+import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
 import { Download, File as FileIcon } from "lucide-react";
 import {
   EXIT_T,
+  InlineError,
   NOTICE_T,
   ENTER_T,
   SUCCESS,
@@ -48,11 +50,13 @@ export function SuccessCard({
   files?: SuccessFile[];
   /** Primary and secondary buttons. */
   actions: React.ReactNode;
-  next?: { slugs: string[]; onPick: (slug: string) => void };
+  /** `failed`: the tool the file couldn't be passed to, if a pick failed. */
+  next?: { slugs: string[]; onPick: (slug: string) => void; failed?: string | null };
   upsell?: React.ReactNode;
   className?: string;
 }) {
   const tools = (next?.slugs ?? []).map((slug) => getTool(slug)).filter((t): t is ToolMeta => !!t);
+  const failed = next?.failed ? getTool(next.failed) : undefined;
 
   return (
     <motion.div
@@ -151,6 +155,23 @@ export function SuccessCard({
               </motion.button>
             ))}
           </div>
+          <AnimatePresence>
+            {failed && (
+              <InlineError
+                key="handoff"
+                compact
+                className="mt-3 justify-center"
+                message={
+                  <>
+                    Couldn&apos;t pass the file on. Download it first.{" "}
+                    <Link href={`/tools/${failed.slug}`} className="tap whitespace-nowrap font-semibold underline underline-offset-2">
+                      Open {failed.name}
+                    </Link>
+                  </>
+                }
+              />
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
 

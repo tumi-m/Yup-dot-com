@@ -69,6 +69,20 @@ export async function setHandoff(files: HandoffFile[]) {
   await tx("handoff", "readwrite", (s) => s.put(files, "pending"));
 }
 
+/**
+ * Stores files for the next page. Resolves false instead of throwing when the
+ * browser won't keep them (site data blocked, or storage full), so the caller
+ * can say so and stay where it is.
+ */
+export async function tryHandoff(files: (HandoffFile | Promise<HandoffFile>)[]): Promise<boolean> {
+  try {
+    await setHandoff(await Promise.all(files));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Reads and clears the pending handoff, so a refresh doesn't re-apply it. */
 export async function takeHandoff(): Promise<HandoffFile[]> {
   const files = await tx<HandoffFile[] | undefined>("handoff", "readonly", (s) => s.get("pending"));
