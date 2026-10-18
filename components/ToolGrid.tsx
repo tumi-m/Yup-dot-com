@@ -40,7 +40,7 @@ function ToolCard({ tool }: { tool: ToolMeta }) {
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold leading-snug transition-colors duration-200 group-hover:text-primary group-hover:duration-100 sm:text-base">
               {tool.name}
               {tool.badge && (
-                <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-700 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                   {tool.badge}
                 </span>
               )}

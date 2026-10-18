@@ -894,8 +894,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                                 <PillLabel
                                   chosen={chosen}
                                   slide={qualityPicked.current}
-                                  off="hsl(var(--foreground))"
-                                  className="z-[1] mt-0.5 text-[11px] font-normal leading-none opacity-75"
+                                  // Softer than the height, but white stays above 4.5:1 on the pill.
+                                  off="hsl(var(--foreground) / 0.75)"
+                                  on="hsl(var(--primary-foreground) / 0.9)"
+                                  className="z-[1] mt-0.5 text-[11px] font-normal leading-none"
                                 >
                                   {q.exact ? "" : "~"}
                                   {shortBytes(q.size)}

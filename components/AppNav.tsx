@@ -13,7 +13,8 @@ const LINKS: NavLink[] = [
 
 function PlanBadge({ plan }: { plan: PlanId }) {
   return (
-    <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-500 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+    // Ends on fuchsia-700: white text stays above 4.5:1 across the whole pill.
+    <span className="rounded-full bg-gradient-to-r from-primary to-fuchsia-700 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
       {PLANS[plan]?.name ?? plan}
     </span>
   );
