@@ -15,6 +15,7 @@ import { handoffToFile, takeHandoff } from "@/lib/local-store";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { trackToolUsed } from "@/lib/analytics";
 import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
+import { documentToSend } from "@/lib/ai/document";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -25,7 +26,10 @@ interface LoadedDoc {
   name: string;
   size: number;
   pages: number;
+  /** What each question sends: whole pages, up to what any plan reads. */
   text: string;
+  /** The page count, sent when `text` leaves pages out. */
+  totalPages?: number;
 }
 
 const SUGGESTIONS = [
@@ -152,7 +156,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         setError({ message: "This PDF is a scan. Run OCR PDF first." });
         return;
       }
-      setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: toPagedText(parsed) });
+      const sent = documentToSend(toPagedText(parsed), parsed.pageCount);
+      setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: sent.documentText, totalPages: sent.totalPages });
       setMessages([]);
     } catch {
       setError({ message: "Couldn't read that PDF. It may be damaged or password-protected." });
@@ -182,7 +187,12 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Long chats are trimmed to the newest turns the server accepts.
-        body: JSON.stringify({ documentName: doc.name, documentText: doc.text, messages: fitHistory(history) }),
+        body: JSON.stringify({
+          documentName: doc.name,
+          documentText: doc.text,
+          totalPages: doc.totalPages,
+          messages: fitHistory(history),
+        }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
