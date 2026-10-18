@@ -472,6 +472,7 @@ Variables** and redeploy:
 | -------- | ---------- |
 | `NEXT_PUBLIC_SUPABASE_URL` | accounts, dashboard, editor |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional. Cloudflare Turnstile on log in, sign-up and Forgot password. Set it together with Supabase's CAPTCHA protection (see [Owner checklist](#owner-checklist)) |
 | `SUPABASE_SERVICE_ROLE_KEY` | billing (records payments, plans, team seats) and usage counters shared by every server instance |
 | `PAYSTACK_SECRET_KEY` | checkout, subscription management, webhook signatures |
 | `PAYSTACK_PLAN_PRO`, `PAYSTACK_PLAN_TEAM` | monthly subscriptions (`PLN_…` codes) |

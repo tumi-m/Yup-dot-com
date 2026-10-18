@@ -48,16 +48,42 @@ export function authErrorMessage(search: string): string | null {
     : "That link has expired or was opened in another browser. Log in, or sign up again to get a new link.";
 }
 
+/** New passwords: at least this long (sign-up and the new password page). Supabase Auth should match it. */
+export const MIN_PASSWORD_LENGTH = 10;
+
+export type AuthMode = "login" | "signup" | "reset";
+
+const RATE_LIMIT_SITE = /email rate limit/i;
+
+/**
+ * Supabase answers that would tell whether an email has an account. "Forgot
+ * password" for an unknown email always succeeds at once; for a known one
+ * Supabase waits between emails ("For security purposes, you can only
+ * request this after 47 seconds."), so asking twice would tell. Sign-up says
+ * "User already registered" when email confirmation is off. The form shows
+ * its usual message for these instead.
+ */
+export function revealsAccount(err: unknown, mode: AuthMode): boolean {
+  if (!(err instanceof Error)) return false;
+  const { status, code } = err as { status?: number; code?: string };
+  if (mode === "reset") return status === 429 && code === "over_email_send_rate_limit" && !RATE_LIMIT_SITE.test(err.message);
+  if (mode === "signup") return code === "user_already_exists" || /already registered/i.test(err.message);
+  return false;
+}
+
 /**
  * What to say when Supabase turns a request down. Its message for too many
- * emails is jargon; the wait before asking again for one address
- * ("For security purposes, you can only request this after 47 seconds.") is
- * clear as it is.
+ * emails is jargon. Logging in, a wrong password and an unconfirmed email
+ * get the same answer, so it can't be used to tell which accounts exist.
  */
 export function authFailure(err: unknown): string {
   if (!(err instanceof Error)) return "Something went wrong.";
-  if ((err as { status?: number }).status === 429 && /email rate limit/i.test(err.message)) {
+  const { status, code } = err as { status?: number; code?: string };
+  if (status === 429 && RATE_LIMIT_SITE.test(err.message)) {
     return "Too many emails were sent just now. Wait a few minutes, then try again.";
+  }
+  if (code === "invalid_credentials" || code === "email_not_confirmed" || /^(Invalid login credentials|Email not confirmed)$/i.test(err.message)) {
+    return "Wrong email or password. Just signed up? Open the link in your email first.";
   }
   return err.message;
 }
