@@ -1,14 +1,45 @@
 import {
+  PDFBool,
   PDFCheckBox,
   PDFDocument,
   PDFDict,
   PDFDropdown,
+  PDFName,
   PDFOptionList,
   PDFRadioGroup,
   PDFTextField,
   StandardFonts,
+  type PDFFont,
+  type PDFForm,
 } from "pdf-lib";
+import { openPdf } from "./open";
 import { pageFrame, type PageFrame } from "./page-frame";
+
+/**
+ * Draws each field that needs it in `font`. A value the font can't draw
+ * (Helvetica covers Latin-1 and ’ “ ” – — €, not Arabic, Greek or Cyrillic)
+ * keeps its text, and readers are asked to draw those fields themselves
+ * (NeedAppearances). Save with `updateFieldAppearances: false` afterwards,
+ * or pdf-lib draws them again and fails on the same letters.
+ */
+export function drawFields(form: PDFForm, font: PDFFont) {
+  let undrawn = false;
+  try {
+    for (const field of form.getFields()) {
+      try {
+        if (field.needsAppearancesUpdate()) field.defaultUpdateAppearances(font);
+      } catch {
+        undrawn = true;
+        // Its old picture would show the old value.
+        for (const widget of field.acroField.getWidgets()) widget.dict.delete(PDFName.of("AP"));
+      }
+    }
+  } catch {
+    // A malformed form: readers draw it as they can.
+    undrawn = true;
+  }
+  if (undrawn) form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True);
+}
 
 /** A user-space rectangle as a top-left-origin box on the displayed page. */
 function displayRect(frame: PageFrame, r: { x: number; y: number; width: number; height: number }) {
@@ -70,7 +101,7 @@ export async function detectFormFields(
 ): Promise<DetectedField[]> {
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(bytes);
+    doc = await openPdf(bytes);
   } catch {
     return [];
   }
@@ -181,7 +212,7 @@ export async function fillFormFields(
   values: Record<string, string>,
   opts: { flatten?: boolean } = {}
 ): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes);
+  const doc = await openPdf(bytes);
   const form = doc.getForm();
   const font = await doc.embedFont(StandardFonts.Helvetica);
 
@@ -194,10 +225,10 @@ export async function fillFormFields(
     }
     try {
       if (field instanceof PDFTextField) {
-        // Keep what fits: a value over the field's limit would be dropped whole.
+        // The value as typed, in any script. Keep what fits: a value over the
+        // field's limit would be dropped whole. Never half an emoji.
         const max = field.getMaxLength();
-        const text = value.replace(/[^\x00-\xFF]/g, "?");
-        field.setText(max === undefined ? text : text.slice(0, max));
+        field.setText(max === undefined ? value : value.slice(0, max).replace(/[\uD800-\uDBFF]$/, ""));
       } else if (field instanceof PDFCheckBox) {
         if (value === "true") field.check();
         else field.uncheck();
@@ -213,11 +244,7 @@ export async function fillFormFields(
     }
   }
 
-  try {
-    form.updateFieldAppearances(font);
-  } catch {
-    // Best effort — most viewers regenerate appearances themselves.
-  }
+  drawFields(form, font);
 
   if (opts.flatten) {
     try {
@@ -227,5 +254,5 @@ export async function fillFormFields(
     }
   }
 
-  return doc.save();
+  return doc.save({ updateFieldAppearances: false });
 }

@@ -15,24 +15,11 @@ import {
 } from "pdf-lib";
 import type { Annotation } from "@/lib/editor/types";
 import { embedImage } from "./embed-image";
+import { drawFields } from "./forms";
 import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
+import { openPdf } from "./open";
 import { pageFrame } from "./page-frame";
 import { stampWatermark } from "./watermark";
-
-/** Matrix mapping the displayed page (bottom-left origin) to user space. */
-function displayToUser(page: PDFPage): [number, number, number, number, number, number] {
-  const { x: bx, y: by, width: W, height: H } = page.getCropBox();
-  switch (pageFrame(page).rotation) {
-    case 90:
-      return [0, 1, -1, 0, bx + W, by];
-    case 180:
-      return [-1, 0, 0, -1, bx + W, by + H];
-    case 270:
-      return [0, -1, 1, 0, bx, by + H];
-    default:
-      return [1, 0, 0, 1, bx, by];
-  }
-}
 
 function dataUrlBytes(url: string): Uint8Array | null {
   const m = /^data:[^,]*;base64,(.*)$/s.exec(url);
@@ -101,11 +88,20 @@ function hex(color: string) {
 }
 
 /**
- * The standard fonts are WinAnsi-encoded and throw on characters they cannot
- * represent, so replace anything outside Latin-1 rather than failing an export.
+ * The standard fonts are WinAnsi-encoded (Latin-1 and ’ “ ” – — €) and throw
+ * on characters they cannot represent, so replace those rather than failing
+ * an export. Line breaks and spaces stay for wrapping.
  */
-function safeText(text: string): string {
-  return text.replace(/[^\x00-\xFF]/g, "?");
+function safeText(text: string, font: PDFFont): string {
+  const drawable = (ch: string) => {
+    try {
+      font.encodeText(ch);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return Array.from(text, (ch) => (/\s/.test(ch) || drawable(ch) ? ch : "?")).join("");
 }
 
 /**
@@ -166,7 +162,7 @@ function wrapText(
   maxWidth: number
 ): string[] {
   const lines: string[] = [];
-  for (const paragraph of safeText(text).split("\n")) {
+  for (const paragraph of safeText(text, font).split("\n")) {
     if (!paragraph) {
       lines.push("");
       continue;
@@ -220,7 +216,7 @@ export async function bakeAnnotations(
   annotations: Annotation[],
   options: BakeOptions = {}
 ): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes);
+  const doc = await openPdf(bytes);
   const helvetica = await doc.embedFont(StandardFonts.Helvetica);
   const helveticaBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const pages = doc.getPages();
@@ -228,7 +224,6 @@ export async function bakeAnnotations(
   const form = doc.getForm();
   const usedNames = new Set(form.getFields().map((f) => f.getName()));
   const radioGroups = new Map<string, ReturnType<typeof form.createRadioGroup>>();
-  let createdFields = false;
 
   const uniqueName = (base: string) => {
     const clean = base.trim().replace(/[^\w.-]/g, "_") || "field";
@@ -269,7 +264,7 @@ export async function bakeAnnotations(
     const page = pages[pageIndex];
     const frame = pageFrame(page);
     const ph = frame.height;
-    const matrix = displayToUser(page);
+    const { matrix } = frame;
     const transformed = matrix.join() !== "1,0,0,1,0,0";
     if (transformed) page.pushOperators(pushGraphicsState(), concatTransformationMatrix(...matrix));
     /** A display-space rectangle (bottom-left origin) in user space, for annotation dictionaries. */
@@ -537,9 +532,11 @@ export async function bakeAnnotations(
             form.markFieldAsDirty(f.ref);
           };
           try {
+            // Values are set once the widget is on the page: addToPage draws
+            // the field, and fails on letters Helvetica lacks (drawFields
+            // below leaves those to the reader).
             if (ann.field === "text") {
               const f = form.createTextField(uniqueName(ann.name));
-              if (ann.value) f.setText(safeText(ann.value));
               // The widget must exist before the font size is applied — setting
               // it first makes pdf-lib throw and leaves a field with no widget.
               f.addToPage(page, { ...opts, font: helvetica });
@@ -548,6 +545,7 @@ export async function bakeAnnotations(
               } catch {
                 // Keep the default size rather than losing the field.
               }
+              if (ann.value) f.setText(ann.value);
               upright(f);
             } else if (ann.field === "checkbox") {
               const f = form.createCheckBox(uniqueName(ann.name));
@@ -557,8 +555,8 @@ export async function bakeAnnotations(
             } else if (ann.field === "dropdown") {
               const f = form.createDropdown(uniqueName(ann.name));
               f.setOptions(ann.options.length ? ann.options : ["Option 1"]);
-              if (ann.value) f.select(ann.value);
               f.addToPage(page, { ...opts, font: helvetica });
+              if (ann.value) f.select(ann.value);
               upright(f);
             } else {
               // Radio buttons sharing a name belong to one group.
@@ -571,7 +569,6 @@ export async function bakeAnnotations(
               group.addOptionToPage(option, page, opts);
               upright(group);
             }
-            createdFields = true;
           } catch {
             // A field name collision or malformed form should not kill the export.
           }
@@ -583,17 +580,11 @@ export async function bakeAnnotations(
     if (transformed) page.pushOperators(popGraphicsState());
   }
 
-  if (createdFields) {
-    try {
-      form.updateFieldAppearances(helvetica);
-    } catch {
-      // Appearance generation is best-effort; viewers regenerate on open.
-    }
-  }
+  drawFields(form, helvetica);
 
   if (options.watermark) await stampWatermark(doc, helvetica);
 
-  return doc.save();
+  return doc.save({ updateFieldAppearances: false });
 }
 
 /** Rotate a set of pages by a relative angle. */
@@ -602,7 +593,7 @@ export async function rotatePagesBy(
   pageIndices: number[],
   delta: number
 ): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes);
+  const doc = await openPdf(bytes);
   const targets = new Set(pageIndices);
   doc.getPages().forEach((page, i) => {
     if (targets.has(i)) {
@@ -617,7 +608,7 @@ export async function insertBlankPage(
   bytes: ArrayBuffer | Uint8Array,
   afterIndex: number
 ): Promise<Uint8Array> {
-  const doc = await PDFDocument.load(bytes);
+  const doc = await openPdf(bytes);
   const reference = doc.getPages()[afterIndex] ?? doc.getPages()[0];
   // Match the page as displayed: a portrait page shown landscape via /Rotate
   // gets a landscape blank.

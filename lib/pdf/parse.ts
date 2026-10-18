@@ -17,6 +17,7 @@
  */
 
 import { configureWorker } from "./worker";
+import { showsPictures } from "./page-content";
 
 export interface ParsedSpan {
   text: string;
@@ -36,6 +37,8 @@ export interface ParsedLine {
   y: number;
   fontSize: number;
   bold: boolean;
+  /** Reads right to left (Arabic, Hebrew): `spans` run from the right. */
+  rtl: boolean;
   spans: ParsedSpan[];
 }
 
@@ -71,9 +74,15 @@ export interface ParsedDocument {
   pageCount: number;
   /** Median body font size, used for heading classification. */
   bodySize: number;
-  /** True when pages carried essentially no extractable text (likely a scan). */
+  /**
+   * True when there is no text at all, or at least half the pages are
+   * scans: a picture, with next to no text of their own.
+   */
   likelyScanned: boolean;
 }
+
+/** A page with fewer characters than this has no real text layer of its own. */
+const PAGE_TEXT = 40;
 
 // ---------------------------------------------------------------------------
 // pdf.js loading
@@ -102,27 +111,97 @@ interface RawItem {
 const XML_ILLEGAL =
   /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
-function toSpans(items: RawItem[]): ParsedSpan[] {
+// Arabic and Hebrew letters in their joined shapes (U+FExx and the like), as
+// many PDFs store them: made the plain letters again, so the text can be
+// searched. Other compatibility characters (², ½, ™) stay as they are.
+const PRESENTATION_FORMS = /[\uFB1D-\uFDFF\uFE70-\uFEFE]+/g;
+
+/**
+ * Spans on the page as displayed: from the CropBox's corner with /Rotate
+ * applied, y up from the bottom. A landscape page stored as a portrait one
+ * turned by /Rotate, or one cut from a wider sheet, reads like any other.
+ */
+function toSpans(items: RawItem[], viewport: { transform: number[]; height: number }): ParsedSpan[] {
   const spans: ParsedSpan[] = [];
+  const [va, vb, vc, vd, ve, vf] = viewport.transform;
+  const scale = Math.hypot(va, vb) || 1;
   for (const item of items) {
-    const text = item.str?.replace(XML_ILLEGAL, "");
+    const text = item.str
+      ?.replace(PRESENTATION_FORMS, (forms) => forms.normalize("NFKC"))
+      .replace(XML_ILLEGAL, "");
     if (!text || !text.trim()) continue;
     const [a, b, , , e, f] = item.transform;
-    // For unrotated text a == d == fontSize; hypot covers rotated runs.
-    const fontSize = Math.hypot(a, b) || item.height || 12;
+    // The baseline's direction on the displayed page; its length is the font size.
+    const dx = va * a + vc * b;
+    const dy = vb * a + vd * b;
+    const size = Math.hypot(dx, dy);
+    const fontSize = size || item.height || 12;
+    // The run's extent across the page; its width is measured along the baseline.
+    const run = (size ? dx / size : 1) * item.width * scale;
+    const x = va * e + vc * f + ve;
     const fontName = item.fontName ?? "";
     spans.push({
       text,
-      x: e,
-      y: f,
-      width: item.width,
-      height: item.height || fontSize,
+      x: Math.min(x, x + run),
+      y: viewport.height - (vb * e + vd * f + vf),
+      width: Math.abs(run),
+      height: item.height * scale || fontSize,
       fontSize,
       fontName,
       bold: /bold|black|heavy|semibold/i.test(fontName),
     });
   }
   return spans;
+}
+
+const RTL_LETTERS = /(?=\p{L})[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
+const LTR_LETTERS = /(?=\p{L})[^\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
+
+/** Letters of right-to-left scripts less the others: positive for Arabic or Hebrew text. */
+function rtlBalance(text: string): number {
+  return (text.match(RTL_LETTERS)?.length ?? 0) - (text.match(LTR_LETTERS)?.length ?? 0);
+}
+
+/** True when most letters in `text` are Arabic, Hebrew or another right-to-left script. */
+export function isRtl(text: string): boolean {
+  return rtlBalance(text) > 0;
+}
+
+/** Horizontal space between two spans, whichever side each is on. */
+function gapBetween(p: ParsedSpan, q: ParsedSpan): number {
+  return Math.max(p.x, q.x) - Math.min(p.x + p.width, q.x + q.width);
+}
+
+/**
+ * Text of spans next to each other in reading direction, with a space where
+ * they stand apart. pdf.js gives each piece in reading order, but pieces of
+ * the other direction (an English name in Arabic text, a number, or Arabic
+ * letters drawn one by one in an English line) come in visual order: those
+ * runs are turned around.
+ */
+function joinSpans(spans: ParsedSpan[], rtl: boolean): string {
+  const pieces: { text: string; flip: boolean; word: boolean }[] = [];
+  spans.forEach((span, i) => {
+    const prev = spans[i - 1];
+    const last = pieces[pieces.length - 1]?.text ?? "";
+    // A space when the gap exceeds a fraction of an em and the runs are not
+    // already separated by their own whitespace.
+    if (prev && gapBetween(prev, span) > prev.fontSize * 0.18 && !/\s$/.test(last) && !/^\s/.test(span.text)) {
+      pieces.push({ text: " ", flip: false, word: false });
+    }
+    const balance = rtlBalance(span.text);
+    const ltr = balance < 0 || (!balance && /\p{Nd}/u.test(span.text));
+    pieces.push({ text: span.text, flip: rtl ? ltr : balance > 0, word: balance !== 0 || ltr });
+  });
+  for (let i = 0; i < pieces.length; i++) {
+    if (!pieces[i].flip) continue;
+    // The run reaches the last piece of that direction before one of the line's own.
+    let end = i;
+    for (let k = i + 1; k < pieces.length && (pieces[k].flip || !pieces[k].word); k++) if (pieces[k].flip) end = k;
+    pieces.splice(i, end - i + 1, ...pieces.slice(i, end + 1).reverse());
+    i = end;
+  }
+  return pieces.map((p) => p.text).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -150,31 +229,22 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
   }
   lines.push(current);
 
+  // Lines of only numbers or signs read in the page's direction.
+  const rtlPage = isRtl(spans.map((s) => s.text).join(""));
   return lines.map((group) => {
-    const ordered = [...group].sort((p, q) => p.x - q.x);
-    let text = "";
-    for (let i = 0; i < ordered.length; i++) {
-      const span = ordered[i];
-      if (i > 0) {
-        const prev = ordered[i - 1];
-        const gap = span.x - (prev.x + prev.width);
-        // Insert a space when the visual gap exceeds a fraction of an em and
-        // the runs are not already separated by their own whitespace.
-        if (gap > prev.fontSize * 0.18 && !/\s$/.test(text) && !/^\s/.test(span.text)) {
-          text += " ";
-        }
-      }
-      text += span.text;
-    }
+    const balance = rtlBalance(group.map((s) => s.text).join(""));
+    const rtl = balance > 0 || (!balance && rtlPage);
+    // Right-to-left lines (Arabic, Hebrew) read from the right.
+    const ordered = [...group].sort((p, q) => (rtl ? q.x - p.x : p.x - q.x));
     const fontSize = median(ordered.map((s) => s.fontSize));
-    const last = ordered[ordered.length - 1];
     return {
-      text: text.replace(/\s+/g, " ").trim(),
-      x: ordered[0].x,
-      right: last.x + last.width,
+      text: joinSpans(ordered, rtl).replace(/\s+/g, " ").trim(),
+      x: Math.min(...ordered.map((s) => s.x)),
+      right: Math.max(...ordered.map((s) => s.x + s.width)),
       y: ordered[0].y,
       fontSize,
       bold: ordered.every((s) => s.bold),
+      rtl,
       spans: ordered,
     };
   }).filter((l) => l.text.length > 0);
@@ -282,31 +352,22 @@ interface Cell {
  */
 const CELL_GAP_EM = 0.6;
 
-/** Split a line into cells wherever an unusually wide horizontal gap appears. */
+/**
+ * Split a line into cells wherever an unusually wide horizontal gap appears.
+ * Cells come in reading order: from the right in a right-to-left line.
+ */
 function splitCells(line: ParsedLine): Cell[] {
-  const cells: Cell[] = [];
-  let buffer = "";
-  let startX = line.spans[0]?.x ?? line.x;
-  let right = startX;
-
-  for (let i = 0; i < line.spans.length; i++) {
-    const span = line.spans[i];
-    if (i > 0) {
-      const prev = line.spans[i - 1];
-      const gap = span.x - (prev.x + prev.width);
-      if (gap > prev.fontSize * CELL_GAP_EM) {
-        cells.push({ text: buffer.trim(), x: startX, right });
-        buffer = "";
-        startX = span.x;
-      } else if (gap > prev.fontSize * 0.18 && !/\s$/.test(buffer)) {
-        buffer += " ";
-      }
-    }
-    buffer += span.text;
-    right = span.x + span.width;
-  }
-  if (buffer.trim()) cells.push({ text: buffer.trim(), x: startX, right });
-  return cells;
+  const groups: ParsedSpan[][] = [];
+  line.spans.forEach((span, i) => {
+    const prev = line.spans[i - 1];
+    if (!prev || gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM) groups.push([]);
+    groups[groups.length - 1].push(span);
+  });
+  return groups.map((spans) => ({
+    text: joinSpans(spans, line.rtl).trim(),
+    x: Math.min(...spans.map((s) => s.x)),
+    right: Math.max(...spans.map((s) => s.x + s.width)),
+  }));
 }
 
 /**
@@ -486,13 +547,28 @@ export async function parseDocument(
   const perPage: { lines: ParsedLine[]; page: number }[] = [];
   const allSizes: number[] = [];
   let totalChars = 0;
+  let scannedPages = 0;
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();
-    const spans = toSpans(content.items as unknown as RawItem[]);
-    totalChars += spans.reduce((n, s) => n + s.text.trim().length, 0);
+    const spans = toSpans(content.items as unknown as RawItem[], viewport);
+    const chars = spans.reduce((n, s) => n + s.text.trim().length, 0);
+    totalChars += chars;
+    // A scanned page: next to no text of its own, and a picture. A slide or
+    // certificate with a short title has no picture, or more text. Pictures
+    // are only looked for while the answer can still change.
+    const undecided = scannedPages < doc.numPages / 2 && scannedPages + doc.numPages - p + 1 >= doc.numPages / 2;
+    if (chars < PAGE_TEXT && undecided) {
+      try {
+        if (await showsPictures(page, pdfjsLib.OPS as unknown as Record<string, number>)) scannedPages++;
+      } catch {
+        // Drawing it fails: its text is all there is to go on.
+      } finally {
+        page.cleanup();
+      }
+    }
 
     const lines = linesInReadingOrder(spans, viewport.width);
     perPage.push({ lines, page: p });
@@ -519,7 +595,7 @@ export async function parseDocument(
     blocks,
     pageCount,
     bodySize,
-    likelyScanned: totalChars < pageCount * 40,
+    likelyScanned: totalChars === 0 || scannedPages >= pageCount / 2,
   };
 }
 
