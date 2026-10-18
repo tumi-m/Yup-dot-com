@@ -49,6 +49,7 @@ import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
 import { canEncodeH264, MAX_IN_MEMORY, shortBytes } from "@/lib/video-quality";
+import { readToBlob } from "@/lib/read-response";
 
 export interface MediaToolConfig {
   platform: MediaPlatform;
@@ -130,30 +131,6 @@ function saveAs(href: string, name?: string) {
   a.remove();
 }
 
-/** Reads a response into memory, reporting progress when the size is known. */
-async function readWithProgress(res: Response, onProgress: (fraction: number) => void): Promise<Uint8Array> {
-  const total = Number(res.headers.get("content-length")) || 0;
-  const reader = res.body?.getReader();
-  if (!reader) return new Uint8Array(await res.arrayBuffer());
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    if (total) onProgress(Math.min(1, received / total));
-  }
-  if (total && received < total) throw new Error("incomplete");
-  const out = new Uint8Array(received);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.length;
-  }
-  return out;
-}
-
 /** Gives a YouTube download back when its job failed or never ran (the server checks). */
 function refund(token: string) {
   void fetch("/api/media/refund", {
@@ -187,7 +164,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [kind, setKind] = useState<MediaKind>(config.kind);
   const [height, setHeight] = useState<number>(config.defaultHeight ?? 720);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ value: number; stage: string }>({ value: 0, stage: "queued" });
+  /** `detail` replaces the stage's label on screen (not for screen readers, who hear stage changes only). */
+  const [progress, setProgress] = useState<{ value: number; stage: string; detail?: string }>({ value: 0, stage: "queued" });
   const [file, setFile] = useState<SavedFile | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [upsell, setUpsell] = useState<UpsellReason | null>(null);
@@ -265,8 +243,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     if (window.location.pathname + window.location.search !== next) window.history.replaceState(null, "", next);
   }
 
-  const advance = (value: number, stage: string) =>
-    setProgress((p) => ({ value: Math.max(p.value, Math.min(1, value)), stage }));
+  const advance = (value: number, stage: string, detail?: string) =>
+    setProgress((p) => ({ value: Math.max(p.value, Math.min(1, value)), stage, detail }));
 
   /** `auto`: from a ?url= link on arrival, so focus stays where the page put it. */
   async function lookup(e?: React.FormEvent, auto = false) {
@@ -449,11 +427,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       }
       // Re-encoding usually takes longer than the download.
       const share = shrink ? 0.3 : 1;
-      const bytes = await readWithProgress(res, (f) => advance(f * share, "downloading")).catch((err) => {
+      let blob = await readToBlob(res, "video/mp4", (f) => advance(f * share, "downloading")).catch((err) => {
         throw isAbort(err) ? err : new Shown(stopped);
       });
       if (!alive.current || signal.aborted) return;
-      let blob = new Blob([bytes as BlobPart], { type: "video/mp4" });
       let was: number | undefined;
       let note: string | undefined;
       if (shrink) {
@@ -486,8 +463,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   async function convertToMp3(href: string, name: string, from: string, signal: AbortSignal) {
     const stopped = `${from} stopped sending the video. Try again.`;
     let converterReady = false;
+    // The converter's first download is 31 MB: once the video is in, the bar
+    // follows it from 40 to 50%, and the label says how much has come.
+    let core: { fraction: number; label: string } | null = null;
+    let waiting = false;
+    const preparing = () =>
+      advance(0.4 + 0.1 * (core?.fraction ?? 0), "preparing", core && core.fraction < 1 ? core.label : undefined);
     const converter = import("@/lib/mp3").then(async (m) => {
-      const c = await m.loadMp3Converter(signal);
+      const c = await m.loadMp3Converter(signal, (fraction, received) => {
+        core = { fraction, label: m.coreDownloadLabel(received) };
+        if (waiting) preparing();
+      });
       converterReady = true;
       return c;
     });
@@ -495,20 +481,24 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     let mp4: Uint8Array;
     try {
       const res = await fetchFile(href, from, signal);
-      mp4 = await readWithProgress(res, (f) => advance(f * 0.4, "fetching")).catch((err) => {
+      const video = await readToBlob(res, "video/mp4", (f) => advance(f * 0.4, "fetching")).catch((err) => {
         throw isAbort(err) ? err : new Shown(stopped);
       });
+      mp4 = new Uint8Array(await video.arrayBuffer());
     } catch (err) {
       void converter.then((c) => c.dispose(), () => null);
       if (isAbort(err) || signal.aborted) return;
       return fail(err instanceof Shown ? err.message : stopped);
     }
     try {
-      if (!converterReady) advance(0.4, "preparing");
+      if (!converterReady) {
+        waiting = true;
+        preparing();
+      }
       const c = await converter;
-      advance(0.4, "converting");
+      advance(0.5, "converting");
       const { ConvertError } = await import("@/lib/mp3");
-      const mp3 = await c.convert(mp4, (f) => advance(0.4 + f * 0.6, "converting")).catch((err) => {
+      const mp3 = await c.convert(mp4, (f) => advance(0.5 + f * 0.5, "converting")).catch((err) => {
         throw err instanceof ConvertError ? new Shown(err.message) : err;
       });
       if (!alive.current || signal.aborted) return;
@@ -1043,7 +1033,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 <p className="mt-2 text-center text-sm text-muted-foreground" aria-hidden>
                   {/* The number hangs off the label, so the label stays put as it grows. */}
                   <span className="relative">
-                    {kind === "mp3" && progress.stage === "processing" ? STAGES.converting : (STAGES[progress.stage] ?? "Working…")}
+                    {progress.detail ??
+                      (kind === "mp3" && progress.stage === "processing" ? STAGES.converting : (STAGES[progress.stage] ?? "Working…"))}
                     <span className="absolute left-full top-0 ml-1">
                       <ProgressPercent value={progress.value} />
                     </span>

@@ -12,6 +12,7 @@ import { dedupe, directLengths, dropUnreachable, recompressStreams, stripPrivate
 import { optimiseImages, type ImageSettings } from "./images";
 import { asDict, findPlacements, listPages } from "./placement";
 import { decodeFully } from "./streams";
+import { stopIfAborted } from "../../abort";
 
 export type Preset = "smallest" | "balanced" | "high";
 
@@ -37,6 +38,8 @@ export class UnreadablePdfError extends Error {}
 export interface CompressOptions {
   preset: Preset;
   onProgress?: (fraction: number, label: string) => void;
+  /** Stops between images once aborted. */
+  signal?: AbortSignal;
 }
 
 /** PDF/A-1 builds on PDF 1.4, which has no object streams, so such files are saved without them. */
@@ -92,8 +95,10 @@ export async function compressPdf(bytes: Uint8Array, opts: CompressOptions): Pro
   const pages = listPages(context);
   const placements = findPlacements(context, pages);
   const report = await optimiseImages(context, pages, placements, PRESETS[opts.preset], (done, total) => {
+    stopIfAborted(opts.signal);
     if (total) opts.onProgress?.((done / total) * 0.9, `Image ${Math.min(Math.floor(done) + 1, total)} of ${total}`);
   });
+  stopIfAborted(opts.signal);
   opts.onProgress?.(0.92, "Saving…");
   await new Promise((r) => setTimeout(r, 0)); // let the label show before the save runs
   recompressStreams(context, report.rewritten);
