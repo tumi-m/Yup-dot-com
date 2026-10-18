@@ -336,8 +336,12 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 - **Untrusted files** are parsed in the browser; PowerPoint text is sanitised
   before it is shown as HTML.
 - **Headers.** HSTS, `nosniff`, `X-Frame-Options`, a Referrer and Permissions
-  policy, and a CSP that blocks plugins, `<base>` changes, off-site form posts
-  and framing (`next.config.ts`).
+  policy (`next.config.ts`), and on every page a Content-Security-Policy with
+  a fresh nonce (`lib/csp.ts`, set in `proxy.ts`): only the site's own
+  scripts run, so injected `<script>` tags, `onerror=` handlers and
+  `javascript:` links don't, and `fetch` reaches only this site, Supabase,
+  the media worker and (after consent) Google Analytics. It also blocks
+  plugins, `<base>` changes, off-site form posts and framing.
 
 **How it's tested** (all in CI, `.github/workflows/ci.yml`):
 
@@ -447,8 +451,9 @@ ffmpeg.wasm · mediabunny · JSZip · Radix UI · lucide-react · yt-dlp (media 
 
 ## Production notes
 
-- Security headers (HSTS, nosniff, frame options, permissions policy, a basic
-  CSP) are set in `next.config.ts`. See [Security](#security).
+- Security headers (HSTS, nosniff, frame options, permissions policy) are set
+  in `next.config.ts`, and the pages' nonce-based CSP in `proxy.ts`. See
+  [Security](#security).
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
 - **Roadmap:** saved signatures, version history, shared team workspaces;

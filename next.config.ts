@@ -14,9 +14,10 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
-  // A first, safe CSP: no plugins, no <base> hijacking, forms only post here,
-  // framing only by this site. It does not yet restrict script sources (that
-  // needs per-request nonces for Next's inline scripts).
+  // For responses the proxy doesn't see (/_next/static, /vendor, images): no
+  // plugins, no <base> hijacking, forms only post here, framing only by this
+  // site. Pages get a stricter policy with a per-request nonce that also
+  // limits scripts and connections (lib/csp.ts, proxy.ts).
   {
     key: "Content-Security-Policy",
     value: "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",

@@ -546,7 +546,7 @@ export async function parseDocument(
   signal?: AbortSignal
 ): Promise<ParsedDocument> {
   const pdfjsLib = await getPdfjs();
-  const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
+  const doc = await pdfjsLib.getDocument({ data: data.slice(), isEvalSupported: false }).promise;
 
   const perPage: { lines: ParsedLine[]; page: number }[] = [];
   const allSizes: number[] = [];
