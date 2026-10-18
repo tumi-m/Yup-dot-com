@@ -80,13 +80,15 @@ jobs:
       - run: node scripts/check-bundle-secrets.mjs --canary
       # Pages render at request time, so they aren't files the step above can
       # read: start the build and check it from outside, as a visitor would,
-      # looking for the fake values too. (The canary Supabase doesn't exist,
-      # so the database checks run in the weekly live check instead.)
+      # looking for the fake values too, and ask for every private page and
+      # closed route signed out (a route missing from scripts/routes.mjs
+      # fails). The canary Supabase doesn't exist, so the database checks run
+      # in the weekly live check and in the database job instead.
       - name: Check the running build from outside
         run: |
           npx next start -p 3000 > next.log 2>&1 &
           for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3000/robots.txt && break; sleep 1; done
-          node scripts/check-live.mjs http://localhost:3000 --env-values --skip-supabase
+          node scripts/check-live.mjs http://localhost:3000 --env-values --skip-supabase --routes .next/app-path-routes-manifest.json
 
   # Row Level Security: runs supabase/schema.sql and the migrations on a
   # plain Postgres 16 and tries what anyone holding the public anon key could.

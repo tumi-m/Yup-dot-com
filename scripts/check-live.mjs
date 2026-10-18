@@ -13,26 +13,38 @@
  *    an API response, a static file and an error page.
  * 3. Files that must not be public (/.env, /.git/config, source code,
  *    source maps): 404.
- * 4. Private pages signed out (dashboard, billing, password, editor): a
- *    redirect to /login, as HTML and as an RSC request, with no private data.
+ * 4. Pages and routes signed out: every private page in scripts/routes.mjs
+ *    must redirect to /login (as HTML and as an RSC request) with no private
+ *    data, also with .png on the end; every closed route must refuse a GET.
+ *    With --routes, a route the build has that the list doesn't fails.
  * 5. Database: reads the Supabase URL and public key from the site's own
- *    scripts and asks PostgREST for every app table and view, calls every
- *    SECURITY DEFINER function, and lists the documents bucket. Anything but
- *    "no rows" or "permission denied" fails. Also checks that Supabase's
- *    "Confirm email" is on.
+ *    scripts. Every table and view in supabase/schema.sql or in the API's
+ *    listing must refuse reads and writes (insert, update, delete, sent so
+ *    they change nothing); every SECURITY DEFINER function there and every
+ *    function the API lists is called read-only and must be refused; every
+ *    bucket in supabase/*.sql or the listing must list nothing and not be
+ *    public. Also checks that Supabase's "Confirm email" is on. With a test
+ *    account (CHECK_LIVE_EMAIL and CHECK_LIVE_PASSWORD), the same again
+ *    signed in: only that account's own rows and files may come back.
  * 6. /.well-known/security.txt is there and not expired.
  *
  * Options:
  *   --env-values        also fail on the value of any server-only variable set
  *                       in this environment (CI, against a build made with them)
+ *   --routes FILE       the build's .next/app-path-routes-manifest.json: fail on
+ *                       a route that isn't in scripts/routes.mjs
  *   --skip-supabase     skip the database checks
  *   --supabase-url URL  use this Supabase URL instead of the one in the scripts
- *   --quiet             print failures and the summary only
+ *   --quiet             print failures, warnings and the summary only
+ *
+ * The test account is an ordinary account made for this (sign up, confirm
+ * the email, never use it for anything else). With Supabase's CAPTCHA on,
+ * the signed-in checks can't sign in; leave the two variables unset then.
  *
  * Needs Node 20 or later and nothing else. Exit code: 0 all passed,
  * 1 a check failed, 2 the site couldn't be checked.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -45,9 +57,9 @@ const option = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const target = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--supabase-url");
+const target = args.find((a, i) => !a.startsWith("--") && !["--supabase-url", "--routes"].includes(args[i - 1]));
 if (!target || !/^https?:\/\//.test(target)) {
-  console.error("Usage: npm run check:live -- https://your-site [--env-values] [--skip-supabase] [--supabase-url URL] [--quiet]");
+  console.error("Usage: npm run check:live -- https://your-site [--env-values] [--routes .next/app-path-routes-manifest.json] [--skip-supabase] [--supabase-url URL] [--quiet]");
   process.exit(2);
 }
 const SITE = new URL(target).origin;
@@ -59,9 +71,12 @@ const envValues = flag("--env-values") ? secretScan.serverValues(process.env) : 
 
 // ---------- Report ----------
 const results = [];
+const warnings = [];
 let section = "";
 const pass = (msg) => results.push({ section, ok: true, msg });
 const fail = (msg) => results.push({ section, ok: false, msg });
+// Not a failure, but printed even with --quiet: something couldn't be checked.
+const warn = (msg) => warnings.push(msg);
 
 // ---------- HTTP ----------
 async function request(url, { method = "GET", headers = {}, body, maxBytes = 15e6 } = {}) {
@@ -201,13 +216,20 @@ function headerProblems(h, kind) {
 
 section = "Security headers";
 const firstScript = goodScripts[0];
-const missing = await get(`/check-live-missing-${randomUUID().slice(0, 8)}`);
+const missingId = randomUUID().slice(0, 8);
+const missing = await get(`/check-live-missing-${missingId}`);
+// A page path ending in an image extension must still get the page's CSP.
+const missingPng = await get(`/check-live-missing-${missingId}.png`);
 const api = await get("/api/prices");
+// Redirects made outside the app (next.config) used to lose the headers.
+const legacyTxt = await get("/security.txt");
 for (const [label, res, kind] of [
   [`page /`, home, "page"],
   [`API /api/prices`, api, "api"],
   [`static ${firstScript ? pathOf(firstScript.url) : "(no script)"}`, firstScript, "static"],
   [`error page (HTTP ${missing.status})`, missing, "page"],
+  [`error page ending in .png (HTTP ${missingPng.status})`, missingPng, "page"],
+  [`redirect /security.txt (HTTP ${legacyTxt.status})`, legacyTxt, "static"],
 ]) {
   if (!res || res.status === 0) {
     fail(`${label}: no response`);
@@ -218,6 +240,7 @@ for (const [label, res, kind] of [
   else pass(`${label}: ${kind === "page" ? "HSTS, nosniff, framing, referrer, CSP with script-src" : "HSTS, nosniff, framing, referrer, CSP"}${HTTPS ? "" : " (HSTS not checked over http)"}`);
 }
 if (missing.status !== 404) fail(`a page that doesn't exist answered HTTP ${missing.status}, not 404`);
+if (missingPng.status !== 404) fail(`a path that doesn't exist, ending in .png, answered HTTP ${missingPng.status}, not 404`);
 
 // ---------- 3. Files that must not be public ----------
 section = "Files that must not be public";
@@ -254,8 +277,8 @@ await pool(goodScripts.slice(0, 40), 6, async (script) => {
 if (maps.length) for (const m of maps) fail(`source map served: ${m}`);
 else pass(`source maps: none with source code (${Math.min(goodScripts.length, 40)} scripts checked)`);
 
-// ---------- 4. Private pages, signed out ----------
-section = "Private pages, signed out";
+// ---------- 4. Pages and routes, signed out ----------
+section = "Private pages and routes, signed out";
 const publicText = pages.map((p) => p.html.text).join("\n");
 const knownEmails = new Set(publicText.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? []);
 function privateData(text) {
@@ -268,27 +291,65 @@ function privateData(text) {
   if (emails.length) found.push(`email addresses (${emails.length})`);
   return found;
 }
-const PRIVATE = ["/dashboard", "/settings/billing", "/settings/password", `/editor/${randomUUID()}`];
+// The page and route lists sit next to this script; outside the repository
+// the private pages and routes known when it was written are used.
+const routeList = await import(new URL("./routes.mjs", import.meta.url).href).catch(() => ({
+  PUBLIC_PAGES: [],
+  PUBLIC_ROUTES: [],
+  PRIVATE_PAGES: ["/dashboard", "/editor/[id]", "/settings/billing", "/settings/password"],
+  CLOSED_ROUTES: ["/api/billing/team", "/api/billing/verify", "/api/media/health"],
+}));
+const fill = (path) => path.replace(/\[\[?\.{0,3}[^\]]+\]\]?/g, () => randomUUID());
+const shown = (path) => path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>");
+
+if (option("--routes")) {
+  // Every route the build has must be in scripts/routes.mjs.
+  let manifest = null;
+  try {
+    manifest = JSON.parse(readFileSync(option("--routes"), "utf8"));
+  } catch (err) {
+    fail(`--routes: couldn't read ${option("--routes")} (${err.message})`);
+  }
+  if (manifest) {
+    const known = new Set([...routeList.PUBLIC_PAGES, ...routeList.PRIVATE_PAGES, ...routeList.PUBLIC_ROUTES, ...routeList.CLOSED_ROUTES]);
+    const built = [...new Set(Object.values(manifest))].filter((r) => !/^\/_(?:not-found|global-error|error)$/.test(r));
+    const unknown = built.filter((r) => !known.has(r));
+    for (const r of unknown) fail(`${r}: the build has this route but scripts/routes.mjs doesn't say whether it's public or private`);
+    if (!unknown.length) pass(`all ${built.length} routes of the build are listed in scripts/routes.mjs`);
+  }
+}
+
+const PRIVATE = routeList.PRIVATE_PAGES.map(fill);
+// The same with .png on the end, once for a dynamic page: it used to skip the proxy.
+const dynamicPrivate = routeList.PRIVATE_PAGES.find((p) => p.includes("["));
+if (dynamicPrivate) PRIVATE.push(`${fill(dynamicPrivate)}.png`);
 for (const path of PRIVATE) {
   for (const [how, headers] of [["page", {}], ["RSC", { RSC: "1", "Next-Router-Prefetch": "1" }]]) {
     const res = await get(path, { headers });
-    const label = `${path.replace(/[0-9a-f-]{36}$/, "<id>")} (${how})`;
+    const label = `${shown(path)} (${how})`;
     const location = res.headers.get("location") ?? "";
     const toLogin = res.status >= 300 && res.status < 400 && /\/login\b/.test(location);
     const denied = [401, 403, 404].includes(res.status);
     const data = privateData(res.text);
+    const csp = headerProblems(res.headers, "page");
     if (data.length) fail(`${label}: HTTP ${res.status} carries ${data.join(", ")}`);
-    else if (toLogin) pass(`${label}: ${res.status} to ${new URL(location, SITE).pathname}, no private data`);
-    else if (denied) pass(`${label}: HTTP ${res.status}, no private data`);
-    else fail(`${label}: HTTP ${res.status}${location ? ` to ${location}` : ""}, not a redirect to /login`);
+    else if (!toLogin && !denied) fail(`${label}: HTTP ${res.status}${location ? ` to ${location}` : ""}, not a redirect to /login`);
+    else if (how === "page" && csp.length) fail(`${label}: HTTP ${res.status} but missing ${csp.join(", ")}`);
+    else pass(`${label}: ${toLogin ? `${res.status} to ${new URL(location, SITE).pathname}` : `HTTP ${res.status}`}, no private data`);
   }
 }
-{
-  const res = await get("/api/billing/team");
+
+// Routes that need an account, a signature, a POST or the owner.
+const closed = await pool(routeList.CLOSED_ROUTES, 6, async (path) => ({ path, res: await get(fill(path)) }));
+const opened = [];
+for (const { path, res } of closed) {
   const data = privateData(res.text);
-  if (data.length || res.status === 200) fail(`/api/billing/team: HTTP ${res.status}${data.length ? ` carries ${data.join(", ")}` : " without signing in"}`);
-  else pass(`/api/billing/team: HTTP ${res.status}, no private data`);
+  if (res.status === 0) opened.push(`${path}: no response`);
+  else if (res.status >= 200 && res.status < 300) opened.push(`${path}: HTTP ${res.status} to a signed-out GET${data.length ? `, with ${data.join(", ")}` : ""}`);
+  else if (data.length) opened.push(`${path}: HTTP ${res.status} carries ${data.join(", ")}`);
 }
+if (opened.length) for (const o of opened) fail(o);
+else if (closed.length) pass(`${closed.length} closed routes (/api/billing/*, /api/media/*, /auth/*…): none answers a signed-out GET`);
 
 // ---------- 5. Database, with the site's own public key ----------
 section = "Database (Supabase) with the site's public key";
@@ -316,29 +377,48 @@ function publicSupabase() {
   return { url: url?.replace(/\/+$/, ""), key };
 }
 
-/** Tables, views and SECURITY DEFINER functions, from supabase/*.sql when this runs from the repo. */
+/**
+ * Tables and views (with a column, for the update and delete checks),
+ * SECURITY DEFINER functions (with arguments) and storage buckets, from
+ * supabase/*.sql when this runs from the repository.
+ */
 function appSchema() {
-  const files = ["../supabase/schema.sql"].map((f) => new URL(f, import.meta.url)).filter((u) => existsSync(u));
+  const dir = new URL("../supabase/", import.meta.url);
+  let files = [];
+  try {
+    files = ["schema.sql", ...readdirSync(new URL("migrations/", dir)).map((f) => `migrations/${f}`)].map((f) => new URL(f, dir)).filter((u) => existsSync(u));
+  } catch {}
   const sql = files.map((u) => readFileSync(u, "utf8")).join("\n");
-  const tables = new Set([...sql.matchAll(/create table if not exists public\.(\w+)/gi)].map((m) => m[1]));
-  for (const m of sql.matchAll(/create (?:or replace )?(?:materialized )?view (?:if not exists )?public\.(\w+)/gi)) tables.add(m[1]);
+  const tables = new Map();
+  for (const m of sql.matchAll(/create table if not exists public\.(\w+)\s*\(\s*(\w+)/gi)) tables.set(m[1], m[2]);
+  for (const m of sql.matchAll(/create (?:or replace )?(?:materialized )?view (?:if not exists )?public\.(\w+)/gi)) if (!tables.has(m[1])) tables.set(m[1], null);
   const functions = new Map();
   for (const m of sql.matchAll(/create or replace function public\.(\w+)\(([^)]*)\)\s*returns (\w+)([\s\S]*?)\bas \$\$/gi)) {
-    if (m[3].toLowerCase() === "trigger" || !/security definer/i.test(m[4])) continue;
+    if (["trigger", "event_trigger"].includes(m[3].toLowerCase()) || !/security definer/i.test(m[4])) continue;
     const params = {};
-    for (const part of m[2].split(",").map((s) => s.trim()).filter(Boolean)) {
+    for (const part of m[2].split(",").map((x) => x.trim()).filter(Boolean)) {
       const [name, type] = part.split(/\s+/);
-      params[name] = /uuid/i.test(type) ? "00000000-0000-4000-8000-000000000000" : /int/i.test(type) ? 1 : "day";
+      params[name] = sampleArg(type);
     }
     functions.set(m[1], params);
   }
-  if (!tables.size) for (const t of ["profiles", "documents", "team_members", "billing_events", "usage_counters"]) tables.add(t);
+  const buckets = new Set([...sql.matchAll(/insert into storage\.buckets\s*\([^)]*\)\s*values\s*\(\s*'([^']+)'/gi)].map((m) => m[1]));
+  if (!tables.size) for (const t of ["profiles", "documents", "team_members", "billing_events", "usage_counters"]) tables.set(t, null);
   if (!functions.size) {
-    const uid = { uid: "00000000-0000-4000-8000-000000000000" };
+    const uid = { uid: sampleArg("uuid") };
     const usage = { p_key: "x", p_bucket: "x", p_window: "day" };
     for (const [n, p] of [["own_plan", uid], ["effective_plan", uid], ["consume_usage", { ...usage, p_limit: 1 }], ["refund_usage", usage], ["usage_count", usage]]) functions.set(n, p);
   }
-  return { tables: [...tables], functions };
+  if (!buckets.size) buckets.add("documents");
+  return { tables, functions, buckets };
+}
+
+/** A harmless value for an argument of this type. */
+function sampleArg(type = "") {
+  if (/uuid/i.test(type)) return "00000000-0000-4000-8000-000000000000";
+  if (/int|numeric|real|double|bigint|smallint/i.test(type)) return 1;
+  if (/bool/i.test(type)) return false;
+  return "day";
 }
 
 if (flag("--skip-supabase")) {
@@ -348,55 +428,186 @@ if (flag("--skip-supabase")) {
   if (!sb.key || !sb.url) {
     fail(`couldn't find the Supabase ${sb.key ? "URL" : "public key"} in the site's scripts, so the database wasn't checked (use --supabase-url, or --skip-supabase if the site has no accounts)`);
   } else {
-    const headers = { apikey: sb.key, ...(sb.key.startsWith("eyJ") ? { authorization: `Bearer ${sb.key}` } : {}), accept: "application/json" };
-    const call = (path, opts = {}) =>
-      request(`${sb.url}${path}`, { ...opts, headers: { ...headers, ...(opts.headers ?? {}) } }).catch((err) => ({ status: 0, text: "", error: err }));
-    const json = (res) => {
-      try {
-        return JSON.parse(res.text);
-      } catch {
-        return null;
-      }
-    };
-    const { tables, functions } = appSchema();
-    // Anything else the API lists for the public key.
-    const root = await call("/rest/v1/");
-    const listed = Object.keys(json(root)?.paths ?? {}).map((p) => p.replace(/^\//, "")).filter((p) => p && !p.startsWith("rpc/"));
-    for (const t of listed) if (!tables.includes(t)) tables.push(t);
-
-    await pool(tables, 4, async (t) => {
-      const res = await call(`/rest/v1/${encodeURIComponent(t)}?select=*&limit=3`);
-      const body = json(res);
-      if (res.status === 200 && Array.isArray(body) && body.length) fail(`table ${t}: returns rows to anyone with the public key (${body.length}+)`);
-      else if (res.status === 200 && Array.isArray(body)) pass(`table ${t}: no rows`);
-      else if ([401, 403].includes(res.status)) pass(`table ${t}: permission denied`);
-      else if (res.status === 404) pass(`table ${t}: not exposed`);
-      else fail(`table ${t}: couldn't check (HTTP ${res.status}${res.error ? `, ${res.error.message}` : ""})`);
-    });
-    await pool([...functions], 4, async ([fn, params]) => {
-      const res = await call(`/rest/v1/rpc/${encodeURIComponent(fn)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(params) });
-      const code = json(res)?.code;
-      if (res.status >= 200 && res.status < 300) fail(`function ${fn}(): runs for anyone with the public key`);
-      else if ([401, 403].includes(res.status) || code === "42501") pass(`function ${fn}(): permission denied`);
-      else if (res.status === 404) pass(`function ${fn}(): not exposed`);
-      else if (res.status === 0 || res.status >= 500) fail(`function ${fn}(): couldn't check (HTTP ${res.status})`);
-      else fail(`function ${fn}(): ran and failed (HTTP ${res.status}${code ? `, ${code}` : ""}), so the public key may call it`);
-    });
-    {
-      const res = await call("/storage/v1/object/list/documents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: "", limit: 100, offset: 0 }) });
-      const body = json(res);
-      if (res.status === 200 && Array.isArray(body) && body.length) fail(`documents bucket: lists ${body.length} item(s) to anyone with the public key`);
-      else if (res.status === 200 || [400, 401, 403, 404].includes(res.status)) pass(`documents bucket: nothing listed (HTTP ${res.status})`);
-      else fail(`documents bucket: couldn't check (HTTP ${res.status})`);
-    }
-    {
-      const res = await call("/auth/v1/settings");
-      const body = json(res);
-      if (body && body.mailer_autoconfirm === true) fail(`Auth: "Confirm email" is off (sign-up then shows which emails have accounts, and team seats rely on confirmed emails)`);
-      else if (body && body.mailer_autoconfirm === false) pass(`Auth: "Confirm email" is on`);
-      else fail(`Auth settings: couldn't check (HTTP ${res.status})`);
-    }
+    await checkDatabase(sb);
   }
+}
+
+async function checkDatabase(sb) {
+  const base = { apikey: sb.key, accept: "application/json" };
+  const anonAuth = sb.key.startsWith("eyJ") ? { authorization: `Bearer ${sb.key}` } : {};
+  const caller = (auth) => (path, opts = {}) =>
+    request(`${sb.url}${path}`, { ...opts, headers: { ...base, ...auth, ...(opts.headers ?? {}) } }).catch((err) => ({ status: 0, text: "", headers: new Headers(), error: err }));
+  const call = caller(anonAuth);
+  const json = (res) => {
+    try {
+      return JSON.parse(res.text);
+    } catch {
+      return null;
+    }
+  };
+  const code = (res) => json(res)?.code;
+  const refused = (res) => [401, 403].includes(res.status) || code(res) === "42501";
+  const how = (res) => `HTTP ${res.status}${code(res) ? `, ${code(res)}` : ""}${res.error ? `, ${res.error.message}` : ""}`;
+  const schema = appSchema();
+
+  /** What PostgREST lists for this caller (it lists only what the caller may use). */
+  async function listing(callFn, who) {
+    const res = await callFn("/rest/v1/");
+    const doc = json(res);
+    if (res.status !== 200 || !doc?.paths) {
+      warn(`Couldn't list the database API ${who} (${how(res)}), so only the tables, functions and buckets named in supabase/*.sql were checked ${who}. Run supabase/audit.sql in the Supabase SQL editor to cover anything added by hand.`);
+      return { tables: new Map(), functions: new Map() };
+    }
+    const tables = new Map();
+    const functions = new Map();
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      const name = path.replace(/^\//, "");
+      if (!name) continue;
+      if (name.startsWith("rpc/")) {
+        const params = {};
+        for (const p of ops?.get?.parameters ?? []) if (p?.in === "query" && p.name) params[p.name] = sampleArg(p.format ?? p.type);
+        functions.set(name.slice(4), params);
+      } else {
+        tables.set(name, Object.keys(doc.definitions?.[name]?.properties ?? {})[0] ?? null);
+      }
+    }
+    return { tables, functions };
+  }
+
+  // ----- With the public key alone -----
+  const listed = await listing(call, "with the public key");
+  const listedNames = [...listed.tables.keys(), ...[...listed.functions.keys()].map((f) => `${f}()`)];
+  if (listedNames.length) warn(`The database API lists these for the public key, so each was checked: ${listedNames.join(", ")}.`);
+  const tables = new Map(schema.tables);
+  for (const [t, col] of listed.tables) if (!tables.has(t) || !tables.get(t)) tables.set(t, col);
+  const functions = new Map(schema.functions);
+  for (const [f, params] of listed.functions) if (!functions.has(f)) functions.set(f, params);
+
+  await pool([...tables], 4, async ([t, col]) => {
+    const path = `/rest/v1/${encodeURIComponent(t)}`;
+    const read = await call(`${path}?select=*&limit=3`);
+    const rows = json(read);
+    const problems = [];
+    if (read.status === 200 && Array.isArray(rows) && rows.length) problems.push(`returns rows to anyone with the public key (${rows.length}+)`);
+    else if (read.status === 200) problems.push("the public key may read it (no rows now; every row would show if RLS were ever off)");
+    else if (!refused(read) && read.status !== 404) problems.push(`read couldn't be checked (${how(read)})`);
+    if (read.status === 404) {
+      pass(`table ${t}: not exposed`);
+      return;
+    }
+    // Writes that would change nothing if they got through: no rows, or a filter nothing matches.
+    const none = col ? `?${encodeURIComponent(col)}=is.null&${encodeURIComponent(col)}=not.is.null` : null;
+    const writes = [
+      ["insert", () => call(path, { method: "POST", headers: { "content-type": "application/json", prefer: "return=minimal" }, body: "[]" })],
+      ...(none
+        ? [
+            ["update", () => call(`${path}${none}`, { method: "PATCH", headers: { "content-type": "application/json", prefer: "return=minimal" }, body: JSON.stringify({ [col]: null }) })],
+            ["delete", () => call(`${path}${none}`, { method: "DELETE", headers: { prefer: "return=minimal" } })],
+          ]
+        : []),
+    ];
+    for (const [verb, send] of writes) {
+      const res = await send();
+      if (res.status >= 200 && res.status < 300) problems.push(`accepts ${verb}s from the public key`);
+      else if (!refused(res) && ![404, 405].includes(res.status)) problems.push(`${verb} couldn't be checked (${how(res)})`);
+    }
+    if (problems.length) for (const p of problems) fail(`table ${t}: ${p}`);
+    else pass(`table ${t}: read${writes.length > 1 ? ", insert, update and delete" : " and insert"} refused`);
+  });
+
+  /** Calls a function read-only (GET), so even one that writes changes nothing. */
+  async function callFunction(callFn, fn, params, who, isListed) {
+    const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
+    const res = await callFn(`/rest/v1/rpc/${encodeURIComponent(fn)}${qs ? `?${qs}` : ""}`);
+    const c = code(res);
+    if (res.status >= 200 && res.status < 300) return `runs for ${who}`;
+    if (c === "25006") return `runs for ${who} (it tried to write; called read-only, nothing changed)`;
+    if (refused(res)) return null;
+    if (res.status === 404) return isListed ? `couldn't be called to check it (${how(res)})` : null;
+    if (res.status === 0 || res.status >= 500 || res.status === 405) return `couldn't be checked (${how(res)})`;
+    return `ran and failed (${how(res)}), so ${who} may call it`;
+  }
+  await pool([...functions], 4, async ([fn, params]) => {
+    const problem = await callFunction(call, fn, params, "anyone with the public key", listed.functions.has(fn));
+    if (problem) fail(`function ${fn}(): ${problem}`);
+    else pass(`function ${fn}(): refused`);
+  });
+
+  // Buckets: those in supabase/*.sql and any the API shows.
+  const buckets = new Map([...schema.buckets].map((b) => [b, null]));
+  const listedBuckets = json(await call("/storage/v1/bucket"));
+  if (Array.isArray(listedBuckets)) for (const b of listedBuckets) if (b?.id) buckets.set(b.id, b.public ?? null);
+  await pool([...buckets], 4, async ([id, isPublic]) => {
+    const problems = [];
+    const res = await call(`/storage/v1/object/list/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: "", limit: 100, offset: 0 }) });
+    const items = json(res);
+    if (res.status === 200 && Array.isArray(items) && items.length) problems.push(`lists ${items.length} item(s) to anyone with the public key`);
+    else if (!(res.status === 200 || [400, 401, 403, 404].includes(res.status))) problems.push(`couldn't be checked (${how(res)})`);
+    // A public bucket hands out any file whose name is known, policies or not.
+    const probe = await call(`/storage/v1/object/public/${encodeURIComponent(id)}/check-live-${randomUUID()}.txt`);
+    if (isPublic === true || probe.status === 200 || /object not found/i.test(probe.text)) problems.push("is public (anyone can download a file whose name they know)");
+    if (problems.length) for (const p of problems) fail(`bucket ${id}: ${p}`);
+    else pass(`bucket ${id}: private, nothing listed`);
+  });
+
+  {
+    const res = await call("/auth/v1/settings");
+    const body = json(res);
+    if (body && body.mailer_autoconfirm === true) fail(`Auth: "Confirm email" is off (sign-up then shows which emails have accounts, and team seats rely on confirmed emails)`);
+    else if (body && body.mailer_autoconfirm === false) pass(`Auth: "Confirm email" is on`);
+    else fail(`Auth settings: couldn't check (HTTP ${res.status})`);
+  }
+
+  // ----- Signed in as an ordinary account -----
+  const email = process.env.CHECK_LIVE_EMAIL?.trim();
+  const password = process.env.CHECK_LIVE_PASSWORD;
+  if (!email || !password) {
+    warn("No test account (CHECK_LIVE_EMAIL, CHECK_LIVE_PASSWORD), so what any signed-up user can read wasn't checked from outside (scripts/test-rls.sh checks it for the known tables).");
+    return;
+  }
+  section = "Database, signed in as the test account";
+  const login = await call("/auth/v1/token?grant_type=password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+  const session = json(login);
+  if (login.status !== 200 || !session?.access_token || !session?.user?.id) {
+    const msg = String(session?.msg ?? session?.error_description ?? session?.message ?? "");
+    fail(`couldn't sign in the test account (HTTP ${login.status}${/captcha/i.test(msg) ? ": CAPTCHA is on, so this check can't sign in; unset CHECK_LIVE_EMAIL" : ""})`);
+    return;
+  }
+  const uid = session.user.id;
+  const userEmail = String(session.user.email ?? email).toLowerCase();
+  const asUser = caller({ authorization: `Bearer ${session.access_token}` });
+  const own = (row) =>
+    row && typeof row === "object" &&
+    (["id", "owner_id", "user_id", "profile_id", "account_id", "created_by"].some((k) => row[k] === uid) || String(row.email ?? "").toLowerCase() === userEmail);
+
+  const mine = await listing(asUser, "as the test account");
+  const userTables = new Map(tables);
+  for (const [t, col] of mine.tables) if (!userTables.has(t)) userTables.set(t, col);
+  await pool([...userTables.keys()], 4, async (t) => {
+    const res = await asUser(`/rest/v1/${encodeURIComponent(t)}?select=*&limit=50`);
+    const rows = json(res);
+    if (res.status === 200 && Array.isArray(rows)) {
+      const others = rows.filter((r) => !own(r));
+      if (others.length) fail(`table ${t}: any signed-up user gets ${others.length} row(s) that aren't theirs`);
+      else pass(`table ${t}: only the account's own rows (${rows.length})`);
+    } else if (refused(res) || res.status === 404) pass(`table ${t}: ${res.status === 404 ? "not exposed" : "refused"}`);
+    else fail(`table ${t}: couldn't check signed in (${how(res)})`);
+  });
+  const userFunctions = new Map(functions);
+  for (const [f, params] of mine.functions) if (!userFunctions.has(f)) userFunctions.set(f, params);
+  await pool([...userFunctions], 4, async ([fn, params]) => {
+    const problem = await callFunction(asUser, fn, params, "any signed-up user", mine.functions.has(fn));
+    if (problem) fail(`function ${fn}(): ${problem}`);
+    else pass(`function ${fn}(): refused`);
+  });
+  await pool([...buckets.keys()], 4, async (id) => {
+    const res = await asUser(`/storage/v1/object/list/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: "", limit: 100, offset: 0 }) });
+    const items = json(res);
+    const others = Array.isArray(items) ? items.filter((i) => !(i?.name === uid || String(i?.name ?? "").startsWith(`${uid}/`))) : [];
+    if (others.length) fail(`bucket ${id}: any signed-up user sees ${others.length} item(s) outside their own folder`);
+    else pass(`bucket ${id}: only the account's own folder`);
+  });
+  await asUser("/auth/v1/logout", { method: "POST" });
 }
 
 // ---------- 6. security.txt ----------
@@ -425,6 +636,10 @@ for (const s of order) {
   if (!rows.length) continue;
   console.log(`\n${s}`);
   for (const r of rows.sort((a, b) => Number(a.ok) - Number(b.ok))) console.log(`  ${r.ok ? "PASS" : "FAIL"}  ${r.msg}`);
+}
+if (warnings.length) {
+  console.log("\nWarnings (not failures)");
+  for (const w of warnings) console.log(`  WARN  ${w}`);
 }
 console.log(`\n${failed.length ? `FAILED: ${failed.length} of ${results.length} checks` : `All ${results.length} checks passed`}.`);
 process.exit(failed.length ? 1 : 0);

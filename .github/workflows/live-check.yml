@@ -2,8 +2,10 @@ name: Live check
 
 # Checks the live site from the outside (scripts/check-live.mjs): secrets in
 # its scripts, security headers, exposed files, private pages signed out,
-# and what the public Supabase key can read. Needs no secrets: everything it
-# uses is public.
+# and what the public Supabase key can read and write. Needs no secrets:
+# everything it uses is public. With the optional CHECK_LIVE_EMAIL and
+# CHECK_LIVE_PASSWORD secrets (a test account), it also checks what any
+# signed-up user can read.
 #
 # The site comes from the repository variable SITE_URL (Settings → Secrets
 # and variables → Actions → Variables), or https://pdfwizard.xyz.
@@ -42,4 +44,9 @@ jobs:
       - name: Check the site
         env:
           SITE: ${{ inputs.url || vars.SITE_URL || 'https://pdfwizard.xyz' }}
+          # Optional: an ordinary account made only for this check, so it can
+          # also check what any signed-up user can read. Without them, those
+          # checks are skipped with a warning.
+          CHECK_LIVE_EMAIL: ${{ secrets.CHECK_LIVE_EMAIL }}
+          CHECK_LIVE_PASSWORD: ${{ secrets.CHECK_LIVE_PASSWORD }}
         run: node scripts/check-live.mjs "$SITE"
