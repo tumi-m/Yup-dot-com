@@ -5,7 +5,6 @@ import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
 import { annotationName, nudgeAnnotation } from "@/lib/editor/keyboard";
-import { cn } from "@/lib/utils";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "p1" | "p2";
 
