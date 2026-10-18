@@ -311,7 +311,8 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 - **Database (Supabase).** Row Level Security is on for every table, and every
   policy is scoped to `auth.uid()`. From the browser (the public anon key) a
   signed-in user can write only their profile's name and their own document
-  rows, and visitors without a session can write nothing. Plans, billing columns, team seats, payment events and usage
+  rows, and visitors without a session have no privilege on any table (so
+  nothing is readable even if RLS is ever switched off on one). Plans, billing columns, team seats, payment events and usage
   counters are written only by the server with the service role. Functions
   that read plans or count usage are `SECURITY DEFINER` with a fixed
   `search_path` and can't be called from the browser.
@@ -341,8 +342,9 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 **How it's tested** (all in CI, `.github/workflows/ci.yml`):
 
 - `scripts/test-rls.sh` runs [`tests/rls/rls.test.sql`](tests/rls/rls.test.sql)
-  on Postgres 16, against `supabase/schema.sql` and against the schema plus
-  every migration. It plays what anyone holding the anon key could try (read
+  on Postgres 16, against `supabase/schema.sql`, against the schema plus
+  every migration, and with each migration run again on an up-to-date
+  schema (so an old copy of a function or policy can't undo a fix). It plays what anyone holding the anon key could try (read
   other users' rows and files, give themselves a paid plan, forge billing
   events, call the usage functions, keep files past the plan limit) and fails
   if any of it works. Run it locally against any Postgres you can throw away:
@@ -504,7 +506,8 @@ Optional:
   CSP-restricted deployments.
 
 Then run [`supabase/schema.sql`](supabase/schema.sql) in your Supabase project
-(on an existing project, run the files in [`supabase/migrations/`](supabase/migrations))
+(on an existing project, run the files in [`supabase/migrations/`](supabase/migrations)
+you haven't run yet, once each, in date order)
 and set up Paystack as below.
 
 ## Legal pages, analytics and search

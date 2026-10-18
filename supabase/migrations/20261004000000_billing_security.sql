@@ -1,9 +1,10 @@
 -- ============================================================
 -- Paystack billing + security hardening.
 --
--- Safe to run more than once. Run it in the Supabase SQL editor on a project
--- created from an earlier supabase/schema.sql. (A new project only needs
--- supabase/schema.sql, which already includes everything here.)
+-- Run each migration once, in date order, in the Supabase SQL editor, on a
+-- project created from an earlier supabase/schema.sql. Running one again
+-- later is safe (scripts/test-rls.sh checks it). A new project only needs
+-- supabase/schema.sql, which already includes everything here.
 --
 -- Fixes: any signed-in user could give themselves a paid plan, because the
 -- profiles insert/update policies let the browser (anon key) write every
@@ -188,7 +189,7 @@ create policy "team_members_select_own" on public.team_members
 
 -- Team = the owner + 4 members, whoever inserts.
 create or replace function public.team_members_limit()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   perform pg_advisory_xact_lock(hashtext('team_members:' || new.owner_id::text));
   if (select count(*) from public.team_members where owner_id = new.owner_id) >= 4 then
@@ -266,8 +267,10 @@ create policy "documents_all_own" on public.documents
     and position('..' in storage_path) = 0
   );
 
--- The Free plan keeps 5 cloud documents; this used to be enforced only in the
--- browser.
+-- The Free plan keeps 5 cloud documents of up to 50 MB; this used to be
+-- enforced only in the browser. (Same as supabase/schema.sql and
+-- 20261018000000_free_file_size.sql, so running this file again later can't
+-- undo the size check.)
 create or replace function public.documents_limit()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -275,9 +278,13 @@ begin
     return new;
   end if;
   perform pg_advisory_xact_lock(hashtext('documents:' || new.owner_id::text));
-  if public.effective_plan(new.owner_id) = 'free'
-     and (select count(*) from public.documents where owner_id = new.owner_id) >= 5 then
-    raise exception 'The Free plan keeps 5 documents. Upgrade for more.' using errcode = 'P0001';
+  if public.effective_plan(new.owner_id) = 'free' then
+    if (select count(*) from public.documents where owner_id = new.owner_id) >= 5 then
+      raise exception 'The Free plan keeps 5 documents. Upgrade for more.' using errcode = 'P0001';
+    end if;
+    if new.size_bytes > 52428800 then
+      raise exception 'Files up to 50 MB on your plan.' using errcode = 'P0001';
+    end if;
   end if;
   return new;
 end;
@@ -325,11 +332,17 @@ create policy "documents_storage_update" on storage.objects
     )
   );
 
+-- Reading (and signing a link to) a file needs its document row too, so a
+-- file left behind without one can't be used as free hosting.
 drop policy if exists "documents_storage_select" on storage.objects;
 create policy "documents_storage_select" on storage.objects
   for select to authenticated using (
     bucket_id = 'documents'
     and (storage.foldername(name))[1] = auth.uid()::text
+    and exists (
+      select 1 from public.documents d
+       where d.storage_path = objects.name and d.owner_id = auth.uid()
+    )
   );
 
 drop policy if exists "documents_storage_delete" on storage.objects;

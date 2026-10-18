@@ -1,7 +1,8 @@
 -- ============================================================
 -- PDF Wizard — full schema. Run this in the Supabase SQL editor.
 -- Safe to run more than once. Projects created from an earlier version can
--- run it again, or just supabase/migrations/*.sql.
+-- run it again, or the files in supabase/migrations/ they haven't run yet,
+-- in date order.
 -- ============================================================
 
 -- ---------- Tables ----------
@@ -125,6 +126,9 @@ end $$;
 
 -- Column privileges: the browser may only create its own row and edit its
 -- name. Everything else is written with the service role on the server.
+-- Visitors without a session get nothing, not even SELECT, so profiles stay
+-- private even if RLS is ever switched off on this table.
+revoke all on public.profiles from anon;
 revoke insert, update, delete, truncate, references, trigger on public.profiles from anon, authenticated;
 grant insert (id, full_name) on public.profiles to authenticated;
 grant update (full_name) on public.profiles to authenticated;
@@ -584,3 +588,12 @@ revoke execute on function public.usage_count(text, text, text) from public, ano
 grant execute on function public.consume_usage(text, text, integer, text) to service_role;
 grant execute on function public.refund_usage(text, text, text) to service_role;
 grant execute on function public.usage_count(text, text, text) to service_role;
+
+-- ---------- Visitors without a session (the public anon key alone) ----------
+
+-- The app never reads or writes a table without a signed-in user, so the
+-- anon role gets no privilege on any table here, and none on tables created
+-- later from the SQL editor. RLS stays the main lock; this is the second one,
+-- for a table that is ever created or left without RLS.
+revoke all on all tables in schema public from anon;
+alter default privileges in schema public revoke all on tables from anon;

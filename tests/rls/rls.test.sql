@@ -103,7 +103,7 @@ select public.consume_usage('u:' || :'B', 'ai', 10, 'day');
 -- SQL with format() and %L.
 
 -- ---------- Anonymous visitor (public anon key, no session) ----------
-select rlstest.expect('anon: read profiles',            'anon', null, 'select count(*) from public.profiles', 'value:0');
+select rlstest.expect('anon: read profiles',            'anon', null, 'select count(*) from public.profiles', 'denied');
 select rlstest.expect('anon: read documents',           'anon', null, 'select count(*) from public.documents', 'denied');
 select rlstest.expect('anon: read billing_events',      'anon', null, 'select count(*) from public.billing_events', 'denied');
 select rlstest.expect('anon: read team_members',        'anon', null, 'select count(*) from public.team_members', 'denied');
@@ -244,6 +244,16 @@ select rlstest.expect('no SECURITY DEFINER function callable by browsers', 'post
      where n.nspname = 'public' and p.prosecdef and p.prorettype <> 'trigger'::regtype
        and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))$$, 'value:0');
 select rlstest.expect('documents bucket is private',    'postgres', null, 'select public from storage.buckets where id = $q$documents$q$', 'value:false');
+-- RLS is the main lock; table privileges are the second. With the anon key
+-- alone nothing in public is reachable, even with RLS off on a table.
+select rlstest.expect('anon has no privilege on any public table or view', 'postgres', null,
+  $$select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')
+       and has_table_privilege('anon', c.oid, 'select, insert, update, delete, truncate, references, trigger')$$, 'value:0');
+create table public.rlstest_later (x int);
+select rlstest.expect('a table added later gets nothing for anon', 'postgres', null,
+  $$select has_table_privilege('anon', 'public.rlstest_later', 'select, insert, update, delete')$$, 'value:false');
+drop table public.rlstest_later;
 
 -- ---------- Report ----------
 \o
