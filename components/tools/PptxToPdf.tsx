@@ -19,6 +19,7 @@ import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { slideProgressNote } from "./progress-note";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
@@ -238,6 +239,10 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
 
   return (
     <>
+      {/* Says when converting starts and each quarter, not every slide. */}
+      <p className="sr-only" aria-live="polite">
+        {status === "working" && progress ? slideProgressNote(progress.done, progress.total, "Converting slides…") : ""}
+      </p>
       <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
         {status === "done" && result && file ? (
@@ -405,7 +410,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                     </motion.div>
                     <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       <WorkingGlyph />
-                      <span aria-live="polite" className="inline-flex gap-1.5 tabular-nums">
+                      <span aria-hidden className="inline-flex gap-1.5 tabular-nums">
                         {progress ? `Slide ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : "Casting…"}
                         <ProgressPercent value={fraction} />
                       </span>

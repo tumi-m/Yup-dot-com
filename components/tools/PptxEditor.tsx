@@ -27,6 +27,7 @@ import { ProgressBar } from "@/components/motion/Progress";
 import { resultFloor, scrollBehavior, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { slideProgressNote } from "./progress-note";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
@@ -648,6 +649,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     if (!grant) return;
     const hadFocus = !!flow.ref.current?.contains(document.activeElement);
     flow.lock(resultFloor());
+    // The export's own notes take the live region; an older message mustn't come back after.
+    setAnnounce("");
     setStatus("exporting");
     setNextFailed(null);
     const visible = current.slides.filter((s) => !s.hidden).length;
@@ -782,7 +785,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   return (
     <>
       <div aria-live="polite" className="sr-only">
-        {announce}
+        {/* An export says when it starts and each quarter, not every slide. */}
+        {status === "exporting" && progress ? slideProgressNote(progress.done, progress.total, "Exporting PDF…") : announce}
       </div>
       <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
@@ -895,9 +899,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                   </p>
                 </div>
                 {status === "exporting" && (
-                  <div className="order-last flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto" aria-live="polite">
+                  <div className="order-last flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto">
                     <ProgressBar value={fraction} determinate label="Exporting PDF" className="h-2 w-24 sm:w-40" />
-                    <span className="text-xs tabular-nums text-muted-foreground">
+                    <span aria-hidden className="text-xs tabular-nums text-muted-foreground">
                       {progress ? `${Math.min(progress.done + 1, progress.total)}/${progress.total}` : ""}
                     </span>
                     <Button variant="ghost" size="sm" className="tap" onClick={cancelExport} data-testid="cancel-export">

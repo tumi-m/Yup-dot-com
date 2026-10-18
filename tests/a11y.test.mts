@@ -4,6 +4,7 @@ import { createCentred } from "../lib/editor/factory.ts";
 import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "../lib/editor/keyboard.ts";
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 import { focusAfterRemove, movedMessage } from "../components/tools/file-order.ts";
+import { slideProgressNote } from "../components/tools/progress-note.ts";
 
 let pass = 0;
 let total = 0;
@@ -113,6 +114,20 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("removing the last row focuses the one before", focusAfterRemove(["a", "b", "c"], "c") === "b");
   check("removing the only file leaves no row (focus goes to Choose)", focusAfterRemove(["a"], "a") === null);
   check("moving a file says its new place", movedMessage("deck-text.pdf", 1, 3) === "deck-text.pdf moved to position 2 of 3");
+}
+
+// Converting a deck is announced at the start and each quarter, not per slide.
+{
+  const said: string[] = [];
+  for (let done = 0; done <= 40; done++) {
+    const note = slideProgressNote(done, 40, "Converting slides…");
+    if (note !== said[said.length - 1]) said.push(note);
+  }
+  check("40 slides make at most 4 announcements", said.length <= 4, said);
+  check("it starts by saying what is happening", said[0] === "Converting slides…", said);
+  check("then counts quarters", said.slice(1).join(",") === "25% done,50% done,75% done", said);
+  check("a one-slide deck says only the start", slideProgressNote(0, 1, "Exporting PDF…") === "Exporting PDF…" && slideProgressNote(1, 1, "Exporting PDF…") === "Exporting PDF…");
+  check("finishing adds no announcement of its own", slideProgressNote(40, 40, "x") === slideProgressNote(39, 40, "x") && slideProgressNote(2, 2, "x") === slideProgressNote(1, 2, "x"));
 }
 
 console.log(`\n${pass}/${total} passed`);
