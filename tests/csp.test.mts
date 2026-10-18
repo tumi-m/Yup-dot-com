@@ -5,6 +5,7 @@
  * (In Chromium, injected <script>, onerror="" and javascript: links were
  * refused and every tool still ran: see SECURITY.md.)
  */
+import { spawnSync } from "node:child_process";
 import { NextRequest } from "next/server";
 import { contentSecurityPolicy, newNonce, type CspSettings } from "../lib/csp.ts";
 
@@ -55,6 +56,26 @@ check("a new nonce every time", a !== b && /^[A-Za-z0-9+/=]{24,}$/.test(a), a);
   check("and passes the nonce on to Next.js and the layout", forwarded === nonce && forwardedPolicy === policy, `${forwarded} / ${nonce}`);
   const again = (await proxy(new NextRequest("http://localhost/pricing"))).headers.get("content-security-policy");
   check("each response gets its own nonce", again !== policy);
+}
+
+// Which paths the proxy sees, compiled the way Next.js compiles the matcher.
+// A page path ending in .png used to skip it: no script CSP, no login check.
+{
+  const { config } = await import("../proxy.ts");
+  // In a plain Node process: Next's build helpers don't load next to its server modules.
+  const compiled = spawnSync(
+    process.execPath,
+    ["-e", `const { getMiddlewareMatchers } = require("next/dist/build/analysis/get-page-static-info.js");
+            console.log(JSON.stringify(getMiddlewareMatchers(${JSON.stringify(config.matcher)}, { i18n: null }).map((m) => m.regexp)));`],
+    { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" }
+  );
+  const res = (JSON.parse(compiled.stdout || "[]") as string[]).map((r) => new RegExp(r));
+  check("the matcher compiles", res.length > 0, compiled.stderr);
+  const sees = (path: string) => res.some((re) => re.test(path));
+  const pages = ["/", "/pricing", "/editor/3f2a.png", "/edit/x.png", "/tools/merge-pdf.svg", "/dashboard.png", "/security.txt", "/.well-known/security.txt"];
+  const assets = ["/_next/static/chunks/app.js", "/_next/image", "/vendor/pdfjs/pdf.worker.min.mjs", "/icon.svg", "/favicon.ico"];
+  check("the proxy sees every page, including paths that end in .png or .svg", pages.every(sees), pages.filter((p) => !sees(p)).join(", "));
+  check("and skips only Next.js's static files, /vendor and the icon", assets.every((p) => !sees(p)), assets.filter(sees).join(", "));
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);

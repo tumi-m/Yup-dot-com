@@ -21,8 +21,10 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except static assets and image optimization.
+     * Every path except Next.js's own static files, the copied vendor files
+     * and the site icon. Not "anything ending in .png": /editor/x.png is a
+     * page too, and needs the login check and the script CSP.
      */
-    "/((?!_next/static|_next/image|vendor/|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static/|_next/image|vendor/|favicon\\.ico$|icon\\.svg$).*)",
   ],
 };

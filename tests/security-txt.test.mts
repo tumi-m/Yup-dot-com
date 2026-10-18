@@ -30,5 +30,9 @@ const body = await res.text();
 check("the route serves it as plain text", res.headers.get("content-type")?.startsWith("text/plain") === true && body.startsWith("Contact: mailto:security@pdfwizard.xyz\n"), body);
 check("from the configured site URL", body.includes("Canonical: https://pdfwizard.xyz/.well-known/security.txt"), body);
 
+const legacy = (await import("../app/security.txt/route.ts")).GET();
+check("/security.txt redirects there from a route (so it gets the security headers)",
+  legacy.status === 308 && legacy.headers.get("location") === "/.well-known/security.txt");
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

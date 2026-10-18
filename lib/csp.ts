@@ -11,8 +11,8 @@
  * WebAssembly; it doesn't allow eval(). 'self' and https: only matter to
  * browsers too old for 'strict-dynamic', which ignore it.
  *
- * Responses the proxy doesn't see (files under /_next/static, /vendor and
- * images) keep the plainer policy in next.config.ts.
+ * Responses the proxy doesn't see (files under /_next/static and /vendor,
+ * and the site icon) keep the plainer policy in next.config.ts.
  */
 const GOOGLE_ANALYTICS = [
   "https://*.google-analytics.com",

@@ -14,7 +14,7 @@ const securityHeaders = [
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
   },
-  // For responses the proxy doesn't see (/_next/static, /vendor, images): no
+  // For responses the proxy doesn't see (/_next/static, /vendor, the icon): no
   // plugins, no <base> hijacking, forms only post here, framing only by this
   // site. Pages get a stricter policy with a per-request nonce that also
   // limits scripts and connections (lib/csp.ts, proxy.ts).
@@ -33,10 +33,6 @@ const nextConfig: NextConfig = {
   // Browsers and crawlers still ask for /favicon.ico; answer with the SVG icon.
   async rewrites() {
     return [{ source: "/favicon.ico", destination: "/icon.svg" }];
-  },
-  // RFC 9116's older location.
-  async redirects() {
-    return [{ source: "/security.txt", destination: "/.well-known/security.txt", permanent: true }];
   },
   async headers() {
     return [
