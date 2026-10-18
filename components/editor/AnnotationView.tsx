@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
+import { annotationTouchAction } from "@/lib/editor/canvas";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "p1" | "p2";
 
@@ -81,6 +82,8 @@ export function AnnotationView({
     startY: number;
     origin: Annotation;
   } | null>(null);
+  /** A finger on an unselected annotation: it's selected when the finger lifts. */
+  const tapping = useRef<number | null>(null);
 
   const isLine =
     ann.type === "shape" && (ann.shape === "line" || ann.shape === "arrow");
@@ -89,6 +92,12 @@ export function AnnotationView({
     if (!interactive) return;
     e.stopPropagation();
     e.preventDefault();
+    // A finger selects on lift and drags once selected, so a swipe that
+    // starts on an annotation still scrolls the page (and ends in pointercancel).
+    if (e.pointerType !== "mouse" && !selected) {
+      tapping.current = e.pointerId;
+      return;
+    }
     onSelect();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     gesture.current = {
@@ -158,6 +167,11 @@ export function AnnotationView({
   }
 
   function end(e: React.PointerEvent) {
+    if (tapping.current === e.pointerId) {
+      tapping.current = null;
+      if (e.type === "pointerup") onSelect();
+      return;
+    }
     if (!gesture.current) return;
     gesture.current = null;
     try {
@@ -175,7 +189,7 @@ export function AnnotationView({
     width: Math.max(1, ann.width * scale),
     height: Math.max(1, ann.height * scale),
     cursor: interactive ? "move" : "default",
-    touchAction: "none",
+    touchAction: annotationTouchAction(interactive, selected),
   };
 
   return (

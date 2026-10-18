@@ -28,6 +28,8 @@ import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
 import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
 import { useHistory } from "@/lib/editor/history";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
+import { revealOffset } from "@/lib/editor/canvas";
+import { scrollBehavior } from "@/components/motion/focus";
 import {
   DEFAULT_SETTINGS,
   type Annotation,
@@ -118,6 +120,8 @@ export function PdfEditor({
   const [tool, setTool] = useState<ToolId>("select");
   const [settings, setSettings] = useState<ToolSettings>(DEFAULT_SETTINGS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Phones: how much of the canvas the properties sheet covers, in px. */
+  const [sheetCover, setSheetCover] = useState(0);
 
   const [formFields, setFormFields] = useState<DetectedField[]>([]);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
@@ -496,6 +500,18 @@ export function PdfEditor({
   useEffect(() => {
     if (selectedId && narrow()) setShowSidebar(false);
   }, [selectedId]);
+  // Phones: bring the selected annotation (a text box just placed near the
+  // bottom, say) out from under the properties sheet.
+  useEffect(() => {
+    const main = canvasArea.current;
+    if (!main || !selectedId || !sheetCover) return;
+    const el = main.querySelector(`[data-ann-id="${CSS.escape(selectedId)}"]`);
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    const view = main.getBoundingClientRect();
+    const delta = revealOffset(box, { top: view.top, bottom: Math.min(view.bottom, window.innerHeight) - sheetCover });
+    if (delta) main.scrollBy({ top: delta, behavior: scrollBehavior() });
+  }, [selectedId, sheetCover]);
 
   // ---- keyboard shortcuts ----
   useEffect(() => {
@@ -691,7 +707,9 @@ export function PdfEditor({
               <Loader2 className="mr-2 motion-safe:animate-spin" /> Loading document…
             </div>
           ) : (
-            <div className="flex justify-center p-4 sm:p-8">
+            // As wide as the page when zoomed in, so it overflows to the
+            // right only and its left edge can be scrolled to.
+            <div className="flex w-max min-w-full justify-center p-4 sm:p-8">
               <PageView
                 key={`${page}-${numPages}`}
                 loaded={loaded}
@@ -717,9 +735,12 @@ export function PdfEditor({
               />
             </div>
           )}
+          {/* Room to scroll the bottom of the page above the phone sheet. */}
+          {loaded && sheetCover > 0 && <div aria-hidden style={{ height: sheetCover }} />}
 
           {loaded && (
-            <div className="pointer-events-none sticky bottom-4 flex justify-center">
+            // left-0 keeps the controls in view while a zoomed page scrolls sideways.
+            <div className="pointer-events-none sticky bottom-4 left-0 flex justify-center">
               <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur">
                 <Button
                   variant="ghost"
@@ -779,6 +800,7 @@ export function PdfEditor({
             onChange={commitAnnotation}
             onDelete={() => deleteAnnotation(selected.id)}
             onClose={() => setSelectedId(null)}
+            onCover={setSheetCover}
           />
         )}
       </div>

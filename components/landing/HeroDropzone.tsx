@@ -12,7 +12,7 @@ import { getTool } from "@/lib/tools";
 import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
-import { heroActions, MULTI_ACTIONS, TAKES_ALL } from "./hero-actions";
+import { heroActions, MIXED_ACTIONS, MULTI_ACTIONS, TAKES_ALL } from "./hero-actions";
 
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -201,6 +201,8 @@ export function HeroDropzone({
               </span>
             </p>
             <button
+              // With no tool to offer, focus waits here.
+              ref={actions === MIXED_ACTIONS ? focusRef("tools") : undefined}
               onClick={onClear}
               aria-label="Choose different files"
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -213,6 +215,7 @@ export function HeroDropzone({
             aria-label="Choose a tool"
             className={cn(
               "mt-3 grid gap-2",
+              actions.length === 0 && "hidden",
               actions.length === 2 ? "grid-cols-2" : actions.length === 1 ? "grid-cols-1 sm:grid-cols-2" : actions.length % 3 === 0 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
             )}
           >
@@ -245,6 +248,11 @@ export function HeroDropzone({
           </div>
           {actions === MULTI_ACTIONS && (
             <p className="mt-3 text-center text-xs text-muted-foreground">Other tools take one PDF at a time.</p>
+          )}
+          {actions === MIXED_ACTIONS && (
+            <p role="status" className="mt-3 text-center text-sm text-muted-foreground">
+              PDFs and images go to different tools. Pick one kind.
+            </p>
           )}
           <AnimatePresence>
             {failedTool && (

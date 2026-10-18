@@ -21,6 +21,8 @@ import { ProgressBar } from "@/components/motion/Progress";
 import { settleSlot, useHeightLock } from "@/components/motion/focus";
 import { setHandoff } from "@/lib/local-store";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
+import { linkIn } from "@/lib/media";
+import { pasteBlockedMessage } from "@/lib/clipboard";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
@@ -97,7 +99,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     };
   }, []);
 
-  const problem = url.trim() ? slidesLinkProblem(url) : null;
+  const problem = url.trim() ? slidesLinkProblem(linkIn(url)) : null;
   const ext = format.toUpperCase();
 
   async function fetchDeck(link: string): Promise<Fetched | null> {
@@ -151,9 +153,11 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     else router.push("/tools/edit-pptx?handoff=1");
   }
 
-  async function run(which: Action, link = url, auto = false) {
+  async function run(which: Action, input = url, auto = false) {
     if (busy.current) return;
     setError(null);
+    // Text around the link (copied from a message) is left behind.
+    const link = linkIn(input);
     const bad = slidesLinkProblem(link);
     if (bad) {
       setError({ message: SLIDES_FAILURE_MESSAGE[bad] });
@@ -166,7 +170,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     current.current = mine;
     setAction(which);
     try {
-      const f = await fetchDeck(link.trim());
+      const f = await fetchDeck(link);
       if (!f || !alive.current || current.current !== mine) return;
       setFile(f);
       trackToolUsed();
@@ -224,9 +228,9 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
   async function paste() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) setUrl(text.trim());
+      if (text) setUrl(linkIn(text));
     } catch {
-      setError({ message: "Clipboard blocked. Paste with Ctrl+V." });
+      setError({ message: pasteBlockedMessage() });
     }
   }
 

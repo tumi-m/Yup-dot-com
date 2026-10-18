@@ -31,3 +31,8 @@ export function authErrorMessage(search: string): string | null {
 export function loginHref(path: string): string {
   return `/login?redirect=${encodeURIComponent(path)}`;
 }
+
+/** The sign-up page, coming back to `path` afterwards when there is one. */
+export function signupHref(path?: string): string {
+  return path ? `/signup?redirect=${encodeURIComponent(path)}` : "/signup";
+}

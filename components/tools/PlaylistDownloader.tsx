@@ -37,7 +37,8 @@ import {
 } from "@/components/motion/primitives";
 import { ProgressBar } from "@/components/motion/Progress";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
-import { parseMediaUrl, parsePlaylistUrl, type MediaKind } from "@/lib/media";
+import { linkIn, parseMediaUrl, parsePlaylistUrl, type MediaKind } from "@/lib/media";
+import { pasteBlockedMessage } from "@/lib/clipboard";
 import { exportName, formatDuration, playlistCsv, playlistTxt, type PlaylistEntry } from "@/lib/playlist";
 import type { Tier } from "@/lib/limits";
 import { cn } from "@/lib/utils";
@@ -163,8 +164,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
     };
   }, []);
 
-  const playlist = url ? parsePlaylistUrl(url) : null;
-  const single = !playlist && url ? parseMediaUrl(url) : null;
+  const playlist = url ? parsePlaylistUrl(linkIn(url)) : null;
+  const single = !playlist && url ? parseMediaUrl(linkIn(url)) : null;
   const wantsVideo = !!playlist?.video && scope === "video";
 
   // A ?url= link (e.g. from the homepage) lists the playlist straight away.
@@ -196,7 +197,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
     const res = await fetch("/api/media/playlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url: linkIn(url) }),
     }).catch(() => null);
     const data = await res?.json().catch(() => null);
     if (!alive.current) return;
@@ -225,9 +226,9 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
   async function paste() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) setUrl(text.trim());
+      if (text) setUrl(linkIn(text));
     } catch {
-      setError("Clipboard blocked. Paste with Ctrl+V.");
+      setError(pasteBlockedMessage());
     }
   }
 

@@ -3,6 +3,7 @@
  * Library errors ("Failed to parse PDF document (line:0 col:0 offset=0)…",
  * "Input document to `PDFDocument.load` is encrypted…") must never reach users.
  */
+import { isLoadError, loadErrorMessage } from "../load-error";
 
 const ENCRYPTED = /is encrypted|PasswordException|No password given|Incorrect Password/i;
 const UNREADABLE =
@@ -15,6 +16,9 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   const name = (err as { name?: string })?.name ?? "";
   const message = err instanceof Error ? err.message : String(err ?? "");
   const prefix = fileName ? `${fileName}: ` : "";
+  // The tool's code didn't arrive (offline, flaky connection): the file is
+  // fine. Asked before the TypeError check, since a failed fetch is one.
+  if (isLoadError(err)) return new Error(loadErrorMessage());
   if (ENCRYPTED.test(name) || ENCRYPTED.test(message)) {
     return new Error(prefix + ENCRYPTED_MESSAGE);
   }

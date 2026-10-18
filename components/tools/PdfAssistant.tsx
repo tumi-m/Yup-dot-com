@@ -9,6 +9,7 @@ import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, ENTER_T, InlineError, SUCCESS, staggerDelay } from "@/components/motion/primitives";
 import { scrollBehavior } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
+import { isLoadError, loadErrorMessage } from "@/lib/load-error";
 import { useSearchParams } from "next/navigation";
 import type { Tier } from "@/lib/limits";
 import { handoffToFile, takeHandoff } from "@/lib/local-store";
@@ -154,8 +155,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       }
       setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: toPagedText(parsed) });
       setMessages([]);
-    } catch {
-      setError({ message: "Couldn't read that PDF. It may be damaged or password-protected." });
+    } catch (err) {
+      setError({
+        message: isLoadError(err) ? loadErrorMessage() : "Couldn't read that PDF. It may be damaged or password-protected.",
+      });
     } finally {
       setParsing(false);
     }

@@ -36,6 +36,8 @@ import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/loc
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
+import { isLoadError, loadErrorMessage } from "@/lib/load-error";
+import { pptxErrorMessage } from "@/lib/pptx/errors";
 import type { Deck as RenderDeck, DeckElement, DeckSlide } from "@/lib/pptx/parse";
 import type { Deck as PkgDeck, TextShape } from "@/lib/pptx/package";
 import type { History } from "@/lib/pptx/editor";
@@ -183,6 +185,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [pdf, setPdf] = useState<Blob | null>(null);
+  /** The PDF has been downloaded at least once, so leaving doesn't lose it. */
+  const [pdfDownloaded, setPdfDownloaded] = useState(false);
   const [showCard, setShowCard] = useState(false);
   /** The next tool the PDF couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -198,10 +202,19 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   const flow = useHeightLock<HTMLDivElement>();
 
   const getLibs = () =>
-    (libs.current ??= loadLibs().then((l) => {
-      resolved.current = l;
-      return l;
-    }));
+    (libs.current ??= loadLibs().then(
+      (l) => {
+        resolved.current = l;
+        return l;
+      },
+      (err) => {
+        // Didn't load (offline, flaky connection): the next try fetches again.
+        libs.current = null;
+        throw err;
+      }
+    ));
+  /** Starts loading the parser early; a failure shows when a file is opened. */
+  const preload = () => void getLibs().catch(() => {});
   const dirty = !!snap && snap.bytes !== savedBytes.current;
   const index = snap?.index ?? 0;
   const slide = snap?.slides[index];
@@ -261,8 +274,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       requestAnimationFrame(() => barRef.current?.scrollIntoView({ block: "start", behavior: scrollBehavior() }));
     } catch (err) {
       if (id !== job.current) return;
-      const { parse } = await getLibs();
-      setError(parse.pptxErrorMessage(err));
+      // Imported up front: the parser's own code may be what didn't load.
+      setError(pptxErrorMessage(err));
       setFile(null);
       setStatus("idle");
     }
@@ -665,16 +678,17 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       if (!reduce) await new Promise((r) => setTimeout(r, PROGRESS_HOLD_MS));
       if (controller.signal.aborted) return;
       setPdf(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "application/pdf" }));
+      setPdfDownloaded(false);
       if (hadFocus || document.activeElement === document.body) focusNext.current = "done";
       settleSlot(flow.ref.current);
       setStatus("done");
       trackToolUsed();
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) nudge.arm();
-    } catch {
+    } catch (err) {
       // A cancelled export has already handed the UI back.
       if (controller.signal.aborted) return;
-      setError("Couldn't export this deck.");
+      setError(isLoadError(err) ? loadErrorMessage() : "Couldn't export this deck.");
       if (hadFocus || document.activeElement === document.body) focusNext.current = "export";
       // The editor stays, so nothing else lets go of the room kept for the result.
       flow.release();
@@ -794,6 +808,7 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 <Button
                   onClick={() => {
                     nudge.downloaded();
+                    setPdfDownloaded(true);
                     downloadBlob(pdf, `${baseName(file.name)}.pdf`);
                   }}
                   size="lg"
@@ -822,6 +837,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
               showCard && (
                 <UpsellCard
                   tier={tier}
+                  returnTo={`/tools/${SLUG}`}
+                  // Unsaved slide edits already ask before any link leaves.
+                  unsaved={!pdfDownloaded && !dirty}
                   onDismiss={() => {
                     dismissUpsellCard();
                     setShowCard(false);
@@ -861,9 +879,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                 label="Drop a .pptx here"
                 onFiles={(files) => open(files[0] ?? null)}
                 // The parser loads once a file is on its way, not with the page.
-                onPointerEnter={() => void getLibs()}
-                onFocusCapture={() => void getLibs()}
-                onDragEnterCapture={() => void getLibs()}
+                onPointerEnter={preload}
+                onFocusCapture={preload}
+                onDragEnterCapture={preload}
                 data-testid="dropzone"
               >
                 <p className="text-sm text-muted-foreground">or</p>

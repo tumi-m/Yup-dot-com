@@ -17,6 +17,7 @@ import { PLANS, formatPrice } from "@/lib/plans";
 import { displayPrice } from "@/lib/currency";
 import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
+import { signupHref } from "@/components/auth-redirect";
 
 export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits";
 
@@ -101,7 +102,7 @@ export function UpgradeDialog({
   // Guests are first offered the free account, unless it wouldn't help
   // (Free has the same file size, batch, quality and edit limits).
   const offerFreeAccount = guest && !["file-size", "batch", "quality", "edits"].includes(reason);
-  const signup = `/signup${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ""}`;
+  const signup = signupHref(returnTo);
   const prices = useLocalPrices(open);
   const pro = PLANS.pro.priceMonthly;
 
@@ -185,16 +186,28 @@ export function UpgradeDialog({
   );
 }
 
+/** Asked before the card's link leaves a result that hasn't been downloaded. */
+export const LEAVE_RESULT_PROMPT = "Leave without downloading your file? It isn't saved anywhere.";
+
 /** A quiet, dismissible card for success screens. */
 export function UpsellCard({
   tier,
   onDismiss,
+  returnTo,
+  unsaved = false,
 }: {
   tier: Tier;
   onDismiss: () => void;
+  /** Where sign-up comes back to: the tool. */
+  returnTo?: string;
+  /** The result hasn't been downloaded, so leaving would lose it. */
+  unsaved?: boolean;
 }) {
   if (tier === "pro" || tier === "team") return null;
   const guest = tier === "guest";
+  const leave = (e: React.MouseEvent) => {
+    if (unsaved && !window.confirm(LEAVE_RESULT_PROMPT)) e.preventDefault();
+  };
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -206,15 +219,18 @@ export function UpsellCard({
         {guest ? <Cloud className="h-5 w-5" /> : <Crown className="h-5 w-5" />}
       </div>
       <div className="min-w-0 flex-1 text-sm">
-        <p className="font-semibold">{guest ? "Save your work to the cloud" : "Upgrade to Pro"}</p>
+        <p className="font-semibold">{guest ? "Your documents on any device" : "Upgrade to Pro"}</p>
         <p className="text-muted-foreground">
           {guest ? (
             <>
-              <Link href="/signup" className="font-medium text-primary hover:underline">Free account</Link> · cloud library · more AI
+              <Link href={signupHref(returnTo)} onClick={leave} className="font-medium text-primary hover:underline">
+                Free account
+              </Link>{" "}
+              · cloud library · more AI
             </>
           ) : (
             <>
-              <Link href="/pricing" className="font-medium text-primary hover:underline">Pro</Link> · {formatLimitBytes(LIMITS.pro.maxFileBytes)} files · unlimited library
+              <Link href="/pricing" onClick={leave} className="font-medium text-primary hover:underline">Pro</Link> · {formatLimitBytes(LIMITS.pro.maxFileBytes)} files · unlimited library
             </>
           )}
         </p>

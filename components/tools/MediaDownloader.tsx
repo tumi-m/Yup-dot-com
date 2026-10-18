@@ -35,6 +35,7 @@ import { ProgressBar, ProgressPercent } from "@/components/motion/Progress";
 import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
+  linkIn,
   parseMediaUrl,
   parsePlaylistUrl,
   PLATFORM_LABEL,
@@ -43,6 +44,7 @@ import {
   type MediaKind,
   type MediaPlatform,
 } from "@/lib/media";
+import { pasteBlockedMessage } from "@/lib/clipboard";
 import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
@@ -244,8 +246,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     };
   }, []);
 
-  const detected = url ? parseMediaUrl(url) : null;
-  const playlist = url && YOUTUBE_ENABLED ? parsePlaylistUrl(url) : null;
+  // Share-sheet text around the link is fine: only the link is read.
+  const detected = url ? parseMediaUrl(linkIn(url)) : null;
+  const playlist = url && YOUTUBE_ENABLED ? parsePlaylistUrl(linkIn(url)) : null;
 
   // A ?url= link (e.g. from the homepage) looks the video up straight away.
   const autoLookup = useRef(false);
@@ -270,7 +273,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     e?.preventDefault();
     if (phase === "loading") return;
     setError(null);
-    const target = url.trim();
+    const target = linkIn(url);
     const parsed = parseMediaUrl(target);
     if (!parsed) {
       // A playlist link is offered the playlist tool instead (see below the input).
@@ -325,9 +328,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   async function paste() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) setUrl(text.trim());
+      if (text) setUrl(linkIn(text));
     } catch {
-      setError("Clipboard blocked. Paste with Ctrl+V.");
+      setError(pasteBlockedMessage());
     }
   }
 

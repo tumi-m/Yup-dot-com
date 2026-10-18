@@ -1,7 +1,7 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { heroActions, IMAGE_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL } from "../components/landing/hero-actions.ts";
+import { heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL } from "../components/landing/hero-actions.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
 
@@ -17,8 +17,21 @@ const jpg = { type: "image/jpeg" };
 const several = heroActions("pdf", [pdf, pdf, pdf]);
 check("several PDFs: only tools that take them all", several.every((s) => TAKES_ALL.includes(s) && PROCESSORS[s]?.multiple), several);
 check("several PDFs: Merge PDF offered", several.includes("merge-pdf"), several);
-const mixed = heroActions("pdf", [pdf, jpg]);
-check("PDFs and images: only tools that take them all", mixed.every((s) => TAKES_ALL.includes(s) && PROCESSORS[s]?.multiple), mixed);
+// A PDF and a photo used to offer Merge PDF, which dropped the photo and
+// then asked for at least 2 files.
+const takes = (slug: string, type: string) => (PROCESSORS[slug]?.accept ?? "").split(",").includes(type);
+for (const files of [[pdf, jpg], [pdf, pdf, jpg], [jpg, pdf, { type: "image/png" }]]) {
+  const mixed = heroActions("pdf", files);
+  const label = files.map((f) => f.type.split("/")[1]).join(" + ");
+  check(`${label}: every tool offered takes every file`, mixed.every((s) => files.every((f) => takes(s, f.type))), mixed);
+  check(`${label}: says to pick one kind`, mixed === MIXED_ACTIONS && mixed.length === 0, mixed);
+}
+for (const files of [[pdf, pdf], [jpg, jpg], [pdf], [jpg]]) {
+  const offered = heroActions("pdf", files);
+  const handed = (s: string) => (TAKES_ALL.includes(s) ? files : files.slice(0, 1));
+  const label = files.map((f) => f.type.split("/")[1]).join(" + ");
+  check(`${label}: every tool takes what it's handed`, offered.every((s) => !PROCESSORS[s] || handed(s).every((f) => takes(s, f.type))), offered);
+}
 const images = heroActions("pdf", [jpg, jpg]);
 check("several images: only tools that take them all", images.every((s) => TAKES_ALL.includes(s) && PROCESSORS[s]?.multiple), images);
 
