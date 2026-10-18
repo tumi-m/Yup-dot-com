@@ -645,7 +645,8 @@ export function PdfEditor({
             variant="ghost"
             size="icon"
             onClick={history.undo}
-            disabled={!history.canUndo}
+            // aria-disabled, not disabled: a disabled button drops the focus it has.
+            aria-disabled={!history.canUndo}
             title="Undo (Ctrl+Z)"
             aria-label="Undo"
           >
@@ -655,7 +656,7 @@ export function PdfEditor({
             variant="ghost"
             size="icon"
             onClick={history.redo}
-            disabled={!history.canRedo}
+            aria-disabled={!history.canRedo}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
           >

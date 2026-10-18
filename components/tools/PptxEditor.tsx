@@ -149,7 +149,7 @@ function sameLook(a: { slide: DeckSlide; meta: Meta }, b: { slide: DeckSlide; me
 }
 
 const iconBtn =
-  "tap inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4";
+  "tap inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4";
 
 export function PptxEditor({ tier }: { tier: Tier }) {
   const router = useRouter();
@@ -903,8 +903,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                     {busy && <Loader2 className="mr-1 h-4 w-4 text-primary motion-safe:animate-spin" aria-label="Working" />}
                     <button
                       className={iconBtn}
-                      onClick={() => restore("undo")}
-                      disabled={!hist?.canUndo || busy || status !== "ready"}
+                      onClick={() => status === "ready" && restore("undo")}
+                      // aria-disabled, not disabled: a disabled button drops the focus it has.
+                      aria-disabled={!hist?.canUndo || busy || status !== "ready"}
                       aria-label="Undo"
                       title="Undo (Ctrl+Z)"
                       data-testid="undo"
@@ -913,8 +914,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                     </button>
                     <button
                       className={iconBtn}
-                      onClick={() => restore("redo")}
-                      disabled={!hist?.canRedo || busy || status !== "ready"}
+                      onClick={() => status === "ready" && restore("redo")}
+                      aria-disabled={!hist?.canRedo || busy || status !== "ready"}
                       aria-label="Redo"
                       title="Redo (Ctrl+Shift+Z)"
                       data-testid="redo"
