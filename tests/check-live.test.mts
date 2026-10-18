@@ -108,11 +108,12 @@ const supabase = await listen((req, res, body) => {
     if (user) return send(200, list === "documents" ? [{ name: UID, id: null }] : []);
     if (unsafe && list === "documents") return send(200, [{ name: "alice/tax-return.pdf" }]);
     if (unsafe && list === "avatars") return send(200, [{ name: "u1/passport-scan.jpg" }]);
+    if (unsafe && list === "uploads") return send(200, [{ name: "u2/id-card.jpg" }]);
     return send(200, []);
   }
   const pub = /^\/storage\/v1\/object\/public\/([\w-]+)\//.exec(url.pathname)?.[1];
   if (pub) {
-    if (unsafe && pub === "avatars") return send(400, { statusCode: "404", error: "not_found", message: "Object not found" });
+    if (unsafe && (pub === "avatars" || pub === "uploads")) return send(400, { statusCode: "404", error: "not_found", message: "Object not found" });
     return send(400, { statusCode: "404", error: "Bucket not found", message: "Bucket not found" });
   }
   send(404, { message: "not found" });
@@ -215,6 +216,7 @@ check("unsafe: a function only the API's listing names runs for anyone (RT-2)", 
 check("unsafe: a function that writes is caught without letting it write", failed(/function wipe_waitlist\(\): runs for anyone .*nothing changed/), bad.out);
 check("unsafe: the documents bucket lists files", failed(/bucket documents: lists 1 item/), bad.out);
 check("unsafe: another bucket lists files and is public (RT-4)", failed(/bucket avatars: lists 1 item/) && failed(/bucket avatars: is public/), bad.out);
+check("unsafe: a bucket nothing names, found by guessing a common name", failed(/bucket uploads: lists 1 item/) && failed(/bucket uploads: is public/), bad.out);
 check("unsafe: a table any signed-up user can read (RT-1)", failed(/table customer_notes: any signed-up user gets 1 row/), bad.out);
 check("unsafe: Confirm email is off", failed(/Confirm email" is off/), bad.out);
 check("unsafe: no security.txt", failed(/security\.txt: missing/), bad.out);

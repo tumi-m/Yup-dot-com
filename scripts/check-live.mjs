@@ -455,7 +455,7 @@ async function checkDatabase(sb) {
     const res = await callFn("/rest/v1/");
     const doc = json(res);
     if (res.status !== 200 || !doc?.paths) {
-      warn(`Couldn't list the database API ${who} (${how(res)}), so only the tables, functions and buckets named in supabase/*.sql were checked ${who}. Run supabase/audit.sql in the Supabase SQL editor to cover anything added by hand.`);
+      warn(`Couldn't list the database API ${who} (${how(res)}), so only the tables and functions named in supabase/*.sql were checked ${who}. Run supabase/audit.sql in the Supabase SQL editor to cover anything added by hand.`);
       return { tables: new Map(), functions: new Map() };
     }
     const tables = new Map();
@@ -533,10 +533,16 @@ async function checkDatabase(sb) {
     else pass(`function ${fn}(): refused`);
   });
 
-  // Buckets: those in supabase/*.sql and any the API shows.
+  // Buckets: those in supabase/*.sql, any the storage API shows, any the
+  // site's scripts name (storage.from("…")), and the names people usually
+  // pick, as an attacker would guess them. A bucket with a name nobody would
+  // guess only shows up in supabase/audit.sql.
   const buckets = new Map([...schema.buckets].map((b) => [b, null]));
   const listedBuckets = json(await call("/storage/v1/bucket"));
   if (Array.isArray(listedBuckets)) for (const b of listedBuckets) if (b?.id) buckets.set(b.id, b.public ?? null);
+  for (const m of goodScripts.map((r) => r.text).join("\n").matchAll(/\.storage\.from\(\s*["'`]([\w.-]{1,63})["'`]/g)) if (!buckets.has(m[1])) buckets.set(m[1], null);
+  const guessed = ["avatars", "public", "uploads", "images", "files", "media", "attachments", "assets", "private", "backups", "exports", "documents"].filter((b) => !buckets.has(b));
+  for (const b of guessed) buckets.set(b, null);
   await pool([...buckets], 4, async ([id, isPublic]) => {
     const problems = [];
     const res = await call(`/storage/v1/object/list/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prefix: "", limit: 100, offset: 0 }) });
@@ -547,8 +553,9 @@ async function checkDatabase(sb) {
     const probe = await call(`/storage/v1/object/public/${encodeURIComponent(id)}/check-live-${randomUUID()}.txt`);
     if (isPublic === true || probe.status === 200 || /object not found/i.test(probe.text)) problems.push("is public (anyone can download a file whose name they know)");
     if (problems.length) for (const p of problems) fail(`bucket ${id}: ${p}`);
-    else pass(`bucket ${id}: private, nothing listed`);
+    else if (!guessed.includes(id)) pass(`bucket ${id}: private, nothing listed`);
   });
+  pass(`common bucket names (${guessed.join(", ")}): none public or listable`);
 
   {
     const res = await call("/auth/v1/settings");
@@ -605,7 +612,7 @@ async function checkDatabase(sb) {
     const items = json(res);
     const others = Array.isArray(items) ? items.filter((i) => !(i?.name === uid || String(i?.name ?? "").startsWith(`${uid}/`))) : [];
     if (others.length) fail(`bucket ${id}: any signed-up user sees ${others.length} item(s) outside their own folder`);
-    else pass(`bucket ${id}: only the account's own folder`);
+    else if (!guessed.includes(id)) pass(`bucket ${id}: only the account's own folder`);
   });
   await asUser("/auth/v1/logout", { method: "POST" });
 }

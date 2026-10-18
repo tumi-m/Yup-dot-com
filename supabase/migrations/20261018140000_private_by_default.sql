@@ -21,7 +21,10 @@
 -- Run supabase/audit.sql afterwards: it lists anything still open.
 -- ============================================================
 
--- New objects: no privileges for visitors or signed-in users unless granted.
+-- Visitors without a session get nothing on any table (as in the previous
+-- migration, again here in case one was granted since), and new objects get
+-- no privileges for visitors or signed-in users unless granted.
+revoke all on all tables in schema public from anon;
 alter default privileges in schema public revoke all on tables from anon, authenticated;
 alter default privileges in schema public revoke all on sequences from anon, authenticated;
 alter default privileges in schema public revoke all on functions from anon, authenticated;
