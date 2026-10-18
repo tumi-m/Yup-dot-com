@@ -33,6 +33,7 @@ import { trackToolUsed } from "@/lib/analytics";
 import { documentFingerprint, EditCheckError, requestEdit, WATERMARK_TEXT } from "@/lib/edit-usage";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
+import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
 import type { Deck as RenderDeck, DeckElement, DeckSlide } from "@/lib/pptx/parse";
@@ -208,33 +209,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
 
   useEffect(() => () => abort.current?.abort(), []);
 
-  // Warn before leaving only when there is something to lose.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    // In-app links navigate without unloading the page, so ask here too.
-    const onLink = (e: MouseEvent) => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>("a[href]") : null;
-      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
-      const to = new URL(a.href, window.location.href);
-      if (to.origin !== window.location.origin) return; // a full navigation: beforeunload asks
-      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
-      if (!window.confirm("Discard changes and leave?")) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", warn);
-    window.addEventListener("click", onLink, true);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      window.removeEventListener("click", onLink, true);
-    };
-  }, [dirty]);
+  // Ask before leaving only when there is something to lose.
+  useUnsavedGuard(dirty);
 
   useEffect(() => {
     if (snap) setOrder(snap.keys);

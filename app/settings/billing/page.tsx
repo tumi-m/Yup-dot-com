@@ -8,8 +8,9 @@ import {
   PaymentReturn,
   TeamSeats,
 } from "@/components/BillingClient";
-import { PLANS, TEAM_SEATS, formatBillingDate, formatPrice } from "@/lib/plans";
+import { PLANS, TEAM_SEATS, formatPrice } from "@/lib/plans";
 import { ownPlan } from "@/lib/billing";
+import { planStatus } from "@/lib/billing-ui";
 import { isAdminConfigured, listTeamMembers } from "@/lib/billing-store";
 import { isOurReference } from "@/lib/paystack";
 import { displayPrice } from "@/lib/currency";
@@ -42,17 +43,7 @@ export default async function BillingPage({
       ? (await listTeamMembers(profile.id).catch(() => [])).map((m) => m.email)
       : [];
 
-  let status: string | null = null;
-  if (billing.source === "subscription" && sub) {
-    const label = sub.pastDue ? "Payment due" : sub.renews ? "Renews" : "Ends";
-    status = sub.periodEnd ? `${label} ${formatBillingDate(sub.periodEnd)}` : null;
-  } else if (billing.source === "prepaid" && prepaid) {
-    status = `Paid until ${formatBillingDate(prepaid.paidUntil)}`;
-  } else if (billing.source === "team") {
-    status = billing.teamOwnerEmail ? `Seat on ${billing.teamOwnerEmail}'s team` : "Team seat";
-  } else if (prepaid && !prepaid.active) {
-    status = `${PLANS[prepaid.plan].name} ended ${formatBillingDate(prepaid.paidUntil)}`;
-  }
+  const status = planStatus(billing);
 
   return (
     <div className="min-h-screen">
@@ -67,7 +58,11 @@ export default async function BillingPage({
           <div className="mt-1 flex items-center justify-between gap-4">
             <div>
               <p className="text-2xl font-bold">{plan.name}</p>
-              {status && <p className="text-sm text-muted-foreground">{status}</p>}
+              {status.map((line) => (
+                <p key={line} className="text-sm text-muted-foreground">
+                  {line}
+                </p>
+              ))}
             </div>
             {billing.source !== "team" && (
               <div className="text-right">

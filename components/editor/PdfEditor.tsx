@@ -27,6 +27,7 @@ import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake"
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
 import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
 import { useHistory } from "@/lib/editor/history";
+import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import {
   DEFAULT_SETTINGS,
   type Annotation,
@@ -551,33 +552,8 @@ export function PdfEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, selectedId, deleteAnnotation, handleSave, placementImage]);
 
-  // Don't let a stray tab close or link throw away unsaved edits.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    // In-app links navigate without unloading the page, so ask here too.
-    const onLink = (e: MouseEvent) => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>("a[href]") : null;
-      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
-      const to = new URL(a.href, window.location.href);
-      if (to.origin !== window.location.origin) return; // a full navigation: beforeunload asks
-      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
-      if (!window.confirm("Discard changes and leave?")) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", warn);
-    window.addEventListener("click", onLink, true);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-      window.removeEventListener("click", onLink, true);
-    };
-  }, [dirty]);
+  // Don't let a stray tab close, link or Back throw away unsaved edits.
+  useUnsavedGuard(dirty);
 
   return (
     <div className="flex h-dvh flex-col bg-secondary/30">
