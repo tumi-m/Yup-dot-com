@@ -1,11 +1,11 @@
 import type { PDFPage } from "pdf-lib";
 
 /**
- * The page as the reader sees it: visible box (CropBox, which defaults to the
+ * The page as the reader sees it: visible box (CropBox clipped to the
  * MediaBox) with /Rotate applied. Stamps such as page numbers and watermarks
  * are laid out in this frame, then mapped back to PDF user space — otherwise
- * they land off-page on boxes that don't start at 0,0 and sideways on
- * rotated pages.
+ * they land off-page on boxes that don't start at 0,0, or reach past the
+ * MediaBox, and sideways on rotated pages.
  */
 export interface PageFrame {
   /** Displayed width and height. */
@@ -38,7 +38,7 @@ export function visibleBox(page: PDFPage): { x: number; y: number; width: number
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
-export function pageFrame(page: PDFPage, box = page.getCropBox()): PageFrame {
+export function pageFrame(page: PDFPage, box = visibleBox(page)): PageFrame {
   const r = (((Math.round(page.getRotation().angle / 90) * 90) % 360) + 360) % 360;
   const { x: bx, y: by, width: W, height: H } = box;
   const swap = r === 90 || r === 270;

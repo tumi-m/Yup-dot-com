@@ -5,6 +5,7 @@ import {
   PDFHexString,
   PDFInvalidObject,
   PDFName,
+  PDFRef,
   PDFStream,
   PDFString,
   type PDFObject,
@@ -37,7 +38,18 @@ export async function protectPdf(
   opts: ProtectOptions
 ): Promise<Uint8Array> {
   if (!opts.userPassword) throw new Error("Please enter a password.");
-  const doc = await SecurePDFDocument.load(bytes);
+  let doc: SecurePDFDocument;
+  try {
+    doc = await SecurePDFDocument.load(bytes);
+  } catch (err) {
+    if (!/encrypted/i.test(err instanceof Error ? err.message : "")) throw err;
+    // Restricted by an owner password only: it opens without one, so a
+    // decrypted copy is protected. One that needs a password still fails.
+    const plain = await unlockPdf(bytes, "").catch(() => {
+      throw err;
+    });
+    doc = await SecurePDFDocument.load(plain);
+  }
   doc.encrypt({
     userPassword: opts.userPassword,
     ownerPassword: opts.ownerPassword || randomPassword(),
@@ -97,9 +109,19 @@ export async function unlockPdf(
 ): Promise<Uint8Array> {
   let doc: SecurePDFDocument;
   try {
-    doc = await SecurePDFDocument.load(bytes, { password });
+    doc = await SecurePDFDocument.load(bytes, { password, updateMetadata: false });
   } catch {
     throw new Error("That password didn't work. Check it and try again.");
+  }
+  // Decrypting a file with a cross-reference stream (Acrobat, Word, qpdf)
+  // loses the trailer's Info (title, author) and ID: take them from the file
+  // as stored. Info is a reference to the document's own, decrypted, copy;
+  // the ID is never encrypted.
+  const trailer = doc.context.trailerInfo;
+  if (!trailer.Info || !trailer.ID) {
+    const stored = (await SecurePDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false })).context.trailerInfo;
+    if (stored.Info instanceof PDFRef && doc.context.lookup(stored.Info) instanceof PDFDict) trailer.Info ??= stored.Info;
+    trailer.ID ??= stored.ID;
   }
   dropEncryptionLeftovers(doc);
   // Saving without calling encrypt() writes the document in the clear.

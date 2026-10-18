@@ -14,7 +14,7 @@ import {
 } from "docx";
 import JSZip from "jszip";
 import { zipEntryOptions } from "../zip";
-import type { ParsedDocument, TableBlock } from "./parse";
+import { isRtl, type ParsedDocument, type TableBlock } from "./parse";
 
 /**
  * Structured conversions built on the layout-aware parser.
@@ -36,10 +36,22 @@ const HEADINGS = [
 
 const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: "BFBFBF" };
 
+/** A run of text, set right to left when it is Arabic or Hebrew. */
+function run(text: string, bold?: boolean): TextRun {
+  return new TextRun({ text, bold, rightToLeft: isRtl(text) || undefined });
+}
+
+/** Right-to-left paragraph layout (Arabic, Hebrew), so it aligns and wraps from the right. */
+function direction(text: string): { bidirectional?: boolean } {
+  return isRtl(text) ? { bidirectional: true } : {};
+}
+
 function wordTable(table: TableBlock): Table {
   const columns = Math.max(1, ...table.rows.map((r) => r.length));
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    // Rows run from the right in an Arabic or Hebrew table.
+    visuallyRightToLeft: isRtl(table.rows.flat().join(" ")) || undefined,
     rows: table.rows.map(
       (row, rowIndex) =>
         new TableRow({
@@ -55,7 +67,8 @@ function wordTable(table: TableBlock): Table {
               shading: rowIndex === 0 ? { fill: "EDE9FE" } : undefined,
               children: [
                 new Paragraph({
-                  children: [new TextRun({ text: row[c] ?? "", bold: rowIndex === 0 })],
+                  ...direction(row[c] ?? ""),
+                  children: [run(row[c] ?? "", rowIndex === 0)],
                 }),
               ],
             })
@@ -75,7 +88,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
         children.push(
           new Paragraph({
             heading: HEADINGS[Math.min(5, block.level - 1)],
-            children: [new TextRun(block.text)],
+            ...direction(block.text),
+            children: [run(block.text)],
           })
         );
         break;
@@ -84,7 +98,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
           new Paragraph({
             style: "Normal",
             spacing: { after: 160 },
-            children: [new TextRun(block.text)],
+            ...direction(block.text),
+            children: [run(block.text)],
           })
         );
         break;
@@ -94,7 +109,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
         for (const item of block.items) {
           children.push(
             new Paragraph({
-              children: [new TextRun(item)],
+              ...direction(item),
+              children: [run(item)],
               ...(block.ordered
                 ? { numbering: { reference: "ordered", level: 0, instance: listInstance } }
                 : { bullet: { level: 0 } }),

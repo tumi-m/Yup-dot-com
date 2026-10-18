@@ -10,6 +10,7 @@ const UNREADABLE =
 
 export const ENCRYPTED_MESSAGE = "This PDF is password-protected. Unlock it first.";
 export const UNREADABLE_MESSAGE = "This file isn't a readable PDF.";
+export const LETTERS_MESSAGE = "Some of these letters can't be drawn in this PDF.";
 
 export function friendlyPdfError(err: unknown, fileName?: string): Error {
   const name = (err as { name?: string })?.name ?? "";
@@ -24,5 +25,7 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   if (name === "InvalidPDFException" || name === "TypeError" || UNREADABLE.test(message)) {
     return new Error(prefix + UNREADABLE_MESSAGE);
   }
+  // pdf-lib's standard fonts: "WinAnsi cannot encode "Ł" (0x0141)".
+  if (/cannot encode/i.test(message)) return new Error(prefix + LETTERS_MESSAGE);
   return err instanceof Error ? err : new Error("Something went wrong.");
 }

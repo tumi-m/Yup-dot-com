@@ -10,6 +10,8 @@ import {
 } from "./parse";
 import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
+import { openPdf } from "./open";
+import { extractPages, mergeDocuments } from "./operations";
 import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
 import { embedImage, type EmbeddedImage } from "./embed-image";
 import { canvasToJpeg } from "../image-codec";
@@ -82,18 +84,16 @@ export function parseRanges(input: string, pageCount: number): number[][] {
 // Merge
 // ---------------------------------------------------------------------------
 export async function mergeTool(files: File[]): Promise<ToolFile> {
-  const out = await PDFDocument.create();
+  const docs: PDFDocument[] = [];
   for (const file of files) {
-    let src: PDFDocument;
     try {
-      src = await PDFDocument.load(await buf(file));
+      docs.push(await openPdf(await buf(file)));
     } catch (err) {
       throw friendlyPdfError(err, file.name);
     }
-    const copied = await out.copyPages(src, src.getPageIndices());
-    copied.forEach((p) => out.addPage(p));
   }
-  return { blob: pdfBlob(await out.save()), filename: "merged.pdf" };
+  // Built on the first file, so its form, title and bookmarks stay.
+  return { blob: pdfBlob(await mergeDocuments(docs[0], docs.slice(1))), filename: "merged.pdf" };
 }
 
 function pageLabel(pages: number[]): string {
@@ -109,13 +109,13 @@ export async function splitTool(
   files: File[],
   opts: { mode: string; ranges: string }
 ): Promise<ToolFile | ToolFile[]> {
-  const src = await PDFDocument.load(await buf(files[0]));
-  const count = src.getPageCount();
+  const bytes = await buf(files[0]);
+  const count = (await openPdf(bytes)).getPageCount();
   const base = files[0].name.replace(/\.pdf$/i, "");
 
   let groups: number[][];
   if (opts.mode === "every") {
-    groups = src.getPageIndices().map((i) => [i]);
+    groups = Array.from({ length: count }, (_, i) => [i]);
   } else {
     groups = parseRanges(opts.ranges ?? "", count);
     // Never hand back the whole document as if it were the requested split.
@@ -127,15 +127,15 @@ export async function splitTool(
   const results: ToolFile[] = [];
   const used = new Map<string, number>();
   for (let g = 0; g < groups.length; g++) {
-    const out = await PDFDocument.create();
-    const copied = await out.copyPages(src, groups[g]);
-    copied.forEach((p) => out.addPage(p));
+    // The document keeps its form, title, bookmarks and links to the pages
+    // that stay; the other pages and what only they use are dropped.
+    const out = await extractPages(bytes, groups[g]);
     // Repeated ranges ("1, 1") must not overwrite each other in the zip.
     const label = pageLabel(groups[g]);
     const n = (used.get(label) ?? 0) + 1;
     used.set(label, n);
     results.push({
-      blob: pdfBlob(await out.save()),
+      blob: pdfBlob(out),
       filename: `${base}-${label}${n > 1 ? `-${n}` : ""}.pdf`,
     });
   }
@@ -297,7 +297,7 @@ export async function rotateTool(
   opts: { angle: string }
 ): Promise<ToolFile> {
   const delta = Number(opts.angle) || 90;
-  const doc = await PDFDocument.load(await buf(files[0]));
+  const doc = await openPdf(await buf(files[0]));
   doc.getPages().forEach((page) => {
     const current = page.getRotation().angle;
     page.setRotation(degrees((current + delta + 360) % 360));
@@ -312,7 +312,7 @@ export async function pageNumbersTool(
   files: File[],
   opts: { position: string; format: string; fontSize: string }
 ): Promise<ToolFile> {
-  const doc = await PDFDocument.load(await buf(files[0]));
+  const doc = await openPdf(await buf(files[0]));
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const size = Number(opts.fontSize) || 12;
   const pages = doc.getPages();
@@ -371,7 +371,7 @@ export async function watermarkTool(
   files: File[],
   opts: { text: string; opacity: string; color: string; fontSize: string }
 ): Promise<ToolFile> {
-  const doc = await PDFDocument.load(await buf(files[0]));
+  const doc = await openPdf(await buf(files[0]));
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
   const text = (opts.text ?? "").trim();
   if (!text) throw new Error("Type the watermark text.");
@@ -553,15 +553,9 @@ export async function unlockTool(
  */
 export async function openForTextLayer(bytes: Uint8Array): Promise<PDFDocument | null> {
   try {
-    return await PDFDocument.load(bytes);
-  } catch (err) {
-    if (!/encrypted/i.test(err instanceof Error ? err.message : "")) return null;
-  }
-  try {
-    const { unlockPdf } = await import("./security");
-    return await PDFDocument.load(await unlockPdf(bytes, ""));
+    return await openPdf(bytes);
   } catch {
-    // It needs a password.
+    // Damaged, or it needs a password.
     return null;
   }
 }
