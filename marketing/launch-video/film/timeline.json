@@ -1,0 +1,20 @@
+{
+  "title": "Cast a spell",
+  "bpm": 120,
+  "beat": 0.5,
+  "bar": 2,
+  "duration": 38,
+  "drop": 10,
+  "music": { "intro": [0,4], "groove": [4,8], "build": [8,10], "drop": [10,30], "half": [30,33.5], "gap": [33.5,34], "hit": 34, "ring": [34,38] },
+  "open": { "lockupOut": 0, "twinkle": 0.25, "push": 0, "caret": 0.02, "w1": 0.5, "w2": 0.75, "w3": 1, "line2": 1.25, "sheen": 2.5, "out": 3.85 },
+  "chooser": { "in": 4, "pdf": 4.25, "title": 4.25, "pptx": 4.5, "slides": 4.75, "media": 5, "drop": 5.25, "cursorIn": 5.2, "click": 6 },
+  "pdf": { "out": 6.05, "header": 6.15, "chip": 6.5, "caption": 8.05, "grid": 6.625, "gridStep": 0.125, "toCompress": 7.75, "click": 8, "captionOut": 9.75 },
+  "compress": { "panel": 8.05, "button": 8.5, "click": 9, "barStart": 9.1, "barEnd": 9.96 },
+  "done": { "check": 10, "title": 10.1, "stats": 10.2, "smaller": 10.3, "buttons": 10.4, "next": 10.55, "chips": 10.625, "chipStep": 0.125, "toChip": 11.5083, "click": 12 },
+  "editor": { "open": 12, "chrome": 12.3, "pull": 12.45, "edit": 12.5, "tool": 12.7583, "push": 13, "fieldClick": 13.25, "type": 13.5, "fill": 13.5, "charStep": 0.125, "toSign": 14.5, "sign": 15, "signEnd": 15.75, "toSave": 15.5, "save": 16, "captionOut": 16.15 },
+  "ai": { "open": 16, "caption": 16.25, "click": 16.625, "bubble": 16.67, "think": 16.85, "stream": 17.1, "streamEnd": 17.55, "collapse": 18.75, "captionOut": 18.75 },
+  "slides": { "pan": 19, "title": 19.25, "titleOut": 20.75, "card": 19, "toEdit": 19.45, "click": 20.5, "editor": 20.55, "band": 20.5, "caption1": 21, "select": 21.75, "type1": 22, "dragPress": 22.5, "dragMove": 22.6, "dragRelease": 23, "caption2": 23.5, "toPdf": 23.5, "pdfClick": 24, "check": 24.25, "captionOut": 24.9, "titleOutV": 20.3 },
+  "video": { "title": 25, "field": 25, "card": 25.2, "paste": 25.75, "link": 26, "eyebrow": 26.25, "buttons": 26.25, "titleOut": 26.55, "caption": 26.7, "print": 27, "tiktok": 27, "insta": 27.5, "toMp4": 27.75, "click": 28, "check": 28.25, "captionOut": 29.75, "reframeV": 26.6 },
+  "price": { "upgrade": 30, "open": 30.125, "side": 30.5, "caption": 30.4, "feats": 31, "roll": 31, "rollEnd": 31.75, "popular": 31.5, "seats": 31.75, "hover": 32.25, "captionOut": 33.25, "sideOut": 33.6, "cursorOut": 33.5 },
+  "end": { "collapse": 34, "hat": 34.1, "twinkle": 34.5, "word": 34.5, "url": 35, "underline": 35.25, "tag": 35.5, "rest": 37.5 }
+}
