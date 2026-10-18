@@ -5,6 +5,7 @@ import {
   PDFDocument,
   PDFHexString,
   PDFName,
+  PDFNull,
   PDFNumber,
   PDFObjectCopier,
   PDFPage,
@@ -14,6 +15,7 @@ import {
   PDFString,
   degrees,
   type PDFObject,
+  type PDFWidgetAnnotation,
 } from "pdf-lib";
 import { openPdf } from "./open";
 import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
@@ -69,25 +71,43 @@ const Last = PDFName.of("Last");
 const Next = PDFName.of("Next");
 const Prev = PDFName.of("Prev");
 const Count = PDFName.of("Count");
+const Names = PDFName.of("Names");
+const S = PDFName.of("S");
+const K = PDFName.of("K");
+const Pg = PDFName.of("Pg");
+const Obj = PDFName.of("Obj");
+const Ref = PDFName.of("Ref");
+const StructTreeRoot = PDFName.of("StructTreeRoot");
+const ParentTree = PDFName.of("ParentTree");
+const IDTree = PDFName.of("IDTree");
+const PageLabels = PDFName.of("PageLabels");
+
+/** The [key, value] pairs of a name tree (`kind` "Names") or a number tree ("Nums"). */
+function treeEntries(doc: PDFDocument, node: PDFObject | undefined, kind: "Names" | "Nums") {
+  const out: [PDFObject | undefined, PDFObject][] = [];
+  const seen = new Set<PDFDict>();
+  const walk = (node: PDFObject | undefined) => {
+    const dict = doc.context.lookup(node);
+    if (!(dict instanceof PDFDict) || seen.has(dict)) return;
+    seen.add(dict);
+    const pairs = dict.lookup(PDFName.of(kind));
+    for (let i = 0; pairs instanceof PDFArray && i + 1 < pairs.size(); i += 2) out.push([pairs.lookup(i), pairs.get(i + 1)]);
+    const kids = dict.lookup(PDFName.of("Kids"));
+    for (let i = 0; kids instanceof PDFArray && i < kids.size(); i++) walk(kids.get(i));
+  };
+  walk(node);
+  return out;
+}
 
 /** The document's named destinations: the /Names /Dests tree, and the older /Dests dictionary. */
 function namedDests(doc: PDFDocument): Map<string, PDFObject> {
   const out = new Map<string, PDFObject>();
-  const seen = new Set<PDFDict>();
-  const walk = (node: PDFObject | undefined) => {
-    const dict = node instanceof PDFRef ? doc.context.lookup(node) : node;
-    if (!(dict instanceof PDFDict) || seen.has(dict)) return;
-    seen.add(dict);
-    const names = dict.lookup(PDFName.of("Names"));
-    for (let i = 0; names instanceof PDFArray && i + 1 < names.size(); i += 2) {
-      const key = names.lookup(i);
-      if (key instanceof PDFString || key instanceof PDFHexString) out.set(key.decodeText(), names.get(i + 1));
+  const names = doc.catalog.lookup(Names);
+  if (names instanceof PDFDict) {
+    for (const [key, value] of treeEntries(doc, names.get(Dests), "Names")) {
+      if (key instanceof PDFString || key instanceof PDFHexString) out.set(key.decodeText(), value);
     }
-    const kids = dict.lookup(PDFName.of("Kids"));
-    for (let i = 0; kids instanceof PDFArray && i < kids.size(); i++) walk(kids.get(i));
-  };
-  const names = doc.catalog.lookup(PDFName.of("Names"));
-  if (names instanceof PDFDict) walk(names.get(Dests));
+  }
   const old = doc.catalog.lookup(Dests);
   if (old instanceof PDFDict) {
     for (const [key, value] of old.entries()) if (!out.has(key.decodeText())) out.set(key.decodeText(), value);
@@ -143,22 +163,35 @@ function dropUnreachable(doc: PDFDocument) {
   }
 }
 
-/**
- * Takes the widgets on dropped pages out of the form, and fields left with
- * none. A widget is on one when a dropped page lists it (`onDropped`) or it
- * names one as its page (`droppedRefs`).
- */
-function dropFields(doc: PDFDocument, onDropped: Set<PDFDict>, droppedRefs: Set<PDFRef>) {
+/** The annotations on a page. */
+function annotationsOf(page: PDFPage): PDFDict[] {
+  const annots = page.node.Annots();
+  const out: PDFDict[] = [];
+  for (let i = 0; i < (annots?.size() ?? 0); i++) {
+    const annot = annots!.lookup(i);
+    if (annot instanceof PDFDict) out.push(annot);
+  }
+  return out;
+}
+
+/** Takes the widgets `gone` picks out of the form, and fields left with none. */
+function dropFields(doc: PDFDocument, gone: (widget: PDFWidgetAnnotation) => boolean) {
   const acroForm = doc.catalog.getAcroForm();
-  if (!acroForm || !droppedRefs.size) return;
+  if (!acroForm) return;
   try {
     for (const [field] of acroForm.getAllFields()) {
       if (!(field instanceof PDFAcroTerminal)) continue;
       const widgets = field.getWidgets();
-      const gone = widgets.map((w) => onDropped.has(w.dict) || droppedRefs.has(w.P() as PDFRef));
-      if (!gone.includes(true)) continue;
-      if (!gone.includes(false)) acroForm.removeField(field);
-      else for (let i = widgets.length - 1; i >= 0; i--) if (gone[i]) field.removeWidget(i);
+      const out = widgets.map(gone);
+      if (!out.includes(true)) continue;
+      if (!out.includes(false)) acroForm.removeField(field);
+      else for (let i = widgets.length - 1; i >= 0; i--) if (out[i]) field.removeWidget(i);
+    }
+    // The calculation order would keep removed fields, and their values, in the file.
+    const order = acroForm.dict.lookup(PDFName.of("CO"));
+    if (order instanceof PDFArray) {
+      const left = new Set(acroForm.getAllFields().map(([, ref]) => ref));
+      for (let i = order.size() - 1; i >= 0; i--) if (!left.has(order.get(i) as PDFRef)) order.remove(i);
     }
   } catch {
     // A malformed form must not stop the page operation.
@@ -174,24 +207,27 @@ function dropXfa(doc: PDFDocument) {
   doc.catalog.delete(PDFName.of("NeedsRendering"));
 }
 
-/** Keeps the given (0-indexed) pages, in that order, and drops the rest. */
-function arrangePages(doc: PDFDocument, order: number[]) {
-  const pages = doc.getPages();
+/** `order` names pages of `pages`, each at most once. */
+function checkOrder(pages: PDFPage[], order: number[]) {
   if (new Set(order).size !== order.length || order.some((i) => !pages[i])) {
     throw new Error("Invalid page order.");
   }
+}
+
+/** Whether `order` keeps every page of `pages` where it was. */
+const unmoved = (pages: PDFPage[], order: number[]) => order.length === pages.length && order.every((p, i) => p === i);
+
+/** Keeps the given (0-indexed) pages, in that order, and drops the rest. */
+function arrangePages(doc: PDFDocument, order: number[]) {
+  const pages = doc.getPages();
+  checkOrder(pages, order);
   const kept = new Set(order);
   const dropped = pages.filter((_, i) => !kept.has(i));
   const droppedRefs = new Set(dropped.map((p) => p.ref));
-  const onDropped = new Set<PDFDict>();
-  for (const page of dropped) {
-    const annots = page.node.Annots();
-    for (let i = 0; i < (annots?.size() ?? 0); i++) {
-      const annot = annots!.lookup(i);
-      if (annot instanceof PDFDict) onDropped.add(annot);
-    }
+  if (dropped.length) {
+    const onDropped = new Set(dropped.flatMap(annotationsOf));
+    dropFields(doc, (w) => onDropped.has(w.dict) || droppedRefs.has(w.P() as PDFRef));
   }
-  dropFields(doc, onDropped, droppedRefs);
   dropXfa(doc);
   for (const page of pages) {
     // A page can inherit its size, rotation and resources from the page
@@ -205,11 +241,204 @@ function arrangePages(doc: PDFDocument, order: number[]) {
   for (let i = pages.length - 1; i >= 0; i--) doc.removePage(i);
   for (const i of order) doc.addPage(pages[i]);
   dropLinksTo(doc, droppedRefs);
+  if (dropped.length) {
+    const tags = readTags(doc);
+    copyTags(doc, doc, tags, new Set(order.map((i) => pages[i].ref)), (obj) => obj, tags.refs);
+  }
+  // Page labels go by position.
+  if (!unmoved(pages, order)) doc.catalog.delete(PageLabels);
   // What else still points at a dropped page (a named destination) now
   // points at nothing, which readers ignore; a page left outside the page
   // tree would read as page 1.
   for (const page of dropped) doc.context.delete(page.ref);
   dropUnreachable(doc);
+}
+
+/** The kids of a structure element: one object or an array of them. */
+function kidsOf(holder: PDFDict): PDFObject[] {
+  const kids = holder.get(K);
+  const list = holder.context.lookup(kids);
+  return list instanceof PDFArray ? list.asArray() : kids ? [kids] : [];
+}
+
+/** A document's tags (its structure tree), read once to copy them for any set of its pages. */
+interface Tags {
+  root?: PDFDict;
+  /** The pages each element's content is on: the marked content and annotations under it. */
+  pages: Map<PDFDict, Set<PDFRef>>;
+  /** Each element's object number. */
+  refs: Map<PDFDict, PDFRef>;
+  /** The ParentTree: by key, a page's elements (by marked content number) or an annotation's. */
+  parents: [PDFObject, (PDFObject | undefined)[] | PDFObject | undefined][];
+  /** The IDTree: elements by ID. */
+  ids: [PDFObject, PDFObject | undefined][];
+  /** Elements something outside the tags points at, such as a bookmark (/SE). */
+  pointedAt: PDFRef[];
+}
+
+function readTags(doc: PDFDocument): Tags {
+  const root = doc.catalog.lookup(StructTreeRoot);
+  const tags: Tags = { pages: new Map(), refs: new Map(), parents: [], ids: [], pointedAt: [] };
+  if (!(root instanceof PDFDict)) return tags;
+  tags.root = root;
+  const visit = (kid: PDFObject, inherited?: PDFRef): Set<PDFRef> | undefined => {
+    const el = doc.context.lookup(kid);
+    if (!(el instanceof PDFDict) || !el.has(S)) return undefined;
+    if (kid instanceof PDFRef) tags.refs.set(el, kid);
+    const known = tags.pages.get(el);
+    if (known) return known;
+    const pages = new Set<PDFRef>();
+    tags.pages.set(el, pages);
+    const own = el.get(Pg);
+    const page = own instanceof PDFRef ? own : inherited;
+    for (const kid of kidsOf(el)) {
+      const item = doc.context.lookup(kid);
+      const below = visit(kid, page);
+      if (below) below.forEach((p) => pages.add(p));
+      else if (item instanceof PDFNumber && page) pages.add(page);
+      else if (item instanceof PDFDict) {
+        const at = item.get(Pg) ?? page;
+        if (at instanceof PDFRef) pages.add(at);
+      }
+    }
+    if (!pages.size && page) pages.add(page);
+    return pages;
+  };
+  for (const kid of kidsOf(root)) visit(kid);
+
+  const lookup = (value: PDFObject | undefined) => doc.context.lookup(value);
+  for (const [key, value] of treeEntries(doc, root.get(ParentTree), "Nums")) {
+    const list = lookup(value);
+    if (key) tags.parents.push([key, list instanceof PDFArray ? list.asArray().map(lookup) : list]);
+  }
+  for (const [key, value] of treeEntries(doc, root.get(IDTree), "Names")) if (key) tags.ids.push([key, lookup(value)]);
+
+  // Everything else, to find what points into the tags.
+  const elements = new Set(tags.refs.values());
+  const seen = new Set<PDFRef>();
+  const tree = doc.catalog.get(StructTreeRoot);
+  if (tree instanceof PDFRef) seen.add(tree);
+  const pending: unknown[] = [doc.context.trailerInfo.Info];
+  for (const [key, value] of doc.catalog.entries()) if (key !== StructTreeRoot) pending.push(value);
+  while (pending.length) {
+    const obj = pending.pop();
+    if (obj instanceof PDFRef) {
+      if (seen.has(obj)) continue;
+      seen.add(obj);
+      if (elements.has(obj)) tags.pointedAt.push(obj);
+      else pending.push(doc.context.lookup(obj));
+    } else if (obj instanceof PDFDict) pending.push(...obj.values());
+    else if (obj instanceof PDFArray) pending.push(...obj.asArray());
+    else if (obj instanceof PDFStream) pending.push(obj.dict);
+  }
+  return tags;
+}
+
+/**
+ * Writes `from`'s tags into `into`, which can be the same document, for the
+ * `kept` pages of `from` alone: what only other pages show, such as a
+ * picture's alt text or a link's address, is left out. `copy` brings an
+ * object of `from` into `into`. An element that stays gets the number
+ * `numbers` gives it, if any: in the same document its own, in another the
+ * one what points at it (a bookmark's /SE) was copied with. Those of the
+ * elements left out are deleted, so what points at one points at nothing.
+ */
+function copyTags(
+  from: PDFDocument,
+  into: PDFDocument,
+  tags: Tags,
+  kept: Set<PDFRef>,
+  copy: <T extends PDFObject>(obj: T) => T,
+  numbers: Map<PDFDict, PDFRef>
+) {
+  const { root } = tags;
+  if (!root) return;
+  const made = new Map<PDFDict, PDFRef>();
+  const { context } = into;
+  const annots = new Set(into.getPages().flatMap(annotationsOf));
+  // Written at the end, so the walk reads the elements as they were.
+  const written: [PDFRef, PDFDict][] = [];
+  const onKept = (page: PDFObject | undefined) => page instanceof PDFRef && kept.has(page);
+  const showsKept = (el: PDFDict) => {
+    for (const page of tags.pages.get(el) ?? []) if (kept.has(page)) return true;
+    return false;
+  };
+
+  const kids = (holder: PDFDict, parent: PDFRef, page?: PDFRef): PDFObject[] => {
+    const out: PDFObject[] = [];
+    for (const kid of kidsOf(holder)) {
+      const item = from.context.lookup(kid);
+      if (item instanceof PDFDict && item.has(S)) {
+        const ref = element(item, parent, page);
+        if (ref) out.push(ref);
+      } else if (item instanceof PDFNumber) {
+        if (onKept(page)) out.push(item);
+      } else if (item instanceof PDFDict && onKept(item.get(Pg) ?? page)) {
+        // A link to a page left out is gone from the page that stays.
+        const obj = item.get(Obj);
+        if (obj instanceof PDFRef && from.context.lookup(obj) instanceof PDFDict && !annots.has(context.lookup(copy(obj)) as PDFDict)) {
+          continue;
+        }
+        out.push(copy(kid));
+      }
+    }
+    return out;
+  };
+  const element = (el: PDFDict, parent: PDFRef, inherited?: PDFRef): PDFRef | undefined => {
+    if (!showsKept(el)) return undefined;
+    const known = made.get(el);
+    if (known) return known;
+    const ref = numbers.get(el) ?? context.nextRef();
+    made.set(el, ref);
+    const own = el.get(Pg);
+    const below = kids(el, ref, own instanceof PDFRef ? own : inherited);
+    if (!below.length && kidsOf(el).length) {
+      made.delete(el);
+      return undefined;
+    }
+    const dict = context.obj({});
+    for (const [key, value] of el.entries()) {
+      // Its parent and kids are the copies'; /Ref can name elements left out.
+      if (key === K || key === P || key === Ref || (key === Pg && !onKept(value))) continue;
+      dict.set(key, copy(value));
+    }
+    dict.set(P, parent);
+    if (below.length) dict.set(K, context.obj(below));
+    written.push([ref, dict]);
+    return ref;
+  };
+
+  const rootRef = context.nextRef();
+  const tree = context.obj({});
+  for (const [key, value] of root.entries()) {
+    if (key !== K && key !== ParentTree && key !== IDTree) tree.set(key, copy(value));
+  }
+  const top = kids(root, rootRef);
+  if (top.length) tree.set(K, context.obj(top));
+  // Which element each piece of a page, and each annotation, belongs to.
+  const stays = (el: PDFObject | undefined) => (el instanceof PDFDict ? made.get(el) : undefined);
+  if (root.has(ParentTree)) {
+    const nums: PDFObject[] = [];
+    for (const [key, value] of tags.parents) {
+      if (Array.isArray(value)) {
+        if (value.some(stays)) nums.push(key, context.register(context.obj(value.map((v) => stays(v) ?? PDFNull))));
+      } else {
+        const el = stays(value);
+        if (el) nums.push(key, el);
+      }
+    }
+    tree.set(ParentTree, context.register(context.obj({ Nums: nums })));
+  }
+  const ids: PDFObject[] = [];
+  for (const [key, value] of tags.ids) {
+    const el = stays(value);
+    if (el) ids.push(key, el);
+  }
+  if (ids.length) tree.set(IDTree, context.register(context.obj({ Names: ids })));
+  for (const [el, ref] of numbers) if (!made.has(el)) context.delete(ref);
+  for (const [ref, dict] of written) context.assign(ref, dict);
+  context.assign(rootRef, tree);
+  into.catalog.set(StructTreeRoot, rootRef);
 }
 
 /**
@@ -448,19 +677,41 @@ export async function extractPages(
 }
 
 /**
- * A document with the given (0-indexed) pages of `src`, in that order, made
- * as extractPages makes it, but copied out of `src` and leaving it as it is:
- * Split reads the file once for all its parts, instead of reading the whole
- * file again for each one.
+ * What a part of a document keeps of its catalog besides its pages, tags,
+ * named destinations and page labels. Its attachments, scripts and open
+ * action stay behind.
+ */
+const PART_ENTRIES = ["Version", "Extensions", "PageLayout", "PageMode", "ViewerPreferences", "Lang", "Metadata", "MarkInfo", "OCProperties", "Outlines", "AcroForm", "Dests"];
+
+/**
+ * Copies parts of `src` out of it as extractFrom does, for Split, which reads
+ * the file once for all its parts: what every part needs of `src` (its tags)
+ * is read once too.
+ */
+export function extractorFor(src: PDFDocument): (order: number[]) => Promise<Uint8Array> {
+  const tags = readTags(src);
+  return (order) => extractPart(src, tags, order);
+}
+
+/**
+ * A document with the given (0-indexed) pages of `src`, in that order, copied
+ * out of `src` and leaving it as it is. Like extractPages, it keeps the form
+ * fields, bookmarks, links, layers, tags and title that go with its pages;
+ * but it is built from only what those pages use, so nothing of the pages
+ * left out comes along (such as the alt text and link addresses in their
+ * tags), nor do the document's attachments and scripts.
  */
 export async function extractFrom(src: PDFDocument, order: number[]): Promise<Uint8Array> {
+  return extractorFor(src)(order);
+}
+
+async function extractPart(src: PDFDocument, tags: Tags, order: number[]): Promise<Uint8Array> {
   const srcPages = src.getPages();
-  if (new Set(order).size !== order.length || order.some((i) => !srcPages[i])) {
-    throw new Error("Invalid page order.");
-  }
+  checkOrder(srcPages, order);
   const doc = await PDFDocument.create({ updateMetadata: false });
   doc.context.header = src.context.header;
   const copier = PDFObjectCopier.for(src.context, doc.context);
+  const copy = <T extends PDFObject>(obj: T) => copier.copy(obj);
   const copied = (copier as unknown as { traversedObjects: Map<PDFObject, PDFObject> }).traversedObjects;
   // Anything that points at the catalog or page tree gets the new ones, not copies.
   copied.set(src.context.trailerInfo.Root!, doc.context.trailerInfo.Root!);
@@ -473,6 +724,16 @@ export async function extractFrom(src: PDFDocument, order: number[]): Promise<Ui
   srcPages.forEach((page, i) => {
     if (!kept.has(i)) copied.set(page.ref, gone);
   });
+  // Nor are the tags, which copyTags writes for these pages alone. What
+  // points at an element (a bookmark's /SE) gets the number it has if it stays.
+  const structTree = src.catalog.get(StructTreeRoot);
+  if (structTree instanceof PDFRef) copied.set(structTree, PDFNull);
+  const numbers = new Map<PDFDict, PDFRef>();
+  for (const ref of tags.pointedAt) {
+    const number = doc.context.nextRef();
+    copied.set(ref, number);
+    numbers.set(src.context.lookup(ref, PDFDict), number);
+  }
   const refs = order.map((i) => {
     const ref = doc.context.nextRef();
     copied.set(srcPages[i].ref, ref);
@@ -484,29 +745,28 @@ export async function extractFrom(src: PDFDocument, order: number[]): Promise<Ui
     doc.context.assign(refs[k], node);
     doc.addPage(PDFPage.of(node, refs[k], doc));
   });
-  // The rest of the document: title, form, bookmarks, names, layers.
-  for (const [key, value] of src.catalog.entries()) {
-    if (key !== PDFName.of("Pages")) doc.catalog.set(key, copier.copy(value));
+  // The rest of the document: title, form, bookmarks, named destinations, layers.
+  for (const key of PART_ENTRIES) {
+    const value = src.catalog.get(PDFName.of(key));
+    if (value) doc.catalog.set(PDFName.of(key), copy(value));
   }
+  const names = src.catalog.lookup(Names);
+  const dests = names instanceof PDFDict ? names.get(Dests) : undefined;
+  if (dests) doc.catalog.set(Names, doc.context.obj({ Dests: copy(dests) }));
+  // Page labels go by position.
+  const labels = src.catalog.get(PageLabels);
+  if (labels && unmoved(srcPages, order)) doc.catalog.set(PageLabels, copy(labels));
   const { Info, ID } = src.context.trailerInfo;
-  if (Info) doc.context.trailerInfo.Info = copier.copy(Info);
-  if (ID) doc.context.trailerInfo.ID = copier.copy(ID);
+  if (Info) doc.context.trailerInfo.Info = copy(Info);
+  if (ID) doc.context.trailerInfo.ID = copy(ID);
 
-  const droppedRefs = new Set(kept.size < srcPages.length ? [gone] : []);
-  const onDropped = new Set<PDFDict>();
-  if (droppedRefs.size && doc.catalog.getAcroForm()) {
-    srcPages.forEach((page, i) => {
-      const annots = kept.has(i) ? undefined : page.node.Annots();
-      for (let a = 0; a < (annots?.size() ?? 0); a++) {
-        const copy = copied.get(annots!.get(a));
-        const annot = copy instanceof PDFRef ? doc.context.lookup(copy) : copy;
-        if (annot instanceof PDFDict) onDropped.add(annot);
-      }
-    });
+  if (kept.size < srcPages.length) {
+    dropLinksTo(doc, new Set([gone]));
+    const onPages = new Set(doc.getPages().flatMap(annotationsOf));
+    dropFields(doc, (w) => !onPages.has(w.dict));
   }
-  dropFields(doc, onDropped, droppedRefs);
+  copyTags(src, doc, tags, new Set(order.map((i) => srcPages[i].ref)), copy, numbers);
   dropXfa(doc);
-  dropLinksTo(doc, droppedRefs);
   dropUnreachable(doc);
   return doc.save();
 }

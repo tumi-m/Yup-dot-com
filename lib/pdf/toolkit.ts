@@ -11,7 +11,7 @@ import {
 import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
 import { openPdf } from "./open";
-import { extractFrom, mergeDocuments } from "./operations";
+import { extractorFor, mergeDocuments } from "./operations";
 import { isAbort, stopIfAborted } from "../abort";
 import { canvasToJpeg } from "../image-codec";
 import type { OcrProgress } from "./ocr";
@@ -125,14 +125,16 @@ export async function splitTool(
     }
   }
 
+  const extract = extractorFor(src);
   const results: ToolFile[] = [];
   const used = new Map<string, number>();
   for (let g = 0; g < groups.length; g++) {
     stopIfAborted(ctx.signal);
     if (groups.length > 1) ctx.progress?.(g / groups.length, `File ${g + 1} of ${groups.length}`);
-    // The document keeps its form, title, bookmarks and links to the pages
-    // that stay; the other pages and what only they use are left out.
-    const out = await extractFrom(src, groups[g]);
+    // The document keeps its form, title, bookmarks, links and tags for the
+    // pages that stay; the other pages and what only they use are left out,
+    // and so are its attachments and scripts.
+    const out = await extract(groups[g]);
     // Repeated ranges ("1, 1") must not overwrite each other in the zip.
     const label = pageLabel(groups[g]);
     const n = (used.get(label) ?? 0) + 1;
