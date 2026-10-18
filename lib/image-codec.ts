@@ -15,6 +15,7 @@
  */
 import encodeWasm, { init as initEncoder } from "@jsquash/jpeg/encode.js";
 import decodeWasm, { init as initDecoder } from "@jsquash/jpeg/decode.js";
+import { imageSize, withoutOrientation } from "./pdf/images";
 
 export const JSQUASH_JPEG_VERSION = "1.6.0";
 
@@ -130,15 +131,22 @@ async function canvasEncode(image: RawImage, quality: number): Promise<Uint8Arra
 }
 
 async function canvasDecode(bytes: Uint8Array): Promise<RawImage> {
-  const blob = new Blob([bytes.slice() as unknown as BlobPart], { type: "image/jpeg" });
+  // As a PDF viewer shows it: no EXIF rotation, no colour profile. Browsers
+  // now rotate even for imageOrientation "none", so the tag is cleared first.
+  const blob = new Blob([withoutOrientation(bytes) as unknown as BlobPart], { type: "image/jpeg" });
   let bitmap: ImageBitmap;
   try {
-    // As a PDF viewer shows it: no EXIF rotation, no colour profile.
     bitmap = await createImageBitmap(blob, { imageOrientation: "none", colorSpaceConversion: "none", premultiplyAlpha: "none" });
   } catch {
     bitmap = await createImageBitmap(blob);
   }
   const { width, height } = bitmap;
+  // Pixels turned from how they are stored would be resized out of shape.
+  const stored = imageSize(bytes, "jpeg");
+  if (stored && (stored.width !== width || stored.height !== height)) {
+    bitmap.close();
+    throw new Error("This image couldn't be read.");
+  }
   const { ctx } = context2d(width, height);
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
