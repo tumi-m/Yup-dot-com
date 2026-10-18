@@ -1,8 +1,9 @@
 /**
  * What the pricing cards offer a signed-in customer, why a checkout is
- * refused, and how the payment return page reads the verify response. Works
- * from the billing summary, without Node APIs, so the checkout route, the
- * browser and the tests share one set of rules.
+ * refused, what the Billing page says about the plan, and how the payment
+ * return page reads the verify response. Works from the billing summary,
+ * without Node APIs, so the checkout route, the browser and the tests share
+ * one set of rules.
  */
 import { PLANS, formatBillingDate, type PaidPlanId } from "./plans";
 import type { BillingSummary } from "./billing";
@@ -68,12 +69,50 @@ export function cardOffer(plan: PaidPlanId, current: PlanId | undefined, billing
   }
   const block = subscribeBlock(plan, billing);
   const pre = billing?.prepaid;
+  const notes = [
+    pre?.active && pre.plan !== plan ? `Your ${PLANS[pre.plan].name} time left carries over.` : null,
+    renewalNote(plan, billing),
+  ].filter(Boolean);
   return {
     main: block ? "blocked" : "subscribe",
     text: block,
     payOnce: !payOnceBlock(plan, billing),
-    payOnceNote: pre?.active && pre.plan !== plan ? `Your ${PLANS[pre.plan].name} time left carries over.` : null,
+    payOnceNote: notes.length ? notes.join(" ") : null,
   };
+}
+
+/** Paying once for `plan` doesn't stop a subscription to another plan: say it's still charged. */
+function renewalNote(plan: PaidPlanId, billing: Billing): string | null {
+  const sub = billing?.subscription;
+  if (!sub?.active || !sub.renews || sub.plan === plan) return null;
+  const name = PLANS[sub.plan].name;
+  const when = sub.periodEnd && !sub.pastDue ? ` on ${formatBillingDate(sub.periodEnd)}` : "";
+  return `Your ${name} subscription still renews${when}. Cancel it under Manage subscription.`;
+}
+
+/**
+ * The lines under the plan name on the Billing page. A renewing
+ * subscription is listed even when another plan is in use, so the next
+ * charge is never hidden.
+ */
+export function planStatus(billing: BillingSummary): string[] {
+  const { subscription: sub, prepaid } = billing;
+  if (billing.source === "subscription" && sub) {
+    const label = sub.pastDue ? "Payment due" : sub.renews ? "Renews" : "Ends";
+    return sub.periodEnd ? [`${label} ${formatBillingDate(sub.periodEnd)}`] : [];
+  }
+  const lines: string[] = [];
+  if (billing.source === "prepaid" && prepaid) {
+    lines.push(`Paid until ${formatBillingDate(prepaid.paidUntil)}`);
+  } else if (billing.source === "team") {
+    lines.push(billing.teamOwnerEmail ? `Seat on ${billing.teamOwnerEmail}'s team` : "Team seat");
+  } else if (prepaid && !prepaid.active) {
+    lines.push(`${PLANS[prepaid.plan].name} ended ${formatBillingDate(prepaid.paidUntil)}`);
+  }
+  if (sub?.active && sub.renews && sub.periodEnd) {
+    lines.push(`${PLANS[sub.plan].name} subscription ${sub.pastDue ? "payment due" : "renews"} ${formatBillingDate(sub.periodEnd)}`);
+  }
+  return lines;
 }
 
 export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "retry" | "unknown";
