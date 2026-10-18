@@ -200,7 +200,11 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
           </p>
         )}
         {state !== "checking" && (
-          <button onClick={dismiss} aria-label="Dismiss" className="ml-auto text-muted-foreground hover:text-foreground">
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="-my-2 -mr-2 ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <X className="h-4 w-4" />
           </button>
         )}
