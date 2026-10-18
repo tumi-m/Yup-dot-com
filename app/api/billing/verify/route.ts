@@ -1,4 +1,4 @@
-import { applyCharge, parseMetadata } from "@/lib/billing";
+import { confirmCharge, parseMetadata } from "@/lib/billing";
 import { supabaseBillingStore } from "@/lib/billing-store";
 import { billingContext, json } from "@/lib/billing-route";
 import { isOurReference, planForCode, verifyTransaction } from "@/lib/paystack";
@@ -37,13 +37,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await applyCharge(tx, { store: supabaseBillingStore(), planForCode: (c) => planForCode(c) });
+    const result = await confirmCharge(tx, account.user.id, account.profile.plan, {
+      store: supabaseBillingStore(),
+      planForCode: (c) => planForCode(c),
+    });
     if (result.status === "ignored") {
       // Paystack took the money but it doesn't match a plan we sell.
       console.error("payment not applied", reference, result.reason);
       return json({ status: "not-applied" }, 422);
     }
-    return json({ status: "success", purchase: purchaseSummary(tx) });
+    // The webhook has the payment and is still recording it.
+    if (result.status === "pending") return json({ status: "pending" }, 202);
+    return json({ status: "success", plan: result.plan, purchase: purchaseSummary(tx) });
   } catch (err) {
     console.error("apply payment failed", err);
     return json({ status: "pending" }, 202);
