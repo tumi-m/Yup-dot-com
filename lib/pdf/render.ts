@@ -17,6 +17,20 @@ function ensureWorker() {
 const MAX_CANVAS_SIDE = 8192;
 const MAX_CANVAS_PIXELS = 4096 * 4096;
 
+/**
+ * The pixel ratio to render a page of `width` × `height` CSS pixels at:
+ * `wanted`, or less to stay within the canvas limits. The page keeps its
+ * size on screen and only looks a little softer.
+ */
+export function canvasRatio(width: number, height: number, wanted: number): number {
+  const fit = Math.min(
+    MAX_CANVAS_SIDE / (width * wanted),
+    MAX_CANVAS_SIDE / (height * wanted),
+    Math.sqrt(MAX_CANVAS_PIXELS / (width * height * wanted * wanted))
+  );
+  return wanted * Math.min(1, fit);
+}
+
 const canvasSlots = new WeakMap<
   HTMLCanvasElement,
   { generation: number; task: { cancel: () => void } | null; done: Promise<void> }
@@ -84,13 +98,7 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         const screen = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-        const wanted = opts?.pixelRatio ?? screen;
-        const fit = Math.min(
-          MAX_CANVAS_SIDE / (viewport.width * wanted),
-          MAX_CANVAS_SIDE / (viewport.height * wanted),
-          Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height * wanted * wanted))
-        );
-        const dpr = wanted * Math.min(1, fit);
+        const dpr = canvasRatio(viewport.width, viewport.height, opts?.pixelRatio ?? screen);
         canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
         canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
         canvas.style.width = `${viewport.width}px`;
