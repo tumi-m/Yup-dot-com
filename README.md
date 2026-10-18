@@ -318,14 +318,23 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   counters are written only by the server with the service role. Functions
   that read plans or count usage are `SECURITY DEFINER` with a fixed
   `search_path` and can't be called from the browser.
+- **Tables, views and functions added later** (say, by hand in the SQL
+  editor) are private by default: an event trigger switches RLS on for each
+  new table (and refuses to switch it off), makes new views check RLS as the
+  reader, and takes EXECUTE on new functions away from browsers; browsers get
+  no privilege on anything new until it is granted on purpose.
+  [`supabase/audit.sql`](supabase/audit.sql) lists anything a browser could
+  still reach; run it in the SQL editor after any change by hand.
 - **Stored files.** The `documents` bucket is private, PDFs only. A file can
   be uploaded or read only when the user owns a document row for it, a row
   can't be pointed at another file, and a row can only be deleted after its
   file, so the Free 5-document limit also limits stored files.
 - **Payments.** The Paystack webhook checks an HMAC-SHA512 signature
   (constant-time) and the amount paid; events are applied once.
-- **Secrets.** Only `NEXT_PUBLIC_*` values reach the browser. `.env*` files
-  are git-ignored except `.env.example`.
+- **Secrets.** Only `NEXT_PUBLIC_*` values reach the browser, and the code
+  may use only the names listed in `PUBLIC_VARS` (`lib/secret-scan.cjs`).
+  There is no admin password anywhere. `.env*` files are git-ignored except
+  `.env.example`.
 - **Downloads and imports.** Links users paste are fetched by the server only
   from allow-listed hosts (`video.twimg.com`, Google Slides), checked again on
   every redirect. X download links
@@ -355,24 +364,44 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   events, call the usage functions, keep files past the plan limit) and fails
   if any of it works. Run it locally against any Postgres you can throw away:
   `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
-- Every `npm run build` (on Vercel too) runs `scripts/check-env.mjs` first,
-  which stops the build if a `NEXT_PUBLIC_` variable holds a secret (a
-  service_role or `sb_secret_` key, a Paystack secret key, a private key,
-  a server-only value) or a server-only name, and
-  `scripts/check-bundle-secrets.mjs` after, which fails it if a secret
-  pattern or a server-only value is in `.next/static`, a prerendered page or
+  The same tests run `supabase/audit.sql` (it must find nothing), add a
+  table, a `SECURITY DEFINER` function and a view the way someone would in
+  the SQL editor and check they come out private, and plant each mistake
+  with the event trigger off to check the audit names it.
+- Every `npm run build` (on Vercel too) first runs `scripts/check-env.mjs`,
+  which stops the build if a `NEXT_PUBLIC_` variable is named like a secret
+  (password, pass, pw, token, API key, JWT, database, a server-only name in
+  any case) or holds one (a service_role or `sb_secret_` key, Paystack,
+  OpenAI, Resend or other secret keys, a private key, a connection string
+  with a password, also base64 or hex encoded, or a server-only value), and
+  `scripts/check-source.mjs`, which stops it for a hard-coded credential in
+  the code (`password === "…"`, `ADMIN_PASSWORD = "…"`), a key pasted into
+  app code or `public/`, or a `NEXT_PUBLIC_` name not on the list.
+  `next.config.ts` runs both for a plain `next build`. After the build,
+  `scripts/check-bundle-secrets.mjs` fails it if a secret pattern or a
+  server-only value (including passwords, `*_KEY` variables and the password
+  in a connection string) is in `.next/static`, a prerendered page or
   `public/`. CI builds with fake values in every secret and runs both, then
   starts the build and checks it from outside with `scripts/check-live.mjs`.
+- CI scans the repository and its whole history with gitleaks
+  (`.gitleaks.toml`), and packs the browser extension, which searches what it
+  ships for secrets.
 - React refuses to send a server secret to the browser
-  (`lib/server-secrets.ts`); modules that read secrets import `server-only`.
+  (`lib/server-secrets.ts`): every value the build checks count as secret, not
+  only the known keys. Modules that read secrets import `server-only`.
+- [`scripts/routes.mjs`](scripts/routes.mjs) lists every page and route as
+  public or private; `npm test` fails when a new one is in neither list.
 - `npm run check:live -- https://pdfwizard.xyz` checks the live site from
-  outside: secrets in its scripts, headers, exposed files, private pages
-  signed out, and what the public Supabase key can read. GitHub runs it
-  weekly and after each push to `main` (`.github/workflows/live-check.yml`).
-  See [SECURITY.md](SECURITY.md#why-the-mybroadband-style-hacks-dont-apply-here).
+  outside: secrets in its scripts, headers, exposed files, every private page
+  and closed route signed out, and what the public Supabase key can read or
+  write (every table, function and bucket it can find). With a test account
+  it also checks what any signed-up user can read. GitHub runs it weekly and
+  after each push to `main` (`.github/workflows/live-check.yml`). See
+  [SECURITY.md](SECURITY.md#why-the-mybroadband-style-hacks-dont-apply-here).
 - `npm test` covers webhook signatures, billing replay, token signing and
-  refunds, the PPTX sanitiser, URL allow-lists, the build checks, the CSP
-  and the live checker (against a made-up safe and unsafe site).
+  refunds, the PPTX sanitiser, URL allow-lists, the build and source checks,
+  the CSP and the proxy's paths, the route list and the live checker
+  (against a made-up safe and unsafe site).
 
 The free plan's edit watermark and daily edit count are checked in the
 browser, where the file is made, so they are a soft limit. Everything that
@@ -417,27 +446,37 @@ someone leaves or a key changes.
       time as setting `NEXT_PUBLIC_TURNSTILE_SITE_KEY` in Vercel.
    6. Custom SMTP from your own domain, so reset emails don't come from the
       shared sender.
-6. Supabase → Database: Security Advisor shows no "RLS disabled" table, the
-   `documents` bucket is not Public, and each file in `supabase/migrations/`
-   has run once, in date order. Turn off `pg_graphql` if you don't use it.
-7. Cloudflare (DNS): turn on **DNSSEC** and add the DS record at the
+6. Supabase → SQL editor: run each file in `supabase/migrations/` you
+   haven't run yet, once, in date order (the newest is
+   `20261018140000_private_by_default.sql`). Then run
+   [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
+   it again whenever you change anything by hand (a table, a bucket, a
+   function, a policy). Security Advisor should show no "RLS disabled" table.
+   Turn off `pg_graphql` if you don't use it.
+7. Optional, for the Live check: create an ordinary account used only for
+   it (sign up, confirm the email, never upload anything private), and add
+   its email and password as the GitHub Actions secrets `CHECK_LIVE_EMAIL`
+   and `CHECK_LIVE_PASSWORD`. The check then also proves that a signed-up
+   user sees only their own rows and files. It can't sign in while
+   Supabase's CAPTCHA is on.
+8. Cloudflare (DNS): turn on **DNSSEC** and add the DS record at the
    registrar; add **CAA** records for the certificate authorities Vercel
    uses (`letsencrypt.org`) plus `iodef` `mailto:security@pdfwizard.xyz`;
    SPF, DKIM and DMARC for the mail domain; registrar lock on.
-8. Paystack: webhook URL `https://pdfwizard.xyz/api/billing/webhook` only.
+9. Paystack: webhook URL `https://pdfwizard.xyz/api/billing/webhook` only.
    Webhooks are verified with `PAYSTACK_SECRET_KEY`, so a new secret key goes
    into Vercel straight away. Two-factor on, least-privilege team roles,
    test keys outside production.
-9. GitHub (the repository is public): Settings → Code security: secret
-   scanning with push protection, Dependabot alerts and security updates,
-   private vulnerability reporting. Protect `main`: require a pull request
-   and the CI checks `app`, `build`, `database` and `media-worker`; block
-   force pushes. Actions → General: read-only workflow permissions, and
-   approval for workflows from forks. Add the variable `SITE_URL` =
-   `https://pdfwizard.xyz` for the Live check workflow.
-10. Media worker host: `MEDIA_ALLOWED_ORIGINS=https://pdfwizard.xyz`, and
+10. GitHub (the repository is public): Settings → Code security: secret
+    scanning with push protection, Dependabot alerts and security updates,
+    private vulnerability reporting. Protect `main`: require a pull request
+    and the CI checks `app`, `secrets`, `build`, `database` and
+    `media-worker`; block force pushes. Actions → General: read-only workflow permissions, and
+    approval for workflows from forks. Add the variable `SITE_URL` =
+    `https://pdfwizard.xyz` for the Live check workflow.
+11. Media worker host: `MEDIA_ALLOWED_ORIGINS=https://pdfwizard.xyz`, and
     `YTDLP_PROXY` credentials only in that host's secret store.
-11. After changing any of these: `npm run check:live -- https://pdfwizard.xyz`.
+12. After changing any of these: `npm run check:live -- https://pdfwizard.xyz`.
 
 ---
 
