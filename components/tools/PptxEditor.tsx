@@ -232,6 +232,11 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       return;
     }
     const id = ++job.current;
+    // The editor replaces the Choose button: once the deck is open, focus
+    // goes to the first slide (or back to Choose if it can't be opened).
+    const hadFocus = !!flow.ref.current?.contains(document.activeElement);
+    const stillHere = () =>
+      hadFocus && (document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement));
     setFile(picked);
     setSnap(null);
     setMeta(null);
@@ -258,10 +263,12 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       setMeta({ width: deck.width, height: deck.height, themeColors: deck.themeColors });
       setSnap(first);
       setStatus("ready");
+      if (stillHere()) focusThumb(0);
       requestAnimationFrame(() => barRef.current?.scrollIntoView({ block: "start", behavior: scrollBehavior() }));
     } catch (err) {
       if (id !== job.current) return;
       const { parse } = await getLibs();
+      if (stillHere()) focusNext.current = "choose";
       setError(parse.pptxErrorMessage(err));
       setFile(null);
       setStatus("idle");

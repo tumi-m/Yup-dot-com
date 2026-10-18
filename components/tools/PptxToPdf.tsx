@@ -114,6 +114,11 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       return;
     }
     const id = ++job.current;
+    // The file row replaces the Choose button: once the deck is read, focus
+    // goes to Convert (or back to Choose if it can't be read).
+    const hadFocus = !!flow.ref.current?.contains(document.activeElement);
+    const stillHere = () =>
+      hadFocus && (document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement));
     setFile(picked);
     setDeck(null);
     setResult(null);
@@ -122,11 +127,13 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       const { parsePptx } = await import("@/lib/pptx/parse");
       const parsed = await parsePptx(await picked.arrayBuffer());
       if (id !== job.current) return;
+      if (stillHere()) focusNext.current = "convert";
       setDeck(parsed);
       setStatus("ready");
     } catch (err) {
       if (id !== job.current) return;
       const { pptxErrorMessage } = await import("@/lib/pptx/parse");
+      if (stillHere()) focusNext.current = "choose";
       setError(pptxErrorMessage(err));
       setFile(null);
       setStatus("idle");
