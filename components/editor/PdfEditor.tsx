@@ -29,6 +29,7 @@ import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/
 import { useHistory } from "@/lib/editor/history";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
+import { PICTURE_MESSAGE, pictureDataUrl } from "@/lib/editor/picture";
 import { scrollBehavior } from "@/components/motion/focus";
 import { readShortcutsOn, toolShortcut, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
@@ -344,16 +345,19 @@ export function PdfEditor({
 
   async function handleImagePicked(files: FileList | null) {
     const file = files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPlacementImage(String(reader.result));
-      setTool("image");
-      if (keyboardTool.current) setPlaceNow((n) => n + 1);
-      else toast("Click on the page to place the image.", "info");
-    };
-    reader.readAsDataURL(file);
     if (imageInput.current) imageInput.current.value = "";
+    if (!file) return;
+    let url: string;
+    try {
+      url = await pictureDataUrl(file);
+    } catch {
+      toast(PICTURE_MESSAGE, "error");
+      return;
+    }
+    setPlacementImage(url);
+    setTool("image");
+    if (keyboardTool.current) setPlaceNow((n) => n + 1);
+    else toast("Click on the page to place the image.", "info");
   }
 
   // ---- export ----

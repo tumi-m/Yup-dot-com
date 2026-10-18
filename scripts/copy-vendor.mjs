@@ -35,9 +35,13 @@ function copy(from, to) {
   cpSync(from, to);
 }
 
-// pdf.js worker
+// pdf.js worker: the legacy build, like the app's own pdf.js (lib/pdf/worker.ts).
+// Its own path, so browsers that cached the modern worker don't keep it.
 const pdfjs = version("pdfjs-dist");
-copy(join(pkgDir("pdfjs-dist"), "build", "pdf.worker.min.mjs"), join(out, "pdfjs", pdfjs, "pdf.worker.min.mjs"));
+copy(
+  join(pkgDir("pdfjs-dist"), "legacy", "build", "pdf.worker.min.mjs"),
+  join(out, "pdfjs", pdfjs, "legacy", "pdf.worker.min.mjs")
+);
 
 // Tesseract worker + LSTM engine builds (the loader picks one per browser)
 const tess = version("tesseract.js");

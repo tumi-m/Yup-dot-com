@@ -89,7 +89,8 @@ const PAGE_TEXT = 40;
 // ---------------------------------------------------------------------------
 
 async function getPdfjs() {
-  const pdfjsLib = await import("pdfjs-dist");
+  // The legacy build, for Safari before 17.4 and older iPhones (see worker.ts).
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
   configureWorker(pdfjsLib);
   return pdfjsLib;
 }

@@ -52,8 +52,13 @@ const never = new Promise<never>(() => {});
 let canvasMod: typeof import("canvas") | null = null;
 try {
   canvasMod = await import("canvas");
-  // Pages are rendered into a canvas before they are read.
-  (globalThis as Record<string, unknown>).document = { createElement: () => Object.assign(canvasMod!.createCanvas(1, 1), { style: {} }) };
+  // Pages are rendered into a canvas before they are read; toBlob as in a browser.
+  (globalThis as Record<string, unknown>).document = {
+    createElement: () => {
+      const c = canvasMod!.createCanvas(1, 1);
+      return Object.assign(c, { style: {}, toBlob: (done: (b: Blob) => void) => done(new Blob([c.toBuffer("image/png")])) });
+    },
+  };
 } catch {
   console.log("SKIP  checks that render pages (node-canvas not installed)");
 }
