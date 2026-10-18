@@ -21,12 +21,13 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      # Built with fake values in every secret, so the next step can prove
-      # none of them reaches the browser.
+      # Built with fake values in every secret. prebuild refuses a secret in
+      # a NEXT_PUBLIC_ variable; postbuild searches the output for secret
+      # patterns and these values. The anon key is a fake "anon" JWT.
       - run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://canary-project.supabase.invalid
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbmFyeSIsInJvbGUiOiJhbm9uIiwiY2FuYXJ5IjoicHVibGljX2Fub25fNWQxYyJ9.canary_signature_5d1c
           SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
           PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
           PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
@@ -37,9 +38,11 @@ jobs:
           MEDIA_WORKER_URL: https://canary-worker.invalid
           MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
           MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
-      - run: node scripts/check-bundle-secrets.mjs
+      # Again with --canary: fails unless the fake values were really set and
+      # the public key is found, so the search can't pass by reading nothing.
+      - run: node scripts/check-bundle-secrets.mjs --canary
         env:
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbmFyeSIsInJvbGUiOiJhbm9uIiwiY2FuYXJ5IjoicHVibGljX2Fub25fNWQxYyJ9.canary_signature_5d1c
           SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
           PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
           PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa

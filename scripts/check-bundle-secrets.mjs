@@ -1,39 +1,43 @@
 #!/usr/bin/env node
 /**
- * Fails if a server secret ended up in what browsers download.
+ * Fails if a server secret ended up in what browsers can download: the
+ * client bundle (.next/static), public/, and prerendered pages
+ * (.next/server/**.html|.rsc|.body|.meta|.json). Runs after every build
+ * (npm "postbuild", so on Vercel too).
  *
- * Build with a recognisable fake value in every server-only variable, then
- * run this: it searches the client bundle (.next/static), public/ and the
- * prerendered pages (.next/server/**.html|.rsc|.body|.meta) for each value.
- * As a positive control, the public anon key must be found in the bundle,
- * so a broken search can't pass.
+ * It looks for two things (rules in lib/secret-scan.cjs):
+ * - secret patterns: Supabase JWTs whose role isn't "anon" (service_role),
+ *   sb_secret_ keys, Paystack sk_live_/sk_test_ keys, private keys;
+ * - the actual values of the server-only variables set for this build
+ *   (SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, … and any other
+ *   variable named like a secret), read the same way `next build` reads them.
  *
- *   SUPABASE_SERVICE_ROLE_KEY=canary_service_role_8f3a ... npx next build
- *   node scripts/check-bundle-secrets.mjs
+ * When NEXT_PUBLIC_SUPABASE_ANON_KEY is set, it must be found in
+ * .next/static, so a search that reads nothing can't pass. With --canary
+ * (CI), the build must also have fake values in at least three secrets,
+ * so the search by value is really tested:
  *
- * CI sets the values (see .github/workflows/ci.yml).
+ *   SUPABASE_SERVICE_ROLE_KEY=canary_service_role_8f3a ... npm run build
+ *   node scripts/check-bundle-secrets.mjs --canary
+ *
+ * Pages rendered at request time aren't files here: React refuses to send
+ * a secret to the browser (lib/server-secrets.ts), and
+ * `npm run check:live -- <url> --env-values` checks the rendered pages.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import secretScan from "../lib/secret-scan.cjs";
+import { loadBuildEnv } from "./build-env.mjs";
 
-const SERVER_ONLY = [
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "PAYSTACK_SECRET_KEY",
-  "PAYSTACK_PLAN_PRO",
-  "PAYSTACK_PLAN_TEAM",
-  "OLLAMA_API_KEY",
-  "OLLAMA_HOST",
-  "USAGE_HASH_SALT",
-  "MEDIA_WORKER_SECRET",
-  "MEDIA_SIGNING_SECRET",
-];
 const PUBLIC_CONTROL = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
+const canary = process.argv.includes("--canary");
 
-const secrets = SERVER_ONLY.map((name) => [name, process.env[name]?.trim()]).filter(([, v]) => v && v.length >= 8);
+await loadBuildEnv();
+const secrets = secretScan.serverValues(process.env);
 const control = process.env[PUBLIC_CONTROL]?.trim();
-if (secrets.length < 3 || !control) {
+if (canary && (secrets.length < 3 || !control)) {
   console.error(
-    `Build and run this with fake values in at least SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, MEDIA_SIGNING_SECRET and ${PUBLIC_CONTROL}.`
+    `--canary: build and run this with fake values in at least SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, MEDIA_SIGNING_SECRET and ${PUBLIC_CONTROL}.`
   );
   process.exit(2);
 }
@@ -53,27 +57,44 @@ function* files(dir, filter = () => true) {
   }
 }
 
+const STATIC = join(".next", "static") + sep;
 const prerendered = (p) => /\.(html|rsc|body|meta|json)$/.test(p);
-const targets = [...files(".next/static"), ...files("public"), ...files(".next/server", prerendered)];
-if (!targets.some((p) => p.startsWith(join(".next", "static")))) {
+const targets = [...files(join(".next", "static")), ...files("public"), ...files(join(".next", "server"), prerendered)];
+if (!targets.some((p) => p.startsWith(STATIC))) {
   console.error("No .next/static: run `next build` first.");
   process.exit(2);
 }
 
 const leaks = [];
 let controlFound = false;
+let bytes = 0;
 for (const path of targets) {
   const text = readFileSync(path).toString("latin1");
-  if (!controlFound && path.startsWith(join(".next", "static")) && text.includes(control)) controlFound = true;
-  for (const [name, value] of secrets) if (text.includes(value)) leaks.push(`${name} in ${path}`);
+  bytes += text.length;
+  if (control && !controlFound && path.startsWith(STATIC) && text.includes(control)) controlFound = true;
+  for (const { kind, sample } of secretScan.findSecrets(text)) leaks.push(`${path}: ${kind} (${sample})`);
+  for (const [name, value] of secrets) if (text.includes(value)) leaks.push(`${path}: the value of ${name}`);
 }
 
-if (!controlFound) {
+if (control && !controlFound) {
   console.error(`Positive control failed: ${PUBLIC_CONTROL} was not found in .next/static, so the search can't be trusted.`);
   process.exit(1);
 }
 if (leaks.length) {
-  console.error(`Server secrets found in browser-facing files:\n  ${leaks.join("\n  ")}`);
+  console.error(
+    [
+      "",
+      "Build stopped: a server secret is in files that browsers can download.",
+      ...leaks.slice(0, 20).map((l) => `  - ${l}`),
+      ...(leaks.length > 20 ? [`  … and ${leaks.length - 20} more`] : []),
+      "Remove it from client code, public/ or NEXT_PUBLIC_ variables, rebuild, and rotate the key if it was ever deployed (SECURITY.md).",
+      "",
+    ].join("\n")
+  );
   process.exit(1);
 }
-console.log(`No server secret in ${targets.length} browser-facing files (${secrets.map(([n]) => n).join(", ")}).`);
+const names = secrets.map(([n]) => n);
+console.log(
+  `Bundle check: no server secret in ${targets.length} browser-facing files (${(bytes / 1e6).toFixed(0)} MB; ` +
+    `patterns${names.length ? `, values of ${names.join(", ")}` : ""}).`
+);

@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import secretScan from "./lib/secret-scan.cjs";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -43,4 +45,17 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * The same check as `npm run build`'s prebuild (scripts/check-env.mjs), for a
+ * plain `next build`: no server secret may sit in a NEXT_PUBLIC_ variable,
+ * because those are copied into the browser bundle.
+ */
+export default function config(phase: string): NextConfig {
+  if (phase === PHASE_PRODUCTION_BUILD) {
+    const problems = secretScan.envProblems(process.env);
+    if (problems.length) {
+      throw new Error(`Build stopped: a secret would reach the browser.\n  - ${problems.join("\n  - ")}`);
+    }
+  }
+  return nextConfig;
+}
