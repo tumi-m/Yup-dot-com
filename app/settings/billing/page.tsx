@@ -38,10 +38,11 @@ export default async function BillingPage({
   const sub = billing.subscription;
   const prepaid = billing.prepaid;
   const ownsTeam = ownPlan(row, new Date()) === "team";
-  const members =
-    ownsTeam && isAdminConfigured()
-      ? (await listTeamMembers(profile.id).catch(() => [])).map((m) => m.email)
-      : [];
+  // Listed after a Team plan ends too, so they can be removed: the emails
+  // are kept, and get Team again if the owner renews it.
+  const members = isAdminConfigured()
+    ? (await listTeamMembers(profile.id).catch(() => [])).map((m) => m.email)
+    : [];
 
   const status = planStatus(billing);
 
@@ -96,9 +97,9 @@ export default async function BillingPage({
           ) : null}
         </section>
 
-        {ownsTeam && (
+        {(ownsTeam || members.length > 0) && (
           <section className="mt-10">
-            <TeamSeats ownerEmail={profile.email} initialMembers={members} seats={TEAM_SEATS} />
+            <TeamSeats ownerEmail={profile.email} initialMembers={members} seats={TEAM_SEATS} ended={!ownsTeam} />
           </section>
         )}
 
