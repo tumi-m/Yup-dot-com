@@ -16,8 +16,15 @@ export function isAdminConfigured(): boolean {
   return !!process.env.SUPABASE_SERVICE_ROLE_KEY && !!process.env.NEXT_PUBLIC_SUPABASE_URL;
 }
 
-function fail(what: string, error: { message?: string } | null) {
-  if (error) throw new Error(`${what}: ${error.message ?? "database error"}`);
+/** A database error, with Postgres' error code when it gave one. */
+export class StoreError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
+
+function fail(what: string, error: { message?: string; code?: string } | null) {
+  if (error) throw new StoreError(`${what}: ${error.message ?? "database error"}`, error.code);
 }
 
 export function supabaseBillingStore(admin: Admin = createAdminClient()): BillingStore {
@@ -76,6 +83,11 @@ export async function addTeamMember(ownerId: string, email: string, admin: Admin
   const { error } = await admin.from("team_members").insert({ owner_id: ownerId, email });
   if (error?.code === "23505") return; // already there
   fail("add member", error);
+}
+
+/** The database refused a member because every seat is taken (its seat trigger raises P0001). */
+export function isSeatsFullError(err: unknown): boolean {
+  return err instanceof StoreError && err.code === "P0001";
 }
 
 export async function removeTeamMember(ownerId: string, email: string, admin: Admin = createAdminClient()) {

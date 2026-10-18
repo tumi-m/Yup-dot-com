@@ -181,6 +181,23 @@ select rlstest.expect('A: delete a row, keep its file', 'authenticated', :'A', '
 select rlstest.expect('A: delete the file',             'authenticated', :'A', format('delete from storage.objects where name = %L', :'A' || '/a1.pdf'), 'rows:1');
 select rlstest.expect('A: then the row',                'authenticated', :'A', 'delete from public.documents where owner_id = auth.uid()', 'rows:1');
 
+-- Free keeps files up to 50 MB; the bucket allows Pro's 500 MB. Storage
+-- records the real size in metadata, and may write it as the service role.
+select rlstest.expect('A: a 60 MB document on Free',    'authenticated', :'A', format('insert into public.documents (owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %L)', :'A', 'big', :'A' || '/big.pdf', 62914560), 'error:P0001:');
+select rlstest.expect('A: a 50 MB document on Free',    'authenticated', :'A', format('insert into public.documents (id, owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %L, %L)', '00000000-0000-4000-8000-0000000000a2', :'A', 'a2', :'A' || '/a2.pdf', 52428800), 'rows:1');
+select rlstest.expect('A: its 50 MB file',              'authenticated', :'A', format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'A' || '/a2.pdf', :'A', '{"size": 52428800}'), 'rows:1');
+select rlstest.expect('A: replace it with 60 MB',       'authenticated', :'A', format('update storage.objects set metadata = %L where name = %L', '{"size": 62914560}', :'A' || '/a2.pdf'), 'error:P0001:');
+select rlstest.expect('A: rename it (size unchanged)',  'authenticated', :'A', format('update storage.objects set metadata = metadata || %L where name = %L', '{"mimetype": "application/pdf"}', :'A' || '/a2.pdf'), 'rows:1');
+select rlstest.expect('A: a small document, 60 MB file', 'authenticated', :'A', format('insert into public.documents (id, owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %L, %L)', '00000000-0000-4000-8000-0000000000a3', :'A', 'a3', :'A' || '/a3.pdf', 10), 'rows:1');
+select rlstest.expect('A: upload the 60 MB file',       'authenticated', :'A', format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'A' || '/a3.pdf', :'A', '{"size": 62914560}'), 'error:P0001:');
+select rlstest.expect('storage (service role): A''s 60 MB file', 'service_role', null, format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'A' || '/a3.pdf', :'A', '{"size": 62914560}'), 'error:P0001:');
+select rlstest.expect('A: clean up the 50 MB file',     'authenticated', :'A', format('delete from storage.objects where name = %L', :'A' || '/a2.pdf'), 'rows:1');
+select rlstest.expect('A: clean up its documents',      'authenticated', :'A', 'delete from public.documents where owner_id = auth.uid()', 'rows:2');
+select rlstest.expect('B (Team): a 60 MB document',     'authenticated', :'B', format('insert into public.documents (id, owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %L, %L)', '00000000-0000-4000-8000-0000000000b2', :'B', 'b2', :'B' || '/b2.pdf', 62914560), 'rows:1');
+select rlstest.expect('storage (service role): B''s 60 MB file', 'service_role', null, format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'B' || '/b2.pdf', :'B', '{"size": 62914560}'), 'rows:1');
+select rlstest.expect('E (on B''s team): a 60 MB file',  'authenticated', :'E', format('insert into public.documents (owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %L)', :'E', 'e1', :'E' || '/e1.pdf', 62914560), 'rows:1');
+select rlstest.expect('E: upload it',                   'authenticated', :'E', format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'E' || '/e1.pdf', :'E', '{"size": 62914560}'), 'rows:1');
+
 -- Free keeps 5 documents.
 select rlstest.expect('A: 5 documents on Free',         'authenticated', :'A', format('insert into public.documents (owner_id, name, storage_path) select %L, %L || i, %L || i || %L from generate_series(1, 5) i', :'A', 'f', :'A' || '/f', '.pdf'), 'rows:5');
 select rlstest.expect('A: a 6th on Free',               'authenticated', :'A', format('insert into public.documents (owner_id, name, storage_path) values (%L, %L, %L)', :'A', 'f6', :'A' || '/f6.pdf'), 'error:P0001:');

@@ -18,6 +18,8 @@ import {
 import { Dropzone } from "@/components/ui/dropzone";
 import { AnimatePresence } from "motion/react";
 import { InlineError, Reveal, staggerDelay } from "@/components/motion/primitives";
+import { UpgradeDialog } from "@/components/upsell/Upsell";
+import { formatLimitBytes, limitsFor } from "@/lib/limits";
 import { getTool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 import type { DocumentRecord, PlanId } from "@/lib/types";
@@ -64,7 +66,9 @@ export function DashboardClient({
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DocumentRecord | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [upsell, setUpsell] = useState(false);
   const dragDepth = useRef(0);
+  const maxFileBytes = limitsFor(plan).maxFileBytes;
 
   const atLimit = maxDocuments !== -1 && docs.length >= maxDocuments;
 
@@ -82,6 +86,11 @@ export function DashboardClient({
     const file = files[0];
     if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
       setError("Please choose a PDF file.");
+      return;
+    }
+    if (file.size > maxFileBytes) {
+      setError(`Files up to ${formatLimitBytes(maxFileBytes)} on your plan.`);
+      if (plan === "free") setUpsell(true);
       return;
     }
 
@@ -281,6 +290,8 @@ export function DashboardClient({
           </div>
         </DialogContent>
       </Dialog>
+
+      <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="file-size" tier={plan} returnTo="/dashboard" />
 
       <section className="mt-14">
         <h2 className="mb-4 text-lg font-semibold">Tools</h2>
