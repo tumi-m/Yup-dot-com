@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Crown, Loader2, Pencil, Trash2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { getPageCount } from "@/lib/pdf/operations";
+import { pageCountToStore } from "@/lib/pdf/operations";
 import { formatBytes, formatDate, uuid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -93,7 +93,7 @@ export function DashboardClient({
       if (!user) throw new Error("Not authenticated.");
 
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const pageCount = await getPageCount(bytes);
+      const pageCount = await pageCountToStore(bytes);
 
       const docId = uuid();
       const storagePath = `${user.id}/${docId}.pdf`;
