@@ -36,9 +36,12 @@ check("the bucket allows Pro's limit", Number(bucket?.[1]) === LIMITS.pro.maxFil
 
 // The dashboard checks the size before it adds the document.
 const dashboard = read("components/DashboardClient.tsx");
-const sizeCheck = dashboard.indexOf("file.size > limitsFor(plan).maxFileBytes");
+const sizeCheck = dashboard.search(/file\.size > (limitsFor\(plan\)\.)?maxFileBytes/);
 check("the dashboard checks the plan's file size before uploading",
-  sizeCheck > 0 && sizeCheck < dashboard.indexOf(".insert(") && /reason="file-size"/.test(dashboard));
+  sizeCheck > 0 &&
+    sizeCheck < dashboard.indexOf(".insert(") &&
+    /maxFileBytes = limitsFor\(plan\)\.maxFileBytes|file\.size > limitsFor\(plan\)\.maxFileBytes/.test(dashboard) &&
+    /reason="file-size"/.test(dashboard));
 
 // The RLS tests cover it.
 const rls = read("tests/rls/rls.test.sql");

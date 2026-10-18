@@ -9,7 +9,11 @@
 -- 50 MB Free limit was only checked in the browser, so a Free account could
 -- store files up to 500 MB. Now the database refuses a Free document over
 -- 50 MB, and storage refuses the file itself.
--- =====================================================create or replace function public.documents_limit()
+-- ============================================================
+
+-- ---------- documents: 5 documents of up to 50 MB on Free ----------
+
+create or replace function public.documents_limit()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if coalesce(auth.role(), '') not in ('anon', 'authenticated') then
