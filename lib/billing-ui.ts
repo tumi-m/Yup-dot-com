@@ -100,3 +100,30 @@ export function paymentOutcome(httpStatus: number, status: unknown): PaymentOutc
   }
   return httpStatus === 202 ? "retry" : "unknown";
 }
+
+/** Fast tries before the return page says the payment is still processing. */
+const PENDING_AFTER = 8;
+
+/** The wait before asking again, after `tries` answers of "still processing". */
+export function verifyDelay(tries: number): number {
+  return tries < PENDING_AFTER ? 2000 : Math.min(60_000, 15_000 * 2 ** (tries - PENDING_AFTER));
+}
+
+/**
+ * Asks `verify` until the payment has an outcome: every 2 s at first, then
+ * less often, up to once a minute, for as long as the page is open. A slow
+ * EFT can take minutes. Null when stopped first.
+ */
+export async function waitForPayment(
+  verify: () => Promise<PaymentOutcome>,
+  { sleep, stopped, onPending }: { sleep: (ms: number) => Promise<void>; stopped: () => boolean; onPending: () => void }
+): Promise<Exclude<PaymentOutcome, "retry"> | null> {
+  for (let tries = 1; !stopped(); tries++) {
+    const outcome = await verify();
+    if (stopped()) break;
+    if (outcome !== "retry") return outcome;
+    if (tries === PENDING_AFTER) onPending();
+    await sleep(verifyDelay(tries));
+  }
+  return null;
+}

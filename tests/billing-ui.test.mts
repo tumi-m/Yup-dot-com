@@ -5,7 +5,9 @@
 import {
   hasLiveSubscription, resolveAccess, summarize, type BillingRow,
 } from "../lib/billing.ts";
-import { cardOffer, payOnceBlock, paymentOutcome, subscribeBlock } from "../lib/billing-ui.ts";
+import {
+  cardOffer, payOnceBlock, paymentOutcome, subscribeBlock, verifyDelay, waitForPayment, type PaymentOutcome,
+} from "../lib/billing-ui.ts";
 import type { PaidPlanId } from "../lib/plans.ts";
 
 const results: boolean[] = [];
@@ -144,6 +146,39 @@ for (const v of [{ plan: undefined, billing: undefined }, viewer(row())]) {
   check("errors without a payment status are unknown, not 'not charged'",
     [[400, undefined], [401, undefined], [404, undefined], [422, "failed-ish"], [500, undefined], [503, undefined]]
       .every(([code, s]) => paymentOutcome(code as number, s) === "unknown"));
+}
+
+// Payment return: a slow payment keeps being checked until it clears.
+{
+  const answers = (n: number, last: PaymentOutcome) => {
+    let calls = 0;
+    return { verify: async () => (++calls > n ? last : "retry") as PaymentOutcome, calls: () => calls };
+  };
+  const waits: number[] = [];
+  let pending = 0;
+  const slow = answers(25, "success");
+  const outcome = await waitForPayment(slow.verify, {
+    sleep: async (ms) => { waits.push(ms); },
+    stopped: () => false,
+    onPending: () => { pending++; },
+  });
+  check("still processing past the fast tries: keeps checking until success",
+    outcome === "success" && slow.calls() === 26, { outcome, calls: slow.calls() });
+  check("says 'still processing' once, after 8 tries", pending === 1);
+  check("checks every 2 s, then 15 s, 30 s, then once a minute",
+    waits.slice(0, 7).every((ms) => ms === 2000) && waits[7] === 15000 && waits[8] === 30000 &&
+      waits.slice(9).every((ms) => ms === 60000) && verifyDelay(100) === 60000, waits);
+
+  // React's development double run: the first run is stopped, the second still finishes.
+  let firstStopped = false;
+  const first = waitForPayment(async () => { firstStopped = true; return "retry"; }, {
+    sleep: async () => {}, stopped: () => firstStopped, onPending: () => { pending++; },
+  });
+  const second = waitForPayment(answers(2, "failed").verify, {
+    sleep: async () => {}, stopped: () => false, onPending: () => {},
+  });
+  check("a stopped run ends quietly", (await first) === null);
+  check("another run isn't stopped with it", (await second) === "failed");
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -11,7 +11,7 @@ import { ENTER_T, EXIT_T, FADE_EXIT, InlineError, SPRING_LAYOUT, SuccessBadge } 
 import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
-import { paymentOutcome, type PaymentOutcome } from "@/lib/billing-ui";
+import { paymentOutcome, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
@@ -111,35 +111,36 @@ type VerifyState = "checking" | "pending" | Exclude<PaymentOutcome, "retry">;
 export function PaymentReturn({ reference, planName }: { reference: string; planName: string }) {
   const router = useRouter();
   const [state, setState] = useState<VerifyState>("checking");
-  const started = useRef(false);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    // Each run checks on its own; cleanup stops only this run's checks.
     let cancelled = false;
-    (async () => {
-      for (let attempt = 0; attempt < 8 && !cancelled; attempt++) {
-        try {
-          const res = await fetch(`/api/billing/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" });
-          const data = await res.json().catch(() => ({}));
-          const outcome = paymentOutcome(res.status, data.status);
-          if (outcome === "success") {
-            if (data.purchase) trackPurchase(reference, data.purchase as CheckoutChoice, data.purchase.amount);
-            setState("success");
-            router.refresh();
-            return;
-          }
-          if (outcome !== "retry") {
-            setState(outcome);
-            return;
-          }
-        } catch {
-          // offline: try again
-        }
-        await new Promise((r) => setTimeout(r, 2000));
+    let purchase: (CheckoutChoice & { amount?: number }) | null = null;
+    async function verify(): Promise<PaymentOutcome> {
+      try {
+        const res = await fetch(`/api/billing/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        const outcome = paymentOutcome(res.status, data.status);
+        if (outcome === "success") purchase = data.purchase ?? null;
+        return outcome;
+      } catch {
+        return "retry"; // offline: try again
       }
-      if (!cancelled) setState("pending");
-    })();
+    }
+    // Waits while the tab is hidden, then checks as soon as it's back.
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(function wake() {
+          if (cancelled || !document.hidden) return resolve();
+          document.addEventListener("visibilitychange", wake, { once: true });
+        }, ms);
+      });
+    waitForPayment(verify, { sleep, stopped: () => cancelled, onPending: () => setState("pending") }).then((outcome) => {
+      if (!outcome) return;
+      if (outcome === "success" && purchase) trackPurchase(reference, purchase, purchase.amount);
+      setState(outcome);
+      if (outcome === "success") router.refresh();
+    });
     return () => {
       cancelled = true;
     };
