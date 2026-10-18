@@ -425,7 +425,12 @@ npm install
    the usage counters), and enable Email auth. Under Authentication → URL
    Configuration set the Site URL to your domain and add
    `https://<your-domain>/**` to the Redirect URLs (sign-up and password
-   reset emails link to `/auth/callback`).
+   reset emails link to `/auth/callback`). Under Authentication → Email
+   Templates → Reset Password, make the link
+   `<a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Reset password</a>`
+   (the app's address already has a `?`), so a reset link works in any
+   browser, a phone's mail app too. The default link only works in the
+   browser that asked for it.
 2. **Paystack** — see [Billing setup](#billing-setup-paystack).
 3. **Env** — copy `.env.example` to `.env.local` and fill in the values.
 4. **Run** — `npm run dev`, then open <http://localhost:3000>.

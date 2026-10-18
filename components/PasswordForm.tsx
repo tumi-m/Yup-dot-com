@@ -9,8 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
 
-/** Sets a new password for the signed-in account (after a reset link, too). */
-export function PasswordForm() {
+/**
+ * Sets a new password for the signed-in account (after a reset link, too),
+ * then links on to `next` when logging in started somewhere.
+ */
+export function PasswordForm({ next }: { next?: string }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,8 +74,8 @@ export function PasswordForm() {
       {saved && (
         <p role="status" className="rounded-lg bg-accent px-3 py-2 text-sm text-accent-foreground motion-safe:animate-rise">
           Password saved.{" "}
-          <Link href="/dashboard" className="font-medium underline underline-offset-2">
-            Go to your documents
+          <Link href={next || "/dashboard"} className="font-medium underline underline-offset-2">
+            {next ? "Continue" : "Go to your documents"}
           </Link>
         </p>
       )}

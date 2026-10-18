@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { safeRedirect } from "@/components/auth-redirect";
+import { linkSignIn, safeRedirect } from "@/components/auth-redirect";
 
-/** Exchanges the email-confirmation / OAuth code for a session. */
+/** Signs in from an email confirmation, password reset or OAuth link. */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get("code");
   // Back to where sign-up started (say, pricing), same-site paths only.
   const back = safeRedirect(searchParams.get("next"), "");
   const next = back || "/dashboard";
@@ -15,9 +14,10 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login`);
   }
 
-  if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const link = linkSignIn(searchParams);
+  if (link) {
+    const { auth } = await createClient();
+    const { error } = "code" in link ? await auth.exchangeCodeForSession(link.code) : await auth.verifyOtp(link);
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }

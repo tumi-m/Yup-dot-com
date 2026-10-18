@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
-import { authErrorMessage, authSwitchHref, resetLinkTarget, safeRedirect } from "@/components/auth-redirect";
+import { authErrorMessage, authFailure, authSwitchHref, resetLinkTarget, safeRedirect } from "@/components/auth-redirect";
 import { track } from "@/lib/analytics";
 
 /** Log in, sign up, or ask for a link to reset a forgotten password. */
@@ -27,13 +27,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
   const isReset = mode === "reset";
   const otherPage = mode === "login" ? "/signup" : "/login";
   const [switchHref, setSwitchHref] = useState<string>(otherPage);
+  const [forgotHref, setForgotHref] = useState("/forgot-password");
 
   // Read after load, like the submit handler, so the page stays static:
-  // keep ?redirect on the link to the other page, and explain a failed
+  // keep ?redirect on the links to the other pages, and explain a failed
   // confirmation link (?error=auth).
   useEffect(() => {
     const search = window.location.search;
     setSwitchHref(authSwitchHref(otherPage, search));
+    setForgotHref(authSwitchHref("/forgot-password", search));
     const linkError = authErrorMessage(search);
     if (linkError) setError(linkError);
   }, [otherPage]);
@@ -46,13 +48,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     const supabase = createClient();
     // Read at submit time, so the page needs no search-params boundary and
     // the whole form is in the static HTML.
-    const redirectTo = safeRedirect(new URLSearchParams(window.location.search).get("redirect"));
+    const redirect = new URLSearchParams(window.location.search).get("redirect");
+    const redirectTo = safeRedirect(redirect);
 
     try {
       if (isReset) {
         // The link signs them in and opens the page to choose a new password.
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: resetLinkTarget(window.location.origin),
+          redirectTo: resetLinkTarget(window.location.origin, safeRedirect(redirect, "")),
         });
         if (error) throw error;
         setMessage("If an account uses that email, we've sent it a link to reset the password.");
@@ -88,7 +91,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(authFailure(err));
     } finally {
       setLoading(false);
     }
@@ -168,7 +171,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
               {!isSignup && (
                 <div className="mt-2 flex justify-end">
                   <Link
-                    href="/forgot-password"
+                    href={forgotHref}
                     className="tap rounded text-sm font-medium text-primary hover:underline"
                   >
                     Forgot password?

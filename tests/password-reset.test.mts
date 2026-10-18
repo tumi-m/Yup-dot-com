@@ -29,8 +29,8 @@ check("/forgot-password asks for the email", existsSync(new URL("../app/forgot-p
   /<AuthForm mode="reset" \/>/.test(read("app/forgot-password/page.tsx")));
 const form = read("components/AuthForm.tsx");
 check("the form sends the reset email to that link",
-  /resetPasswordForEmail\(email, \{\s*redirectTo: resetLinkTarget\(window\.location\.origin\)/.test(form));
-check("the login page links to it", /href="\/forgot-password"/.test(form) && /Forgot password\?/.test(form));
+  /resetPasswordForEmail\(email, \{\s*redirectTo: resetLinkTarget\(window\.location\.origin[,)]/.test(form));
+check("the login page links to it", /href=\{forgotHref\}/.test(form) && /authSwitchHref\("\/forgot-password"/.test(form) && /Forgot password\?/.test(form));
 check("the new password page saves it", /auth\.updateUser\(\{ password \}\)/.test(read("components/PasswordForm.tsx")) &&
   existsSync(new URL("../app/settings/password/page.tsx", import.meta.url)));
 
