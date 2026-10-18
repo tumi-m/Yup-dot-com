@@ -12,9 +12,7 @@ import { getTool } from "@/lib/tools";
 import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
-import { heroActions, MIXED_ACTIONS, MULTI_ACTIONS, TAKES_ALL } from "./hero-actions";
-
-const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL } from "./hero-actions";
 
 const ACCEPT = {
   pdf: "application/pdf,image/png,image/jpeg",
@@ -95,9 +93,9 @@ export function HeroDropzone({
     setGoing(slug);
     setFailed(null);
     const chosen = TAKES_ALL.includes(slug) ? files : files.slice(0, 1);
-    // Browsers often leave `type` empty for Office files, and the handoff
-    // would otherwise default it to PDF.
-    const typed = chosen.map((f) => (mode === "pptx" && !f.type ? new File([f], f.name, { type: PPTX_TYPE }) : f));
+    // Browsers often leave `type` empty (Office files, photos from a share
+    // sheet), and the handoff would otherwise default it to PDF.
+    const typed = chosen.map((f) => (f.type ? f : new File([f], f.name, { type: handoffType(f) })));
     if (await tryHandoff(typed.map((f) => fileToHandoff(f)))) {
       router.push(`/tools/${slug}?handoff=1`);
       return;

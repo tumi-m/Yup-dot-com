@@ -11,8 +11,8 @@ function check(name: string, ok: boolean, extra?: unknown) {
   if (!ok) failed++;
 }
 
-const pdf = { type: "application/pdf" };
-const jpg = { type: "image/jpeg" };
+const pdf = { name: "a.pdf", type: "application/pdf" };
+const jpg = { name: "b.jpg", type: "image/jpeg" };
 
 const several = heroActions("pdf", [pdf, pdf, pdf]);
 check("several PDFs: only tools that take them all", several.every((s) => TAKES_ALL.includes(s) && PROCESSORS[s]?.multiple), several);
@@ -20,7 +20,7 @@ check("several PDFs: Merge PDF offered", several.includes("merge-pdf"), several)
 // A PDF and a photo used to offer Merge PDF, which dropped the photo and
 // then asked for at least 2 files.
 const takes = (slug: string, type: string) => (PROCESSORS[slug]?.accept ?? "").split(",").includes(type);
-for (const files of [[pdf, jpg], [pdf, pdf, jpg], [jpg, pdf, { type: "image/png" }]]) {
+for (const files of [[pdf, jpg], [pdf, pdf, jpg], [jpg, pdf, { name: "c.png", type: "image/png" }]]) {
   const mixed = heroActions("pdf", files);
   const label = files.map((f) => f.type.split("/")[1]).join(" + ");
   check(`${label}: every tool offered takes every file`, mixed.every((s) => files.every((f) => takes(s, f.type))), mixed);
@@ -37,7 +37,7 @@ check("several images: only tools that take them all", images.every((s) => TAKES
 
 check("one PDF: every PDF tool", heroActions("pdf", [pdf]) === PDF_ACTIONS);
 check("one image: JPG to PDF", heroActions("pdf", [jpg]) === IMAGE_ACTIONS);
-check("PPTX: the slide tools", heroActions("pptx", [{ type: "" }]) === PPTX_ACTIONS);
+check("PPTX: the slide tools", heroActions("pptx", [{ name: "s.pptx", type: "" }]) === PPTX_ACTIONS);
 
 check("every tool handed all files takes several", TAKES_ALL.every((s) => PROCESSORS[s]?.multiple), TAKES_ALL);
 const slugs = new Set(TOOLS.map((t) => t.slug));
