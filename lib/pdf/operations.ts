@@ -19,6 +19,7 @@ import {
 } from "pdf-lib";
 import { openPdf } from "./open";
 import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
+import { ownResources } from "./page-resources";
 
 /**
  * Structural page operations. Annotation flattening lives in `bake.ts`.
@@ -81,6 +82,7 @@ const StructTreeRoot = PDFName.of("StructTreeRoot");
 const ParentTree = PDFName.of("ParentTree");
 const IDTree = PDFName.of("IDTree");
 const PageLabels = PDFName.of("PageLabels");
+const Resources = PDFName.of("Resources");
 
 /** The [key, value] pairs of a name tree (`kind` "Names") or a number tree ("Nums"). */
 function treeEntries(doc: PDFDocument, node: PDFObject | undefined, kind: "Names" | "Nums") {
@@ -236,6 +238,14 @@ function arrangePages(doc: PDFDocument, order: number[]) {
       const name = PDFName.of(key);
       const value = page.node.getInheritableAttribute(name);
       if (value && !page.node.get(name)) page.node.set(name, value);
+    }
+  }
+  // Resources the pages share would keep every image and font of the pages
+  // left out; each page that stays keeps only what it uses.
+  if (dropped.length) {
+    for (const i of order) {
+      const own = ownResources(pages[i].node);
+      if (own) pages[i].node.set(Resources, own);
     }
   }
   for (let i = pages.length - 1; i >= 0; i--) doc.removePage(i);
@@ -690,7 +700,21 @@ const PART_ENTRIES = ["Version", "Extensions", "PageLayout", "PageMode", "Viewer
  */
 export function extractorFor(src: PDFDocument): (order: number[]) => Promise<Uint8Array> {
   const tags = readTags(src);
-  return (order) => extractPart(src, tags, order);
+  const trimmed = new Map<number, PDFPageLeaf>();
+  const trim = (i: number) => {
+    let leaf = trimmed.get(i);
+    if (!leaf) {
+      leaf = src.getPage(i).node;
+      const own = ownResources(leaf);
+      if (own) {
+        leaf = leaf.clone();
+        leaf.set(Resources, own);
+      }
+      trimmed.set(i, leaf);
+    }
+    return leaf;
+  };
+  return (order) => extractPart(src, tags, order, trim);
 }
 
 /**
@@ -705,7 +729,11 @@ export async function extractFrom(src: PDFDocument, order: number[]): Promise<Ui
   return extractorFor(src)(order);
 }
 
-async function extractPart(src: PDFDocument, tags: Tags, order: number[]): Promise<Uint8Array> {
+/**
+ * `trim` gives page `i` of `src` to copy with only the resources its content
+ * uses, for a part that leaves pages out.
+ */
+async function extractPart(src: PDFDocument, tags: Tags, order: number[], trim: (i: number) => PDFPageLeaf): Promise<Uint8Array> {
   const srcPages = src.getPages();
   checkOrder(srcPages, order);
   const doc = await PDFDocument.create({ updateMetadata: false });
@@ -739,9 +767,12 @@ async function extractPart(src: PDFDocument, tags: Tags, order: number[]): Promi
     copied.set(srcPages[i].ref, ref);
     return ref;
   });
-  // The copier gives each page what it inherits from the page tree.
+  // The copier gives each page what it inherits from the page tree. Resources
+  // the pages share would bring every image and font of the pages left out,
+  // so each page brings only what it uses.
+  const partial = kept.size < srcPages.length;
   order.forEach((i, k) => {
-    const node = copier.copy(srcPages[i].node) as PDFPageLeaf;
+    const node = copier.copy(partial ? trim(i) : srcPages[i].node) as PDFPageLeaf;
     doc.context.assign(refs[k], node);
     doc.addPage(PDFPage.of(node, refs[k], doc));
   });

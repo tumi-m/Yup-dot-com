@@ -140,6 +140,20 @@ class Lexer {
   }
 }
 
+/** An inline image's dictionary: each value simple, or the simple items of an array. */
+export type InlineImageEntries = Record<string, Operand | Operand[]>;
+
+export interface ScanOptions {
+  /** Called with each inline image's dictionary, before its data is stepped over. */
+  onInlineImage?: (entries: InlineImageEntries) => void;
+  /**
+   * Also count a stream as unreadable when it ends inside an array or
+   * dictionary, or has braces (which content streams never do), since
+   * readers may disagree about the operators after them.
+   */
+  strict?: boolean;
+}
+
 /**
  * Calls `onOp` for every operator in a content stream, in order. Operands are
  * only the simple values directly before it (numbers and names); strings,
@@ -149,7 +163,7 @@ class Lexer {
  * confidence; the rest of the stream is then skipped and the operators seen
  * may be incomplete.
  */
-export function scanContent(data: Uint8Array, onOp: (op: string, operands: Operand[]) => void): boolean {
+export function scanContent(data: Uint8Array, onOp: (op: string, operands: Operand[]) => void, options: ScanOptions = {}): boolean {
   const lx = new Lexer(data);
   let operands: Operand[] = [];
   let depth = 0;
@@ -160,7 +174,8 @@ export function scanContent(data: Uint8Array, onOp: (op: string, operands: Opera
   };
   for (;;) {
     const kind = lx.next();
-    if (kind === END) return true;
+    if (kind === END) return !(options.strict && depth);
+    if (options.strict && (kind === OPEN || kind === CLOSE) && (data[lx.start] === 0x7b || data[lx.start] === 0x7d)) return false;
     if (kind === OPEN) depth++;
     else if (kind === CLOSE) {
       if (depth && --depth === 0) push(null);
@@ -170,7 +185,7 @@ export function scanContent(data: Uint8Array, onOp: (op: string, operands: Opera
       const word = lx.value as string;
       if (word === "true" || word === "false" || word === "null") push(null);
       else if (word === "BI") {
-        const end = skipInlineImage(lx);
+        const end = skipInlineImage(lx, options.onInlineImage);
         if (end < 0) return false;
         lx.pos = end;
         operands = [];
@@ -217,13 +232,18 @@ const OPERATORS = new Set(
  * Steps over "BI <dict> ID <data> EI", returning the index just past EI, or
  * -1 when its end can't be found with confidence.
  */
-function skipInlineImage(lx: Lexer): number {
+function skipInlineImage(lx: Lexer, onImage?: (entries: InlineImageEntries) => void): number {
   const d = lx.d;
-  const entries: Record<string, Operand | Operand[]> = {};
+  const entries: InlineImageEntries = {};
+  /** The stream ended inside the dictionary. */
+  const cutShort = () => {
+    onImage?.(entries);
+    return d.length;
+  };
   let key: string | null = null;
   for (;;) {
     const kind = lx.next();
-    if (kind === END) return d.length;
+    if (kind === END) return cutShort();
     if (kind === WORD && lx.value === "ID") break;
     if (key === null) {
       if (kind === NAME) key = lx.value as string;
@@ -235,7 +255,7 @@ function skipInlineImage(lx: Lexer): number {
       let depth = 1;
       while (depth) {
         const k = lx.next();
-        if (k === END) return d.length;
+        if (k === END) return cutShort();
         if (k === OPEN) depth++;
         else if (k === CLOSE) depth--;
         else if (depth === 1 && (k === NAME || k === NUM)) items.push(lx.value);
@@ -247,6 +267,7 @@ function skipInlineImage(lx: Lexer): number {
     }
     key = null;
   }
+  onImage?.(entries);
   // One whitespace byte separates ID from the data.
   const start = lx.pos + 1;
 

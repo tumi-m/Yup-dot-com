@@ -108,9 +108,13 @@ export function decodeLossless(context: PDFContext, stream: PDFRawStream, tolera
   return { bytes, rest: { names: chain.names.slice(i), parms: chain.parms.slice(i) }, predictor };
 }
 
-/** Readable bytes of a stream with only lossless filters (content streams, forms, ICC profiles). */
-export function decodeFully(context: PDFContext, stream: PDFRawStream): Uint8Array | null {
-  const d = decodeLossless(context, stream, true);
+/**
+ * Readable bytes of a stream with only lossless filters (content streams,
+ * forms, ICC profiles). Damaged Flate data gives what could be read of it,
+ * unless `tolerant` is false.
+ */
+export function decodeFully(context: PDFContext, stream: PDFRawStream, tolerant = true): Uint8Array | null {
+  const d = decodeLossless(context, stream, tolerant);
   if (!d || d.rest.names.length) return null;
   if (!d.predictor) return d.bytes;
   return unpredict(d.bytes, d.predictor);
