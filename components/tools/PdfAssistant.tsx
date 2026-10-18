@@ -16,6 +16,7 @@ import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { trackToolUsed } from "@/lib/analytics";
 import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
 import { documentToSend } from "@/lib/ai/document";
+import { parseMarkdown, type MdBlock } from "@/lib/ai/markdown";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -38,7 +39,7 @@ const SUGGESTIONS = [
   "Action items",
 ];
 
-/** Minimal, safe Markdown: headings, bullets, numbered lists, bold, inline code. */
+/** Minimal, safe Markdown (lib/ai/markdown.ts): headings, lists, tables, bold, inline code. */
 function Inline({ text }: { text: string }) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   return (
@@ -57,42 +58,55 @@ function Inline({ text }: { text: string }) {
 }
 
 function Markdown({ text }: { text: string }) {
-  const lines = text.split("\n");
-  const out: React.ReactNode[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-  const flush = () => {
-    if (!list) return;
-    const Tag = list.ordered ? "ol" : "ul";
-    out.push(
-      <Tag key={out.length} className={cn("my-2 space-y-1 pl-5", list.ordered ? "list-decimal" : "list-disc")}>
-        {list.items.map((it, i) => (
-          <li key={i}><Inline text={it} /></li>
-        ))}
-      </Tag>
-    );
-    list = null;
-  };
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (bullet || numbered) {
-      const ordered = !!numbered;
-      if (list && list.ordered !== ordered) flush();
-      list ??= { ordered, items: [] };
-      list.items.push((bullet ?? numbered)![1]);
-      continue;
-    }
-    flush();
-    if (heading) {
-      out.push(<p key={out.length} className="mt-3 font-semibold"><Inline text={heading[2]} /></p>);
-    } else if (line.trim()) {
-      out.push(<p key={out.length} className="my-1.5 leading-relaxed"><Inline text={line} /></p>);
-    }
-  }
-  flush();
-  return <>{out}</>;
+  return <Blocks blocks={parseMarkdown(text)} />;
+}
+
+function Blocks({ blocks, nested = false }: { blocks: MdBlock[]; nested?: boolean }) {
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === "heading") return <p key={i} className="mt-3 font-semibold"><Inline text={b.text} /></p>;
+        if (b.type === "paragraph") return <p key={i} className="my-1.5 leading-relaxed"><Inline text={b.text} /></p>;
+        if (b.type === "table") {
+          return (
+            <div key={i} className="my-2 overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-border">
+                    {b.head.map((c, j) => (
+                      <th key={j} scope="col" className="px-2 py-1.5 font-semibold"><Inline text={c} /></th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.rows.map((row, j) => (
+                    <tr key={j} className="border-b border-border/60 last:border-0">
+                      {row.map((c, k) => (
+                        <td key={k} className="px-2 py-1.5 align-top"><Inline text={c} /></td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        const className = cn(nested ? "my-1" : "my-2", "space-y-1 pl-5", b.ordered ? "list-decimal" : "list-disc");
+        const items = b.items.map((it, j) => (
+          <li key={j}>
+            <Inline text={it.text} />
+            {it.children.length > 0 && <Blocks blocks={it.children} nested />}
+          </li>
+        ));
+        // The model's own first number, so a list split by a paragraph keeps counting.
+        return b.ordered ? (
+          <ol key={i} start={b.start} className={className}>{items}</ol>
+        ) : (
+          <ul key={i} className={className}>{items}</ul>
+        );
+      })}
+    </>
+  );
 }
 
 export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
