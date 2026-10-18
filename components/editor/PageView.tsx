@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
-import { createAnnotation, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
+import { createAnnotation, createCentred, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
 
@@ -29,6 +29,7 @@ export function PageView({
   onDelete,
   onPlacementUsed,
   onRendered,
+  placeNow,
 }: {
   loaded: LoadedPdf;
   pageIndex: number;
@@ -43,13 +44,15 @@ export function PageView({
   formValues: Record<string, string>;
   onFormChange: (name: string, value: string) => void;
   onSelect: (id: string | null) => void;
-  onCreate: (ann: Annotation) => void;
+  onCreate: (ann: Annotation, keyboard?: boolean) => void;
   onChange: (ann: Annotation) => void;
   onCommitStart: () => void;
   onCommitEnd: () => void;
   onDelete: (id: string) => void;
   onPlacementUsed: () => void;
   onRendered?: (size: { width: number; height: number }) => void;
+  /** Bumped to place the current tool's item in the middle of the view (keyboard). */
+  placeNow: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
@@ -58,6 +61,11 @@ export function PageView({
   const origin = useRef<{ x: number; y: number } | null>(null);
   /** A tap waiting to place a box when the finger lifts. */
   const tap = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const placed = useRef(placeNow);
+  /** An annotation placed from the keyboard, to focus once it has rendered. */
+  const focusNew = useRef<string | null>(null);
+  const hint = useId();
+  const textHint = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +135,42 @@ export function PageView({
     }
   }
 
+  // Keyboard placement: the middle of the part of the page in view.
+  useEffect(() => {
+    if (placeNow === placed.current) return;
+    placed.current = placeNow;
+    const layer = layerRef.current;
+    if (!layer || !size) return;
+    const rect = layer.getBoundingClientRect();
+    const view = layer.closest("main")?.getBoundingClientRect() ?? new DOMRect(0, 0, innerWidth, innerHeight);
+    const mid = (lo: number, hi: number, start: number, end: number) =>
+      Math.max(lo, start) < Math.min(hi, end) ? (Math.max(lo, start) + Math.min(hi, end)) / 2 : (lo + hi) / 2;
+    const cx = (mid(rect.left, rect.right, view.left, view.right) - rect.left) / scale;
+    const cy = (mid(rect.top, rect.bottom, view.top, view.bottom) - rect.top) / scale;
+    const dataUrl = placementImage ?? undefined;
+    const ann = createCentred(tool, settings, cx, cy, { width: size.w / scale, height: size.h / scale }, { dataUrl });
+    if (!ann) return;
+    focusNew.current = ann.id;
+    onCreate({ ...ann, page: pageIndex }, true);
+    if (tool === "image" || tool === "signature") onPlacementUsed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeNow]);
+
+  // It takes focus once it is on the page: a text in its box, anything else itself.
+  useEffect(() => {
+    const id = focusNew.current;
+    const el = id && layerRef.current?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    focusNew.current = null;
+    const box = el.querySelector("textarea");
+    if (box) {
+      box.focus({ preventScroll: true });
+      box.select();
+    } else {
+      el.querySelector<HTMLElement>("[data-ann-focus]")?.focus({ preventScroll: true });
+    }
+  }, [annotations]);
+
   function handlePointerMove(e: React.PointerEvent) {
     if (!draft || !origin.current) return;
     const { x, y } = toPoints(e);
@@ -164,7 +208,12 @@ export function PageView({
       {size && (
         <div
           ref={layerRef}
-          className="annotation-layer"
+          className="annotation-layer outline-none"
+          role="group"
+          aria-label={`Page ${pageIndex + 1}`}
+          // Somewhere for focus to land when the focused annotation goes away.
+          tabIndex={-1}
+          data-page-layer
           style={{ width: size.w, height: size.h, cursor, touchAction: "none" }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -182,11 +231,20 @@ export function PageView({
             />
           ))}
 
+          <span id={hint} hidden>
+            Arrow keys move it, Shift+arrow keys move it further, Alt+arrow keys resize it, Delete removes it.
+          </span>
+          <span id={textHint} hidden>
+            Enter edits the text. Arrow keys move it, Alt+arrow keys resize it, Delete removes it.
+          </span>
+
           {annotations.map((ann) => (
             <AnnotationView
               key={ann.id}
               ann={ann}
               scale={scale}
+              page={{ width: size.w / scale, height: size.h / scale }}
+              describedBy={ann.type === "text" || ann.type === "note" ? textHint : hint}
               selected={selectedId === ann.id}
               interactive={editable}
               onSelect={() => onSelect(ann.id)}
@@ -201,6 +259,7 @@ export function PageView({
             <AnnotationView
               ann={draft}
               scale={scale}
+              page={{ width: size.w / scale, height: size.h / scale }}
               selected={false}
               interactive={false}
               onSelect={() => {}}

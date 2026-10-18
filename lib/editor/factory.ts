@@ -218,3 +218,44 @@ export function isDraftUsable(draft: Annotation): boolean {
   if (draft.type === "draw") return draft.points.length > 2;
   return draft.width >= 4 && draft.height >= 4;
 }
+
+/** The box a drag tool gets when it is placed from the keyboard, in points. */
+const KEYBOARD_SIZE: Partial<Record<ToolId, [number, number]>> = {
+  rect: [120, 80],
+  ellipse: [120, 80],
+  whiteout: [120, 40],
+  line: [120, 0],
+  arrow: [120, 0],
+  highlight: [120, 14],
+  underline: [120, 14],
+  strikeout: [120, 14],
+  link: [120, 20],
+  "field-text": [160, 24],
+  "field-checkbox": [16, 16],
+  "field-radio": [16, 16],
+  "field-dropdown": [120, 24],
+};
+
+/**
+ * Places a tool's annotation without a pointer: at its usual size (drag tools
+ * get a box to move and resize from there), centred on a point and kept on
+ * the page. Null when the tool needs a pointer path (freehand) or an image.
+ */
+export function createCentred(
+  tool: ToolId,
+  settings: ToolSettings,
+  cx: number,
+  cy: number,
+  page: { width: number; height: number },
+  extras: { dataUrl?: string; fieldIndex?: number } = {}
+): Annotation | null {
+  const ann = createAnnotation(tool, settings, 0, 0, extras);
+  if (!ann || ann.type === "draw") return null;
+  const [width, height] = KEYBOARD_SIZE[tool] ?? [ann.width, ann.height];
+  const x = Math.max(0, Math.min(cx - width / 2, page.width - width));
+  const y = Math.max(0, Math.min(cy - height / 2, page.height - height));
+  if (ann.type === "shape" && (ann.shape === "line" || ann.shape === "arrow")) {
+    return { ...ann, x, y, width, height, x1: x, y1: y, x2: x + width, y2: y + height };
+  }
+  return { ...ann, x, y, width, height };
+}

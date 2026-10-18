@@ -1,5 +1,8 @@
 import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
 import { detectFormFields } from "../lib/pdf/forms.ts";
+import { createCentred } from "../lib/editor/factory.ts";
+import { annotationName, nudgeAnnotation } from "../lib/editor/keyboard.ts";
+import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
 let total = 0;
@@ -35,6 +38,53 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("a field without /TU uses its parent's", by("address.street")?.label === "Home address", by("address.street"));
   check("no /TU leaves the label empty (the name is used)", by("zip")?.label === undefined, by("zip"));
   check("a blank /TU is ignored", by("blank")?.label === undefined, by("blank"));
+}
+
+// The editor works without a pointer: tools place their item in the middle of
+// the view, and the arrow keys move and resize it.
+{
+  const page = { width: 612, height: 792 };
+  const key = (k: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}) => ({ key: k, shiftKey: false, altKey: false, ...mods });
+  const sig = createCentred("signature", DEFAULT_SETTINGS, 306, 396, page, { dataUrl: "data:image/png;base64,x" })!;
+  check("a signature is placed centred on the point", sig?.x === 306 - sig.width / 2 && sig.y === 396 - sig.height / 2, sig);
+  check("an image tool without an image places nothing", createCentred("signature", DEFAULT_SETTINGS, 306, 396, page) === null);
+  check("freehand needs a pointer", createCentred("draw", DEFAULT_SETTINGS, 306, 396, page) === null);
+  const rect = createCentred("rect", DEFAULT_SETTINGS, 306, 396, page)!;
+  check("a drag tool gets a box to work with", rect.width >= 40 && rect.height >= 40, rect);
+  const corner = createCentred("rect", DEFAULT_SETTINGS, 600, 5, page)!;
+  check("a box placed near the edge stays on the page", corner.x + corner.width <= 612 && corner.y >= 0, corner);
+  const line = createCentred("arrow", DEFAULT_SETTINGS, 306, 396, page)! as Extract<Annotation, { type: "shape" }>;
+  check("a line placed from the keyboard has its end points", line.x1 === line.x && line.x2 === line.x + line.width && line.y1 === line.y2, line);
+  check("every placeable tool gets a usable size", (["text", "note", "rect", "ellipse", "whiteout", "highlight", "underline", "strikeout", "link", "field-text", "field-checkbox", "field-radio", "field-dropdown"] as const).every((t) => {
+    const a = createCentred(t, DEFAULT_SETTINGS, 306, 396, page);
+    return !!a && a.width >= 4 && a.height >= 4;
+  }));
+
+  const right = nudgeAnnotation(sig, key("ArrowRight"), page)!;
+  check("ArrowRight moves 1pt", right.x === sig.x + 1 && right.y === sig.y && right.width === sig.width, right);
+  const down = nudgeAnnotation(sig, key("ArrowDown", { shiftKey: true }), page)!;
+  check("Shift+ArrowDown moves 10pt", down.y === sig.y + 10 && down.x === sig.x, down);
+  const wider = nudgeAnnotation(sig, key("ArrowRight", { altKey: true }), page)!;
+  check("Alt+ArrowRight makes it wider and keeps it in place", wider.width === sig.width + 1 && wider.x === sig.x, wider);
+  const shorter = nudgeAnnotation(sig, key("ArrowUp", { altKey: true, shiftKey: true }), page)!;
+  check("Alt+Shift+ArrowUp makes it 10pt shorter", shorter.height === sig.height - 10, shorter);
+  check("other keys are left alone", nudgeAnnotation(sig, key("a"), page) === null && nudgeAnnotation(sig, key("Enter"), page) === null);
+  const atLeft = nudgeAnnotation({ ...sig, x: 0 }, key("ArrowLeft", { shiftKey: true }), page)!;
+  check("it stops at the page edge", atLeft.x === 0, atLeft);
+  const off = nudgeAnnotation({ ...sig, x: -30 }, key("ArrowLeft"), page)!;
+  check("one already over the edge doesn't jump back", off.x === -30, off);
+  let tiny = sig;
+  for (let i = 0; i < 40; i++) tiny = nudgeAnnotation(tiny, key("ArrowLeft", { altKey: true, shiftKey: true }), page)!;
+  check("resizing stops at the smallest size", tiny.width === 6, tiny.width);
+  const moved = nudgeAnnotation(line, key("ArrowDown"), page)! as typeof line;
+  check("a line moves with its end points", moved.y === line.y + 1 && moved.y1 === line.y1! + 1 && moved.y2 === line.y2! + 1, moved);
+  const longer = nudgeAnnotation(line, key("ArrowRight", { altKey: true }), page)! as typeof line;
+  check("Alt+arrow moves a line's end point", longer.x2 === line.x2! + 1 && longer.x1 === line.x1 && longer.width === line.width + 1, longer);
+
+  check("annotations are named by kind and page", annotationName({ ...sig, page: 0 }) === "Signature, page 1", annotationName(sig));
+  check("a rectangle reads as one", annotationName({ ...rect, page: 2 }) === "Rectangle, page 3", annotationName(rect));
+  const text = createCentred("text", DEFAULT_SETTINGS, 306, 396, page)!;
+  check("a text box is named by its text", annotationName({ ...text, text: "Hello  world" } as Annotation) === "Text: Hello world, page 1");
 }
 
 console.log(`\n${pass}/${total} passed`);

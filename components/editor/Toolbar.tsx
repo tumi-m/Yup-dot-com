@@ -121,7 +121,8 @@ export function Toolbar({
   onSettingsChange,
 }: {
   tool: ToolId;
-  onToolChange: (tool: ToolId) => void;
+  /** `keyboard`: chosen with Enter or Space, so its item is placed for the visitor. */
+  onToolChange: (tool: ToolId, keyboard: boolean) => void;
   settings: ToolSettings;
   onSettingsChange: (next: ToolSettings) => void;
 }) {
@@ -147,7 +148,8 @@ export function Toolbar({
               {group.tools.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => onToolChange(t.id)}
+                  // A click from Enter or Space has no pointer position (detail 0).
+                  onClick={(e) => onToolChange(t.id, e.detail === 0)}
                   title={t.key ? `${t.label} (${t.key})` : t.label}
                   aria-label={t.label}
                   aria-pressed={tool === t.id}

@@ -33,6 +33,7 @@ export function PropertiesPanel({
     // Phones: a bottom sheet over the page. Wider screens: a side panel.
     <aside
       aria-label="Properties"
+      data-properties
       className="fixed inset-x-0 bottom-0 z-30 max-h-[50dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-background p-4 shadow-2xl md:static md:z-auto md:max-h-none md:w-64 md:shrink-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none"
     >
       <div className="mb-4 flex items-center justify-between">
