@@ -95,5 +95,11 @@ export const BUSINESS: Business = resolveBusiness(
   process.env.NODE_ENV === "development"
 );
 
+/**
+ * Where security reports go (SECURITY.md, /security, /.well-known/security.txt).
+ * NEXT_PUBLIC_SECURITY_EMAIL overrides it, for another domain.
+ */
+export const SECURITY_EMAIL = cleanEmail(process.env.NEXT_PUBLIC_SECURITY_EMAIL) ?? "security@pdfwizard.xyz";
+
 /** When the legal pages last changed (YYYY-MM-DD). Update it with every material change. */
 export const LEGAL_UPDATED = "2026-10-17";

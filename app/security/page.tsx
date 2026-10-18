@@ -1,8 +1,8 @@
 import type { ResolvingMetadata } from "next";
 import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
-import { BUSINESS } from "@/lib/business";
-import { EmailLink, LegalPage, Section } from "@/components/legal/LegalPage";
+import { BUSINESS, SECURITY_EMAIL } from "@/lib/business";
+import { LegalPage, Section } from "@/components/legal/LegalPage";
 
 // Its own title and description on shared links too, not the home page's.
 export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
@@ -57,9 +57,11 @@ export default function SecurityPage() {
 
       <Section id="report" title="Report a problem">
         <p>
-          Found a vulnerability? Email <EmailLink subject="Security report" />
-          {BUSINESS.email ? "" : <Link href="/contact">us</Link>} with the steps to reproduce it. We reply within 3
-          working days. Please don&apos;t access other people&apos;s data or disrupt the service while testing.
+          Found a vulnerability? Email{" "}
+          <a href={`mailto:${SECURITY_EMAIL}?subject=${encodeURIComponent("Security report")}`}>{SECURITY_EMAIL}</a> with
+          the steps to reproduce it. We reply within 3 working days. Please don&apos;t access other people&apos;s data
+          or disrupt the service while testing. This address is also in{" "}
+          <a href="/.well-known/security.txt">security.txt</a>.
         </p>
         <p>
           More detail is in our <Link href="/privacy#security">privacy policy</Link>.

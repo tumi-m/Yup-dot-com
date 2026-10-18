@@ -499,6 +499,7 @@ Variables** and redeploy:
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Legal and contact pages: where privacy, refund and copyright requests go |
 | `NEXT_PUBLIC_BUSINESS_ADDRESS` | Legal and contact pages: physical address (Paystack and POPIA expect one) |
 | `NEXT_PUBLIC_CONTACT_PHONE` | Optional. Contact page phone number |
+| `NEXT_PUBLIC_SECURITY_EMAIL` | Optional. Where security reports go, on `/security` and in `/.well-known/security.txt` (default `security@pdfwizard.xyz`) |
 | `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
 | `NEXT_PUBLIC_ENABLE_YOUTUBE` | Optional. `1` brings back the YouTube tools (they are paused and hidden by default); needs the media worker |

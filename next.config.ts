@@ -34,6 +34,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/favicon.ico", destination: "/icon.svg" }];
   },
+  // RFC 9116's older location.
+  async redirects() {
+    return [{ source: "/security.txt", destination: "/.well-known/security.txt", permanent: true }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
