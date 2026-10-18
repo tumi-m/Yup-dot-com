@@ -1,7 +1,7 @@
 import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
-import { annotationName, nudgeAnnotation, pageActionFocus } from "../lib/editor/keyboard.ts";
+import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "../lib/editor/keyboard.ts";
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
@@ -94,6 +94,16 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("after a delete, focus is on the page now in its place", JSON.stringify(pageActionFocus("delete", 1, true, 12)) === JSON.stringify({ index: 1, pages: 11 }));
   check("after deleting the last page, focus is on the new last page", pageActionFocus("delete", 11, true, 12).index === 10);
   check("a failed action leaves focus on its button", JSON.stringify(pageActionFocus("delete", 3, false, 12)) === JSON.stringify({ index: 3, action: "delete", pages: 12 }));
+}
+
+// Single-key tool shortcuts can be turned off (WCAG 2.1.4).
+{
+  const press = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+  check("T switches to Add text when shortcuts are on", toolShortcut(press("t"), true) === "text");
+  check("Shift+T does too", toolShortcut(press("T"), true) === "text");
+  check("nothing happens when they are off", toolShortcut(press("t"), false) === null && toolShortcut(press("s"), false) === null);
+  check("a modifier key leaves the letter alone", toolShortcut(press("t", { ctrlKey: true }), true) === null && toolShortcut(press("t", { altKey: true }), true) === null && toolShortcut(press("t", { metaKey: true }), true) === null);
+  check("unmapped keys do nothing", toolShortcut(press("q"), true) === null && toolShortcut(press("Enter"), true) === null);
 }
 
 console.log(`\n${pass}/${total} passed`);

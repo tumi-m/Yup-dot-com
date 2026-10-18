@@ -1,4 +1,53 @@
-import { annotationLabel, type Annotation } from "./types";
+import { annotationLabel, type Annotation, type ToolId } from "./types";
+
+/** Single-key tool shortcuts (V for Select, T for Add text, ...). */
+export const TOOL_SHORTCUTS: Record<string, ToolId> = {
+  v: "select",
+  t: "text",
+  n: "note",
+  h: "highlight",
+  u: "underline",
+  k: "strikeout",
+  d: "draw",
+  w: "whiteout",
+  r: "rect",
+  o: "ellipse",
+  l: "line",
+  a: "arrow",
+  s: "signature",
+};
+
+/**
+ * The tool a key press switches to, if any. Single-key shortcuts can be
+ * turned off (WCAG 2.1.4), so a stray letter or a speech command doesn't
+ * change tools; with a modifier held the key belongs to something else.
+ */
+export function toolShortcut(
+  key: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
+  enabled: boolean
+): ToolId | null {
+  if (!enabled || key.ctrlKey || key.metaKey || key.altKey) return null;
+  return TOOL_SHORTCUTS[key.key.toLowerCase()] ?? null;
+}
+
+const SHORTCUTS_KEY = "pw.editor.shortcuts";
+
+/** Whether single-key shortcuts are on in this browser (they are unless turned off). */
+export function readShortcutsOn(): boolean {
+  try {
+    return localStorage.getItem(SHORTCUTS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function writeShortcutsOn(on: boolean) {
+  try {
+    localStorage.setItem(SHORTCUTS_KEY, on ? "1" : "0");
+  } catch {
+    /* storage unavailable: the choice lasts for this visit */
+  }
+}
 
 /** Smallest box a keyboard resize leaves, as with the resize handles. */
 const MIN = 6;

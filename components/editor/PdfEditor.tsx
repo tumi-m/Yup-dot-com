@@ -28,6 +28,7 @@ import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
 import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
 import { useHistory } from "@/lib/editor/history";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
+import { readShortcutsOn, toolShortcut, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
   annotationLabel,
   DEFAULT_SETTINGS,
@@ -47,22 +48,6 @@ import { PageView } from "./PageView";
 import { ThumbnailSidebar } from "./ThumbnailSidebar";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { SignaturePad } from "./SignaturePad";
-
-const SHORTCUTS: Record<string, ToolId> = {
-  v: "select",
-  t: "text",
-  n: "note",
-  h: "highlight",
-  u: "underline",
-  k: "strikeout",
-  d: "draw",
-  w: "whiteout",
-  r: "rect",
-  o: "ellipse",
-  l: "line",
-  a: "arrow",
-  s: "signature",
-};
 
 /**
  * Where the document lives. Cloud documents belong to a signed-in user's
@@ -117,6 +102,9 @@ export function PdfEditor({
   const annotations = history.state;
 
   const [tool, setTool] = useState<ToolId>("select");
+  /** Single-key tool shortcuts, which the visitor can turn off. */
+  const [shortcuts, setShortcuts] = useState(true);
+  useEffect(() => setShortcuts(readShortcutsOn()), []);
   const [settings, setSettings] = useState<ToolSettings>(DEFAULT_SETTINGS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -589,8 +577,8 @@ export function PdfEditor({
         deleteAnnotation(selectedId);
         return;
       }
-      const mapped = SHORTCUTS[e.key.toLowerCase()];
-      if (mapped && !mod) {
+      const mapped = toolShortcut(e, shortcuts);
+      if (mapped) {
         e.preventDefault();
         handleToolChange(mapped);
       }
@@ -598,7 +586,7 @@ export function PdfEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, selectedId, deleteAnnotation, handleSave, placementImage]);
+  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts]);
 
   // Don't let a stray tab close, link or Back throw away unsaved edits.
   useUnsavedGuard(dirty);
@@ -703,6 +691,11 @@ export function PdfEditor({
           onToolChange={handleToolChange}
           settings={settings}
           onSettingsChange={setSettings}
+          shortcuts={shortcuts}
+          onShortcutsChange={(on) => {
+            setShortcuts(on);
+            writeShortcutsOn(on);
+          }}
         />
       )}
 
