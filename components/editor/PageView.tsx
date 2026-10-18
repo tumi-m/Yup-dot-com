@@ -236,6 +236,8 @@ function FormFieldOverlay({
     height: Math.max(8, field.height * scale),
   };
 
+  // The PDF's own description of the field, when it has one.
+  const label = field.label ?? field.name;
   const shared =
     "border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
 
@@ -250,7 +252,7 @@ function FormFieldOverlay({
           type="button"
           role="checkbox"
           aria-checked={value === "true"}
-          aria-label={field.name}
+          aria-label={label}
           onClick={() => onChange(value === "true" ? "" : "true")}
           className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
         >
@@ -268,7 +270,7 @@ function FormFieldOverlay({
           type="button"
           role="radio"
           aria-checked={!!on}
-          aria-label={`${field.name}: ${field.exportValue ?? ""}`}
+          aria-label={`${label}: ${field.exportValue ?? ""}`}
           onClick={() => onChange(field.exportValue ?? "")}
           className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
         >
@@ -282,7 +284,7 @@ function FormFieldOverlay({
     return (
       <div style={style} onPointerDown={(e) => e.stopPropagation()}>
         <select
-          aria-label={field.name}
+          aria-label={label}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
@@ -304,7 +306,7 @@ function FormFieldOverlay({
     return (
       <div style={style} onPointerDown={(e) => e.stopPropagation()}>
         <textarea
-          aria-label={field.name}
+          aria-label={label}
           value={value}
           maxLength={field.maxLength}
           onChange={(e) => onChange(e.target.value)}
@@ -319,7 +321,7 @@ function FormFieldOverlay({
   return (
     <div style={style} onPointerDown={(e) => e.stopPropagation()}>
       <input
-        aria-label={field.name}
+        aria-label={label}
         value={value}
         maxLength={field.maxLength}
         onChange={(e) => onChange(e.target.value)}

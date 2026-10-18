@@ -3,10 +3,14 @@ import {
   PDFDocument,
   PDFDict,
   PDFDropdown,
+  PDFHexString,
+  PDFName,
   PDFOptionList,
   PDFRadioGroup,
+  PDFString,
   PDFTextField,
   StandardFonts,
+  type PDFField,
 } from "pdf-lib";
 import { pageFrame, type PageFrame } from "./page-frame";
 
@@ -34,6 +38,8 @@ export interface DetectedField {
   /** Unique per widget — a radio group contributes one entry per option. */
   id: string;
   name: string;
+  /** What the PDF says the field is for (its /TU tooltip), for screen readers. */
+  label?: string;
   kind: DetectedFieldKind;
   page: number;
   /** Top-left origin, PDF points. */
@@ -59,6 +65,20 @@ function kindOf(field: unknown): DetectedFieldKind {
   if (field instanceof PDFDropdown || field instanceof PDFOptionList)
     return "dropdown";
   return "unsupported";
+}
+
+/** A field's /TU text, or its parent's: the name forms give people, not code. */
+function alternateName(field: PDFField): string | undefined {
+  const read = (dict: PDFDict | undefined) => {
+    const tu = dict?.lookup(PDFName.of("TU"));
+    if (!(tu instanceof PDFString || tu instanceof PDFHexString)) return undefined;
+    return tu.decodeText().replace(/\s+/g, " ").trim() || undefined;
+  };
+  try {
+    return read(field.acroField.dict) ?? read(field.acroField.getParent()?.dict);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -102,6 +122,7 @@ export async function detectFormFields(
     if (kind === "unsupported") continue;
 
     const name = field.getName();
+    const label = alternateName(field);
     let value = "";
     let options: string[] = [];
     let maxLength: number | undefined;
@@ -156,6 +177,7 @@ export async function detectFormFields(
       detected.push({
         id: `${name}::${i}`,
         name,
+        label,
         kind,
         page: pageIndex,
         ...displayRect(frame, rect),
