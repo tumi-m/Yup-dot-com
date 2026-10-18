@@ -36,6 +36,7 @@ import {
   choiceFromHash,
   fileKind,
   JOURNEY_CHOICES,
+  markSent,
   mediaActions,
   slidesActions,
   type JourneyAction,
@@ -419,7 +420,10 @@ function LinkBranch({
       transition={PANEL_T}
       onSubmit={(e) => {
         e.preventDefault();
-        if (actions[0]) router.push(actions[0].href);
+        if (!actions[0]) return;
+        // Tells the tool page this site sent the user, so it may start by itself.
+        markSent(actions[0].href);
+        router.push(actions[0].href);
       }}
     >
       <label htmlFor={id} className="sr-only">
@@ -489,6 +493,7 @@ function LinkBranch({
                   >
                     <Link
                       href={a.href}
+                      onClick={() => markSent(a.href)}
                       className={cn(
                         "flex h-14 items-center justify-center gap-2 rounded-2xl text-sm font-semibold shadow-sm transition-colors duration-200 hover:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         i === 0

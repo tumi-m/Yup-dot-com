@@ -20,6 +20,7 @@ import {
 import { ProgressBar } from "@/components/motion/Progress";
 import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { setHandoff } from "@/lib/local-store";
+import { takeSent } from "@/lib/journey";
 import { SLIDES_FAILURE_MESSAGE, SLIDES_MIME, slidesLinkProblem, type SlidesFormat } from "@/lib/google-slides";
 import { linkIn } from "@/lib/media";
 import { pasteBlockedMessage } from "@/lib/clipboard";
@@ -216,16 +217,19 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
     }
   }
 
-  // ?url= prefills and starts; ?then=edit goes straight to the editor.
+  // ?url= fills in the box. Only when the homepage sent the user here does it
+  // start by itself (?then=edit going straight to the editor): a link from
+  // another site mustn't spend an import or save a file without a click.
   useEffect(() => {
     if (autoRan.current) return;
     autoRan.current = true;
+    const sent = takeSent(window.location.pathname + window.location.search);
     const link = params.get("url");
     if (!link) return;
     // Drop the params so Back or a reload doesn't import the deck again.
     window.history.replaceState(window.history.state, "", window.location.pathname);
     setUrl(link);
-    void run(format === "pptx" && params.get("then") === "edit" ? "edit" : "download", link, true);
+    if (sent) void run(format === "pptx" && params.get("then") === "edit" ? "edit" : "download", link, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

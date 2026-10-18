@@ -64,6 +64,50 @@ export function slidesActions(input: string): JourneyAction[] {
 }
 
 /**
+ * A tool page opened with ?url= from another site only fills in the box:
+ * starting spends an import and saves a file, so it waits for a click. The
+ * homepage leaves a note in this tab right before it sends the user on, and
+ * the tool page starts by itself only when the note names the address it was
+ * opened at. Reading the note clears it.
+ */
+const SENT_KEY = "pdf-wizard:sent";
+
+type NoteStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function tabStore(): NoteStore | null {
+  try {
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Path and query, the way the browser writes them. */
+function address(href: string): string {
+  const u = new URL(href, "http://localhost");
+  return u.pathname + u.search;
+}
+
+export function markSent(href: string, store: NoteStore | null = tabStore()) {
+  try {
+    store?.setItem(SENT_KEY, address(href));
+  } catch {
+    /* site data blocked: the page will just fill in the box */
+  }
+}
+
+/** True once, when the homepage sent the user to `href`. */
+export function takeSent(href: string, store: NoteStore | null = tabStore()): boolean {
+  try {
+    const note = store?.getItem(SENT_KEY) ?? null;
+    store?.removeItem(SENT_KEY);
+    return note !== null && note === address(href);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A playlist link goes to the playlist tool; one that also names a video
  * (watch?v=…&list=…) offers that single video too. Text around the link, as
  * a phone's share sheet copies it, is left behind.
