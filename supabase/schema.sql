@@ -362,8 +362,9 @@ create trigger documents_guard
   before update or delete on public.documents
   for each row execute function public.documents_guard();
 
--- The Free plan keeps 5 cloud documents; this used to be enforced only in the
--- browser.
+-- The Free plan keeps 5 cloud documents of up to 50 MB; this used to be
+-- enforced only in the browser. (size_bytes comes from the browser: the file
+-- itself is checked again in storage, below.)
 create or replace function public.documents_limit()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -371,9 +372,13 @@ begin
     return new;
   end if;
   perform pg_advisory_xact_lock(hashtext('documents:' || new.owner_id::text));
-  if public.effective_plan(new.owner_id) = 'free'
-     and (select count(*) from public.documents where owner_id = new.owner_id) >= 5 then
-    raise exception 'The Free plan keeps 5 documents. Upgrade for more.' using errcode = 'P0001';
+  if public.effective_plan(new.owner_id) = 'free' then
+    if (select count(*) from public.documents where owner_id = new.owner_id) >= 5 then
+      raise exception 'The Free plan keeps 5 documents. Upgrade for more.' using errcode = 'P0001';
+    end if;
+    if new.size_bytes > 52428800 then
+      raise exception 'Files up to 50 MB on your plan.' using errcode = 'P0001';
+    end if;
   end if;
   return new;
 end;
@@ -391,6 +396,35 @@ update storage.buckets
    set file_size_limit = 524288000,
        allowed_mime_types = array['application/pdf']
  where id = 'documents';
+
+-- Free files up to 50 MB (lib/limits.ts). Storage writes the real size into
+-- metadata once the file is in, and may write it as the service role, so
+-- every write is checked, against the plan of the folder's owner.
+create or replace function public.documents_file_size()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_owner text := (storage.foldername(new.name))[1];
+  v_size numeric := case when jsonb_typeof(new.metadata -> 'size') = 'number'
+                         then (new.metadata ->> 'size')::numeric end;
+begin
+  -- A file that was allowed (say, before a downgrade) can still be renamed.
+  if tg_op = 'UPDATE' and (new.metadata -> 'size') is not distinct from (old.metadata -> 'size') then
+    return new;
+  end if;
+  if new.bucket_id = 'documents' and v_size > 52428800
+     and (case when v_owner ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+               then public.effective_plan(v_owner::uuid) = 'free'
+               else true end) then
+    raise exception 'Files up to 50 MB on your plan.' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_file_size on storage.objects;
+create trigger documents_file_size
+  before insert or update on storage.objects
+  for each row execute function public.documents_file_size();
 
 -- Uploads must belong to a document row the user owns, so storage can't be
 -- used past the plan's document limit.
