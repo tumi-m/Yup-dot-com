@@ -71,7 +71,7 @@ export interface ParsedDocument {
   pageCount: number;
   /** Median body font size, used for heading classification. */
   bodySize: number;
-  /** True when pages carried essentially no extractable text (likely a scan). */
+  /** True when most pages carried no extractable text (likely a scan). */
   likelyScanned: boolean;
 }
 
@@ -486,13 +486,16 @@ export async function parseDocument(
   const perPage: { lines: ParsedLine[]; page: number }[] = [];
   const allSizes: number[] = [];
   let totalChars = 0;
+  let pagesWithText = 0;
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();
     const spans = toSpans(content.items as unknown as RawItem[]);
-    totalChars += spans.reduce((n, s) => n + s.text.trim().length, 0);
+    const chars = spans.reduce((n, s) => n + s.text.trim().length, 0);
+    totalChars += chars;
+    if (chars > 0) pagesWithText++;
 
     const lines = linesInReadingOrder(spans, viewport.width);
     perPage.push({ lines, page: p });
@@ -519,7 +522,9 @@ export async function parseDocument(
     blocks,
     pageCount,
     bodySize,
-    likelyScanned: totalChars < pageCount * 40,
+    // Little text, and none on most pages. A slide deck with a short title
+    // on each slide has little text too, but on every page: not a scan.
+    likelyScanned: totalChars < pageCount * 40 && pagesWithText < pageCount / 2,
   };
 }
 
