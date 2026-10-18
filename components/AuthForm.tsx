@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
-import { authErrorMessage, authSwitchHref, safeRedirect } from "@/components/auth-redirect";
+import { authErrorMessage, authSwitchHref, resetLinkTarget, safeRedirect } from "@/components/auth-redirect";
 import { track } from "@/lib/analytics";
 
-export function AuthForm({ mode }: { mode: "login" | "signup" }) {
+/** Log in, sign up, or ask for a link to reset a forgotten password. */
+export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -23,7 +24,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const [message, setMessage] = useState<string | null>(null);
 
   const isSignup = mode === "signup";
-  const otherPage = isSignup ? "/login" : "/signup";
+  const isReset = mode === "reset";
+  const otherPage = mode === "login" ? "/signup" : "/login";
   const [switchHref, setSwitchHref] = useState<string>(otherPage);
 
   // Read after load, like the submit handler, so the page stays static:
@@ -47,7 +49,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     const redirectTo = safeRedirect(new URLSearchParams(window.location.search).get("redirect"));
 
     try {
-      if (isSignup) {
+      if (isReset) {
+        // The link signs them in and opens the page to choose a new password.
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: resetLinkTarget(window.location.origin),
+        });
+        if (error) throw error;
+        setMessage("If an account uses that email, we've sent it a link to reset the password.");
+      } else if (isSignup) {
         const { error } = await supabase.auth.signUp({
           email,
           password,
@@ -97,8 +106,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           <WizardWordmark />
         </Link>
         <h1 className="text-center text-2xl font-bold">
-          {isSignup ? "Create account" : "Log in"}
+          {isSignup ? "Create account" : isReset ? "Reset password" : "Log in"}
         </h1>
+        {isReset && (
+          <p className="mt-2 text-center text-sm text-muted-foreground">
+            We&apos;ll email you a link to choose a new one.
+          </p>
+        )}
 
         {!configured && (
           <p className="mt-6 rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-900">
@@ -137,20 +151,32 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
               autoComplete="email"
             />
           </div>
-          <div>
-            <label htmlFor="auth-password" className="sr-only">Password</label>
-            <Input
-              id="auth-password"
-              className={field}
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete={isSignup ? "new-password" : "current-password"}
-            />
-          </div>
+          {!isReset && (
+            <div>
+              <label htmlFor="auth-password" className="sr-only">Password</label>
+              <Input
+                id="auth-password"
+                className={field}
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete={isSignup ? "new-password" : "current-password"}
+              />
+              {!isSignup && (
+                <div className="mt-2 flex justify-end">
+                  <Link
+                    href="/forgot-password"
+                    className="tap rounded text-sm font-medium text-primary hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-rise">
@@ -165,7 +191,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
           <Button type="submit" className="h-11 w-full" disabled={loading || !configured}>
             {loading && <Loader2 className="motion-safe:animate-spin" />}
-            {isSignup ? "Sign up" : "Log in"}
+            {isSignup ? "Sign up" : isReset ? "Send link" : "Log in"}
           </Button>
           {isSignup && (
             <p className="text-center text-xs leading-5 text-muted-foreground">
@@ -183,12 +209,12 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         </form>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          {isSignup ? "Already have an account? " : "Don't have an account? "}
+          {isSignup ? "Already have an account? " : isReset ? "Remembered it? " : "Don't have an account? "}
           <Link
             href={switchHref}
             className="inline-flex h-11 items-center rounded font-medium text-primary hover:underline"
           >
-            {isSignup ? "Log in" : "Sign up"}
+            {mode === "login" ? "Sign up" : "Log in"}
           </Link>
         </p>
       </div>

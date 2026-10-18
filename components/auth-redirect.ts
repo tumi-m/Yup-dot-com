@@ -20,11 +20,21 @@ export function authSwitchHref(target: "/login" | "/signup", search: string): st
   return redirect ? `${target}?redirect=${encodeURIComponent(redirect)}` : target;
 }
 
-/** What to say on /login?error=auth, after a confirmation link fails. */
+/** Where a password reset link signs people in, to choose a new password. */
+export const NEW_PASSWORD_PATH = "/settings/password";
+
+/** The address in the reset email: /auth/callback signs in, then on to NEW_PASSWORD_PATH. */
+export function resetLinkTarget(origin: string): string {
+  return `${origin}/auth/callback?next=${encodeURIComponent(NEW_PASSWORD_PATH)}`;
+}
+
+/** What to say on /login?error=auth, after a confirmation or reset link fails. */
 export function authErrorMessage(search: string): string | null {
-  return new URLSearchParams(search).get("error") === "auth"
-    ? "That link has expired or was opened in another browser. Log in, or sign up again to get a new link."
-    : null;
+  const params = new URLSearchParams(search);
+  if (params.get("error") !== "auth") return null;
+  return params.get("redirect") === NEW_PASSWORD_PATH
+    ? "That reset link has expired or was opened in another browser. Ask for a new one under Forgot password."
+    : "That link has expired or was opened in another browser. Log in, or sign up again to get a new link.";
 }
 
 /** The login page, coming back to `path` (with its query) afterwards. */
