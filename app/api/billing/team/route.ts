@@ -1,5 +1,5 @@
 import { checkNewMember, normalizeEmail, ownPlan, SEAT_ERRORS } from "@/lib/billing";
-import { addTeamMember, listTeamMembers, removeTeamMember } from "@/lib/billing-store";
+import { addTeamMember, isSeatsFullError, listTeamMembers, removeTeamMember } from "@/lib/billing-store";
 import { billingContext, json } from "@/lib/billing-route";
 import { refuseCrossSite } from "@/lib/cross-site";
 import { TEAM_SEATS } from "@/lib/plans";
@@ -39,8 +39,9 @@ export async function POST(request: Request) {
     await addTeamMember(user.id, check.email);
   } catch (err) {
     // The database also caps seats, in case two adds race.
+    if (isSeatsFullError(err)) return json({ error: SEAT_ERRORS.full }, 409);
     console.error("add team member failed", err);
-    return json({ error: SEAT_ERRORS.full }, 409);
+    return json({ error: "Couldn't add this member. Try again." }, 502);
   }
   return json(await state(user.id));
 }
