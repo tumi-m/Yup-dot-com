@@ -1,14 +1,21 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
 import { PLANS, TEAM_SEATS, formatPrice, prepaidPrice } from "@/lib/plans";
 import { ContactList, EmailLink, Fill, LegalPage, Section } from "@/components/legal/LegalPage";
 
-export const metadata: Metadata = {
-  title: "Terms of service",
-  description: "The rules for using PDF Wizard: accounts, acceptable use, plans, billing, renewal and cancellation.",
-  alternates: { canonical: "/terms" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Terms of service",
+      description: "The rules for using PDF Wizard: accounts, acceptable use, plans, billing, renewal and cancellation.",
+      path: "/terms",
+    },
+    parent
+  );
+}
 
 const S = {
   service: "The service",

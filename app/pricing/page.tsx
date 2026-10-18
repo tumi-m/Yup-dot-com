@@ -1,3 +1,5 @@
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
@@ -8,11 +10,17 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import { getPriceDisplay } from "@/lib/local-prices";
 
-export const metadata = {
-  title: "Pricing",
-  description: "Free to start. Pro R49 a month: unlimited edits, no watermark, 1080p video, more AI.",
-  alternates: { canonical: "/pricing" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Pricing",
+      description: "Free to start. Pro R49 a month: unlimited edits, no watermark, 1080p video, more AI.",
+      path: "/pricing",
+    },
+    parent
+  );
+}
 
 export const dynamic = "force-dynamic";
 

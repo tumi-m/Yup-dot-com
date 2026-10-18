@@ -1,13 +1,20 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
 import { ContactList, EmailLink, LegalPage, Section } from "@/components/legal/LegalPage";
 
-export const metadata: Metadata = {
-  title: "Refund and cancellation policy",
-  description: "Cancel anytime. How cancellations, pay-once plans and refunds work, and how long refunds take.",
-  alternates: { canonical: "/refunds" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Refund and cancellation policy",
+      description: "Cancel anytime. How cancellations, pay-once plans and refunds work, and how long refunds take.",
+      path: "/refunds",
+    },
+    parent
+  );
+}
 
 const S = {
   cancel: "Cancelling a subscription",

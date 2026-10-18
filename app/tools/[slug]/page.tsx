@@ -10,6 +10,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import type { Tier } from "@/lib/limits";
 import { Suspense } from "react";
+import { pageMetadata } from "@/lib/page-metadata";
 import { ToolHeader, RelatedTools } from "@/components/tools/ToolHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
@@ -29,14 +30,7 @@ export async function generateMetadata(
   const { slug } = await params;
   const tool = getTool(slug);
   if (!tool) return { title: "Tool not found" };
-  // Keep the site's shared-link image, which a page's own openGraph replaces.
-  const images = (await parent).openGraph?.images ?? [];
-  return {
-    title: tool.title,
-    description: tool.description,
-    alternates: { canonical: `/tools/${tool.slug}` },
-    openGraph: { title: tool.title, description: tool.description, images },
-  };
+  return pageMetadata({ title: tool.title, description: tool.description, path: `/tools/${tool.slug}` }, parent);
 }
 
 export default async function ToolPage({

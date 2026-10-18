@@ -1,15 +1,22 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
 import { GA_ID } from "@/lib/analytics";
 import { ContactList, EmailLink, Fill, LegalPage, Section } from "@/components/legal/LegalPage";
 import { CookieSettingsButton } from "@/components/analytics/CookieSettingsButton";
 
-export const metadata: Metadata = {
-  title: "Privacy policy",
-  description: "What we collect, why, who we share it with, and your rights under POPIA and GDPR.",
-  alternates: { canonical: "/privacy" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Privacy policy",
+      description: "What we collect, why, who we share it with, and your rights under POPIA and GDPR.",
+      path: "/privacy",
+    },
+    parent
+  );
+}
 
 const S = {
   summary: "In short",

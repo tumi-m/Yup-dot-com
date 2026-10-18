@@ -1,14 +1,21 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import { Clock, Mail, MapPin, Phone } from "lucide-react";
 import { BUSINESS, telHref } from "@/lib/business";
 import { Fill, LegalPage } from "@/components/legal/LegalPage";
 import { ContactForm } from "@/components/legal/ContactForm";
 
-export const metadata: Metadata = {
-  title: "Contact",
-  description: "Email, phone and address for PDF Wizard: support, billing, refunds, privacy and copyright.",
-  alternates: { canonical: "/contact" },
-};
+// Its own title and description on shared links too, not the home page's.
+export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return pageMetadata(
+    {
+      title: "Contact",
+      description: "Email, phone and address for PDF Wizard: support, billing, refunds, privacy and copyright.",
+      path: "/contact",
+    },
+    parent
+  );
+}
 
 const ROW = "flex items-start gap-3";
 const ICON = "mt-1 h-4 w-4 shrink-0 text-primary";
