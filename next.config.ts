@@ -24,6 +24,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Lets lib/server-secrets.ts tell React never to send a server secret to
+  // the browser (a page that tries fails instead of leaking it).
+  experimental: { taint: true },
   // Browsers and crawlers still ask for /favicon.ico; answer with the SVG icon.
   async rewrites() {
     return [{ source: "/favicon.ico", destination: "/icon.svg" }];

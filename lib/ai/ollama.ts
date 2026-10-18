@@ -11,6 +11,8 @@
  * writes inline, so chain-of-thought never reaches the browser.
  */
 
+import "server-only";
+
 export const CLOUD_HOST = "https://ollama.com";
 /**
  * DeepSeek V4.1 Flash. Direct calls to ollama.com use the name listed by

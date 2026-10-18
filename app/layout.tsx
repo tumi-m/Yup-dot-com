@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import { siteUrl } from "@/lib/site";
 import { GA_ID, consentBootstrapScript } from "@/lib/analytics";
+import "@/lib/server-secrets";
 import { MotionProvider } from "@/components/motion/primitives";
 import { SkipLink } from "@/components/SkipLink";
 import { Analytics } from "@/components/analytics/Analytics";

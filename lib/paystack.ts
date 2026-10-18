@@ -2,6 +2,7 @@
  * Minimal Paystack client (https://paystack.com/docs/api/). Server-only: it
  * authenticates with the secret key. `fetch` is injectable for tests.
  */
+import "server-only";
 import { CURRENCY, type PaidPlanId } from "./plans";
 
 export const PAYSTACK_API = "https://api.paystack.co";

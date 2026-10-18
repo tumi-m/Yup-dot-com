@@ -14,6 +14,7 @@
  * Subjects: "u:<user id>" for accounts, "ip:<salted SHA-256>" for guests.
  * Raw IP addresses are never stored.
  */
+import "server-only";
 import { createHash } from "node:crypto";
 import { LIMITS, type Tier } from "./limits";
 
