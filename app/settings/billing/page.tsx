@@ -52,7 +52,7 @@ export default async function BillingPage({
       <main id="main" className="container max-w-5xl py-10">
         <h1 className="text-3xl font-bold tracking-tight">Billing</h1>
 
-        {reference && <PaymentReturn key={reference} reference={reference} planName={plan.name} />}
+        {reference && <PaymentReturn key={reference} reference={reference} />}
 
         <section className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="current-plan">
           <p className="text-sm text-muted-foreground">Current plan</p>
@@ -78,10 +78,12 @@ export default async function BillingPage({
             )}
           </div>
 
-          {sub?.pastDue && sub.active && (
+          {sub?.pastDue && sub.live && (
             <div className="mt-5 rounded-xl bg-destructive/10 p-4 text-sm">
               <p className="font-medium text-destructive">
-                Payment failed. Update your card to keep {PLANS[sub.plan].name}.
+                {sub.active
+                  ? `Payment failed. Update your card to keep ${PLANS[sub.plan].name}.`
+                  : `Payment failed, so ${PLANS[sub.plan].name} is paused. Update your card to get it back.`}
               </p>
               <div className="mt-3">
                 <ManageBillingButton label="Update card" variant="default" />
@@ -89,9 +91,9 @@ export default async function BillingPage({
             </div>
           )}
 
-          {(sub?.manageable && !sub.pastDue) || (billing.source === "prepaid" && prepaid) ? (
+          {sub?.manageable || (billing.source === "prepaid" && prepaid) ? (
             <div className="mt-5 space-y-4 border-t border-border pt-5">
-              {sub?.manageable && !sub.pastDue && <ManageBillingButton />}
+              {sub?.manageable && <ManageBillingButton />}
               {billing.source === "prepaid" && prepaid && <ExtendButtons plan={prepaid.plan} display={display} />}
             </div>
           ) : null}
@@ -103,7 +105,7 @@ export default async function BillingPage({
           </section>
         )}
 
-        {!sub?.active && billing.source !== "prepaid" && (
+        {!sub?.active && !sub?.live && billing.source !== "prepaid" && (
           <>
             <h2 className="mt-12 text-xl font-semibold">Upgrade</h2>
             <div className="mt-6">

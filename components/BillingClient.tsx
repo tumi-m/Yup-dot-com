@@ -11,7 +11,7 @@ import { ENTER_T, EXIT_T, FADE_EXIT, InlineError, SPRING_LAYOUT, SuccessBadge } 
 import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
-import { paymentOutcome, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
+import { paymentOutcome, paymentPlanName, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
 import { focusAfterRemove } from "@/components/list-focus";
 
 export type CheckoutRequest =
@@ -107,22 +107,27 @@ type VerifyState = "checking" | "pending" | Exclude<PaymentOutcome, "retry">;
 
 /**
  * Shown on return from Paystack (?ref=…). Confirms the payment server-side,
- * then refreshes the page so the new plan shows.
+ * says which plan is in use now, then refreshes the page so it shows there.
  */
-export function PaymentReturn({ reference, planName }: { reference: string; planName: string }) {
+export function PaymentReturn({ reference }: { reference: string }) {
   const router = useRouter();
   const [state, setState] = useState<VerifyState>("checking");
+  const [planName, setPlanName] = useState<string | null>(null);
 
   useEffect(() => {
     // Each run checks on its own; cleanup stops only this run's checks.
     let cancelled = false;
     let purchase: (CheckoutChoice & { amount?: number }) | null = null;
+    let plan: string | null = null;
     async function verify(): Promise<PaymentOutcome> {
       try {
         const res = await fetch(`/api/billing/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
         const outcome = paymentOutcome(res.status, data.status);
-        if (outcome === "success") purchase = data.purchase ?? null;
+        if (outcome === "success") {
+          purchase = data.purchase ?? null;
+          plan = paymentPlanName(data.plan);
+        }
         return outcome;
       } catch {
         return "retry"; // offline: try again
@@ -139,6 +144,7 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
     waitForPayment(verify, { sleep, stopped: () => cancelled, onPending: () => setState("pending") }).then((outcome) => {
       if (!outcome) return;
       if (outcome === "success" && purchase) trackPurchase(reference, purchase, purchase.amount);
+      setPlanName(plan);
       setState(outcome);
       if (outcome === "success") router.refresh();
     });
@@ -173,7 +179,7 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
             <SuccessBadge size={48} className="mx-0" />
             <div>
               <p className="text-lg font-semibold">Payment received</p>
-              <p className="text-sm text-muted-foreground">You&apos;re on {planName}.</p>
+              {planName && <p className="text-sm text-muted-foreground">You&apos;re on {planName}.</p>}
             </div>
           </>
         )}

@@ -1,6 +1,5 @@
 import { billingContext, json } from "@/lib/billing-route";
 import { refuseCrossSite } from "@/lib/cross-site";
-import { subscriptionActive } from "@/lib/billing";
 import { subscriptionManageLink } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +10,11 @@ export async function POST(request: Request) {
   if (refused) return refused;
   const ctx = await billingContext();
   if (ctx instanceof Response) return ctx;
-  const { row } = ctx.account;
+  const { row, profile } = ctx.account;
 
+  // While it gives access or Paystack may still charge it (past due).
   const code = row.paystack_subscription_code;
-  if (!code || !subscriptionActive(row, new Date())) {
+  if (!code || !profile.billing.subscription?.manageable) {
     return json({ error: "No subscription to manage." }, 400);
   }
   try {

@@ -152,6 +152,8 @@ export interface BillingSummary {
     status: SubscriptionStatus;
     periodEnd: string | null;
     active: boolean;
+    /** Paystack may still charge it, even after access ended (see hasLiveSubscription). */
+    live: boolean;
     pastDue: boolean;
     renews: boolean;
     manageable: boolean;
@@ -167,6 +169,7 @@ export function summarize(
   teamOwnerEmail: string | null = null
 ): BillingSummary {
   const subActive = subscriptionActive(row, now);
+  const live = hasLiveSubscription(row, now);
   const subscription =
     row && isPaidPlan(row.subscription_plan) && row.subscription_status
       ? {
@@ -174,9 +177,10 @@ export function summarize(
           status: row.subscription_status,
           periodEnd: row.current_period_end,
           active: subActive,
+          live,
           pastDue: row.subscription_status === "attention",
           renews: row.subscription_status === "active" || row.subscription_status === "attention",
-          manageable: !!row.paystack_subscription_code && subActive,
+          manageable: !!row.paystack_subscription_code && (subActive || live),
         }
       : null;
   const prepaid =
@@ -195,12 +199,18 @@ export const FREE_SUMMARY: BillingSummary = {
 };
 
 /**
- * Whether a new subscription checkout should be refused: Paystack would
- * otherwise run two subscriptions side by side.
+ * Whether Paystack may still charge the subscription. A new subscription
+ * checkout is refused while it is (Paystack would run two side by side),
+ * and it stays manageable. Paystack charges an active or past-due
+ * ("attention") subscription again on its next payment date until it is
+ * cancelled, so that holds after the grace period too, once its code is
+ * known. A non-renewing one is live until its end date.
  */
 export function hasLiveSubscription(row: BillingRow | null, now: Date): boolean {
-  if (!row?.subscription_status) return false;
-  return subscriptionActive(row, now) && row.subscription_status !== "cancelled" && row.subscription_status !== "complete";
+  if (!row?.subscription_status || !isPaidPlan(row.subscription_plan)) return false;
+  const st = row.subscription_status;
+  if ((st === "active" || st === "attention") && row.paystack_subscription_code) return true;
+  return subscriptionActive(row, now) && st !== "cancelled" && st !== "complete";
 }
 
 /** Calendar months in UTC, clamping the day (31 Jan + 1 month = 28/29 Feb). */
@@ -398,6 +408,13 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
       if (firstCharge || st === null || st === "active" || st === "attention") {
         patch.subscription_status = "active";
       }
+      // A new subscription after one that ended: its code comes with its
+      // subscription.create. The old code must not be managed meanwhile, or
+      // make an early event for the new one look stale.
+      if (firstCharge && st !== null && st !== "active" && st !== "attention" && row.paystack_subscription_code) {
+        patch.paystack_subscription_code = null;
+        patch.paystack_email_token = null;
+      }
     }
     await deps.store.updateRow(userId, patch);
     return { status: "applied", userId, key };
@@ -405,6 +422,37 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     await deps.store.releaseEvent(key);
     throw err;
   }
+}
+
+/**
+ * The return from checkout: applies the charge unless the webhook already
+ * has, and says which plan is in use now (`before` is the plan in use
+ * before, which counts a Team seat). On a duplicate, the other path holds
+ * the charge and may still be writing it: until the row grants the plan
+ * bought, the answer is "pending", so the page asks again rather than
+ * showing the old plan.
+ */
+export async function confirmCharge(
+  tx: Json,
+  userId: string,
+  before: PlanId,
+  deps: EventDeps
+): Promise<{ status: "success"; plan: PlanId } | { status: "pending" } | { status: "ignored"; reason: string }> {
+  const result = await applyCharge(tx, deps);
+  if (result.status === "ignored") return result;
+  const now = deps.now?.() ?? new Date();
+  const own = ownPlan(await deps.store.getRow(userId), now);
+  if (result.status === "duplicate") {
+    // applyCharge checked the metadata and plan before its claim.
+    const meta = parseMetadata(tx.metadata);
+    const once = meta.mode === "once";
+    const bought = (once ? meta.plan : deps.planForCode(planCodeOf(tx))) as PaidPlanId;
+    // Once the term it paid for is over, the row no longer shows it.
+    const paidAt = time(tx.paid_at);
+    const over = addMonths(Number.isNaN(paidAt) ? now : new Date(paidAt), once ? Number(meta.months) : 1).getTime() <= now.getTime();
+    if (RANK[own] < RANK[bought] && !over) return { status: "pending" };
+  }
+  return { status: "success", plan: best(before, own) };
 }
 
 const sha256 = (s: string | Uint8Array) => createHash("sha256").update(s).digest("hex");
@@ -432,18 +480,23 @@ export async function handlePaystackEvent(
       return {
         code,
         userId,
-        patch: (row) =>
-          plan && code
-            ? {
-                plan,
-                subscription_plan: plan,
-                subscription_status: statusOf(data.status) ?? "active",
-                paystack_subscription_code: code,
-                paystack_email_token: data.email_token ?? row.paystack_email_token,
-                paystack_customer_code: data.customer?.customer_code ?? row.paystack_customer_code,
-                current_period_end: data.next_payment_date ?? row.current_period_end,
-              }
-            : null,
+        patch: (row) => {
+          if (!plan || !code) return null;
+          // A retried create can come after a later event for the same
+          // subscription (a cancel, say): what that stored is newer.
+          const known = row.paystack_subscription_code === code;
+          return {
+            plan,
+            subscription_plan: plan,
+            subscription_status: (known && row.subscription_status) || (statusOf(data.status) ?? "active"),
+            paystack_subscription_code: code,
+            paystack_email_token: data.email_token ?? row.paystack_email_token,
+            paystack_customer_code: data.customer?.customer_code ?? row.paystack_customer_code,
+            current_period_end: known
+              ? later(row.current_period_end, data.next_payment_date ?? null)
+              : (data.next_payment_date ?? row.current_period_end),
+          };
+        },
       };
     },
     "subscription.not_renew": async () => subscriptionChange(data, deps.store, () => ({ subscription_status: "non-renewing" })),
@@ -481,11 +534,20 @@ export async function handlePaystackEvent(
     if (!row) throw new Error(`No profile for ${userId}`);
     // Only the subscription we know about may change state: a late event
     // from an older, replaced subscription must not touch the current one.
-    if (type !== "subscription.create" && row.paystack_subscription_code !== code) {
+    // With no code stored, the event is about the subscription whose
+    // subscription.create hasn't arrived yet (Paystack retries it), so it
+    // applies, and the code is kept.
+    const known = row.paystack_subscription_code;
+    if (type !== "subscription.create" && known && known !== code) {
+      await deps.store.releaseEvent(key);
       return { status: "ignored", reason: "stale subscription" };
     }
     const p = patch(row);
-    if (!p) return { status: "ignored", reason: "nothing to change" };
+    if (!p) {
+      await deps.store.releaseEvent(key);
+      return { status: "ignored", reason: "nothing to change" };
+    }
+    if (!known) p.paystack_subscription_code = code;
     await deps.store.updateRow(userId, p);
     return { status: "applied", userId, key };
   } catch (err) {
