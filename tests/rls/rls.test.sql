@@ -250,10 +250,66 @@ select rlstest.expect('anon has no privilege on any public table or view', 'post
   $$select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')
        and has_table_privilege('anon', c.oid, 'select, insert, update, delete, truncate, references, trigger')$$, 'value:0');
-create table public.rlstest_later (x int);
-select rlstest.expect('a table added later gets nothing for anon', 'postgres', null,
-  $$select has_table_privilege('anon', 'public.rlstest_later', 'select, insert, update, delete')$$, 'value:false');
-drop table public.rlstest_later;
+-- ---------- Added later, by hand in the SQL editor (as the owner) ----------
+-- Supabase's defaults would give a new table to every signed-in user and a
+-- new function to everyone, and anyone can sign up.
+\set audit_sql `cat supabase/audit.sql`
+select format('create view rlstest.audit as %s', rtrim(:'audit_sql', E'; \n\t')) \gexec
+select rlstest.expect('audit (supabase/audit.sql): nothing open', 'postgres', null, 'select count(*) from rlstest.audit', 'value:0');
+
+select rlstest.expect('owner: add a notes table, no RLS asked for', 'postgres', null, 'create table public.rlstest_notes (id serial, email text, note text)', 'rows:0');
+insert into public.rlstest_notes (email, note) values ('victim@example.com', 'card ending 4242');
+select rlstest.expect('  it gets RLS by itself',           'postgres', null, $$select relrowsecurity from pg_class where oid = 'public.rlstest_notes'::regclass$$, 'value:true');
+select rlstest.expect('  anon reads it',                   'anon', null, 'select count(*) from public.rlstest_notes', 'denied');
+select rlstest.expect('  any signed-up user reads it',     'authenticated', :'A', 'select count(*) from public.rlstest_notes', 'denied');
+select rlstest.expect('  any signed-up user writes it',    'authenticated', :'A', 'insert into public.rlstest_notes (email) values ($q$x$q$)', 'denied');
+select rlstest.expect('  owner switches RLS off',          'postgres', null, 'alter table public.rlstest_notes disable row level security', 'denied');
+select rlstest.expect('  owner adds a column (allowed)',   'postgres', null, 'alter table public.rlstest_notes add column extra text', 'rows:0');
+select rlstest.expect('  created with CREATE TABLE AS',    'postgres', null, 'create table public.rlstest_copy as select * from public.rlstest_notes', 'rows:1');
+select rlstest.expect('  that one gets RLS too',           'postgres', null, $$select relrowsecurity from pg_class where oid = 'public.rlstest_copy'::regclass$$, 'value:true');
+select rlstest.expect('owner: add a SECURITY DEFINER function', 'postgres', null,
+  $$create function public.rlstest_list_emails() returns setof text language sql security definer set search_path = public as 'select email from public.profiles'$$, 'rows:0');
+select rlstest.expect('  anon calls it',                   'anon', null, 'select count(*) from public.rlstest_list_emails()', 'denied');
+select rlstest.expect('  a signed-in user calls it',       'authenticated', :'A', 'select count(*) from public.rlstest_list_emails()', 'denied');
+select rlstest.expect('  CREATE OR REPLACE keeps it closed', 'postgres', null,
+  $$create or replace function public.rlstest_list_emails() returns setof text language sql security definer set search_path = public as 'select email from public.profiles'$$, 'rows:0');
+select rlstest.expect('  anon calls it again',             'anon', null, 'select count(*) from public.rlstest_list_emails()', 'denied');
+select rlstest.expect('owner: add a view of profiles',     'postgres', null, 'create view public.rlstest_people as select id, email from public.profiles', 'rows:0');
+select rlstest.expect('  it checks RLS as the reader',     'postgres', null, $$select reloptions::text from pg_class where oid = 'public.rlstest_people'::regclass$$, 'value:{security_invoker=true}');
+grant select on public.rlstest_people to authenticated;
+select rlstest.expect('  granted: a user sees only self',  'authenticated', :'A', 'select count(*) from public.rlstest_people', 'value:1');
+select rlstest.expect('  owner turns security_invoker off', 'postgres', null, 'alter view public.rlstest_people set (security_invoker = false)', 'denied');
+select rlstest.expect('a table added later gets nothing for anon or signed-in users', 'postgres', null,
+  $$select has_table_privilege('anon', 'public.rlstest_notes', 'select, insert, update, delete')
+        or has_table_privilege('authenticated', 'public.rlstest_notes', 'select, insert, update, delete')$$, 'value:false');
+select rlstest.expect('audit: still nothing open',         'postgres', null, 'select count(*) from rlstest.audit', 'value:0');
+
+-- The audit names each mistake when the event trigger isn't there to stop it
+-- (a project where it couldn't be added, or one where it was dropped).
+alter event trigger private_by_default disable;
+create table public.rlstest_open (id serial primary key, email text);
+grant select, insert on public.rlstest_open to anon;
+create function public.rlstest_open_fn() returns int language sql security definer set search_path = public as 'select 1';
+create view public.rlstest_open_view as select id, email from public.profiles;
+insert into storage.buckets (id, name, public) values ('rlstest_avatars', 'rlstest_avatars', true);
+create policy rlstest_avatars_list on storage.objects for select to anon using (bucket_id = 'rlstest_avatars');
+select rlstest.expect('audit: table without RLS',          'postgres', null, $$select count(*) from rlstest.audit where problem like 'table without%' and object = 'public.rlstest_open'$$, 'value:1');
+select rlstest.expect('audit: anon may read/write it',     'postgres', null, $$select count(*) from rlstest.audit where problem like 'the public key%' and object = 'public.rlstest_open'$$, 'value:1');
+select rlstest.expect('audit: callable SECURITY DEFINER',  'postgres', null, $$select count(*) from rlstest.audit where problem like 'SECURITY DEFINER%' and object = 'rlstest_open_fn()'$$, 'value:1');
+select rlstest.expect('audit: view that skips RLS',        'postgres', null, $$select count(*) from rlstest.audit where problem like 'view%' and object = 'public.rlstest_open_view'$$, 'value:1');
+select rlstest.expect('audit: public bucket',              'postgres', null, $$select count(*) from rlstest.audit where problem like 'public bucket%' and object = 'rlstest_avatars'$$, 'value:1');
+select rlstest.expect('audit: storage policy for anon',    'postgres', null, $$select count(*) from rlstest.audit where problem like 'storage policy%'$$, 'value:1');
+select rlstest.expect('audit: event trigger off',          'postgres', null, $$select count(*) from rlstest.audit where problem like 'event trigger%'$$, 'value:1');
+drop policy rlstest_avatars_list on storage.objects;
+delete from storage.buckets where id = 'rlstest_avatars';
+drop view public.rlstest_open_view;
+drop function public.rlstest_open_fn();
+drop table public.rlstest_open;
+alter event trigger private_by_default enable;
+drop view public.rlstest_people;
+drop function public.rlstest_list_emails();
+drop table public.rlstest_notes, public.rlstest_copy;
+select rlstest.expect('audit: clean again',                'postgres', null, 'select count(*) from rlstest.audit', 'value:0');
 
 -- ---------- Report ----------
 \o
