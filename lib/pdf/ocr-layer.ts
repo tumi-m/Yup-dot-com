@@ -126,9 +126,17 @@ export function newWords(src: OcrText, own: OwnText[]): OcrWord[] {
   });
 }
 
-/** The standard fonts are WinAnsi-only; skip words they cannot encode. */
-function encodable(text: string) {
-  return /^[\x20-\x7E\xA0-\xFF]+$/.test(text);
+/**
+ * The standard fonts are WinAnsi-only; skip words they cannot encode. WinAnsi
+ * has curly quotes, dashes, € and œ, which Word and PowerPoint text is full of.
+ */
+function encodable(font: PDFFont, text: string) {
+  try {
+    font.encodeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -147,7 +155,7 @@ function textLayer(
 
   for (const w of src.words) {
     const text = w.text.trim();
-    if (!text || w.confidence < minConfidence || !encodable(text)) continue;
+    if (!text || w.confidence < minConfidence || !encodable(font, text)) continue;
 
     const boxW = (w.x1 - w.x0) * sx;
     const boxH = (w.y1 - w.y0) * sy;

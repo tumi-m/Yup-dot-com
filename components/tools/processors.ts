@@ -278,6 +278,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
+    cancellable: true,
     fields: [
       {
         key: "lang",

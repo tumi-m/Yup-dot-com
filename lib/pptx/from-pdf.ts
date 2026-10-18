@@ -153,6 +153,8 @@ export interface PdfToPptxOptions {
   rasterize?: PageRasterizer;
   /** For reproducible output in tests. */
   date?: Date;
+  /** Stops between pages: Cancel, a new file, or leaving the tool. */
+  signal?: AbortSignal;
   /** Where pdf.js finds the standard 14 fonts (needed outside the browser). */
   standardFontDataUrl?: string;
 }
@@ -181,6 +183,7 @@ export async function pdfToPptx(data: Uint8Array, opts: PdfToPptxOptions = {}): 
     let size: { cx: number; cy: number } | null = null;
 
     for (let i = 1; i <= total; i++) {
+      if (opts.signal?.aborted) throw new DOMException("Cancelled.", "AbortError");
       opts.onProgress?.((i - 1) / total, `Page ${i} of ${total}`);
       const page = await doc.getPage(i);
       // The scale-1 viewport accounts for /Rotate, so sizes match what readers show.
@@ -229,6 +232,7 @@ export async function pdfToPptxTool(
     quality: opts.quality === "high" ? "high" : "standard",
     title: base,
     onProgress: ctx.progress,
+    signal: ctx.signal,
   });
   // No copy: decks can run to hundreds of MB, and the bytes are ours alone.
   return { blob: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: PPTX_MIME }), filename: `${base}.pptx` };

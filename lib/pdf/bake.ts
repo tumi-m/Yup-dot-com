@@ -15,7 +15,7 @@ import {
 } from "pdf-lib";
 import type { Annotation } from "@/lib/editor/types";
 import { embedImage } from "./embed-image";
-import { drawOrientedImage, imageSize, sniffImage } from "./images";
+import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
 import { pageFrame } from "./page-frame";
 import { stampWatermark } from "./watermark";
 
@@ -43,11 +43,12 @@ function dataUrlBytes(url: string): Uint8Array | null {
   return out;
 }
 
-/** An embedded picture and its pixel size as stored (for its proportions). */
+/** An embedded picture, its size as shown (for its proportions) and its EXIF orientation. */
 interface Picture {
   ref: PDFRef;
   width: number;
   height: number;
+  orientation: number;
 }
 
 /** Scale that fits `size` inside `box`, keeping its proportions (CSS object-contain). */
@@ -68,16 +69,20 @@ async function embedPicture(
     const kind = bytes && sniffImage(bytes);
     const size = kind && imageSize(bytes, kind);
     if (bytes && kind && size) {
-      const scale = Math.max(...boxes.map((box) => containScale(size, box)));
+      // Phone photos are stored sideways with an EXIF tag; the editor shows them upright.
+      const orientation = kind === "jpeg" ? jpegOrientation(bytes) : 1;
+      const shown = orientedSize(size, orientation);
+      const scale = Math.max(...boxes.map((box) => containScale(shown, box)));
+      // Right-sized in the stored orientation.
       const { ref } = await embedImage(doc, bytes, kind, size, { widthPt: size.width * scale, heightPt: size.height * scale });
-      return { ref, ...size };
+      return { ref, ...shown, orientation };
     }
   } catch {
     // Try pdf-lib directly below.
   }
   try {
     const img = dataUrl.startsWith("data:image/jpeg") ? await doc.embedJpg(dataUrl) : await doc.embedPng(dataUrl);
-    return { ref: img.ref, width: img.width, height: img.height };
+    return { ref: img.ref, width: img.width, height: img.height, orientation: 1 };
   } catch {
     return null;
   }
@@ -328,7 +333,7 @@ export async function bakeAnnotations(
           const fit = containScale(embed, ann);
           const width = embed.width * fit;
           const height = embed.height * fit;
-          drawOrientedImage(page, embed, 1, {
+          drawOrientedImage(page, embed, embed.orientation, {
             x: ann.x + (ann.width - width) / 2,
             y: bottom + (ann.height - height) / 2,
             width,

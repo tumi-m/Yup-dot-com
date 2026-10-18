@@ -62,6 +62,26 @@ function jpegFrame(bytes: Uint8Array): { width: number; height: number; channels
  * sideways and rely on this tag; browsers honour it, so the PDF must too.
  */
 export function jpegOrientation(bytes: Uint8Array): number {
+  const tag = orientationTag(bytes);
+  if (!tag) return 1;
+  const value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(tag.offset, tag.little);
+  return value >= 1 && value <= 8 ? value : 1;
+}
+
+/**
+ * A copy of a JPEG whose EXIF orientation reads 1 (upright), for decoders
+ * that can't be told to keep the pixels as stored.
+ */
+export function withoutOrientation(bytes: Uint8Array): Uint8Array {
+  // A fresh copy (a Node Buffer's slice() is a view).
+  const copy = new Uint8Array(bytes);
+  const tag = orientationTag(copy);
+  if (tag) new DataView(copy.buffer).setUint16(tag.offset, 1, tag.little);
+  return copy;
+}
+
+/** Where a JPEG's EXIF orientation value sits, or null when it has none. */
+function orientationTag(bytes: Uint8Array): { offset: number; little: boolean } | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 2;
   while (offset + 4 <= bytes.length && bytes[offset] === 0xff) {
@@ -75,24 +95,21 @@ export function jpegOrientation(bytes: Uint8Array): number {
       view.getUint16(offset + 8) === 0
     ) {
       const tiff = offset + 10;
-      if (tiff + 8 > bytes.length) return 1;
+      if (tiff + 8 > bytes.length) return null;
       const little = view.getUint16(tiff) === 0x4949;
       const ifd = tiff + view.getUint32(tiff + 4, little);
-      if (ifd + 2 > bytes.length) return 1;
+      if (ifd + 2 > bytes.length) return null;
       const entries = view.getUint16(ifd, little);
       for (let i = 0; i < entries; i++) {
         const entry = ifd + 2 + i * 12;
-        if (entry + 12 > bytes.length) return 1;
-        if (view.getUint16(entry, little) === 0x0112) {
-          const value = view.getUint16(entry + 8, little);
-          return value >= 1 && value <= 8 ? value : 1;
-        }
+        if (entry + 12 > bytes.length) return null;
+        if (view.getUint16(entry, little) === 0x0112) return { offset: entry + 8, little };
       }
-      return 1;
+      return null;
     }
     offset += 2 + length;
   }
-  return 1;
+  return null;
 }
 
 /** Displayed size of an image once its EXIF orientation is applied. */

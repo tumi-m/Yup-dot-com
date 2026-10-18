@@ -546,6 +546,26 @@ export async function unlockTool(
 // OCR
 // ---------------------------------------------------------------------------
 
+/**
+ * The PDF to add text to, or null when pdf-lib can't edit it. One restricted
+ * by an owner password only opens without a password, so it is decrypted and
+ * keeps its pages as they are.
+ */
+export async function openForTextLayer(bytes: Uint8Array): Promise<PDFDocument | null> {
+  try {
+    return await PDFDocument.load(bytes);
+  } catch (err) {
+    if (!/encrypted/i.test(err instanceof Error ? err.message : "")) return null;
+  }
+  try {
+    const { unlockPdf } = await import("./security");
+    return await PDFDocument.load(await unlockPdf(bytes, ""));
+  } catch {
+    // It needs a password.
+    return null;
+  }
+}
+
 export async function ocrTool(
   files: File[],
   opts: { lang: string; output: string },
@@ -561,8 +581,9 @@ export async function ocrTool(
         : `Reading page ${p.page} of ${p.total}…`;
     ctx.progress?.(((p.page - 1) + p.pageProgress) / p.total, label);
   };
+  const { signal } = ctx;
   if (opts.output === "text") {
-    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress });
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal });
     return {
       blob: new Blob([ocrText(pages)], { type: "text/plain" }),
       filename: `${base}-ocr.txt`,
@@ -570,21 +591,16 @@ export async function ocrTool(
   }
 
   // Keep the original pages and add only the text, so the file stays as
-  // sharp and about as small as it came. A PDF pdf-lib can't edit (encrypted)
-  // is rebuilt from page images instead.
-  let original: PDFDocument | null = null;
-  try {
-    original = await PDFDocument.load(bytes);
-  } catch {
-    // Rebuilt from images below.
-  }
+  // sharp and about as small as it came. A PDF pdf-lib can't edit is rebuilt
+  // from page images instead.
+  const original = await openForTextLayer(bytes);
   const { addTextLayer, buildSearchablePdf } = await import("./ocr-layer");
   if (!original) {
-    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, images: true });
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, images: true });
     ctx.progress?.(1, "Building searchable PDF…");
     return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
   }
-  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, newWordsOnly: true });
+  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, newWordsOnly: true });
   if (!pages.some((p) => p?.words.length)) {
     // Pages left unread, or words left out, mean the text is there already.
     const there = pages.some((p) => !p || p.known);

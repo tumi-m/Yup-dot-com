@@ -40,7 +40,12 @@ export interface OcrOptions {
    * Null for pages left unread.
    */
   newWordsOnly?: boolean;
+  /** Stops the run at once: Cancel, a new file, or leaving the tool. */
+  signal?: AbortSignal;
 }
+
+const abortError = () => new DOMException("Cancelled.", "AbortError");
+const ENGINE_FAILED = "Couldn't load the OCR engine. Check your connection and try again.";
 
 /** Recognised words per page, measured on a render of each page as displayed. */
 export async function ocrDocument(bytes: Uint8Array, opts?: OcrOptions & { images?: false }): Promise<(OcrText | null)[]>;
@@ -50,8 +55,14 @@ export async function ocrDocument(
   bytes: Uint8Array,
   opts: OcrOptions & { images?: boolean } = {}
 ): Promise<(OcrText | OcrPage | null)[]> {
+  const { signal } = opts;
+  if (signal?.aborted) throw abortError();
   const { createWorker } = await import("tesseract.js");
   const loaded = await loadForRender(bytes);
+  if (signal?.aborted) {
+    loaded.destroy();
+    throw abortError();
+  }
   const total = loaded.numPages;
   const newOnly = !!opts.newWordsOnly && !opts.images;
   // Progress counts the pages actually read.
@@ -59,6 +70,10 @@ export async function ocrDocument(
   let count = total;
 
   opts.onProgress?.({ page: 1, total, pageProgress: 0, stage: "loading" });
+  // Tesseract reports a language file that didn't download here, not by rejecting.
+  let engineFailed: (err: unknown) => void = () => {};
+  const engineError = new Promise<never>((_, reject) => (engineFailed = reject));
+  engineError.catch(() => {});
   // The engine loads while the pages are checked.
   const workerReady = createWorker(opts.lang ?? "eng", 1, {
     workerPath: `${TESSERACT_BASE}/worker.min.js`,
@@ -69,9 +84,32 @@ export async function ocrDocument(
         opts.onProgress?.({ page: current, total: count, pageProgress: m.progress, stage: "recognizing" });
       }
     },
+    errorHandler: (err: unknown) => engineFailed(err),
   });
   // A failed load is reported where it is awaited, below.
   workerReady.catch(() => {});
+
+  // On abort, the engine and pdf.js stop now rather than after the last page,
+  // and whatever the run is waiting on gives way.
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    workerReady.then((w) => w.terminate(), () => {});
+    loaded.destroy();
+  };
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      stop();
+      reject(abortError());
+    };
+  });
+  aborted.catch(() => {});
+  signal?.addEventListener("abort", onAbort, { once: true });
+  // Aborted from the progress callback above.
+  if (signal?.aborted) onAbort();
+  const until = <T>(work: Promise<T>) => Promise.race([work, aborted]);
 
   const pages: (OcrText | OcrPage | null)[] = new Array(total).fill(null);
   try {
@@ -83,11 +121,11 @@ export async function ocrDocument(
     if (newOnly) {
       toRead = [];
       for (let i = 1; i <= total; i++) {
-        const pieces = await loaded.ownText(i);
+        const pieces = await until(loaded.ownText(i));
         own.set(i, pieces);
         const text = pieces.map((t) => t.text).join(" ");
         const hasText = text.replace(/\s+/g, "").length >= HAS_TEXT && !looksGarbled(text);
-        if (hasText && !(await loaded.showsPictures(i))) plain.push(i);
+        if (hasText && !(await until(loaded.showsPictures(i)))) plain.push(i);
         else toRead.push(i);
       }
       // Read one plain page (the fullest) to check the text layer says what the
@@ -96,20 +134,28 @@ export async function ocrDocument(
       if (sample) toRead.unshift(sample);
       plain = plain.filter((i) => i !== sample);
     }
-    const worker = await workerReady;
+    let worker: Awaited<typeof workerReady>;
+    try {
+      worker = await until(Promise.race([workerReady, engineError]));
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      // Tesseract rejects with a bare message, which would read "Something went wrong."
+      throw new Error(ENGINE_FAILED);
+    }
 
     for (let k = 0; k < toRead.length; k++) {
+      if (signal?.aborted) throw abortError();
       const i = toRead[k];
       current = k + 1;
       count = toRead.length;
       opts.onProgress?.({ page: current, total: count, pageProgress: 0, stage: "rendering" });
-      const vp = await loaded.getPageViewport(i, RENDER_SCALE);
+      const vp = await until(loaded.getPageViewport(i, RENDER_SCALE));
       const canvas = document.createElement("canvas");
       // Word boxes are measured against canvas.width/height below, so any
       // devicePixelRatio applied by renderPage is accounted for automatically.
-      await loaded.renderPage(i, canvas, RENDER_SCALE);
+      await until(loaded.renderPage(i, canvas, RENDER_SCALE));
 
-      const { data } = await worker.recognize(canvas, {}, { blocks: true, text: true });
+      const { data } = await until(worker.recognize(canvas, {}, { blocks: true, text: true }));
       const words: OcrWord[] = [];
       for (const block of data.blocks ?? []) {
         for (const para of block.paragraphs) {
@@ -139,8 +185,8 @@ export async function ocrDocument(
       canvas.width = canvas.height = 0;
     }
   } finally {
-    workerReady.then((w) => w.terminate(), () => {});
-    loaded.destroy();
+    signal?.removeEventListener("abort", onAbort);
+    stop();
   }
   return pages;
 }
