@@ -5,14 +5,14 @@
  * otherwise bitrate × duration.
  */
 import { pickXVariant, variantQuality, type XVariant, type XVideo } from "./x-video";
-import { encodedBytes, targetBitrate, TYPICAL_AUDIO_BITRATE, worthReencoding } from "./video-quality";
+import { encodedBytes, MAX_IN_MEMORY, targetBitrate, TYPICAL_AUDIO_BITRATE, worthReencoding } from "./video-quality";
 
 export interface QualitySize {
   /** Bytes of the file this quality downloads. */
   size: number;
   /** False when worked out from a bitrate. */
   exact: boolean;
-  /** About what the "Smaller file" option makes of it; only when that saves enough. */
+  /** About what the "Smaller file" option makes of it; only when that saves enough and can be done in the tab. */
   smaller?: number;
 }
 
@@ -23,9 +23,12 @@ export function variantSize(v: XVariant, duration: number | null): { size: numbe
   return null;
 }
 
-/** Re-encoded size of a variant, if re-encoding would pay off. 16:9 is assumed when the size is unknown. */
+/**
+ * Re-encoded size of a variant, if re-encoding would pay off and the file
+ * fits in the tab to be re-encoded. 16:9 is assumed when the size is unknown.
+ */
 export function smallerSize(v: XVariant, size: number, duration: number | null, hasAudio: boolean): number | undefined {
-  if (!duration || duration <= 0) return undefined;
+  if (!duration || duration <= 0 || size > MAX_IN_MEMORY) return undefined;
   const short = variantQuality(v);
   const width = v.width && v.height ? v.width : Math.round((short * 16) / 9);
   const height = v.width && v.height ? v.height : short;

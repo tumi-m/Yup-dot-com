@@ -46,7 +46,7 @@ import {
 import type { Tier } from "@/lib/limits";
 import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
-import { canEncodeH264, shortBytes } from "@/lib/video-quality";
+import { canEncodeH264, MAX_IN_MEMORY, shortBytes } from "@/lib/video-quality";
 
 export interface MediaToolConfig {
   platform: MediaPlatform;
@@ -109,8 +109,6 @@ function writeSmaller(on: boolean) {
 /** Give up on a stuck worker job rather than spinning forever. */
 const POLL_DEADLINE_MS = 20 * 60 * 1000;
 const POLL_MAX_FAILURES = 6;
-/** Larger X files are saved by the browser directly instead of through memory. */
-const MAX_IN_MEMORY = 1024 ** 3;
 
 /** An error whose message is ours and safe to show as is. */
 class Shown extends Error {}
@@ -211,6 +209,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const blobUrl = useRef<string | null>(null);
   const alive = useRef(true);
   const lookupSeq = useRef(0);
+  /** Set while a silent post has the format on MP4 instead of MP3, so the next post with sound goes back. */
+  const autoMp4 = useRef(false);
   /** The download in progress: aborting it cancels fetches, polling and the converter. */
   const op = useRef<AbortController | null>(null);
   const job = useRef<{ workerUrl: string; id: string; token: string } | null>(null);
@@ -301,9 +301,15 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     setNote(null);
     syncAddress(parsed.canonical);
     if (!auto) focusNext.current = "download";
-    if (kind === "mp3" && data.hasAudio === false) {
-      setKind("mp4");
-      setNote(data.platform === "x" ? "This is a GIF, so it has no sound. It downloads as MP4." : "This video has no sound. It downloads as MP4.");
+    if (data.hasAudio === false) {
+      if (kind === "mp3" || autoMp4.current) {
+        autoMp4.current = true;
+        setKind("mp4");
+        setNote(data.platform === "x" ? "This is a GIF, so it has no sound. It downloads as MP4." : "This video has no sound. It downloads as MP4.");
+      }
+    } else if (autoMp4.current) {
+      autoMp4.current = false;
+      setKind("mp3");
     }
     // Start on the requested quality if possible, else the best unlocked one.
     const usable = (data.qualities as Info["qualities"]).filter((q) => q.available);
@@ -385,8 +391,10 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     setProgress({ value: 0, stage: data.mode === "worker" ? "queued" : data.mode === "convert" ? "fetching" : "downloading" });
     focusNext.current = "progress";
     setPhase("working");
-    if (data.mode === "direct") return await downloadX(data.href, data.filename, ctl.signal, shrinkOffered && smaller);
-    if (data.mode === "convert") return await convertToMp3(data.href, data.filename, ctl.signal);
+    // Direct files come from the post's platform; their errors name it.
+    const from = PLATFORM_LABEL[info?.platform ?? config.platform];
+    if (data.mode === "direct") return await downloadX(data.href, data.filename, from, ctl.signal, shrinkOffered && smaller);
+    if (data.mode === "convert") return await convertToMp3(data.href, data.filename, from, ctl.signal);
     await runWorkerJob(data.workerUrl, data.token, ctl.signal, retried);
   }
 
@@ -404,17 +412,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   }
 
   /** Fetches one of our own file links; a JSON error body becomes the message. */
-  async function fetchFile(href: string, signal: AbortSignal) {
+  async function fetchFile(href: string, from: string, signal: AbortSignal) {
     let res: Response;
     try {
       res = await fetch(href, { signal });
     } catch (err) {
       if (isAbort(err)) throw err;
-      throw new Shown("X didn't send the video. Try again.");
+      throw new Shown(`${from} didn't send the video. Try again.`);
     }
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      throw new Shown(body?.error ?? "X didn't send the video. Try again.");
+      throw new Shown(body?.error ?? `${from} didn't send the video. Try again.`);
     }
     return res;
   }
@@ -425,19 +433,21 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
    * re-encoded in this tab (lib/video-compress.ts), which keeps the original
    * when that wouldn't pay off or can't be done here.
    */
-  async function downloadX(href: string, name: string, signal: AbortSignal, shrink = false) {
+  async function downloadX(href: string, name: string, from: string, signal: AbortSignal, shrink = false) {
+    const stopped = `${from} stopped sending the video. Try again.`;
     try {
-      const res = await fetchFile(href, signal);
+      const res = await fetchFile(href, from, signal);
       const size = Number(res.headers.get("content-length")) || 0;
       if (size > MAX_IN_MEMORY) {
         // Too big to hold in a tab: the browser saves it straight from our origin.
         await res.body?.cancel();
-        return finish({ href, name, size, source: "remote" });
+        const note = shrink ? "Too large to make smaller in the browser, so this is the original." : undefined;
+        return finish({ href, name, size, note, source: "remote" });
       }
       // Re-encoding usually takes longer than the download.
       const share = shrink ? 0.3 : 1;
       const bytes = await readWithProgress(res, (f) => advance(f * share, "downloading")).catch((err) => {
-        throw isAbort(err) ? err : new Shown("X stopped sending the video. Try again.");
+        throw isAbort(err) ? err : new Shown(stopped);
       });
       if (!alive.current || signal.aborted) return;
       let blob = new Blob([bytes as BlobPart], { type: "video/mp4" });
@@ -465,12 +475,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       finish({ href: blobUrl.current, name, size: blob.size, was, note, source: "blob" });
     } catch (err) {
       if (isAbort(err) || signal.aborted) return;
-      fail(err instanceof Shown ? err.message : "X stopped sending the video. Try again.");
+      fail(err instanceof Shown ? err.message : stopped);
     }
   }
 
-  /** X audio: fetch the smallest MP4 and convert it in this tab, loading the converter meanwhile. */
-  async function convertToMp3(href: string, name: string, signal: AbortSignal) {
+  /** X, TikTok, Instagram audio: fetch the smallest MP4 and convert it in this tab, loading the converter meanwhile. */
+  async function convertToMp3(href: string, name: string, from: string, signal: AbortSignal) {
+    const stopped = `${from} stopped sending the video. Try again.`;
     let converterReady = false;
     const converter = import("@/lib/mp3").then(async (m) => {
       const c = await m.loadMp3Converter(signal);
@@ -480,14 +491,14 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     converter.catch(() => null);
     let mp4: Uint8Array;
     try {
-      const res = await fetchFile(href, signal);
+      const res = await fetchFile(href, from, signal);
       mp4 = await readWithProgress(res, (f) => advance(f * 0.4, "fetching")).catch((err) => {
-        throw isAbort(err) ? err : new Shown("X stopped sending the video. Try again.");
+        throw isAbort(err) ? err : new Shown(stopped);
       });
     } catch (err) {
       void converter.then((c) => c.dispose(), () => null);
       if (isAbort(err) || signal.aborted) return;
-      return fail(err instanceof Shown ? err.message : "X stopped sending the video. Try again.");
+      return fail(err instanceof Shown ? err.message : stopped);
     }
     try {
       if (!converterReady) advance(0.4, "preparing");

@@ -5,7 +5,7 @@
  * registration. Pure logic only; the browser path is checked with Playwright.
  */
 import {
-  BITS_PER_PIXEL, canEncodeH264, encodedBytes, encoderFrameRate, encoderRequest, planVideo, REENCODE_RATIO, shortBytes, targetBitrate, worthReencoding,
+  BITS_PER_PIXEL, canEncodeH264, encodedBytes, encoderFrameRate, encoderRequest, MAX_IN_MEMORY, planVideo, REENCODE_RATIO, shortBytes, targetBitrate, worthReencoding,
 } from "../lib/video-quality.ts";
 import { probeSizes, qualitySizes, smallerSize, variantSize, workerQualitySizes } from "../lib/media-size.ts";
 import { mp3VbrLevel, parseAudioStream } from "../lib/mp3.ts";
@@ -113,6 +113,14 @@ check("a silent clip counts no audio", smallerSize({ url: "u", bitrate: 0, width
 const at = (mbps: number) => smallerSize({ url: "u", bitrate: 0, width: 1920, height: 1080 }, (mbps * 1e6 * 10) / 8, 10, false);
 check("1080p at 8 Mbps: a 60 fps post would be kept, so not offered", at(8) === undefined);
 check("1080p at 9.2 Mbps: re-encoded at 30 and 60 fps, offered", at(9.2) === encodedBytes(hd, 0, 10) && 9.2e6 >= targetBitrate(1920, 1080, 60) * REENCODE_RATIO);
+{
+  // Over 1 GB the browser saves the file straight from our origin, so it can't be re-encoded.
+  const long: XVideo = { ...xVideo, duration: 1000, variants: [{ url: "https://video.twimg.com/1280x720/big.mp4", bitrate: 10_000_000, width: 1280, height: 720 }] };
+  const s = qualitySizes(long, [720]);
+  check("a 1.25 GB file shows its size but doesn't offer Smaller file", s[720]?.size === 1_250_000_000 && s[720].smaller === undefined, JSON.stringify(s));
+  const v = long.variants[0];
+  check("at the in-tab limit it's still offered", !!smallerSize(v, MAX_IN_MEMORY, 800, true) && smallerSize(v, MAX_IN_MEMORY + 1, 800, true) === undefined);
+}
 
 // TikTok: DataSize is exact, PlayAddr's own width/height win.
 {

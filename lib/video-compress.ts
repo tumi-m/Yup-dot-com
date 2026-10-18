@@ -20,7 +20,9 @@ import {
   Output,
   Quality,
   type ConversionAudioOptions,
+  type EncodedPacket,
   type InputAudioTrack,
+  type InputVideoTrack,
 } from "mediabunny";
 import type { ToolContext, ToolFile } from "./pdf/toolkit";
 import { canEncodeH264, encoderRequest, planVideo, type VideoPlan, type VideoPreset } from "./video-quality";
@@ -105,6 +107,7 @@ export async function compressVideo(
       }
     }
     if (signal?.aborted) throw abortError();
+    timeEveryFrame(video, 1 / (fps ?? 30));
     const audioTrack = await input.getPrimaryAudioTrack();
     const audio = audioTrack ? await audioOptions(audioTrack) : undefined;
     const blob = await convert(input, plan, { audio, fps, signal, onProgress });
@@ -117,6 +120,33 @@ export async function compressVideo(
     return { blob, action: plan.action, targetBitrate: plan.action === "encode" ? plan.bitrate : 0, ...base };
   } finally {
     input.dispose();
+  }
+}
+
+type PacketRead = (...args: unknown[]) => Promise<EncodedPacket | null>;
+
+/**
+ * Gives a frame that doesn't say how long it lasts the time until the next
+ * one. MediaRecorder's WebM (screen recordings) leaves it out for the last
+ * frame of every cluster, mediabunny reads that as 0 s, and its conversion
+ * drops such frames: a hitch every second and the last frame lost. This
+ * wraps mediabunny's own packet reader; without one it does nothing.
+ */
+function timeEveryFrame(track: InputVideoTrack, frameTime: number) {
+  const backing = (track as unknown as { _backing?: Record<string, PacketRead | undefined> })._backing;
+  const peek = backing?.getNextPacket;
+  if (!backing || !peek) return;
+  const timed = async (packet: EncodedPacket | null) => {
+    if (packet?.duration === 0) {
+      const after = await peek.call(backing, packet, { metadataOnly: true });
+      const gap = after ? after.timestamp - packet.timestamp : 0;
+      (packet as { duration: number }).duration = gap > 0 ? gap : frameTime;
+    }
+    return packet;
+  };
+  for (const name of ["getFirstPacket", "getPacket", "getNextPacket", "getKeyPacket", "getNextKeyPacket"]) {
+    const read = backing[name];
+    if (read) backing[name] = (...args) => read.apply(backing, args).then(timed);
   }
 }
 
@@ -171,7 +201,8 @@ async function convert(
 /**
  * AAC and MP3 are copied as they are. Other audio becomes AAC where this
  * browser can make it; uncompressed audio otherwise becomes Opus (MP4 holds
- * it and browsers play it) rather than staying uncompressed. Anything else
+ * it and browsers play it) rather than staying uncompressed, and so does
+ * Vorbis, which Safari and QuickTime don't play from an MP4. Anything else
  * is copied (Opus fits in MP4) or converted to what mediabunny can make.
  */
 async function audioOptions(track: InputAudioTrack): Promise<ConversionAudioOptions> {
@@ -181,7 +212,7 @@ async function audioOptions(track: InputAudioTrack): Promise<ConversionAudioOpti
   const can = (codec: "aac" | "opus", sampleRate: number) =>
     canEncodeAudio(codec, { numberOfChannels: channels, sampleRate, bitrate }).catch(() => false);
   if (await can("aac", track.sampleRate)) return { codec: "aac", quality: new Quality({ bitrate }) };
-  const uncompressed = !!track.codec && (track.codec.startsWith("pcm-") || track.codec === "flac");
-  if (uncompressed && (await can("opus", 48_000))) return { codec: "opus", quality: new Quality({ bitrate }), sampleRate: 48_000 };
+  const toOpus = !!track.codec && (track.codec.startsWith("pcm-") || track.codec === "flac" || track.codec === "vorbis");
+  if (toOpus && (await can("opus", 48_000))) return { codec: "opus", quality: new Quality({ bitrate }), sampleRate: 48_000 };
   return {};
 }

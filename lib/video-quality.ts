@@ -30,6 +30,12 @@ export const REENCODE_RATIO = 1.4;
 /** Audio is copied, so it counts at what it is; this is the guess when unknown. */
 export const TYPICAL_AUDIO_BITRATE = 128_000;
 
+/**
+ * Largest download read into the tab. A bigger one is saved by the browser
+ * straight from our origin, so "Smaller file" can't re-encode it.
+ */
+export const MAX_IN_MEMORY = 1024 ** 3;
+
 const FULL_HD = 1920 * 1080;
 
 /** Target H.264 bitrate (bits/s) for a frame size and rate. */
