@@ -57,7 +57,8 @@ const nextConfig: NextConfig = {
  */
 export default function config(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) {
-    const problems = secretScan.envProblems(process.env);
+    const used = new Set(secretScan.publicVarsInSource(process.cwd()).keys());
+    const problems = secretScan.envProblems(process.env, used);
     if (problems.length) {
       throw new Error(`Build stopped: a secret would reach the browser.\n  - ${problems.join("\n  - ")}`);
     }

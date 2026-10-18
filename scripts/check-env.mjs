@@ -2,11 +2,16 @@
 /**
  * Runs before every build (npm "prebuild", so on Vercel too) and stops it
  * when a NEXT_PUBLIC_ variable would put a server secret in the browser
- * bundle: a Supabase service_role JWT or sb_secret_ key, a Paystack
- * sk_live_/sk_test_ key, a private key, the value of a server-only variable,
- * or a server-only name (NEXT_PUBLIC_PAYSTACK_SECRET_KEY). The anon or
- * publishable key and pk_ keys are fine. next.config.ts runs the same check
- * for a plain `next build`. Rules: lib/secret-scan.cjs.
+ * bundle: a name that says secret, password, token, API key, JWT or database
+ * (NEXT_PUBLIC_ADMIN_PASSWORD, NEXT_PUBLIC_OPENAI_API_KEY), a server-only
+ * name in any case, a value holding a key (Supabase service_role JWT or
+ * sb_secret_, Paystack sk_, OpenAI, Resend, private keys, a connection
+ * string with a password; also base64 or hex encoded), the value of a
+ * server-only variable, or a NEXT_PUBLIC_ variable the code uses that isn't
+ * on the public list. The anon or publishable key and pk_ keys are fine.
+ * NEXT_PUBLIC_ variables nothing uses only get a warning: Next.js doesn't
+ * put those in the bundle. next.config.ts runs the same check for a plain
+ * `next build`. Rules: lib/secret-scan.cjs.
  *
  *   node scripts/check-env.mjs
  */
@@ -14,7 +19,9 @@ import secretScan from "../lib/secret-scan.cjs";
 import { loadBuildEnv } from "./build-env.mjs";
 
 await loadBuildEnv();
-const problems = secretScan.envProblems(process.env);
+const used = new Set(secretScan.publicVarsInSource(process.cwd()).keys());
+const problems = secretScan.envProblems(process.env, used);
+for (const w of secretScan.envWarnings(process.env, used)) console.warn(`Environment check: ${w}`);
 if (problems.length) {
   console.error(
     [

@@ -7,10 +7,13 @@
  *
  * It looks for two things (rules in lib/secret-scan.cjs):
  * - secret patterns: Supabase JWTs whose role isn't "anon" (service_role),
- *   sb_secret_ keys, Paystack sk_live_/sk_test_ keys, private keys;
+ *   sb_secret_ keys, Paystack sk_live_/sk_test_ keys, private keys, OpenAI,
+ *   Resend, GitHub and AWS keys, connection strings with a password, also
+ *   when base64 or hex encoded, escaped or cut in two;
  * - the actual values of the server-only variables set for this build
- *   (SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, … and any other
- *   variable named like a secret), read the same way `next build` reads them.
+ *   (SUPABASE_SERVICE_ROLE_KEY, PAYSTACK_SECRET_KEY, … any variable named
+ *   like a secret, such as ADMIN_PASSWORD or RESEND_KEY, and the password in
+ *   a connection string), read the same way `next build` reads them.
  *
  * When NEXT_PUBLIC_SUPABASE_ANON_KEY is set, it must be found in
  * .next/static, so a search that reads nothing can't pass. With --canary

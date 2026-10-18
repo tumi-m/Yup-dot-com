@@ -40,6 +40,25 @@ const PEM = "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwg
   check("a private key is a secret", kinds(`x="${PEM}"`).length === 1);
   check("a PEM header a library uses to parse keys is not", kinds(`x="-----BEGIN PRIVATE KEY-----"`).length === 0);
   check("placeholders and bare prefixes are not", kinds(`"sk_test_xxx" "sb_secret_" startsWith("sk_live_")`).length === 0);
+  check("keys cut in two, escaped, joined, base64 or hex encoded are found",
+    [
+      `x="sk_li"+"ve_${"4f9a0c1e".repeat(5)}"`,
+      `x="${SERVICE.slice(0, 20)}"+"${SERVICE.slice(20)}"`,
+      `x="${SERVICE.replace(/\./g, "\\u002e")}"`,
+      `x=["sk","live","${"4f9a0c1e".repeat(5)}"].join("_")`,
+      `x=atob("${Buffer.from(SK_LIVE).toString("base64")}")`,
+      `x="${Buffer.from(SK_LIVE).toString("hex")}"`,
+      `x="\\u0073k_live_${"4f9a0c1e".repeat(3)}"`,
+    ].every((t) => kinds(t).length > 0),
+  );
+  check("and other services' keys and private key bodies",
+    kinds(`"sk-ant-api03-${"Ab1_".repeat(8)}"`).length === 1 && kinds(`"ghp_${"A1b2".repeat(9)}"`).length === 1 &&
+      kinds(`"AKIA${"ABCD1234".repeat(2)}"`).length === 1 && kinds(`"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7"`).length === 1);
+  check("connection strings with a password, not placeholders",
+    kinds(`"postgresql://postgres:SuperSecretPw123@db.x.supabase.co"`).length === 1 &&
+      kinds(`"postgresql://postgres:[YOUR-PASSWORD]@db.x.supabase.co" "redis://localhost:6379" "postgres://postgres:postgres@localhost"`).length === 0);
+  check("images, fonts and hashes in a bundle are not",
+    kinds(`a="data:image/png;base64,${Buffer.from(Array.from({ length: 3000 }, (_, i) => (i * 37) % 256)).toString("base64")}";h="${"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}"`).length === 0);
   const sample = scan.findSecrets(`x="${SK_LIVE}"`)[0]?.sample ?? "";
   check("a match is reported without the usable key", sample.length <= 13 && !sample.includes(SK_LIVE.slice(12)), sample);
   check("a role=anon JWT or sb_publishable_ is the public Supabase key",
@@ -64,6 +83,50 @@ const PEM = "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwg
     problems({ MEDIA_SIGNING_SECRET: "a-long-random-string-1", NEXT_PUBLIC_SIGNING: "a-long-random-string-1" }).length === 1);
   check("an anon key that isn't Supabase's public key fails", problems({ NEXT_PUBLIC_SUPABASE_ANON_KEY: "your-anon-key" }).length === 1);
   check("no message holds a secret's value", !swapped.join(" ").includes(SERVICE.split(".")[1]));
+
+  // The article's mistake and its cousins: whatever the name or encoding.
+  const blocked = (env: Record<string, string>) => problems({ ...fine, ...env }).length === 1;
+  check("NEXT_PUBLIC_ADMIN_PASS / _PW / _TOKEN fail, whatever their value",
+    blocked({ NEXT_PUBLIC_ADMIN_PASS: "Hunter2-PdfWizard!" }) && blocked({ NEXT_PUBLIC_ADMIN_PW: "x" }) && blocked({ NEXT_PUBLIC_ADMIN_TOKEN: "tok_123" }));
+  check("an API key, JWT secret or database URL under NEXT_PUBLIC_ fails",
+    blocked({ NEXT_PUBLIC_OPENAI_API_KEY: "x" }) && blocked({ NEXT_PUBLIC_SUPABASE_JWT_KEY: "x" }) && blocked({ NEXT_PUBLIC_DATABASE_URL: "x" }));
+  check("a server-only name in lower case fails", blocked({ NEXT_PUBLIC_media_worker_url: "https://worker.example" }));
+  check("an OpenAI, Resend or webhook key in any NEXT_PUBLIC_ value fails",
+    blocked({ NEXT_PUBLIC_A: "sk-proj-" + "Ab1".repeat(10) }) && blocked({ NEXT_PUBLIC_B: "re_AbCdEf12_3456789abcdefghijk" }) && blocked({ NEXT_PUBLIC_C: "whsec_" + "Ab12".repeat(8) }));
+  check("a connection string with a password fails", blocked({ NEXT_PUBLIC_DB: "postgresql://postgres:SuperSecretPw123@db.x.supabase.co:5432/postgres" }));
+  check("a service_role key in base64 fails", blocked({ NEXT_PUBLIC_SB: Buffer.from(SERVICE).toString("base64") }));
+  check("a JWT that isn't the anon key fails", blocked({ NEXT_PUBLIC_K: jwt({ iss: "supabase", aud: "authenticated", sub: "u1" }) }));
+  const used = new Set(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_ADMIN_CODE"]);
+  check("a NEXT_PUBLIC_ variable the code uses but isn't listed fails",
+    scan.envProblems({ ...fine, NEXT_PUBLIC_ADMIN_CODE: "4821" }, used).some((p) => /NEXT_PUBLIC_ADMIN_CODE is used by the code/.test(p)));
+  const leftover = { ...fine, NEXT_PUBLIC_APP_URL: "https://pdfwizard.xyz", NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY: "pk_live_" + "ab12".repeat(10) };
+  check("a leftover NEXT_PUBLIC_ variable nothing uses only warns",
+    scan.envProblems(leftover, used).length === 0 && scan.envWarnings(leftover, used).length === 2, scan.envProblems(leftover, used).join("; "));
+  check("Vercel's NEXT_PUBLIC_VERCEL_* variables are fine",
+    scan.envProblems({ ...fine, NEXT_PUBLIC_VERCEL_URL: "pdf-wizard-abc.vercel.app", NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA: "0123456789abcdef0123456789abcdef01234567" }, used).length === 0 &&
+      scan.envWarnings({ NEXT_PUBLIC_VERCEL_ENV: "production" }, used).length === 0);
+  check("a server copy of the public key isn't treated as a secret",
+    problems({ ...fine, SUPABASE_ANON_KEY: ANON }).length === 0 && !scan.serverValues({ SUPABASE_ANON_KEY: ANON }).length);
+}
+
+// ---------- Values searched for and tainted ----------
+{
+  const values = scan.serverValues({
+    ADMIN_PASSWORD: "Tumelo@2026",
+    DATABASE_URL: "postgresql://postgres:LongDbPassw0rd@db.x.supabase.co:5432/postgres",
+    RESEND_KEY: "re_123abcDE_4567890abcdefghij",
+    SUPABASE_JWT_SECRET: "super-secret-jwt-token-with-at-least-32-characters-long",
+    PAYSTACK_PLAN_PRO: "PLN_abc123def",
+    OLLAMA_HOST: "https://ollama.com",
+    TOKEN_HEADER: "authorization",
+    PWD: "/vercel/path0",
+    npm_package_scripts_check_secrets: "node scripts/check-bundle-secrets.mjs",
+  });
+  const names = (taint: boolean) => values.filter(([, , t]) => t === taint).map(([n]) => n).sort().join(",");
+  check("short passwords, *_KEY names and connection strings are secrets (searched and tainted)",
+    names(true) === "ADMIN_PASSWORD,DATABASE_URL,DATABASE_URL (its password),RESEND_KEY,SUPABASE_JWT_SECRET", names(true));
+  check("server settings are searched for but not tainted, and plain words, paths and npm's variables are skipped",
+    names(false) === "OLLAMA_HOST,PAYSTACK_PLAN_PRO", names(false));
 }
 
 // ---------- The scripts, for real ----------

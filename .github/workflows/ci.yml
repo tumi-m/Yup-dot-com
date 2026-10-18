@@ -25,6 +25,27 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # No hard-coded password or key in app code, only listed NEXT_PUBLIC_
+      # variables (also runs before every build).
+      - run: node scripts/check-source.mjs
+      # The store package holds only the files the manifest names, searched
+      # for secrets.
+      - run: node scripts/pack-extension.mjs extension "$RUNNER_TEMP/extension"
+
+  # Secret keys anywhere in the repository or its history, with gitleaks'
+  # rules (.gitleaks.toml lists the made-up values the tests use).
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Scan with gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --no-banner --redact -c .gitleaks.toml .
 
   # The build, with a fake value in every secret, checked for those values
   # the way a visitor could find them.

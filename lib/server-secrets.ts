@@ -12,6 +12,12 @@ type Taint = (message: string, lifetime: object, value: string) => void;
  * mistake, which the build checks can't see because pages render at request
  * time.
  *
+ * Every value lib/secret-scan.cjs counts as a secret is tainted: the known
+ * keys and salts, any variable named like a secret (ADMIN_PASSWORD,
+ * SUPABASE_JWT_SECRET, RESEND_API_KEY, …) and the password inside a
+ * connection string (DATABASE_URL). Plain settings such as a server's
+ * address aren't, so pages may still show them.
+ *
  * Imported by app/layout.tsx, so it runs before any page renders. Only
  * whole values are matched: a secret pasted into a longer string isn't, so
  * code still never passes secrets to client components.
@@ -20,11 +26,11 @@ export function taintServerSecrets(env: NodeJS.ProcessEnv = process.env): string
   const taint = (React as unknown as { experimental_taintUniqueValue?: Taint }).experimental_taintUniqueValue;
   if (typeof taint !== "function") return [];
   const tainted: string[] = [];
-  for (const name of secretScan.SECRET_VARS) {
-    const raw = env[name];
-    if (!raw) continue;
-    for (const value of new Set([raw, raw.trim()])) {
-      if (value.length >= 8) taint(`${name} is a server secret and can't be sent to the browser.`, globalThis, value);
+  for (const [name, value, secret] of secretScan.serverValues(env)) {
+    if (!secret) continue;
+    const raw = Object.prototype.hasOwnProperty.call(env, name) ? env[name] ?? value : value;
+    for (const v of new Set([raw, value])) {
+      if (v.length >= 8) taint(`${name} is a server secret and can't be sent to the browser.`, globalThis, v);
     }
     tainted.push(name);
   }
