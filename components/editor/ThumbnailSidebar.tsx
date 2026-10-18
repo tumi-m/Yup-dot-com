@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCw, Trash2, Plus, GripVertical, ArrowUp, ArrowDown } from "lucide-react";
 import type { LoadedPdf } from "@/lib/pdf/render";
+import { pageActionFocus, type PageAction } from "@/lib/editor/keyboard";
 import { cn } from "@/lib/utils";
 
 /** Page navigator with drag-to-reorder and per-page actions. */
@@ -23,14 +24,18 @@ export function ThumbnailSidebar({
   busy: boolean;
   onGoTo: (page: number) => void;
   onReorder: (from: number, to: number) => void;
-  onRotate: (page: number) => void;
-  onDelete: (page: number) => void;
-  onInsertAfter: (page: number) => void;
+  /** Page actions resolve to whether they worked. */
+  onRotate: (page: number) => Promise<boolean>;
+  onDelete: (page: number) => Promise<boolean>;
+  onInsertAfter: (page: number) => Promise<boolean>;
 }) {
   const [dragOver, setDragOver] = useState<number | null>(null);
   const dragFrom = useRef<number | null>(null);
   const list = useRef<HTMLUListElement>(null);
   const movedTo = useRef<number | null>(null);
+  /** Where focus goes once a page action is done and the pages have caught up. */
+  const refocus = useRef<ReturnType<typeof pageActionFocus> | null>(null);
+  const [settled, setSettled] = useState(0);
 
   // Keyboard reordering re-renders the list; keep focus on the moved page.
   useEffect(() => {
@@ -38,6 +43,27 @@ export function ThumbnailSidebar({
     movedTo.current = null;
     list.current?.querySelectorAll<HTMLButtonElement>("button[data-thumb]")[currentPage]?.focus();
   }, [busy, currentPage, numPages]);
+
+  // Page actions disable the panel while they run, which drops focus. Put it
+  // back: on Rotate again after a rotation, on the new page after an insert,
+  // on the page that took the deleted one's place, or on the same button if
+  // the action failed.
+  useEffect(() => {
+    const r = refocus.current;
+    if (!r || busy || numPages !== r.pages) return;
+    refocus.current = null;
+    const row = list.current?.children[Math.min(r.index, numPages - 1)];
+    row?.querySelector<HTMLElement>(r.action ? `[data-action="${r.action}"]` : "button[data-thumb]")?.focus();
+  }, [busy, numPages, settled]);
+
+  function act(action: PageAction, i: number, run: (page: number) => Promise<boolean>) {
+    const hadFocus = !!list.current?.contains(document.activeElement);
+    run(i).then((ok) => {
+      if (!hadFocus) return;
+      refocus.current = pageActionFocus(action, i, ok, numPages);
+      setSettled((n) => n + 1);
+    });
+  }
 
   return (
     // Phones: a drawer over the page. Wider screens: a column beside it.
@@ -102,7 +128,7 @@ export function ThumbnailSidebar({
               {/* Touch has no drag and drop: move buttons instead. */}
               <span className="hidden gap-0.5 hover-none:flex">
                 <IconButton
-                  label="Move up"
+                  label={`Move page ${i + 1} up`}
                   onClick={() => {
                     movedTo.current = i - 1;
                     onReorder(i, i - 1);
@@ -112,7 +138,7 @@ export function ThumbnailSidebar({
                   <ArrowUp className="h-3 w-3" />
                 </IconButton>
                 <IconButton
-                  label="Move down"
+                  label={`Move page ${i + 1} down`}
                   onClick={() => {
                     movedTo.current = i + 1;
                     onReorder(i, i + 1);
@@ -123,19 +149,26 @@ export function ThumbnailSidebar({
                 </IconButton>
               </span>
               <span className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 hover-none:opacity-100">
-                <IconButton label="Rotate" onClick={() => onRotate(i)} disabled={busy}>
+                <IconButton
+                  label={`Rotate page ${i + 1}`}
+                  action="rotate"
+                  onClick={() => act("rotate", i, onRotate)}
+                  disabled={busy}
+                >
                   <RotateCw className="h-3 w-3" />
                 </IconButton>
                 <IconButton
-                  label="Insert page after"
-                  onClick={() => onInsertAfter(i)}
+                  label={`Insert page after page ${i + 1}`}
+                  action="insert"
+                  onClick={() => act("insert", i, onInsertAfter)}
                   disabled={busy}
                 >
                   <Plus className="h-3 w-3" />
                 </IconButton>
                 <IconButton
-                  label="Delete page"
-                  onClick={() => onDelete(i)}
+                  label={`Delete page ${i + 1}`}
+                  action="delete"
+                  onClick={() => act("delete", i, onDelete)}
                   disabled={busy || numPages <= 1}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -152,16 +185,19 @@ export function ThumbnailSidebar({
 function IconButton({
   children,
   label,
+  action,
   onClick,
   disabled,
 }: {
   children: React.ReactNode;
   label: string;
+  action?: PageAction;
   onClick: () => void;
   disabled?: boolean;
 }) {
   return (
     <button
+      data-action={action}
       onClick={onClick}
       disabled={disabled}
       title={label}

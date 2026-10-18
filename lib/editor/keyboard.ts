@@ -90,3 +90,22 @@ export function annotationName(ann: Annotation): string {
   else if (ann.type === "link") detail = ann.targetPage !== null ? `to page ${ann.targetPage + 1}` : snippet(ann.url);
   return `${annotationLabel(ann)}${detail ? `: ${detail}` : ""}, page ${ann.page + 1}`;
 }
+
+export type PageAction = "rotate" | "insert" | "delete";
+
+/**
+ * Where focus goes after a page action in the page panel, once the panel
+ * shows `pages` pages: Rotate again on the same page (to keep turning it),
+ * the new page after an insert, the page that took a deleted one's place
+ * (`action` unset means its thumbnail), or the same button when it failed.
+ */
+export function pageActionFocus(
+  action: PageAction,
+  index: number,
+  ok: boolean,
+  numPages: number
+): { index: number; action?: PageAction; pages: number } {
+  if (!ok || action === "rotate") return { index, action, pages: numPages };
+  if (action === "insert") return { index: index + 1, pages: numPages + 1 };
+  return { index: Math.min(index, numPages - 2), pages: numPages - 1 };
+}

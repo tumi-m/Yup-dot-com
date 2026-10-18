@@ -297,8 +297,8 @@ export function PdfEditor({
     async (
       transform: (input: Uint8Array) => Promise<Uint8Array>,
       message: string
-    ) => {
-      if (!bytes || busyRef.current) return;
+    ): Promise<boolean> => {
+      if (!bytes || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
       try {
@@ -312,8 +312,10 @@ export function PdfEditor({
         setFormValues({});
         setBytes(new Uint8Array(result));
         toast(message, "success");
+        return true;
       } catch (err) {
         toast(friendlyPdfError(err).message || "Operation failed.", "error");
+        return false;
       } finally {
         busyRef.current = false;
         setBusy(false);
@@ -331,14 +333,14 @@ export function PdfEditor({
     );
   };
 
-  const handleDeletePage = (target: number) => {
+  const handleDeletePage = async (target: number) => {
     if (numPages <= 1) {
       toast("A document must keep at least one page.", "error");
-      return;
+      return false;
     }
-    runStructural((b) => deletePages(b, [target]), "Page deleted.").then(() =>
-      setPage((p) => Math.max(0, Math.min(p, numPages - 2)))
-    );
+    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.");
+    setPage((p) => Math.max(0, Math.min(p, numPages - 2)));
+    return ok;
   };
 
   async function handleMerge(files: FileList | null) {

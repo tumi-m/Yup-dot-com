@@ -1,7 +1,7 @@
 import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
-import { annotationName, nudgeAnnotation } from "../lib/editor/keyboard.ts";
+import { annotationName, nudgeAnnotation, pageActionFocus } from "../lib/editor/keyboard.ts";
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
@@ -85,6 +85,15 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("a rectangle reads as one", annotationName({ ...rect, page: 2 }) === "Rectangle, page 3", annotationName(rect));
   const text = createCentred("text", DEFAULT_SETTINGS, 306, 396, page)!;
   check("a text box is named by its text", annotationName({ ...text, text: "Hello  world" } as Annotation) === "Text: Hello world, page 1");
+}
+
+// Page panel actions hand focus back instead of dropping it to the page.
+{
+  check("after Rotate, focus is on Rotate again", JSON.stringify(pageActionFocus("rotate", 1, true, 12)) === JSON.stringify({ index: 1, action: "rotate", pages: 12 }));
+  check("after an insert, focus is on the new page once it shows", JSON.stringify(pageActionFocus("insert", 1, true, 12)) === JSON.stringify({ index: 2, pages: 13 }));
+  check("after a delete, focus is on the page now in its place", JSON.stringify(pageActionFocus("delete", 1, true, 12)) === JSON.stringify({ index: 1, pages: 11 }));
+  check("after deleting the last page, focus is on the new last page", pageActionFocus("delete", 11, true, 12).index === 10);
+  check("a failed action leaves focus on its button", JSON.stringify(pageActionFocus("delete", 3, false, 12)) === JSON.stringify({ index: 3, action: "delete", pages: 12 }));
 }
 
 console.log(`\n${pass}/${total} passed`);
