@@ -40,7 +40,7 @@ import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/componen
 import { PROCESSORS, type ToolField } from "./processors";
 import { SuccessCard } from "./SuccessCard";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
-import { fileToHandoff, handoffToFile, setHandoff, takeHandoff } from "@/lib/local-store";
+import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { friendlyPdfError } from "@/lib/pdf/errors";
@@ -106,11 +106,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  /** The next tool the result couldn't be passed to. */
+  const [nextFailed, setNextFailed] = useState<string | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
 
   /** Where focus goes once the next state has rendered, so it never drops to the page. */
-  const { next: focusNext, focusRef } = useFocusNext<"progress" | "done" | "run">();
+  const { next: focusNext, focusRef } = useFocusNext<"progress" | "done" | "run" | "choose">();
   /** Holds the flow's height while the work view and the result swap. */
   const flow = useHeightLock<HTMLDivElement>();
   /** The running job; aborted on Cancel, on new files and when the page goes away. */
@@ -185,6 +187,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setStatus("working");
     setError(null);
     setProgress(null);
+    setNextFailed(null);
     const started = performance.now();
     const ctl = new AbortController();
     job.current = ctl;
@@ -213,6 +216,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       if (ctl.signal.aborted) return;
       fail(friendlyPdfError(err).message);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
+      // The work view stays, so nothing else lets go of the room kept for the result.
+      flow.release();
       setStatus("idle");
     } finally {
       if (job.current === ctl) {
@@ -228,6 +233,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     job.current.abort();
     job.current = null;
     setProgress(null);
+    flow.release();
     setStatus("idle");
   }
 
@@ -256,9 +262,10 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** Hands the result to another tool without a download/re-upload round trip. */
   async function continueWith(nextSlug: string) {
     nudge.cancel();
+    setNextFailed(null);
     const r = results[0];
-    await setHandoff([await fileToHandoff(r.blob, r.filename)]);
-    router.push(`/tools/${nextSlug}?handoff=1`);
+    if (await tryHandoff([fileToHandoff(r.blob, r.filename)])) router.push(`/tools/${nextSlug}?handoff=1`);
+    else setNextFailed(nextSlug);
   }
 
   // Files handed over from the homepage dropzone or a previous tool.
@@ -273,6 +280,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   function reset() {
     stopJob();
     nudge.cancel();
+    if (flow.ref.current?.contains(document.activeElement)) focusNext.current = "choose";
     flow.lock();
     setEntries([]);
     setResults([]);
@@ -346,7 +354,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           }
           next={
             results.length === 1
-              ? { slugs: nextSteps(slug, results[0].filename), onPick: (next) => void continueWith(next) }
+              ? { slugs: nextSteps(slug, results[0].filename), onPick: (next) => void continueWith(next), failed: nextFailed }
               : undefined
           }
           upsell={
@@ -383,7 +391,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               }}
             />
             <p className="text-sm text-muted-foreground">or</p>
-            <Button className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
+            <Button ref={focusRef("choose")} className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
               Choose {proc.multiple ? "files" : "file"}
             </Button>
             <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>

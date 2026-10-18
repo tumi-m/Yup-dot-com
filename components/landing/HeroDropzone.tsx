@@ -7,9 +7,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, FileText, Presentation, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropTile } from "@/components/ui/dropzone";
-import { fileToHandoff, setHandoff } from "@/lib/local-store";
+import { fileToHandoff, tryHandoff } from "@/lib/local-store";
 import { getTool } from "@/lib/tools";
 import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
+import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { heroActions, MULTI_ACTIONS, TAKES_ALL } from "./hero-actions";
 
@@ -63,7 +64,13 @@ export function HeroDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const chooseRef = useRef<HTMLButtonElement>(null);
   const [going, setGoing] = useState<string | null>(null);
+  /** The tool the files couldn't be passed to. */
+  const [failed, setFailed] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  /** The control focus goes to when the view it was in swaps out. */
+  const { next: focusNext, focusRef } = useFocusNext<"tools" | "choose" | "failed">();
+  const hasFiles = files.length > 0;
 
   useEffect(() => {
     if (autoFocus && files.length === 0) chooseRef.current?.focus({ preventScroll: true });
@@ -71,23 +78,41 @@ export function HeroDropzone({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Choosing or clearing files swaps the view: keep focus in the panel if it was there.
+  const hadFiles = useRef(hasFiles);
+  useEffect(() => {
+    if (hadFiles.current === hasFiles) return;
+    hadFiles.current = hasFiles;
+    setFailed(null);
+    if (boxRef.current?.contains(document.activeElement)) focusNext.current = hasFiles ? "tools" : "choose";
+  }, [hasFiles, focusNext]);
+
   const actions = heroActions(mode, files);
 
   async function go(slug: string) {
+    // The buttons are disabled while the files are stored, which drops focus.
+    const hadFocus = !!boxRef.current?.contains(document.activeElement);
     setGoing(slug);
+    setFailed(null);
     const chosen = TAKES_ALL.includes(slug) ? files : files.slice(0, 1);
     // Browsers often leave `type` empty for Office files, and the handoff
     // would otherwise default it to PDF.
     const typed = chosen.map((f) => (mode === "pptx" && !f.type ? new File([f], f.name, { type: PPTX_TYPE }) : f));
-    await setHandoff(await Promise.all(typed.map((f) => fileToHandoff(f))));
-    router.push(`/tools/${slug}?handoff=1`);
+    if (await tryHandoff(typed.map((f) => fileToHandoff(f)))) {
+      router.push(`/tools/${slug}?handoff=1`);
+      return;
+    }
+    if (hadFocus || document.activeElement === document.body) focusNext.current = "failed";
+    setGoing(null);
+    setFailed(slug);
   }
 
   const FileIcon = mode === "pptx" ? Presentation : FileText;
+  const failedTool = failed ? getTool(failed) : undefined;
 
   return (
     // A layout node, so taking the room at the tap resizes the panel smoothly.
-    <motion.div layout="position" transition={{ layout: RESIZE_T }} className={cn("flex flex-col", RESERVE[mode].always, armed && RESERVE[mode].armed)}>
+    <motion.div ref={boxRef} layout="position" transition={{ layout: RESIZE_T }} className={cn("flex flex-col", RESERVE[mode].always, armed && RESERVE[mode].armed)}>
     <AnimatePresence mode="wait" initial={false}>
       {files.length === 0 ? (
         <motion.div
@@ -130,7 +155,10 @@ export function HeroDropzone({
               {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
             </p>
             <Button
-              ref={chooseRef}
+              ref={(el) => {
+                chooseRef.current = el;
+                focusRef("choose")(el);
+              }}
               size="lg"
               className={cn("h-12 w-full px-6 shadow-lg shadow-primary/25 sm:w-auto", dragging && "invisible")}
               onClick={() => {
@@ -194,6 +222,7 @@ export function HeroDropzone({
               return (
                 <motion.button
                   key={slug}
+                  ref={i === 0 ? focusRef("tools") : undefined}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ ...ENTER_T, delay: staggerDelay(i) }}
@@ -217,6 +246,23 @@ export function HeroDropzone({
           {actions === MULTI_ACTIONS && (
             <p className="mt-3 text-center text-xs text-muted-foreground">Other tools take one PDF at a time.</p>
           )}
+          <AnimatePresence>
+            {failedTool && (
+              <InlineError
+                key="handoff"
+                compact
+                className="pt-3 text-sm"
+                message={
+                  <>
+                    Couldn&apos;t pass the file on.{" "}
+                    <Link ref={focusRef("failed")} href={`/tools/${failedTool.slug}`} className="tap whitespace-nowrap font-semibold underline underline-offset-2">
+                      Open {failedTool.name}
+                    </Link>
+                  </>
+                }
+              />
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
     </AnimatePresence>
