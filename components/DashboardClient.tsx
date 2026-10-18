@@ -21,6 +21,8 @@ import { InlineError, Reveal, staggerDelay } from "@/components/motion/primitive
 import { getTool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 import type { DocumentRecord, PlanId } from "@/lib/types";
+import { limitsFor } from "@/lib/limits";
+import { UpgradeDialog } from "@/components/upsell/Upsell";
 
 const QUICK = ["merge-pdf", "compress-pdf", "pdf-to-word", "ocr-pdf", "protect-pdf", "chat-with-pdf", "split-pdf", "pdf-to-excel"];
 
@@ -63,6 +65,7 @@ export function DashboardClient({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DocumentRecord | null>(null);
+  const [upsell, setUpsell] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
 
@@ -82,6 +85,11 @@ export function DashboardClient({
     const file = files[0];
     if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
       setError("Please choose a PDF file.");
+      return;
+    }
+    // The plan's file size, as in the tools. The database checks it too.
+    if (file.size > limitsFor(plan).maxFileBytes) {
+      setUpsell(true);
       return;
     }
 
@@ -281,6 +289,8 @@ export function DashboardClient({
           </div>
         </DialogContent>
       </Dialog>
+
+      <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="file-size" tier={plan} returnTo="/dashboard" />
 
       <section className="mt-14">
         <h2 className="mb-4 text-lg font-semibold">Tools</h2>

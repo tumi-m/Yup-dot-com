@@ -191,6 +191,17 @@ insert into storage.objects (bucket_id, name, owner) values ('documents', :'D' |
 select rlstest.expect('D: read an orphaned file',       'authenticated', :'D', 'select count(*) from storage.objects', 'value:0');
 select rlstest.expect('D: upload to an orphan''s path', 'authenticated', :'D', format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'documents', :'D' || '/orphan2.pdf'), 'denied');
 
+-- Free keeps files up to 50 MB (the bucket allows Pro's 500 MB): checked on
+-- the row, and on the stored file whatever the row says. Storage saves the
+-- file's size as its own role, which 'postgres' stands in for here.
+select rlstest.expect('D: a 60 MB document on Free',   'authenticated', :'D', format('insert into public.documents (owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %s)', :'D', 'big', :'D' || '/big.pdf', 62934872), 'error:P0001:');
+select rlstest.expect('D: a 50 MB document on Free',   'authenticated', :'D', format('insert into public.documents (owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %s)', :'D', 'd50', :'D' || '/d50.pdf', 52428800), 'rows:1');
+select rlstest.expect('D: its 50 MB file is stored',   'postgres', null, format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'D' || '/d50.pdf', :'D', '{"size": 52428800}'), 'rows:1');
+select rlstest.expect('D: a 60 MB file, whatever its row', 'postgres', null, format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'D' || '/d60.pdf', :'D', '{"size": 62934872}'), 'error:P0001:');
+select rlstest.expect('D: replace the file with 60 MB', 'postgres', null, format('update storage.objects set metadata = %L where name = %L', '{"size": 62934872}', :'D' || '/d50.pdf'), 'error:P0001:');
+select rlstest.expect('B: a 400 MB document on Team', 'authenticated', :'B', format('insert into public.documents (owner_id, name, storage_path, size_bytes) values (%L, %L, %L, %s)', :'B', 'big', :'B' || '/big.pdf', 419430400), 'rows:1');
+select rlstest.expect('B: its 400 MB file is stored',  'postgres', null, format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)', 'documents', :'B' || '/big.pdf', :'B', '{"size": 419430400}'), 'rows:1');
+
 -- ---------- Server (service role) ----------
 select rlstest.expect('server: 3rd team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm3@example.com'), 'rows:1');
 select rlstest.expect('server: 4th team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm4@example.com'), 'rows:1');
