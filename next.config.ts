@@ -47,14 +47,15 @@ const nextConfig: NextConfig = {
 };
 
 /**
- * The same check as `npm run build`'s prebuild (scripts/check-env.mjs), for a
- * plain `next build`: no server secret may sit in a NEXT_PUBLIC_ variable,
- * because those are copied into the browser bundle.
+ * The same checks as `npm run build`'s prebuild (scripts/check-env.mjs and
+ * scripts/check-source.mjs), for a plain `next build`: no server secret may
+ * sit in a NEXT_PUBLIC_ variable, because those are copied into the browser
+ * bundle, and no password or key may be written into the code.
  */
 export default function config(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) {
     const used = new Set(secretScan.publicVarsInSource(process.cwd()).keys());
-    const problems = secretScan.envProblems(process.env, used);
+    const problems = [...secretScan.envProblems(process.env, used), ...secretScan.sourceProblems(process.cwd()).problems];
     if (problems.length) {
       throw new Error(`Build stopped: a secret would reach the browser.\n  - ${problems.join("\n  - ")}`);
     }
