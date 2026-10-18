@@ -1,5 +1,5 @@
-// Builds the demo proposal.pdf whose Compress PDF result the film shows ("1 file · 120.8 KB",
-// "94% smaller"): three A4 pages, two of them with a full-width photo. The photos are drawn
+// Builds the demo proposal.pdf whose Compress PDF result the film shows ("1 file · 42 KB",
+// "98% smaller"): three A4 pages, two of them with a full-width photo. The photos are drawn
 // in code (sky, hills, buildings, grain), so the file is made-up and needs no stock media.
 //   node scripts/demo-pdf.mjs [out/demo/proposal.pdf]
 // Then drop it on the app's Compress PDF tool (Recommended quality) and read the result line.

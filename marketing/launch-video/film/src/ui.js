@@ -174,10 +174,10 @@
     // the result line (ToolWorkbench): output size and the saving, measured by running the
     // app's Compress PDF on the demo proposal.pdf (2.0 MB, two photos). The timer chip is left out.
     const stats = h("div", "row", root, { gap: "8px", marginTop: "14px", position: "relative", justifyContent: "center" });
-    const fileStat = h("span", "stat", stats, null, "1 file · 120.8 KB");
+    const fileStat = h("span", "stat", stats, null, "1 file · 42 KB");
     const smaller = h("span", "stat good", stats);
     icon("trending-down", 15, 2.2, smaller);
-    h("span", "", smaller, null, "94% smaller");
+    h("span", "", smaller, null, "98% smaller");
     const btns = h("div", "row", root, { gap: "12px", marginTop: "24px", position: "relative" });
     const dl = h("div", "btn primary", btns, { width: "176px", height: "48px", fontSize: "17px" });
     icon("download", 18, 2, dl); h("span", "", dl, null, "Download");

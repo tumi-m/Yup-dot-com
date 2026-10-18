@@ -59,10 +59,9 @@ their body text is shown as grey lines.
 Numbers on screen:
 - Prices from `lib/plans.ts` (R0, R49 and R199 a month, which the price counters roll up to)
   and "5 seats".
-- The Compress result line, "1 file · 120.8 KB" and "94% smaller". These were read off the
-  app's own Compress PDF tool (Recommended quality, run in `next dev` on 17 Oct 2026) after
-  dropping the demo `proposal.pdf` on it: 2.0 MB, three pages, two photos
-  (`npm run demo-pdf` rebuilds it). A text-only PDF gets "Already optimized" instead. The
+- The Compress result line, "1 file · 42 KB" and "98% smaller". These are what the app's
+  Compress PDF tool (Recommended quality, 18 Oct 2026) makes of the demo `proposal.pdf`:
+  2.0 MB, three pages, two photos (`npm run demo-pdf` rebuilds it). A text-only PDF gets "Already optimized" instead. The
   app's timer chip is left out.
 - The page citation "(p. 2)" in the "Ask your PDF" answer.
 
