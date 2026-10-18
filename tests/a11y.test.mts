@@ -3,6 +3,7 @@ import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
 import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "../lib/editor/keyboard.ts";
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
+import { focusAfterRemove, movedMessage } from "../components/tools/file-order.ts";
 
 let pass = 0;
 let total = 0;
@@ -104,6 +105,14 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("nothing happens when they are off", toolShortcut(press("t"), false) === null && toolShortcut(press("s"), false) === null);
   check("a modifier key leaves the letter alone", toolShortcut(press("t", { ctrlKey: true }), true) === null && toolShortcut(press("t", { altKey: true }), true) === null && toolShortcut(press("t", { metaKey: true }), true) === null);
   check("unmapped keys do nothing", toolShortcut(press("q"), true) === null && toolShortcut(press("Enter"), true) === null);
+}
+
+// Chosen files: removing one keeps focus in the list; moving one says where it went.
+{
+  check("removing a file focuses the next row", focusAfterRemove(["a", "b", "c"], "a") === "b");
+  check("removing the last row focuses the one before", focusAfterRemove(["a", "b", "c"], "c") === "b");
+  check("removing the only file leaves no row (focus goes to Choose)", focusAfterRemove(["a"], "a") === null);
+  check("moving a file says its new place", movedMessage("deck-text.pdf", 1, 3) === "deck-text.pdf moved to position 2 of 3");
 }
 
 console.log(`\n${pass}/${total} passed`);
