@@ -535,6 +535,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
+            # Uptime monitors only need to know it's up. Versions and setup
+            # are for the web app's /api/media/health, which sends the secret.
+            if not self.authorized():
+                return self.json(200, {"ok": True})
             return self.json(200, {
                 "ok": True,
                 "ytdlp": yt_dlp.version.__version__,

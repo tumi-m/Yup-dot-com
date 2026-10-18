@@ -150,5 +150,19 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
 }
 
 setUsageStore(null);
+// The setup check (/api/media/health) shows versions and setup, and calls the
+// worker: in production only the owner, with MEDIA_WORKER_SECRET, gets it.
+{
+  const health = await import("../app/api/media/health/route.ts");
+  const env = process.env as Record<string, string | undefined>;
+  const saved = { NODE_ENV: env.NODE_ENV, MEDIA_WORKER_SECRET: env.MEDIA_WORKER_SECRET, MEDIA_WORKER_URL: env.MEDIA_WORKER_URL };
+  Object.assign(env, { NODE_ENV: "production", MEDIA_WORKER_SECRET: "owner-secret-123", MEDIA_WORKER_URL: "" });
+  const ask = (auth?: string) => health.GET(new Request("http://localhost/api/media/health", { headers: auth ? { authorization: auth } : {} }));
+  check("health: anyone else gets a 404 in production", (await ask()).status === 404 && (await ask("Bearer wrong")).status === 404);
+  const owner = await ask("Bearer owner-secret-123");
+  check("health: the owner, with the secret, gets the setup report", owner.status === 200 && (await owner.json()).x === "ready");
+  for (const [k, v] of Object.entries(saved)) if (v === undefined) delete env[k]; else env[k] = v;
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

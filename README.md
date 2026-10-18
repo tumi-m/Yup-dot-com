@@ -143,7 +143,9 @@ stream URLs only work from the IP that requested them.
 
 For all of them, the web app checks the plan (1080p is Pro) and the daily quota
 (guest 5, free account 10, Pro 200), then signs a short-lived token for exactly
-one download. Open `/api/media/health` after deploying to see what's missing.
+one download. After deploying, check what's missing with
+`curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<your-site>/api/media/health`
+(without the secret it answers 404 in production).
 Read the worker README's **Things to know before launch** section: YouTube
 blocks cloud IPs, and there are legal points too.
 
