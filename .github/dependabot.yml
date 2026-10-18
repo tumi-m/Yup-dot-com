@@ -1,0 +1,20 @@
+# Weekly pull requests for dependency updates and security fixes, and for the
+# pinned GitHub Actions (CI pins each action to a commit).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /media-worker
+    schedule:
+      interval: weekly
