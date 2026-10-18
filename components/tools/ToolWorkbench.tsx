@@ -38,7 +38,7 @@ import {
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { PROCESSORS, type ToolField } from "./processors";
-import { focusAfterRemove, movedMessage } from "./file-order";
+import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";

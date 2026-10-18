@@ -3,7 +3,7 @@ import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
 import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "../lib/editor/keyboard.ts";
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
-import { focusAfterRemove, movedMessage } from "../components/tools/file-order.ts";
+import { focusAfterRemove, movedMessage } from "../components/list-focus.ts";
 import { slideProgressNote } from "../components/tools/progress-note.ts";
 
 let pass = 0;

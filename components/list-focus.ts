@@ -1,6 +1,6 @@
-/** Pure helpers for the list of chosen files, kept apart so tests can run them. */
+/** Pure helpers for lists people remove items from or reorder, kept apart so tests can run them. */
 
-/** Which row's Remove button takes focus when a row goes: the next, else the one before. */
+/** Which item takes focus when one is removed: the next, else the one before; null when none is left. */
 export function focusAfterRemove(ids: string[], removed: string): string | null {
   const i = ids.indexOf(removed);
   if (i < 0) return null;
