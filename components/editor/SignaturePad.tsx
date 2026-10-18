@@ -16,10 +16,14 @@ export function SignaturePad({
   open,
   onOpenChange,
   onSave,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (dataUrl: string) => void;
+  /** `keyboard`: "Use signature" was pressed with Enter or Space. */
+  onSave: (dataUrl: string, keyboard: boolean) => void;
+  /** Once the dialog has closed; prevent the default to put focus elsewhere. */
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -108,9 +112,9 @@ export function SignaturePad({
     setTyped("");
   }
 
-  function save() {
+  function save(keyboard: boolean) {
     if (!hasInk.current) return;
-    onSave(canvasRef.current!.toDataURL("image/png"));
+    onSave(canvasRef.current!.toDataURL("image/png"), keyboard);
     onOpenChange(false);
   }
 
@@ -124,6 +128,7 @@ export function SignaturePad({
           e.preventDefault();
           contentRef.current?.focus({ preventScroll: true });
         }}
+        onCloseAutoFocus={onCloseAutoFocus}
         className="focus:outline-none"
       >
         <DialogHeader>
@@ -154,7 +159,7 @@ export function SignaturePad({
           <Button variant="ghost" onClick={clear}>
             Clear
           </Button>
-          <Button onClick={save} disabled={empty}>
+          <Button onClick={(e) => save(e.detail === 0)} disabled={empty}>
             Use signature
           </Button>
         </div>

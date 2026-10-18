@@ -8,6 +8,8 @@ import type { DocumentRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Your documents" };
+
 export default async function DashboardPage() {
   const profile = await getProfile();
   if (!profile) redirect("/login?redirect=/dashboard");

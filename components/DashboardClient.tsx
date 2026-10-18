@@ -22,6 +22,7 @@ import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { formatLimitBytes, limitsFor } from "@/lib/limits";
 import { getTool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
+import { focusAfterRemove } from "@/components/list-focus";
 import type { DocumentRecord, PlanId } from "@/lib/types";
 
 const QUICK = ["merge-pdf", "compress-pdf", "pdf-to-word", "ocr-pdf", "protect-pdf", "chat-with-pdf", "split-pdf", "pdf-to-excel"];
@@ -69,6 +70,9 @@ export function DashboardClient({
   const [upsell, setUpsell] = useState(false);
   const dragDepth = useRef(0);
   const maxFileBytes = limitsFor(plan).maxFileBytes;
+  const mainRef = useRef<HTMLElement>(null);
+  /** After a delete, the dialog hands focus here: a document's id, or "upload". */
+  const focusAfterDelete = useRef<string | null>(null);
 
   const atLimit = maxDocuments !== -1 && docs.length >= maxDocuments;
 
@@ -144,6 +148,9 @@ export function DashboardClient({
   }
 
   async function handleDelete(doc: DocumentRecord) {
+    // The card that opened the dialog is going: focus the next card's Delete
+    // (or the one before), or Upload PDF when none is left.
+    focusAfterDelete.current = focusAfterRemove(docs.map((d) => d.id), doc.id) ?? "upload";
     setPendingDelete(null);
     const prev = docs;
     setDocs((d) => d.filter((x) => x.id !== doc.id));
@@ -162,6 +169,7 @@ export function DashboardClient({
 
   return (
     <main id="main"
+      ref={mainRef}
       className="container py-10"
       // Drop a PDF anywhere on the page.
       onDragEnter={(e) => {
@@ -240,6 +248,7 @@ export function DashboardClient({
             dragging && "ring-2 ring-primary ring-offset-8 ring-offset-background"
           )}
         >
+          <h2 className="sr-only">Documents</h2>
           {docs.map((doc, i) => (
             <div
               key={doc.id}
@@ -263,6 +272,7 @@ export function DashboardClient({
                 <Button
                   variant="outline"
                   className="h-11 w-11 p-0"
+                  data-delete={doc.id}
                   onClick={() => setPendingDelete(doc)}
                   aria-label={`Delete ${doc.name}`}
                 >
@@ -275,7 +285,22 @@ export function DashboardClient({
       )}
 
       <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          className="max-w-sm"
+          onCloseAutoFocus={(e) => {
+            const target = focusAfterDelete.current;
+            if (!target) return;
+            focusAfterDelete.current = null;
+            const buttons = Array.from(mainRef.current?.querySelectorAll<HTMLElement>("button") ?? []);
+            const el =
+              target === "upload"
+                ? buttons.find((b) => b.textContent?.trim() === "Upload PDF")
+                : buttons.find((b) => b.dataset.delete === target);
+            if (!el) return;
+            e.preventDefault();
+            el.focus({ preventScroll: true });
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="pr-8">Delete {pendingDelete ? `“${pendingDelete.name}”` : "document"}?</DialogTitle>
             <DialogDescription>This can&apos;t be undone.</DialogDescription>

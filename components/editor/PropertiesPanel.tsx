@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { cloneElement, useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { annotationLabel } from "@/lib/editor/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-const NOTE_COLORS = ["#fde047", "#86efac", "#93c5fd", "#fca5a5", "#f0abfc"];
+const NOTE_COLORS = [
+  { value: "#fde047", name: "Yellow" },
+  { value: "#86efac", name: "Green" },
+  { value: "#93c5fd", name: "Blue" },
+  { value: "#fca5a5", name: "Red" },
+  { value: "#f0abfc", name: "Pink" },
+];
 
 /** Contextual editor for the selected annotation. */
 export function PropertiesPanel({
@@ -45,6 +51,7 @@ export function PropertiesPanel({
     <aside
       ref={ref}
       aria-label="Properties"
+      data-properties
       className="fixed inset-x-0 bottom-0 z-30 max-h-[50dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-background p-4 shadow-2xl md:static md:z-auto md:max-h-none md:w-64 md:shrink-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none"
     >
       <div className="mb-4 flex items-center justify-between">
@@ -96,17 +103,19 @@ export function PropertiesPanel({
         )}
 
         {annotation.type === "note" && (
-          <Field label="Colour">
+          <Field label="Colour" group>
             <div className="flex gap-1.5">
               {NOTE_COLORS.map((c) => (
                 <button
-                  key={c}
-                  onClick={() => onChange({ ...annotation, color: c })}
+                  key={c.value}
+                  onClick={() => onChange({ ...annotation, color: c.value })}
                   className={`h-7 w-7 rounded-full border ${
-                    annotation.color === c ? "ring-2 ring-ring ring-offset-1" : ""
+                    annotation.color === c.value ? "ring-2 ring-ring ring-offset-1" : ""
                   }`}
-                  style={{ background: c }}
-                  aria-label={`Colour ${c}`}
+                  style={{ background: c.value }}
+                  aria-label={c.name}
+                  aria-pressed={annotation.color === c.value}
+                  title={c.name}
                 />
               ))}
             </div>
@@ -139,10 +148,11 @@ export function PropertiesPanel({
               </select>
             </Field>
             {(annotation.shape === "rect" || annotation.shape === "ellipse") && (
-              <Field label="Fill">
+              <Field label="Fill" group>
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
+                    aria-label="Fill"
                     checked={annotation.fill !== null}
                     onChange={(e) =>
                       onChange({
@@ -154,6 +164,7 @@ export function PropertiesPanel({
                   {annotation.fill !== null && (
                     <input
                       type="color"
+                      aria-label="Fill colour"
                       value={annotation.fill}
                       onChange={(e) => onChange({ ...annotation, fill: e.target.value })}
                       className="h-9 flex-1 cursor-pointer rounded-md border border-input bg-background px-1"
@@ -162,13 +173,14 @@ export function PropertiesPanel({
                 </div>
               </Field>
             )}
-            <Field label={`Opacity ${Math.round(annotation.opacity * 100)}%`}>
+            <Field label={<OpacityLabel opacity={annotation.opacity} />}>
               <input
                 type="range"
                 min={0.1}
                 max={1}
                 step={0.05}
                 value={annotation.opacity}
+                aria-valuetext={`${Math.round(annotation.opacity * 100)}%`}
                 onChange={(e) =>
                   onChange({ ...annotation, opacity: Number(e.target.value) })
                 }
@@ -188,13 +200,14 @@ export function PropertiesPanel({
                 className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1"
               />
             </Field>
-            <Field label={`Opacity ${Math.round(annotation.opacity * 100)}%`}>
+            <Field label={<OpacityLabel opacity={annotation.opacity} />}>
               <input
                 type="range"
                 min={0.1}
                 max={1}
                 step={0.05}
                 value={annotation.opacity}
+                aria-valuetext={`${Math.round(annotation.opacity * 100)}%`}
                 onChange={(e) =>
                   onChange({ ...annotation, opacity: Number(e.target.value) })
                 }
@@ -322,9 +335,11 @@ const optionLines = (text: string) => text.split("\n").filter(Boolean);
  * option; blank lines are left out of the options.
  */
 function OptionsField({
+  id,
   options,
   onChange,
 }: {
+  id?: string;
   options: string[];
   onChange: (options: string[]) => void;
 }) {
@@ -337,6 +352,7 @@ function OptionsField({
   }, [options]);
   return (
     <textarea
+      id={id}
       value={text}
       onChange={(e) => {
         setText(e.target.value);
@@ -349,13 +365,46 @@ function OptionsField({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/** The percentage is shown, and read out as the slider's value instead. */
+function OpacityLabel({ opacity }: { opacity: number }) {
+  return (
+    <>
+      Opacity <span aria-hidden>{Math.round(opacity * 100)}%</span>
+    </>
+  );
+}
+
+/**
+ * A labelled control: the label names the control it holds. A set of
+ * controls (`group`) is named as a group instead.
+ */
+function Field({
+  label,
+  group = false,
+  children,
+}: {
+  label: React.ReactNode;
+  group?: boolean;
+  children: React.ReactElement<{ id?: string }>;
+}) {
+  const id = useId();
+  const className = "mb-1.5 block text-xs font-medium text-muted-foreground";
+  if (group) {
+    return (
+      <div role="group" aria-labelledby={id}>
+        <span id={id} className={className}>
+          {label}
+        </span>
+        {children}
+      </div>
+    );
+  }
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+      <label htmlFor={id} className={className}>
         {label}
       </label>
-      {children}
+      {cloneElement(children, { id })}
     </div>
   );
 }

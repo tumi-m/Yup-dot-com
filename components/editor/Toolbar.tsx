@@ -20,6 +20,7 @@ import {
   CheckSquare,
   CircleDot,
   ChevronDownSquare,
+  Keyboard,
 } from "lucide-react";
 import type { ToolId, ToolSettings } from "@/lib/editor/types";
 import { cn } from "@/lib/utils";
@@ -119,11 +120,17 @@ export function Toolbar({
   onToolChange,
   settings,
   onSettingsChange,
+  shortcuts,
+  onShortcutsChange,
 }: {
   tool: ToolId;
-  onToolChange: (tool: ToolId) => void;
+  /** `keyboard`: chosen with Enter or Space, so its item is placed for the visitor. */
+  onToolChange: (tool: ToolId, keyboard: boolean) => void;
   settings: ToolSettings;
   onSettingsChange: (next: ToolSettings) => void;
+  /** Whether single-key tool shortcuts are on. */
+  shortcuts: boolean;
+  onShortcutsChange: (on: boolean) => void;
 }) {
   const showColor = NEEDS_COLOR.includes(tool);
   const showHighlight = tool === "highlight";
@@ -147,9 +154,11 @@ export function Toolbar({
               {group.tools.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => onToolChange(t.id)}
-                  title={t.key ? `${t.label} (${t.key})` : t.label}
+                  // A click from Enter or Space has no pointer position (detail 0).
+                  onClick={(e) => onToolChange(t.id, e.detail === 0)}
+                  title={t.key && shortcuts ? `${t.label} (${t.key})` : t.label}
                   aria-label={t.label}
+                  aria-keyshortcuts={shortcuts ? t.key : undefined}
                   aria-pressed={tool === t.id}
                   className={cn(
                     "flex h-8 w-8 items-center justify-center rounded-md transition-colors pointer-coarse:h-11 pointer-coarse:w-11",
@@ -164,6 +173,21 @@ export function Toolbar({
             </div>
           </div>
         ))}
+        <div className="flex shrink-0 items-center">
+          <div className="mx-1.5 h-6 w-px bg-border" />
+          <button
+            onClick={() => onShortcutsChange(!shortcuts)}
+            title={shortcuts ? "Single-key shortcuts: on" : "Single-key shortcuts: off"}
+            aria-label="Single-key shortcuts"
+            aria-pressed={shortcuts}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md transition-colors pointer-coarse:h-11 pointer-coarse:w-11",
+              shortcuts ? "text-foreground hover:bg-accent" : "text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Keyboard className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {hasOptions && (

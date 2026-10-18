@@ -7,7 +7,7 @@ const buttonVariants = cva(
   // Colours change fast on hover (100ms) and settle back slower (200ms); a
   // press sinks to 97% in 100ms. The focus ring (a box-shadow) is not
   // transitioned, so it appears at once.
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,transform] duration-200 ease-out hover:duration-100 active:scale-[0.97] active:duration-100 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,transform] duration-200 ease-out hover:duration-100 active:scale-[0.97] active:duration-100 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {

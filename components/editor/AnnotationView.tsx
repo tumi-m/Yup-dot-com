@@ -5,6 +5,7 @@ import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
 import { annotationTouchAction } from "@/lib/editor/canvas";
+import { annotationName, nudgeAnnotation } from "@/lib/editor/keyboard";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "p1" | "p2";
 
@@ -57,6 +58,8 @@ function resizeBox(
 export function AnnotationView({
   ann,
   scale,
+  page,
+  describedBy,
   selected,
   interactive,
   onSelect,
@@ -67,6 +70,10 @@ export function AnnotationView({
 }: {
   ann: Annotation;
   scale: number;
+  /** The page's size in points, which keyboard moves keep to. */
+  page: { width: number; height: number };
+  /** The id of the keyboard hint. */
+  describedBy?: string;
   selected: boolean;
   /** False while a creation drag is previewing this annotation. */
   interactive: boolean;
@@ -87,6 +94,30 @@ export function AnnotationView({
 
   const isLine =
     ann.type === "shape" && (ann.shape === "line" || ann.shape === "arrow");
+  const hasText = ann.type === "text" || ann.type === "note";
+  const self = useRef<HTMLDivElement>(null);
+
+  /** The keyboard version of the pointer gestures: move, resize, edit. */
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!interactive || e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      const box = e.currentTarget.querySelector("textarea");
+      if (!box) return;
+      box.focus({ preventScroll: true });
+      if (box.value === NEW_TEXT) box.select();
+      else box.setSelectionRange(box.value.length, box.value.length);
+      return;
+    }
+    const next = nudgeAnnotation(ann, e, page);
+    if (!next) return;
+    e.preventDefault();
+    if (!selected) onSelect();
+    // One undo step per key press.
+    onCommitStart();
+    onChange(next);
+    onCommitEnd();
+  }
 
   function begin(e: React.PointerEvent, kind: "move" | Handle) {
     if (!interactive) return;
@@ -207,12 +238,36 @@ export function AnnotationView({
         <div className="pointer-events-none absolute -inset-[2px] rounded-[2px] border-2 border-primary" />
       )}
 
-      <Content ann={ann} scale={scale} selected={selected} interactive={interactive} onChange={onChange} />
+      {/* Reachable with Tab; focusing it selects it, so the Properties panel
+          and the Delete key work on it. The selection chrome sits beside it,
+          not inside, so nothing interactive is nested in it. */}
+      <div
+        ref={self}
+        data-ann-focus={interactive ? "" : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        role={interactive ? (hasText ? "group" : "button") : undefined}
+        aria-label={interactive ? annotationName(ann) : undefined}
+        aria-describedby={interactive ? describedBy : undefined}
+        onFocus={(e) => interactive && !selected && e.target === e.currentTarget && onSelect()}
+        onKeyDown={onKeyDown}
+        className="h-full w-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <Content
+          ann={ann}
+          scale={scale}
+          selected={selected}
+          interactive={interactive}
+          onChange={onChange}
+          onDone={() => self.current?.focus({ preventScroll: true })}
+        />
+      </div>
 
       {selected && interactive && (
         <>
           <button
             type="button"
+            // The Delete key and the Properties panel do this from the keyboard.
+            tabIndex={-1}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -264,16 +319,25 @@ function Content({
   selected,
   interactive,
   onChange,
+  onDone,
 }: {
   ann: Annotation;
   scale: number;
   selected: boolean;
   interactive: boolean;
   onChange: (next: Annotation) => void;
+  /** Escape in a text: back to the annotation itself. */
+  onDone: () => void;
 }) {
+  /** Escape leaves the text for the annotation, which stays selected. */
+  const leave = (e: React.KeyboardEvent) => {
+    if (e.key !== "Escape" || !interactive) return;
+    e.stopPropagation();
+    onDone();
+  };
   switch (ann.type) {
     case "text":
-      return <TextBody ann={ann} scale={scale} selected={selected} interactive={interactive} onChange={onChange} />;
+      return <TextBody ann={ann} scale={scale} selected={selected} interactive={interactive} onChange={onChange} onKeyDown={leave} />;
 
     case "draw":
       return (
@@ -321,7 +385,11 @@ function Content({
             value={ann.text}
             onChange={(e) => onChange({ ...ann, text: e.target.value })}
             onPointerDown={(e) => selected && e.stopPropagation()}
+            onKeyDown={leave}
             readOnly={!interactive}
+            // Reached through the note itself (Enter), so it isn't a second Tab stop.
+            tabIndex={-1}
+            aria-label="Comment"
             placeholder="Add a comment…"
             className="flex-1 resize-none border-none bg-transparent p-1.5 text-[11px] leading-snug outline-none"
           />
@@ -453,12 +521,14 @@ function TextBody({
   selected,
   interactive,
   onChange,
+  onKeyDown,
 }: {
   ann: Extract<Annotation, { type: "text" }>;
   scale: number;
   selected: boolean;
   interactive: boolean;
   onChange: (next: Annotation) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   // Type at 16px or more and scale down to the page, so phones don't zoom in on focus.
@@ -489,7 +559,11 @@ function TextBody({
         onChange({ ...ann, text: e.target.value, height: Math.max(ann.height, needed) });
       }}
       onPointerDown={(e) => selected && e.stopPropagation()}
+      onKeyDown={onKeyDown}
       readOnly={!interactive}
+      // Reached through the text box itself (Enter), so it isn't a second Tab stop.
+      tabIndex={-1}
+      aria-label="Text"
       spellCheck={false}
       data-fit-text
       className="block resize-none overflow-hidden border-none bg-transparent p-0 leading-tight outline-none"

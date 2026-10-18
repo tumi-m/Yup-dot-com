@@ -7,7 +7,7 @@ import { ArrowUp, FileText, RotateCcw, Sparkles, Square, UploadCloud } from "luc
 import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, ENTER_T, InlineError, SUCCESS, staggerDelay } from "@/components/motion/primitives";
-import { scrollBehavior } from "@/components/motion/focus";
+import { scrollBehavior, useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { isLoadError, loadErrorMessage } from "@/lib/load-error";
 import { useSearchParams } from "next/navigation";
@@ -118,6 +118,9 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const questionRef = useRef<HTMLTextAreaElement | null>(null);
+  /** Where focus goes when the view it was in is swapped out. */
+  const { next: focusNext, focusRef } = useFocusNext<"question" | "choose">();
 
   const [doc, setDoc] = useState<LoadedDoc | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -156,7 +159,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: scrollBehavior() });
   }, [messages]);
 
-  async function loadFile(file: File | undefined) {
+  /** `chosen`: picked or dropped here, so focus follows it into the chat. */
+  async function loadFile(file: File | undefined, chosen = false) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setError({ message: "Please choose a PDF file." });
@@ -164,6 +168,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     }
     setError(null);
     setParsing(true);
+    // The Choose button steps aside while the file is read; it or the question box gets focus after.
+    if (chosen) focusNext.current = "choose";
     try {
       const { parseDocument, toPagedText } = await import("@/lib/pdf/parse");
       const parsed = await parseDocument(new Uint8Array(await file.arrayBuffer()));
@@ -171,6 +177,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         setError({ message: "This PDF is a scan. Run OCR PDF first." });
         return;
       }
+      if (chosen) focusNext.current = "question";
       const sent = documentToSend(toPagedText(parsed), parsed.pageCount);
       setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: sent.documentText, totalPages: sent.totalPages });
       setMessages([]);
@@ -183,8 +190,20 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     }
   }
 
+  /**
+   * Suggestions and Stop go away as an answer starts and ends (and Send,
+   * which takes Stop's place, is disabled while the box is empty): the
+   * question box takes focus from them instead of the page.
+   */
+  function keepFocus() {
+    if (document.activeElement instanceof HTMLElement && document.activeElement.dataset.swap !== undefined) {
+      questionRef.current?.focus({ preventScroll: true });
+    }
+  }
+
   async function ask(question: string) {
     if (!doc || !question.trim() || streaming) return;
+    keepFocus();
     if (question.trim().length > MAX_MESSAGE_CHARS) {
       setError({ message: `Questions can be up to ${MAX_MESSAGE_CHARS.toLocaleString("en")} characters.` });
       return;
@@ -262,6 +281,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     } catch (e) {
       if ((e as Error).name !== "AbortError") setError({ message: "Connection lost. Please try again." });
     } finally {
+      keepFocus();
       setStreaming(false);
       // "New PDF" clears this while the answer comes in: that conversation is gone.
       const current = abortRef.current === controller;
@@ -288,11 +308,11 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           busy={parsing}
           icon={Sparkles}
           tileClassName="bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-primary/30"
-          onFiles={(files) => loadFile(files[0])}
+          onFiles={(files) => loadFile(files[0], true)}
         >
-          <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { loadFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { loadFile(e.target.files?.[0], true); e.target.value = ""; }} />
           {!parsing && (
-            <Button className="mt-4" onClick={() => inputRef.current?.click()}>
+            <Button ref={focusRef("choose")} className="mt-4" onClick={() => inputRef.current?.click()}>
               <UploadCloud /> Choose PDF
             </Button>
           )}
@@ -327,7 +347,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {remaining} left today
           </span>
         )}
-        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); abortRef.current = null; setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
+        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { focusNext.current = "choose"; abortRef.current?.abort(); abortRef.current = null; setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
           <RotateCcw /> New PDF
         </Button>
       </div>
@@ -354,6 +374,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
                   transition={{ ...ENTER_T, delay: SUCCESS.title + staggerDelay(i) }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => ask(s)}
+                  data-swap
                   className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm transition-colors duration-200 hover:border-primary/50 hover:text-primary hover:duration-100"
                 >
                   {s}
@@ -418,6 +439,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         className="flex items-end gap-2 border-t border-border p-3"
       >
         <textarea
+          ref={(el) => {
+            questionRef.current = el;
+            focusRef("question")(el);
+          }}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -439,7 +464,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         {/* Separate buttons (keys): Stop puts the question back in the box at
             once, and the same element turned into Send would then submit it. */}
         {streaming ? (
-          <Button key="stop" type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
+          <Button key="stop" type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => { keepFocus(); abortRef.current?.abort(); }} aria-label="Stop" data-swap>
             <Square className="h-4 w-4" />
           </Button>
         ) : (

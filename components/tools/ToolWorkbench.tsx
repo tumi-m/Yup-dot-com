@@ -38,6 +38,7 @@ import {
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { PROCESSORS, type ToolField } from "./processors";
+import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
@@ -110,6 +111,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
+  /** Read out when a file is moved with the arrow keys. */
+  const [moveNote, setMoveNote] = useState("");
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
 
@@ -168,6 +171,33 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setResults([]);
     const skipped = list.length - accepted.length;
     fail(skipped ? `Skipped ${skipped} unsupported file${skipped === 1 ? "" : "s"}.` : null);
+  }
+
+  /** Moves a file up or down the list from the keyboard, and says where it went. */
+  function moveEntry(id: string, delta: number) {
+    const from = entries.findIndex((x) => x.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= entries.length) return;
+    const next = [...entries];
+    [next[from], next[to]] = [next[to], next[from]];
+    setEntries(next);
+    setMoveNote(movedMessage(entries[from].file.name, to, next.length));
+  }
+
+  function removeEntry(id: string) {
+    // The row leaves with the focused button: hand focus to the next row's
+    // Remove (or the one before), or back to Choose when no file is left.
+    if (document.activeElement?.closest("[data-remove]")) {
+      const target = focusAfterRemove(entries.map((e) => e.id), id);
+      if (target) {
+        requestAnimationFrame(() =>
+          flow.ref.current?.querySelector<HTMLElement>(`[data-remove="${target}"]`)?.focus()
+        );
+      } else {
+        focusNext.current = "choose";
+      }
+    }
+    setEntries((prev) => prev.filter((e) => e.id !== id));
   }
 
   function setOption(key: string, value: string) {
@@ -413,22 +443,15 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               className="space-y-2"
             >
               <AnimatePresence initial={false}>
-                {entries.map((entry) => (
+                {entries.map((entry, i) => (
                   <FileRow
                     key={entry.id}
                     entry={entry}
+                    position={i + 1}
+                    count={entries.length}
                     movable={proc.multiple}
-                    onMove={(delta) =>
-                      setEntries((prev) => {
-                        const from = prev.findIndex((x) => x.id === entry.id);
-                        const to = from + delta;
-                        if (from < 0 || to < 0 || to >= prev.length) return prev;
-                        const next = [...prev];
-                        [next[from], next[to]] = [next[to], next[from]];
-                        return next;
-                      })
-                    }
-                    onRemove={() => setEntries((prev) => prev.filter((e) => e.id !== entry.id))}
+                    onMove={(delta) => moveEntry(entry.id, delta)}
+                    onRemove={() => removeEntry(entry.id)}
                   />
                 ))}
               </AnimatePresence>
@@ -595,6 +618,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       )}
     </AnimatePresence>
     </div>
+    <p className="sr-only" aria-live="polite">
+      {moveNote}
+    </p>
     {upsell && (
       <UpgradeDialog
         open
@@ -614,11 +640,16 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
  */
 function FileRow({
   entry,
+  position,
+  count,
   movable,
   onMove,
   onRemove,
 }: {
   entry: Entry;
+  /** 1-based place in the list, which sets the merge order. */
+  position: number;
+  count: number;
   movable: boolean;
   onMove: (delta: number) => void;
   onRemove: () => void;
@@ -640,7 +671,7 @@ function FileRow({
         // Drag handle that also reorders from the keyboard (↑/↓).
         <button
           type="button"
-          aria-label={`Move ${entry.file.name} (up/down arrows)`}
+          aria-label={`Move ${entry.file.name}, ${position} of ${count} (up/down arrows)`}
           onPointerDown={(e) => controls.start(e)}
           onKeyDown={(e) => {
             const delta = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
@@ -661,6 +692,7 @@ function FileRow({
         <p className="text-xs text-muted-foreground">{formatBytes(entry.file.size)}</p>
       </div>
       <button
+        data-remove={entry.id}
         onClick={onRemove}
         className="-my-1.5 -mr-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         aria-label={`Remove ${entry.file.name}`}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -12,6 +12,7 @@ import { formatPrice, prepaidPrice, type PaidPlanId } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
 import { paymentOutcome, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
+import { focusAfterRemove } from "@/components/list-focus";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
@@ -199,7 +200,11 @@ export function PaymentReturn({ reference, planName }: { reference: string; plan
           </p>
         )}
         {state !== "checking" && (
-          <button onClick={dismiss} aria-label="Dismiss" className="ml-auto text-muted-foreground hover:text-foreground">
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="-my-2 -mr-2 ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <X className="h-4 w-4" />
           </button>
         )}
@@ -227,8 +232,26 @@ export function TeamSeats({
   const [error, setError] = useState<string | null>(null);
   const used = members.length + 1;
   const full = used >= seats;
+  const listRef = useRef<HTMLUListElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  /** After a member is removed: the next member's Remove, or "email" when none is left. */
+  const focusAfter = useRef<string | null>(null);
+
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (!target) return;
+    focusAfter.current = null;
+    const el =
+      target === "email"
+        ? emailRef.current
+        : listRef.current?.querySelector<HTMLElement>(`[data-member="${CSS.escape(target)}"]`);
+    el?.focus({ preventScroll: true });
+  }, [members]);
 
   async function send(method: "POST" | "DELETE", value: string) {
+    if (busy) return;
+    // Removing a member takes its row and button away: focus moves on to the next one.
+    const hadFocus = method === "DELETE" && !!listRef.current?.contains(document.activeElement);
     setBusy(method === "POST" ? "add" : value);
     setError(null);
     try {
@@ -239,7 +262,12 @@ export function TeamSeats({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Couldn't update seats.");
-      setMembers((data.members as { email: string }[]).map((m) => m.email));
+      const next = (data.members as { email: string }[]).map((m) => m.email);
+      if (hadFocus) {
+        const target = focusAfterRemove(members, value);
+        focusAfter.current = target && next.includes(target) ? target : "email";
+      }
+      setMembers(next);
       if (method === "POST") setEmail("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -258,7 +286,7 @@ export function TeamSeats({
           </p>
         )}
       </div>
-      <ul className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
+      <ul ref={listRef} className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
         <li className="flex items-center justify-between px-5 py-3 text-sm">
           <span>{ownerEmail}</span>
           <span className="text-muted-foreground">Owner</span>
@@ -279,7 +307,9 @@ export function TeamSeats({
                 variant="ghost"
                 size="sm"
                 aria-label={`Remove ${m}`}
-                disabled={busy !== null}
+                data-member={m}
+                // aria-disabled, not disabled: a disabled button drops the focus it has.
+                aria-disabled={busy !== null}
                 onClick={() => send("DELETE", m)}
               >
                 {busy === m ? <Loader2 className="motion-safe:animate-spin" /> : <Trash2 />}
@@ -297,6 +327,7 @@ export function TeamSeats({
           }}
         >
           <Input
+            ref={emailRef}
             type="email"
             required
             placeholder="colleague@company.co.za"

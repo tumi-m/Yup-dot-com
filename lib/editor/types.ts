@@ -151,6 +151,14 @@ export function isFieldTool(tool: ToolId): tool is `field-${FieldKind}` {
   return tool.startsWith("field-");
 }
 
+const SHAPE_LABELS: Record<ShapeKind, string> = {
+  rect: "Rectangle",
+  ellipse: "Ellipse",
+  line: "Line",
+  arrow: "Arrow",
+  whiteout: "Whiteout",
+};
+
 /** Human label for the properties panel and toasts. */
 export function annotationLabel(ann: Annotation): string {
   switch (ann.type) {
@@ -163,9 +171,7 @@ export function annotationLabel(ann: Annotation): string {
     case "note":
       return "Sticky note";
     case "shape":
-      return ann.shape === "whiteout"
-        ? "Whiteout"
-        : ann.shape.charAt(0).toUpperCase() + ann.shape.slice(1);
+      return SHAPE_LABELS[ann.shape];
     case "markup":
       return ann.markup.charAt(0).toUpperCase() + ann.markup.slice(1);
     case "link":

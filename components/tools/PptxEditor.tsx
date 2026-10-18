@@ -27,6 +27,7 @@ import { ProgressBar } from "@/components/motion/Progress";
 import { resultFloor, scrollBehavior, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { slideProgressNote } from "./progress-note";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
@@ -151,7 +152,7 @@ function sameLook(a: { slide: DeckSlide; meta: Meta }, b: { slide: DeckSlide; me
 }
 
 const iconBtn =
-  "tap inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4";
+  "tap inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4";
 
 export function PptxEditor({ tier }: { tier: Tier }) {
   const router = useRouter();
@@ -245,6 +246,11 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       return;
     }
     const id = ++job.current;
+    // The editor replaces the Choose button: once the deck is open, focus
+    // goes to the first slide (or back to Choose if it can't be opened).
+    const hadFocus = !!flow.ref.current?.contains(document.activeElement);
+    const stillHere = () =>
+      hadFocus && (document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement));
     setFile(picked);
     setSnap(null);
     setMeta(null);
@@ -271,9 +277,11 @@ export function PptxEditor({ tier }: { tier: Tier }) {
       setMeta({ width: deck.width, height: deck.height, themeColors: deck.themeColors });
       setSnap(first);
       setStatus("ready");
+      if (stillHere()) focusThumb(0);
       requestAnimationFrame(() => barRef.current?.scrollIntoView({ block: "start", behavior: scrollBehavior() }));
     } catch (err) {
       if (id !== job.current) return;
+      if (stillHere()) focusNext.current = "choose";
       // Imported up front: the parser's own code may be what didn't load.
       setError(pptxErrorMessage(err));
       setFile(null);
@@ -654,6 +662,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
     if (!grant) return;
     const hadFocus = !!flow.ref.current?.contains(document.activeElement);
     flow.lock(resultFloor());
+    // The export's own notes take the live region; an older message mustn't come back after.
+    setAnnounce("");
     setStatus("exporting");
     setNextFailed(null);
     const visible = current.slides.filter((s) => !s.hidden).length;
@@ -789,7 +799,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   return (
     <>
       <div aria-live="polite" className="sr-only">
-        {announce}
+        {/* An export says when it starts and each quarter, not every slide. */}
+        {status === "exporting" && progress ? slideProgressNote(progress.done, progress.total, "Exporting PDF…") : announce}
       </div>
       <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
@@ -906,9 +917,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                   </p>
                 </div>
                 {status === "exporting" && (
-                  <div className="order-last flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto" aria-live="polite">
+                  <div className="order-last flex w-full items-center justify-end gap-2 sm:order-none sm:w-auto">
                     <ProgressBar value={fraction} determinate label="Exporting PDF" className="h-2 w-24 sm:w-40" />
-                    <span className="text-xs tabular-nums text-muted-foreground">
+                    <span aria-hidden className="text-xs tabular-nums text-muted-foreground">
                       {progress ? `${Math.min(progress.done + 1, progress.total)}/${progress.total}` : ""}
                     </span>
                     <Button variant="ghost" size="sm" className="tap" onClick={cancelExport} data-testid="cancel-export">
@@ -921,8 +932,9 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                     {busy && <Loader2 className="mr-1 h-4 w-4 text-primary motion-safe:animate-spin" aria-label="Working" />}
                     <button
                       className={iconBtn}
-                      onClick={() => restore("undo")}
-                      disabled={!hist?.canUndo || busy || status !== "ready"}
+                      onClick={() => status === "ready" && restore("undo")}
+                      // aria-disabled, not disabled: a disabled button drops the focus it has.
+                      aria-disabled={!hist?.canUndo || busy || status !== "ready"}
                       aria-label="Undo"
                       title="Undo (Ctrl+Z)"
                       data-testid="undo"
@@ -931,8 +943,8 @@ export function PptxEditor({ tier }: { tier: Tier }) {
                     </button>
                     <button
                       className={iconBtn}
-                      onClick={() => restore("redo")}
-                      disabled={!hist?.canRedo || busy || status !== "ready"}
+                      onClick={() => status === "ready" && restore("redo")}
+                      aria-disabled={!hist?.canRedo || busy || status !== "ready"}
                       aria-label="Redo"
                       title="Redo (Ctrl+Shift+Z)"
                       data-testid="redo"

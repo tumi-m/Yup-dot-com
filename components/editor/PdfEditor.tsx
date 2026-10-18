@@ -30,7 +30,9 @@ import { useHistory } from "@/lib/editor/history";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
 import { scrollBehavior } from "@/components/motion/focus";
+import { readShortcutsOn, toolShortcut, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
+  annotationLabel,
   DEFAULT_SETTINGS,
   type Annotation,
   type ToolId,
@@ -48,22 +50,6 @@ import { PageView } from "./PageView";
 import { ThumbnailSidebar } from "./ThumbnailSidebar";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { SignaturePad } from "./SignaturePad";
-
-const SHORTCUTS: Record<string, ToolId> = {
-  v: "select",
-  t: "text",
-  n: "note",
-  h: "highlight",
-  u: "underline",
-  k: "strikeout",
-  d: "draw",
-  w: "whiteout",
-  r: "rect",
-  o: "ellipse",
-  l: "line",
-  a: "arrow",
-  s: "signature",
-};
 
 /**
  * Where the document lives. Cloud documents belong to a signed-in user's
@@ -118,6 +104,9 @@ export function PdfEditor({
   const annotations = history.state;
 
   const [tool, setTool] = useState<ToolId>("select");
+  /** Single-key tool shortcuts, which the visitor can turn off. */
+  const [shortcuts, setShortcuts] = useState(true);
+  useEffect(() => setShortcuts(readShortcutsOn()), []);
   const [settings, setSettings] = useState<ToolSettings>(DEFAULT_SETTINGS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Phones: how much of the canvas the properties sheet covers, in px. */
@@ -128,6 +117,14 @@ export function PdfEditor({
 
   const [placementImage, setPlacementImage] = useState<string | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
+  /** Bumped to place the current tool's item in the middle of the page. */
+  const [placeNow, setPlaceNow] = useState(0);
+  /** The last tool was chosen with the keyboard, so its item is placed for the visitor. */
+  const keyboardTool = useRef(false);
+  /** Place the signature once its dialog has closed (and let go of focus). */
+  const placeAfterSign = useRef(false);
+  /** An annotation id, or "page": where focus goes once a deleted annotation has gone. */
+  const focusAfter = useRef<string | null>(null);
 
   const { toasts, toast, dismiss } = useToasts();
 
@@ -223,14 +220,18 @@ export function PdfEditor({
 
   // ---- annotation mutations ----
   const createAnnotation = useCallback(
-    (ann: Annotation) => {
+    (ann: Annotation, keyboard = false) => {
       history.commit((prev) => [...prev, ann]);
       setSelectedId(ann.id);
-      if (ann.type === "text" || ann.type === "note" || ann.type === "image") {
+      // Placed from the keyboard: select it, so the keys move it from here.
+      if (keyboard || ann.type === "text" || ann.type === "note" || ann.type === "image") {
         setTool("select");
       }
+      if (keyboard && ann.type !== "text" && ann.type !== "note") {
+        toast(`${annotationLabel(ann)} added. Arrow keys move it, Alt+arrow keys resize it.`, "info");
+      }
     },
-    [history]
+    [history, toast]
   );
 
   const updateAnnotation = useCallback(
@@ -250,19 +251,46 @@ export function PdfEditor({
 
   const deleteAnnotation = useCallback(
     (id: string) => {
+      // Keep focus on the page: on the next annotation when the deleted one
+      // had it, or on the page itself when its delete button or panel did.
+      const area = canvasArea.current;
+      const own = area?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(id)}"]`);
+      const active = document.activeElement;
+      if (area && own && active) {
+        const all = Array.from(area.querySelectorAll<HTMLElement>("[data-ann-focus]"));
+        const i = all.indexOf(active as HTMLElement);
+        if (i >= 0 && own.contains(active)) {
+          const next = all[i + 1] ?? all[i - 1];
+          focusAfter.current = next?.closest<HTMLElement>("[data-ann-id]")?.dataset.annId ?? "page";
+        } else if (own.contains(active) || active.closest("[data-properties]")) {
+          focusAfter.current = "page";
+        }
+      }
       history.commit((prev) => prev.filter((a) => a.id !== id));
       setSelectedId((s) => (s === id ? null : s));
     },
     [history]
   );
 
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (!target) return;
+    focusAfter.current = null;
+    const area = canvasArea.current;
+    const el =
+      target === "page"
+        ? area?.querySelector<HTMLElement>("[data-page-layer]")
+        : area?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(target)}"] [data-ann-focus]`);
+    el?.focus({ preventScroll: true });
+  }, [annotations]);
+
   // ---- structural page operations ----
   const runStructural = useCallback(
     async (
       transform: (input: Uint8Array) => Promise<Uint8Array>,
       message: string
-    ) => {
-      if (!bytes || busyRef.current) return;
+    ): Promise<boolean> => {
+      if (!bytes || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
       try {
@@ -276,8 +304,10 @@ export function PdfEditor({
         setFormValues({});
         setBytes(new Uint8Array(result));
         toast(message, "success");
+        return true;
       } catch (err) {
         toast(friendlyPdfError(err).message || "Operation failed.", "error");
+        return false;
       } finally {
         busyRef.current = false;
         setBusy(false);
@@ -295,14 +325,14 @@ export function PdfEditor({
     );
   };
 
-  const handleDeletePage = (target: number) => {
+  const handleDeletePage = async (target: number) => {
     if (numPages <= 1) {
       toast("A document must keep at least one page.", "error");
-      return;
+      return false;
     }
-    runStructural((b) => deletePages(b, [target]), "Page deleted.").then(() =>
-      setPage((p) => Math.max(0, Math.min(p, numPages - 2)))
-    );
+    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.");
+    setPage((p) => Math.max(0, Math.min(p, numPages - 2)));
+    return ok;
   };
 
   async function handleMerge(files: FileList | null) {
@@ -319,7 +349,8 @@ export function PdfEditor({
     reader.onload = () => {
       setPlacementImage(String(reader.result));
       setTool("image");
-      toast("Click on the page to place the image.", "info");
+      if (keyboardTool.current) setPlaceNow((n) => n + 1);
+      else toast("Click on the page to place the image.", "info");
     };
     reader.readAsDataURL(file);
     if (imageInput.current) imageInput.current.value = "";
@@ -466,7 +497,8 @@ export function PdfEditor({
   }, [bytes, pristine, buildAuthorized, supabase, source, docName, numPages, history, toast, tier]);
 
   // ---- tool switching side effects ----
-  const handleToolChange = (next: ToolId) => {
+  const handleToolChange = (next: ToolId, keyboard = false) => {
+    keyboardTool.current = keyboard;
     if (next === "signature") {
       if (!placementImage) {
         setSigOpen(true);
@@ -478,6 +510,10 @@ export function PdfEditor({
       return;
     }
     setTool(next);
+    // Chosen with the keyboard: there is no pointer to place it with, so it
+    // goes in the middle of the page, ready to move with the arrow keys.
+    if (keyboard && next === "draw") toast("Draw with a mouse, pen or finger.", "info");
+    else if (keyboard && next !== "select") setPlaceNow((n) => n + 1);
   };
 
   // ---- zoom ----
@@ -557,8 +593,8 @@ export function PdfEditor({
         deleteAnnotation(selectedId);
         return;
       }
-      const mapped = SHORTCUTS[e.key.toLowerCase()];
-      if (mapped && !mod) {
+      const mapped = toolShortcut(e, shortcuts);
+      if (mapped) {
         e.preventDefault();
         handleToolChange(mapped);
       }
@@ -566,7 +602,7 @@ export function PdfEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, selectedId, deleteAnnotation, handleSave, placementImage]);
+  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts]);
 
   // Don't let a stray tab close, link or Back throw away unsaved edits.
   useUnsavedGuard(dirty);
@@ -625,7 +661,8 @@ export function PdfEditor({
             variant="ghost"
             size="icon"
             onClick={history.undo}
-            disabled={!history.canUndo}
+            // aria-disabled, not disabled: a disabled button drops the focus it has.
+            aria-disabled={!history.canUndo}
             title="Undo (Ctrl+Z)"
             aria-label="Undo"
           >
@@ -635,7 +672,7 @@ export function PdfEditor({
             variant="ghost"
             size="icon"
             onClick={history.redo}
-            disabled={!history.canRedo}
+            aria-disabled={!history.canRedo}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
           >
@@ -671,6 +708,11 @@ export function PdfEditor({
           onToolChange={handleToolChange}
           settings={settings}
           onSettingsChange={setSettings}
+          shortcuts={shortcuts}
+          onShortcutsChange={(on) => {
+            setShortcuts(on);
+            writeShortcutsOn(on);
+          }}
         />
       )}
 
@@ -732,6 +774,7 @@ export function PdfEditor({
                 onCommitEnd={history.end}
                 onDelete={deleteAnnotation}
                 onPlacementUsed={() => setPlacementImage(null)}
+                placeNow={placeNow}
               />
             </div>
           )}
@@ -799,7 +842,15 @@ export function PdfEditor({
             pageCount={numPages}
             onChange={commitAnnotation}
             onDelete={() => deleteAnnotation(selected.id)}
-            onClose={() => setSelectedId(null)}
+            onClose={() => {
+              // Back to the annotation the panel was for, not to the top of the page.
+              if (document.activeElement?.closest("[data-properties]")) {
+                canvasArea.current
+                  ?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(selected.id)}"] [data-ann-focus]`)
+                  ?.focus({ preventScroll: true });
+              }
+              setSelectedId(null);
+            }}
             onCover={setSheetCover}
           />
         )}
@@ -823,10 +874,18 @@ export function PdfEditor({
       <SignaturePad
         open={sigOpen}
         onOpenChange={setSigOpen}
-        onSave={(url) => {
+        onSave={(url, keyboard) => {
           setPlacementImage(url);
           setTool("signature");
-          toast("Click on the page to place your signature.", "info");
+          if (keyboard) placeAfterSign.current = true;
+          else toast("Click on the page to place your signature.", "info");
+        }}
+        onCloseAutoFocus={(e) => {
+          if (!placeAfterSign.current) return;
+          placeAfterSign.current = false;
+          // The placed signature takes focus instead of the toolbar.
+          e.preventDefault();
+          setPlaceNow((n) => n + 1);
         }}
       />
 

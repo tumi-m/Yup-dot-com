@@ -19,6 +19,7 @@ import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { slideProgressNote } from "./progress-note";
 import { SlideView } from "@/components/slides/SlideView";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
@@ -118,6 +119,11 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       return;
     }
     const id = ++job.current;
+    // The file row replaces the Choose button: once the deck is read, focus
+    // goes to Convert (or back to Choose if it can't be read).
+    const hadFocus = !!flow.ref.current?.contains(document.activeElement);
+    const stillHere = () =>
+      hadFocus && (document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement));
     setFile(picked);
     setDeck(null);
     setResult(null);
@@ -126,10 +132,12 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
       const { parsePptx } = await import("@/lib/pptx/parse");
       const parsed = await parsePptx(await picked.arrayBuffer());
       if (id !== job.current) return;
+      if (stillHere()) focusNext.current = "convert";
       setDeck(parsed);
       setStatus("ready");
     } catch (err) {
       if (id !== job.current) return;
+      if (stillHere()) focusNext.current = "choose";
       // Imported up front: the parser's own code may be what didn't load.
       setError(pptxErrorMessage(err));
       setFile(null);
@@ -236,6 +244,10 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
 
   return (
     <>
+      {/* Says when converting starts and each quarter, not every slide. */}
+      <p className="sr-only" aria-live="polite">
+        {status === "working" && progress ? slideProgressNote(progress.done, progress.total, "Converting slides…") : ""}
+      </p>
       <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
       <AnimatePresence mode="wait" initial={false}>
         {status === "done" && result && file ? (
@@ -406,7 +418,7 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
                     </motion.div>
                     <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
                       <WorkingGlyph />
-                      <span aria-live="polite" className="inline-flex gap-1.5 tabular-nums">
+                      <span aria-hidden className="inline-flex gap-1.5 tabular-nums">
                         {progress ? `Slide ${Math.min(progress.done + 1, progress.total)} of ${progress.total}` : "Casting…"}
                         <ProgressPercent value={fraction} />
                       </span>
