@@ -130,15 +130,19 @@ export async function POST(request: Request) {
           send({ type: "text", text: result.value });
           result = await stream.next();
         }
+        // An answer that never arrived shouldn't cost the user a turn. The
+        // browser counts a turn only once text arrives, so the two agree.
+        if (!delivered) await claim.refund().catch(() => {});
         if (result.value.doneReason === "length") {
           send({ type: "error", message: "The answer was cut short. Ask a narrower question." });
+        } else if (!delivered) {
+          send({ type: "error", message: userMessage(null) });
         }
         send({ type: "done", stopReason: result.value.doneReason });
       } catch (error) {
         if (!(error instanceof OllamaError) || (error.kind !== "aborted" && error.kind !== "rate_limit")) {
           console.error("ai/chat error:", error instanceof Error ? error.message : error);
         }
-        // An answer that never arrived shouldn't cost the user a turn.
         if (!delivered) await claim.refund().catch(() => {});
         try {
           send({ type: "error", message: userMessage(error) });

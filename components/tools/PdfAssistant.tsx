@@ -211,8 +211,6 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
-        setMessages(history.slice(0, -1));
-        setDraft(question);
         if (res.status === 429 && data.reason === "ai") {
           setRemaining(0);
           if (data.upgrade) {
@@ -229,8 +227,8 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         });
         return;
       }
+      // A turn counts once its answer starts: one that never arrives is refunded.
       const left = res.headers.get("x-ai-remaining");
-      if (left !== null) setRemaining(Number(left));
       setPagesRead(res.headers.get("x-ai-pages"));
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -246,6 +244,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           if (!line) continue;
           const event = JSON.parse(line) as { type: string; text?: string; message?: string };
           if (event.type === "text" && event.text) {
+            if (!answer && left !== null) setRemaining(Number(left));
             answer += event.text;
             setMessages((m) => {
               const next = [...m];
@@ -261,13 +260,19 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       if ((e as Error).name !== "AbortError") setError({ message: "Connection lost. Please try again." });
     } finally {
       setStreaming(false);
+      // "New PDF" clears this while the answer comes in: that conversation is gone.
+      const current = abortRef.current === controller;
+      if (current) abortRef.current = null;
       if (answer) {
         setAnnounce(answer.replace(/[*_`#>]+/g, ""));
         trackToolUsed("chat-with-pdf");
+      } else if (current) {
+        // No answer came (refused, failed or stopped first), so the question
+        // leaves the conversation, where it would be sent again with the next
+        // one, and goes back in the box.
+        setMessages(history.slice(0, -1));
+        setDraft((d) => d || question);
       }
-      abortRef.current = null;
-      // Drop an assistant bubble that never received text.
-      setMessages((m) => (m.length && m[m.length - 1].role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m));
     }
   }
 
@@ -319,7 +324,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {remaining} left today
           </span>
         )}
-        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
+        <Button variant="ghost" size="sm" className="pointer-coarse:h-11" onClick={() => { abortRef.current?.abort(); abortRef.current = null; setDoc(null); setMessages([]); setError(null); setPagesRead(null); }}>
           <RotateCcw /> New PDF
         </Button>
       </div>
@@ -428,12 +433,14 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
             {draft.length.toLocaleString("en")}/{MAX_MESSAGE_CHARS.toLocaleString("en")}
           </span>
         )}
+        {/* Separate buttons (keys): Stop puts the question back in the box at
+            once, and the same element turned into Send would then submit it. */}
         {streaming ? (
-          <Button type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
+          <Button key="stop" type="button" size="icon" variant="outline" className="h-11 w-11" onClick={() => abortRef.current?.abort()} aria-label="Stop">
             <Square className="h-4 w-4" />
           </Button>
         ) : (
-          <Button type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
+          <Button key="send" type="submit" size="icon" className="h-11 w-11" disabled={!draft.trim()} aria-label="Send">
             <ArrowUp />
           </Button>
         )}
