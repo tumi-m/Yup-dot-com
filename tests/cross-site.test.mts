@@ -4,6 +4,9 @@
  * still serve the site's own.
  */
 process.env.NEXT_PUBLIC_SITE_URL = "https://pdfwizard.test";
+// One proxy in front, so each request's X-Forwarded-For is the visitor's
+// address (lib/usage.ts clientIp).
+process.env.TRUSTED_PROXY_HOPS = "1";
 import { createRequire } from "node:module";
 import { refuseCrossSite } from "../lib/cross-site.ts";
 

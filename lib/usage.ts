@@ -174,12 +174,56 @@ export function setUsageStore(next: UsageStore | null) {
 /* Subjects                                                            */
 /* ------------------------------------------------------------------ */
 
-export function clientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip")?.trim() ||
-    "unknown"
-  );
+/** The address every request counts as when none can be trusted. */
+export const UNKNOWN_IP = "unknown";
+
+/**
+ * TRUSTED_PROXY_HOPS: how many proxies in front of the app (outside Vercel)
+ * each append the address they saw to X-Forwarded-For. 0 when unset or not a
+ * small whole number.
+ */
+export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.TRUSTED_PROXY_HOPS?.trim() ?? "";
+  if (!/^\d{1,2}$/.test(raw)) return 0;
+  return Math.min(Number(raw), 20);
+}
+
+let warnedNoProxy = false;
+
+/**
+ * The client's address, taken only from a hop the deployment trusts. Never
+ * the leftmost X-Forwarded-For entry: proxies append to that header, so its
+ * first entry is whatever the client sent, and trusting it would let anyone
+ * pick a new address for every request and never reach a per-address limit.
+ *
+ * - On Vercel (VERCEL is set), the edge writes x-real-ip from the connection
+ *   it accepted and replaces any copy a client sent.
+ * - Elsewhere, with TRUSTED_PROXY_HOPS=N, the client is the Nth entry from
+ *   the right of X-Forwarded-For: each of the N proxies appended the address
+ *   it saw, and anything further left came from the client.
+ * - With neither, no header is trusted. `next start` and `next dev` pass a
+ *   client's X-Forwarded-For on untouched (they fill it in from the socket
+ *   only when it is missing), so every request counts as one address. Limits
+ *   per account still apply to signed-in people.
+ */
+export function clientIp(request: Request, env: NodeJS.ProcessEnv = process.env): string {
+  const headers = request.headers;
+  if (env.VERCEL) {
+    const vercel = headers.get("x-vercel-forwarded-for")?.split(",").pop()?.trim();
+    return headers.get("x-real-ip")?.trim() || vercel || UNKNOWN_IP;
+  }
+  const hops = trustedProxyHops(env);
+  if (hops === 0) {
+    if (!warnedNoProxy && env.NODE_ENV === "production") {
+      warnedNoProxy = true;
+      console.warn(
+        "Usage limits: not on Vercel and TRUSTED_PROXY_HOPS is not set, so guests' addresses can't be trusted and all of them share one allowance. Set it to the number of proxies in front of the app."
+      );
+    }
+    return UNKNOWN_IP;
+  }
+  const chain = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return chain[Math.max(0, chain.length - hops)] || UNKNOWN_IP;
 }
 
 function ipSalt(env: NodeJS.ProcessEnv = process.env): string {
@@ -214,9 +258,9 @@ export function hashIp(ip: string, salt = ipSalt()): string {
   return createHash("sha256").update(`${salt}|${normalizeIp(ip)}`).digest("hex");
 }
 
-/** Who a request counts against: the account, or the guest's hashed IP. */
-export function usageSubject(request: Request, user: { id: string } | null, salt?: string): string {
-  return user ? `u:${user.id}` : `ip:${hashIp(clientIp(request), salt)}`;
+/** Who a request counts against: the account, or the guest's hashed IP (see clientIp). */
+export function usageSubject(request: Request, user: { id: string } | null, salt?: string, env: NodeJS.ProcessEnv = process.env): string {
+  return user ? `u:${user.id}` : `ip:${hashIp(clientIp(request, env), salt)}`;
 }
 
 /* ------------------------------------------------------------------ */

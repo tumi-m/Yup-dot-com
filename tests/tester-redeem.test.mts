@@ -14,7 +14,7 @@ import {
   type RedeemDeps,
 } from "../lib/tester-redeem.ts";
 import { REDEEM_ERRORS, REDEEM_TOO_MANY, REDEEM_UNAVAILABLE } from "../lib/tester-access.ts";
-import { memoryUsageStore } from "../lib/usage.ts";
+import { memoryUsageStore, usageSubject } from "../lib/usage.ts";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail: unknown = "") {
@@ -189,6 +189,34 @@ check("only P0001 with a known reason is a refusal", redeemErrorOf({ code: "P000
   check("another address still can", other.status === 400, other.status);
 }
 {
+  // The route's own address rule (lib/usage.ts usageSubject): a new account
+  // and a new forged X-Forwarded-For on every try still meet the limit per
+  // address, which is what the limit is for.
+  const attack = async (env: Record<string, string>, headersFor: (i: number) => Record<string, string>) => {
+    const s = setup({ db: () => refusal("invalid_code") });
+    s.deps.ipSubject = (req) => usageSubject(req, null, "test-salt", env as NodeJS.ProcessEnv);
+    const statuses: number[] = [];
+    for (let i = 0; i < REDEEM_LIMITS.ip + 10; i++) {
+      s.deps.getUser = async () => ({ id: `fresh-account-${i}` });
+      statuses.push((await post(s.deps, { code: CODE }, headersFor(i))).status);
+    }
+    return { passed: statuses.filter((x) => x !== 429).length, blocked: statuses.filter((x) => x === 429).length };
+  };
+  const forged = (i: number) => `198.51.${Math.floor(i / 250)}.${i % 250}`;
+  const held = (r: { passed: number; blocked: number }) => r.passed === REDEEM_LIMITS.ip && r.blocked === 10;
+
+  const direct = await attack({}, (i) => ({ "x-forwarded-for": forged(i) }));
+  check("no proxy declared: a forged X-Forwarded-For per try still meets the address limit", held(direct), direct);
+  const realIp = await attack({}, (i) => ({ "x-forwarded-for": forged(i), "x-real-ip": forged(i) }));
+  check("no proxy declared: nor does a forged X-Real-IP", held(realIp), realIp);
+  const proxied = await attack({ TRUSTED_PROXY_HOPS: "1" }, (i) => ({ "x-forwarded-for": `${forged(i)}, 203.0.113.7` }));
+  check("behind one proxy: forged entries left of the proxy's are ignored", held(proxied), proxied);
+  const vercel = await attack({ VERCEL: "1" }, (i) => ({ "x-forwarded-for": forged(i), "x-real-ip": "203.0.113.7" }));
+  check("on Vercel: the edge's address, not the forwarded chain", held(vercel), vercel);
+  const people = await attack({ TRUSTED_PROXY_HOPS: "1" }, (i) => ({ "x-forwarded-for": `203.0.113.7, ${forged(i)}` }));
+  check("behind one proxy: different real addresses each have their own limit", people.passed === REDEEM_LIMITS.ip + 10 && people.blocked === 0, people);
+}
+{
   const s = setup();
   s.deps.consume = async () => { throw new Error("db down"); };
   const r = await json(await post(s.deps, { code: CODE }));
@@ -199,6 +227,7 @@ check("only P0001 with a known reason is a refusal", redeemErrorOf({ code: "P000
 const route = readFileSync(new URL("../app/api/access/redeem/route.ts", import.meta.url), "utf8");
 check("the route redeems with the service role", /createAdminClient\(\)\.rpc\("redeem_tester_code", args\)/.test(route));
 check("the route takes the user from the session", /getUser: getCurrentUser/.test(route));
+check("the route counts tries by address with lib/usage.ts's rule", /ipSubject: \(req\) => usageSubject\(req, null\)/.test(route) && !/x-forwarded-for|x-real-ip/i.test(route));
 check("the route has no GET (the code is never in a URL)", !/export (async )?function GET/.test(route));
 const client = readFileSync(new URL("../components/TesterAccess.tsx", import.meta.url), "utf8");
 check("no service key or admin client in the browser code", !/SERVICE_ROLE|createAdminClient|tester-redeem/.test(client));

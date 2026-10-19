@@ -92,7 +92,10 @@ Limits live in `lib/limits.ts` and `lib/usage.ts`; the upsell UI in
 run there). Daily allowances (AI answers, edits, video downloads, Slides
 imports) are counted on the server in Supabase (`usage_counters`, through
 functions only the service role can call), keyed by user id or, for guests,
-by a salted SHA-256 of their IP (raw IPs are never stored). Without
+by a salted SHA-256 of their IP (raw IPs are never stored). The IP is the
+one Vercel's edge reports (`x-real-ip`), never the first entry of
+`X-Forwarded-For`, which the visitor writes. Hosted elsewhere, set
+`TRUSTED_PROXY_HOPS`; without it every guest shares one allowance. Without
 `SUPABASE_SERVICE_ROLE_KEY` they are counted in server memory instead (fine for
 local dev, not for Vercel). AI also has a burst limit (6 a minute) and a
 site-wide daily cap; an answer that never arrives is given back. An edit is
@@ -351,6 +354,11 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   account refuse requests from other sites' pages (`Sec-Fetch-Site`,
   `Origin`) and bodies that aren't JSON (`lib/cross-site.ts`), so another
   site can't use up a guest's free edit, AI answers or downloads.
+- **Limits per address** (guests' allowances, tester code tries) count the
+  address Vercel's edge saw, or the one a declared proxy appended
+  (`TRUSTED_PROXY_HOPS`), never one the visitor wrote into
+  `X-Forwarded-For` (`clientIp` in `lib/usage.ts`), so a new made-up
+  address per request doesn't get a new allowance.
 - **Untrusted files** are parsed in the browser; PowerPoint text is sanitised
   before it is shown as HTML.
 - **Headers.** HSTS, `nosniff`, `X-Frame-Options`, a Referrer and Permissions
@@ -617,6 +625,7 @@ Variables** and redeploy:
 | `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
 | `MEDIA_SIGNING_SECRET` | Recommended. Signs and encrypts X, TikTok and Instagram download links (with keys derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
 | `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
+| `TRUSTED_PROXY_HOPS` | Only when hosted outside Vercel: how many proxies in front of the app append to `X-Forwarded-For` (`1` for one nginx or load balancer). The visitor's address is that many entries from the right; anything further left is ignored. Unset: forwarding headers aren't trusted and every guest shares one allowance. Ignored on Vercel |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 | `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |
 | `AI_BURST_PER_MINUTE` | Optional. AI requests per minute per user or guest (default 6) |

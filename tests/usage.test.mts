@@ -5,9 +5,9 @@
  * with refunds, the daily edit allowance and the watermark decision by tier.
  */
 import {
-  aiPolicy, aiRemaining, claimAiAnswer, claimEdit, consumeDaily, hashIp, memoryUsageStore, normalizeIp,
-  periodStart, setUsageStore, supabaseUsageStore, usageStore, usageSubject, withFallback,
-  AI_BUSY_MESSAGE, AI_BURST_MESSAGE, type RpcClient, type UsageStore, type UsageWindow,
+  aiPolicy, aiRemaining, claimAiAnswer, claimEdit, clientIp, consumeDaily, hashIp, memoryUsageStore, normalizeIp,
+  periodStart, setUsageStore, supabaseUsageStore, trustedProxyHops, usageStore, usageSubject, withFallback,
+  AI_BUSY_MESSAGE, AI_BURST_MESSAGE, UNKNOWN_IP, type RpcClient, type UsageStore, type UsageWindow,
 } from "../lib/usage.ts";
 import { LIMITS, type Tier } from "../lib/limits.ts";
 
@@ -134,14 +134,56 @@ check("period: minute start", periodStart("minute", T0 + 59_999) === T0 && perio
   const h = hashIp("203.0.113.9", SALT);
   check("ip: SHA-256 hex", /^[0-9a-f]{64}$/.test(h));
   check("ip: deterministic per salt", h === hashIp("203.0.113.9", SALT) && h !== hashIp("203.0.113.9", "other") && h !== hashIp("203.0.113.10", SALT));
-  const req = new Request("http://x/", { headers: { "x-forwarded-for": "203.0.113.9, 10.0.0.1" } });
-  const subject = usageSubject(req, null, SALT);
-  check("ip: guest subject is ip:<hash> of the first forwarded address", subject === `ip:${h}` && !subject.includes("203.0.113"), subject);
-  check("ip: x-real-ip when no x-forwarded-for", usageSubject(new Request("http://x/", { headers: { "x-real-ip": "203.0.113.9" } }), null, SALT) === `ip:${h}`);
-  check("ip: account holders are keyed by user id", usageSubject(req, { id: "abc" }, SALT) === "u:abc");
+  const oneProxy = { TRUSTED_PROXY_HOPS: "1" } as NodeJS.ProcessEnv;
+  const req = new Request("http://x/", { headers: { "x-forwarded-for": "198.51.100.1, 203.0.113.9" } });
+  const subject = usageSubject(req, null, SALT, oneProxy);
+  check("ip: guest subject is ip:<hash> of the address the trusted proxy saw", subject === `ip:${h}` && !subject.includes("203.0.113"), subject);
+  check("ip: account holders are keyed by user id", usageSubject(req, { id: "abc" }, SALT, oneProxy) === "u:abc");
   check("ip: IPv6 counted per /64", normalizeIp("2001:db8:1:2:aaaa::1") === "2001:db8:1:2::/64" && hashIp("2001:db8:1:2::5", SALT) === hashIp("2001:db8:1:2:ffff:1:2:3", SALT));
   check("ip: IPv4-mapped IPv6 and ports normalised", normalizeIp("::ffff:203.0.113.9") === "203.0.113.9" && normalizeIp("203.0.113.9:443") === "203.0.113.9");
+}
 
+// ---------- Which address counts: never one the client wrote ----------
+{
+  const ip = (headers: Record<string, string>, env: Record<string, string> = {}) =>
+    clientIp(new Request("http://x/", { headers }), env as NodeJS.ProcessEnv);
+  const xff = (v: string) => ({ "x-forwarded-for": v });
+
+  // No trusted proxy and not on Vercel (next start / next dev): every forwarding header is the client's.
+  check("ip: no proxy declared, X-Forwarded-For is ignored", ip(xff("203.0.113.7")) === UNKNOWN_IP && ip(xff("198.51.100.1")) === UNKNOWN_IP);
+  check("ip: no proxy declared, X-Real-IP is ignored too", ip({ "x-real-ip": "203.0.113.7" }) === UNKNOWN_IP);
+  check("ip: no proxy declared, rotating addresses all count as one",
+    new Set(Array.from({ length: 60 }, (_, i) => usageSubject(new Request("http://x/", { headers: xff(`198.51.0.${i}`) }), null, "s", {} as NodeJS.ProcessEnv))).size === 1);
+  check("ip: TRUSTED_PROXY_HOPS that isn't a small whole number counts as none",
+    ["", "x", "-1", "1.5", "999"].every((v) => trustedProxyHops({ TRUSTED_PROXY_HOPS: v } as NodeJS.ProcessEnv) === 0) &&
+      trustedProxyHops({ TRUSTED_PROXY_HOPS: " 2 " } as NodeJS.ProcessEnv) === 2);
+
+  // One proxy: the client is the last entry; whatever the client sent sits to its left.
+  const one = { TRUSTED_PROXY_HOPS: "1" };
+  check("ip: one proxy, the address it appended", ip(xff("203.0.113.9"), one) === "203.0.113.9");
+  check("ip: one proxy, a forged entry on the left is ignored", ip(xff("198.51.100.77, 203.0.113.9"), one) === "203.0.113.9" && ip(xff("1.1.1.1,2.2.2.2 , 203.0.113.9"), one) === "203.0.113.9");
+  check("ip: one proxy, rotating forged entries all count as the proxy's address",
+    new Set(Array.from({ length: 60 }, (_, i) => ip(xff(`198.51.0.${i}, 203.0.113.9`), one))).size === 1);
+  check("ip: one proxy, X-Real-IP is not trusted", ip({ "x-real-ip": "198.51.100.77", ...xff("203.0.113.9") }, one) === "203.0.113.9");
+  check("ip: one proxy, no header at all is unknown", ip({}, one) === UNKNOWN_IP && ip(xff(" , "), one) === UNKNOWN_IP);
+
+  // Two proxies: second from the right.
+  const two = { TRUSTED_PROXY_HOPS: "2" };
+  check("ip: two proxies, second entry from the right", ip(xff("198.51.100.77, 203.0.113.9, 10.0.0.2"), two) === "203.0.113.9");
+  check("ip: two proxies, a chain shorter than declared uses the first entry", ip(xff("203.0.113.9"), two) === "203.0.113.9");
+
+  // Vercel: the edge's x-real-ip, never the forwarded chain's first entry.
+  const vercel = { VERCEL: "1" };
+  check("ip: on Vercel, x-real-ip", ip({ "x-real-ip": "203.0.113.9", ...xff("198.51.100.77, 203.0.113.9") }, vercel) === "203.0.113.9");
+  check("ip: on Vercel, x-vercel-forwarded-for when x-real-ip is missing", ip({ "x-vercel-forwarded-for": "203.0.113.9", ...xff("198.51.100.77") }, vercel) === "203.0.113.9");
+  check("ip: on Vercel, X-Forwarded-For alone is not trusted", ip(xff("198.51.100.77"), vercel) === UNKNOWN_IP);
+  check("ip: on Vercel, TRUSTED_PROXY_HOPS doesn't apply", ip({ "x-real-ip": "203.0.113.9", ...xff("198.51.100.77, 192.0.2.1") }, { ...vercel, TRUSTED_PROXY_HOPS: "1" }) === "203.0.113.9");
+}
+
+// ---------- Salt ----------
+{
+  const SALT = "test-salt";
+  const h = hashIp("203.0.113.9", SALT);
   const env = process.env;
   const saved = { salt: env.USAGE_HASH_SALT, key: env.SUPABASE_SERVICE_ROLE_KEY, media: env.MEDIA_SIGNING_SECRET };
   env.USAGE_HASH_SALT = SALT;
