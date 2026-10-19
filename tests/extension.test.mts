@@ -51,5 +51,32 @@ check("MP3 goes to the X to MP3 tool", u.origin === "https://pdfwizard.xyz" && u
 check("MP4 goes to the X to MP4 tool", new URL(toolUrl("https://x.com/i/status/1", "mp4")).pathname === "/tools/x-to-mp4");
 check("visits from the extension are labelled", u.searchParams.get("utm_source") === "extension");
 
+// Packing: only what the manifest names goes into the store zip, and a zip
+// with a secret in it isn't made.
+{
+  const { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, appendFileSync } = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const JSZip = (await import("jszip")).default;
+  const tmp = mkdtempSync(join(tmpdir(), "ext-pack-"));
+  const ext = join(tmp, "extension");
+  cpSync("extension", ext, { recursive: true });
+  writeFileSync(join(ext, ".env.local.json"), JSON.stringify({ PAYSTACK_SECRET_KEY: "sk_live_canary_ext_9q" }));
+  mkdirSync(join(ext, ".vscode"));
+  writeFileSync(join(ext, ".vscode", "settings.json"), "{}");
+  writeFileSync(join(ext, "notes.js"), "// not loaded by the extension\n");
+  const pack = () => spawnSync(process.execPath, ["scripts/pack-extension.mjs", ext, join(tmp, "dist")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  const ok = pack();
+  const zip = ok.status === 0 ? await JSZip.loadAsync(readFileSync(join(tmp, "dist", `pdf-wizard-x-${manifest.version}.zip`))) : null;
+  const names = zip ? Object.keys(zip.files).sort() : [];
+  check("the zip holds only manifest.json and the files it names",
+    JSON.stringify(names) === JSON.stringify(["content.css", "content.js", "icons/icon-128.png", "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "manifest.json"]), names.join(", ") || ok.stderr);
+  appendFileSync(join(ext, "content.js"), `\nconst key = "sk_live_${"0a1b2c3d".repeat(5)}";\n`);
+  const bad = pack();
+  check("a secret in a packed file stops the pack", bad.status === 1 && /content\.js holds a Paystack/.test(bad.stderr), bad.stderr);
+  rmSync(tmp, { recursive: true, force: true });
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

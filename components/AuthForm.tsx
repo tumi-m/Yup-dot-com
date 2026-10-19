@@ -9,7 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
-import { authErrorMessage, authFailure, authSwitchHref, resetLinkTarget, safeRedirect } from "@/components/auth-redirect";
+import {
+  MIN_PASSWORD_LENGTH,
+  authErrorMessage,
+  authFailure,
+  authSwitchHref,
+  resetLinkTarget,
+  revealsAccount,
+  safeRedirect,
+} from "@/components/auth-redirect";
+import { Captcha, TURNSTILE_SITE_KEY } from "@/components/Captcha";
 import { track } from "@/lib/analytics";
 
 /** Log in, sign up, or ask for a link to reset a forgotten password. */
@@ -22,6 +31,9 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Cloudflare Turnstile, when NEXT_PUBLIC_TURNSTILE_SITE_KEY is set.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   const isSignup = mode === "signup";
   const isReset = mode === "reset";
@@ -50,14 +62,17 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     // the whole form is in the static HTML.
     const redirect = new URLSearchParams(window.location.search).get("redirect");
     const redirectTo = safeRedirect(redirect);
+    const captcha = TURNSTILE_SITE_KEY ? { captchaToken: captchaToken ?? undefined } : {};
 
     try {
       if (isReset) {
         // The link signs them in and opens the page to choose a new password.
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: resetLinkTarget(window.location.origin, safeRedirect(redirect, "")),
+          ...captcha,
         });
-        if (error) throw error;
+        // The same answer whether or not the email has an account.
+        if (error && !revealsAccount(error, "reset")) throw error;
         setMessage("If an account uses that email, we've sent it a link to reset the password.");
       } else if (isSignup) {
         const { error } = await supabase.auth.signUp({
@@ -69,9 +84,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
               typeof window !== "undefined"
                 ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirectTo)}`
                 : undefined,
+            ...captcha,
           },
         });
-        if (error) throw error;
+        if (error) {
+          // An email that already has an account gets the same answer as a new one.
+          if (!revealsAccount(error, "signup")) throw error;
+          setMessage("Check your email to confirm your account, then log in.");
+          return;
+        }
         track("sign_up", { method: "email" });
         // If email confirmation is disabled the session exists immediately.
         const { data } = await supabase.auth.getSession();
@@ -91,6 +112,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
+          options: captcha,
         });
         if (error) throw error;
         router.push(redirectTo);
@@ -100,6 +122,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
       setError(authFailure(err));
     } finally {
       setLoading(false);
+      // A Turnstile token works once.
+      if (TURNSTILE_SITE_KEY) setCaptchaReset((n) => n + 1);
     }
   }
 
@@ -171,9 +195,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={isSignup ? MIN_PASSWORD_LENGTH : undefined}
+                aria-describedby={isSignup ? "auth-password-hint" : undefined}
                 autoComplete={isSignup ? "new-password" : "current-password"}
               />
+              {isSignup && (
+                <p id="auth-password-hint" className="mt-1.5 text-xs text-muted-foreground">
+                  At least {MIN_PASSWORD_LENGTH} characters.
+                </p>
+              )}
               {!isSignup && (
                 <div className="mt-2 flex justify-end">
                   <Link
@@ -198,7 +228,9 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
             </p>
           )}
 
-          <Button type="submit" className="h-11 w-full" disabled={loading || !configured}>
+          {configured && <Captcha onToken={setCaptchaToken} resetKey={captchaReset} />}
+
+          <Button type="submit" className="h-11 w-full" disabled={loading || !configured || (!!TURNSTILE_SITE_KEY && !captchaToken)}>
             {loading && <Loader2 className="motion-safe:animate-spin" />}
             {isSignup ? "Sign up" : isReset ? "Send link" : "Log in"}
           </Button>

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Script from "next/script";
+import { headers } from "next/headers";
 import "./globals.css";
 import { siteUrl } from "@/lib/site";
 import { GA_ID, consentBootstrapScript } from "@/lib/analytics";
+import "@/lib/server-secrets";
 import { MotionProvider } from "@/components/motion/primitives";
 import { SkipLink } from "@/components/SkipLink";
 import { Analytics } from "@/components/analytics/Analytics";
@@ -50,9 +52,11 @@ function siteVerification(): Metadata["verification"] {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // The Content-Security-Policy's nonce for this response (proxy.ts).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" className={inter.variable}>
       <head>
@@ -64,7 +68,7 @@ export default function RootLayout({
       <body className="min-h-screen font-sans">
         {GA_ID && (
           // Consent Mode defaults (all denied) before any Google tag can load.
-          <Script id="consent-default" strategy="beforeInteractive">
+          <Script id="consent-default" strategy="beforeInteractive" nonce={nonce}>
             {consentBootstrapScript()}
           </Script>
         )}

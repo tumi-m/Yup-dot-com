@@ -3,6 +3,7 @@
  * billing columns, webhook events and team lists are not writable from the
  * browser (see supabase/schema.sql).
  */
+import "server-only";
 import { createAdminClient } from "@/lib/supabase/server";
 import { BILLING_COLUMNS, type BillingPatch, type BillingRow, type BillingStore } from "@/lib/billing";
 import { parseTesterAccess } from "@/lib/tester-access";

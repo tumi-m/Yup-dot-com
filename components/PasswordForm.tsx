@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
+import { MIN_PASSWORD_LENGTH } from "@/components/auth-redirect";
 
 /**
  * Sets a new password for the signed-in account (after a reset link, too),
@@ -36,7 +37,15 @@ export function PasswordForm({ next }: { next?: string }) {
       setPassword("");
       setConfirm("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // With Supabase's "Secure password change" on, an older session must log in again first.
+      const reauth = err instanceof Error && ((err as { code?: string }).code === "reauthentication_needed" || /reauthenticat/i.test(err.message));
+      setError(
+        reauth
+          ? "To change your password, log out and log in again first (or use Forgot password)."
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong."
+      );
     } finally {
       setBusy(false);
     }
@@ -53,9 +62,13 @@ export function PasswordForm({ next }: { next?: string }) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
-          minLength={6}
+          minLength={MIN_PASSWORD_LENGTH}
+          aria-describedby="new-password-hint"
           autoComplete="new-password"
         />
+        <p id="new-password-hint" className="mt-1.5 text-xs text-muted-foreground">
+          At least {MIN_PASSWORD_LENGTH} characters.
+        </p>
       </div>
       <div>
         <label htmlFor="confirm-password" className="text-sm font-medium">Type it again</label>
@@ -66,7 +79,7 @@ export function PasswordForm({ next }: { next?: string }) {
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           required
-          minLength={6}
+          minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
         />
       </div>

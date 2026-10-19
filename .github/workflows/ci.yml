@@ -4,16 +4,20 @@ on:
   push:
   pull_request:
 
+# Read the code, nothing else (no write access for a step that misbehaves).
+permissions:
+  contents: read
+
 jobs:
   app:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       # The Word/Excel test opens the output with independent readers.
@@ -21,34 +25,70 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      # Built with fake values in every secret, so the next step can prove
-      # none of them reaches the browser.
+      # No hard-coded password or key in app code, only listed NEXT_PUBLIC_
+      # variables (also runs before every build).
+      - run: node scripts/check-source.mjs
+      # The store package holds only the files the manifest names, searched
+      # for secrets.
+      - run: node scripts/pack-extension.mjs extension "$RUNNER_TEMP/extension"
+
+  # Secret keys anywhere in the repository or its history, with gitleaks'
+  # rules (.gitleaks.toml lists the made-up values the tests use).
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Scan with gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --no-banner --redact -c .gitleaks.toml .
+
+  # The build, with a fake value in every secret, checked for those values
+  # the way a visitor could find them.
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://canary-project.supabase.invalid
+      # A fake "anon" JWT: prebuild accepts only the anon or publishable key.
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbmFyeSIsInJvbGUiOiJhbm9uIiwiY2FuYXJ5IjoicHVibGljX2Fub25fNWQxYyJ9.canary_signature_5d1c
+      SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
+      PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
+      PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
+      PAYSTACK_PLAN_TEAM: PLN_canary_team_93cd
+      OLLAMA_API_KEY: canary_ollama_key_77e0
+      OLLAMA_HOST: https://canary-ollama.invalid
+      USAGE_HASH_SALT: canary_usage_salt_0c6f
+      MEDIA_WORKER_URL: https://canary-worker.invalid
+      MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
+      MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # prebuild refuses a secret in a NEXT_PUBLIC_ variable; postbuild
+      # searches the output for secret patterns and the values above.
       - run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://canary-project.supabase.invalid
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
-          SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
-          PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
-          PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
-          PAYSTACK_PLAN_TEAM: PLN_canary_team_93cd
-          OLLAMA_API_KEY: canary_ollama_key_77e0
-          OLLAMA_HOST: https://canary-ollama.invalid
-          USAGE_HASH_SALT: canary_usage_salt_0c6f
-          MEDIA_WORKER_URL: https://canary-worker.invalid
-          MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
-          MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
-      - run: node scripts/check-bundle-secrets.mjs
-        env:
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: canary_public_anon_key_5d1c
-          SUPABASE_SERVICE_ROLE_KEY: canary_service_role_key_8f3a
-          PAYSTACK_SECRET_KEY: sk_test_canary_paystack_2b7e
-          PAYSTACK_PLAN_PRO: PLN_canary_pro_41aa
-          PAYSTACK_PLAN_TEAM: PLN_canary_team_93cd
-          OLLAMA_API_KEY: canary_ollama_key_77e0
-          OLLAMA_HOST: https://canary-ollama.invalid
-          USAGE_HASH_SALT: canary_usage_salt_0c6f
-          MEDIA_WORKER_SECRET: canary_worker_secret_a9b2
-          MEDIA_SIGNING_SECRET: canary_signing_secret_e4d8
+      # Again with --canary: fails unless the fake values were really set and
+      # the public key is found, so the search can't pass by reading nothing.
+      - run: node scripts/check-bundle-secrets.mjs --canary
+      # Pages render at request time, so they aren't files the step above can
+      # read: start the build and check it from outside, as a visitor would,
+      # looking for the fake values too, and ask for every private page and
+      # closed route signed out (a route missing from scripts/routes.mjs
+      # fails). The canary Supabase doesn't exist, so the database checks run
+      # in the weekly live check and in the database job instead.
+      - name: Check the running build from outside
+        run: |
+          npx next start -p 3000 > next.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3000/robots.txt && break; sleep 1; done
+          node scripts/check-live.mjs http://localhost:3000 --env-values --skip-supabase --routes .next/app-path-routes-manifest.json
 
   # Row Level Security: runs supabase/schema.sql and the migrations on a
   # plain Postgres 16 and tries what anyone holding the public anon key could.
@@ -71,18 +111,18 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: scripts/test-rls.sh
 
   media-worker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg

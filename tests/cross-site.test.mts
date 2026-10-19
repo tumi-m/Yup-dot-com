@@ -64,6 +64,8 @@ const refused = (r: Request, json?: boolean) => refuseCrossSite(r, { json })?.st
     ["AI answers", async () => (await import("../app/api/ai/chat/route.ts")).POST(post("/api/ai/chat"))],
     ["download links", async () => (await import("../app/api/media/link/route.ts")).POST(post("/api/media/link"))],
     ["download refunds", async () => (await import("../app/api/media/refund/route.ts")).POST(post("/api/media/refund"))],
+    ["link previews", async () => (await import("../app/api/media/info/route.ts")).POST(post("/api/media/info"))],
+    ["playlist lists", async () => (await import("../app/api/media/playlist/route.ts")).POST(post("/api/media/playlist"))],
     ["slide imports", async () => (await import("../app/api/slides/export/route.ts")).GET(
       new Request("http://localhost/api/slides/export?url=x&format=pdf", { headers: { "sec-fetch-site": "cross-site" } }))],
     ["checkout", async () => (await import("../app/api/billing/checkout/route.ts")).POST(post("/api/billing/checkout"))],
@@ -76,6 +78,32 @@ const refused = (r: Request, json?: boolean) => refuseCrossSite(r, { json })?.st
     const res = await call();
     check(`${name}: cross-site refused`, res.status === 403, String(res.status));
   }
+}
+
+// Link previews make the server call X, TikTok or Instagram: a few a minute
+// per visitor, so the site can't be used as a free lookup service.
+{
+  setUsageStore(memoryUsageStore());
+  const { MEDIA_LOOKUPS_PER_MINUTE } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
+  const info = await import("../app/api/media/info/route.ts");
+  const ask = (ip: string) =>
+    info.POST(new Request("http://localhost/api/media/info", {
+      method: "POST",
+      headers: { ...JSON_TYPE, origin: "http://localhost", "sec-fetch-site": "same-origin", "x-forwarded-for": ip },
+      body: JSON.stringify({ url: "https://x.com/someone/status/1234567890" }),
+    }));
+  // X answers nothing useful; each lookup still costs the server a call.
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => (calls++, new Response("", { status: 404 }))) as typeof fetch;
+  const statuses: number[] = [];
+  for (let i = 0; i < MEDIA_LOOKUPS_PER_MINUTE; i++) statuses.push((await ask("192.0.2.77")).status);
+  const callsBefore = calls;
+  statuses.push((await ask("192.0.2.77")).status);
+  check(`link previews: ${MEDIA_LOOKUPS_PER_MINUTE} a minute, then 429 without calling out`,
+    statuses.slice(0, -1).every((s) => s !== 429) && statuses.at(-1) === 429 && callsBefore > 0 && calls === callsBefore, statuses.join(","));
+  check("another visitor still gets theirs", (await ask("192.0.2.78")).status !== 429);
+  globalThis.fetch = realFetch;
 }
 
 setUsageStore(null);

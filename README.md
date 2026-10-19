@@ -143,7 +143,9 @@ stream URLs only work from the IP that requested them.
 
 For all of them, the web app checks the plan (1080p is Pro) and the daily quota
 (guest 5, free account 10, Pro 200), then signs a short-lived token for exactly
-one download. Open `/api/media/health` after deploying to see what's missing.
+one download. After deploying, check what's missing with
+`curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<your-site>/api/media/health`
+(without the secret it answers 404 in production).
 Read the worker README's **Things to know before launch** section: YouTube
 blocks cloud IPs, and there are legal points too.
 
@@ -311,7 +313,8 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 - **Database (Supabase).** Row Level Security is on for every table, and every
   policy is scoped to `auth.uid()`. From the browser (the public anon key) a
   signed-in user can write only their profile's name and their own document
-  rows, and visitors without a session can write nothing. Plans, billing columns, team seats, payment events and usage
+  rows, and visitors without a session have no privilege on any table (so
+  nothing is readable even if RLS is ever switched off on one). Plans, billing columns, team seats, payment events and usage
   counters are written only by the server with the service role. Functions
   that read plans or count usage are `SECURITY DEFINER` with a fixed
   `search_path` and can't be called from the browser.
@@ -322,14 +325,23 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   used more times than allowed. A user can read only their own
   `tester_access` row and can't write it. Tester time never changes billing
   columns.
+- **Tables, views and functions added later** (say, by hand in the SQL
+  editor) are private by default: an event trigger switches RLS on for each
+  new table (and refuses to switch it off), makes new views check RLS as the
+  reader, and takes EXECUTE on new functions away from browsers; browsers get
+  no privilege on anything new until it is granted on purpose.
+  [`supabase/audit.sql`](supabase/audit.sql) lists anything a browser could
+  still reach; run it in the SQL editor after any change by hand.
 - **Stored files.** The `documents` bucket is private, PDFs only. A file can
   be uploaded or read only when the user owns a document row for it, a row
   can't be pointed at another file, and a row can only be deleted after its
   file, so the Free 5-document limit also limits stored files.
 - **Payments.** The Paystack webhook checks an HMAC-SHA512 signature
   (constant-time) and the amount paid; events are applied once.
-- **Secrets.** Only `NEXT_PUBLIC_*` values reach the browser. `.env*` files
-  are git-ignored except `.env.example`.
+- **Secrets.** Only `NEXT_PUBLIC_*` values reach the browser, and the code
+  may use only the names listed in `PUBLIC_VARS` (`lib/secret-scan.cjs`).
+  There is no admin password anywhere. `.env*` files are git-ignored except
+  `.env.example`.
 - **Downloads and imports.** Links users paste are fetched by the server only
   from allow-listed hosts (`video.twimg.com`, Google Slides), checked again on
   every redirect. X download links
@@ -342,14 +354,19 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 - **Untrusted files** are parsed in the browser; PowerPoint text is sanitised
   before it is shown as HTML.
 - **Headers.** HSTS, `nosniff`, `X-Frame-Options`, a Referrer and Permissions
-  policy, and a CSP that blocks plugins, `<base>` changes, off-site form posts
-  and framing (`next.config.ts`).
+  policy (`next.config.ts`), and on every page a Content-Security-Policy with
+  a fresh nonce (`lib/csp.ts`, set in `proxy.ts`): only the site's own
+  scripts run, so injected `<script>` tags, `onerror=` handlers and
+  `javascript:` links don't, and `fetch` reaches only this site, Supabase,
+  the media worker and (after consent) Google Analytics. It also blocks
+  plugins, `<base>` changes, off-site form posts and framing.
 
 **How it's tested** (all in CI, `.github/workflows/ci.yml`):
 
 - `scripts/test-rls.sh` runs [`tests/rls/rls.test.sql`](tests/rls/rls.test.sql)
-  on Postgres 16, against `supabase/schema.sql` and against the schema plus
-  every migration. It plays what anyone holding the anon key could try (read
+  on Postgres 16, against `supabase/schema.sql`, against the schema plus
+  every migration, and with each migration run again on an up-to-date
+  schema (so an old copy of a function or policy can't undo a fix). It plays what anyone holding the anon key could try (read
   other users' rows and files, give themselves a paid plan, forge billing
   events, call the usage functions, keep files past the plan limit, read or
   redeem tester codes themselves) and fails if any of it works. It also
@@ -357,15 +374,119 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   as often as allowed, and two codes for one person at once and checks both
   count. Run it locally against any Postgres you can throw away:
   `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
-- `scripts/check-bundle-secrets.mjs` builds with fake values in every server
-  secret and fails if one appears in `.next/static`, `public/` or a
-  prerendered page.
+  The same tests run `supabase/audit.sql` (it must find nothing), add a
+  table, a `SECURITY DEFINER` function and a view the way someone would in
+  the SQL editor and check they come out private, and plant each mistake
+  with the event trigger off to check the audit names it.
+- Every `npm run build` (on Vercel too) first runs `scripts/check-env.mjs`,
+  which stops the build if a `NEXT_PUBLIC_` variable is named like a secret
+  (password, pass, pw, token, API key, JWT, database, a server-only name in
+  any case) or holds one (a service_role or `sb_secret_` key, Paystack,
+  OpenAI, Resend or other secret keys, a private key, a connection string
+  with a password, also base64 or hex encoded, or a server-only value), and
+  `scripts/check-source.mjs`, which stops it for a hard-coded credential in
+  the code (`password === "…"`, `ADMIN_PASSWORD = "…"`), a key pasted into
+  app code or `public/`, or a `NEXT_PUBLIC_` name not on the list.
+  `next.config.ts` runs both for a plain `next build`. After the build,
+  `scripts/check-bundle-secrets.mjs` fails it if a secret pattern or a
+  server-only value (including passwords, `*_KEY` variables and the password
+  in a connection string) is in `.next/static`, a prerendered page or
+  `public/`. CI builds with fake values in every secret and runs both, then
+  starts the build and checks it from outside with `scripts/check-live.mjs`.
+- CI scans the repository and its whole history with gitleaks
+  (`.gitleaks.toml`), and packs the browser extension, which searches what it
+  ships for secrets.
+- React refuses to send a server secret to the browser
+  (`lib/server-secrets.ts`): every value the build checks count as secret, not
+  only the known keys. Modules that read secrets import `server-only`.
+- [`scripts/routes.mjs`](scripts/routes.mjs) lists every page and route as
+  public or private; `npm test` fails when a new one is in neither list.
+- `npm run check:live -- https://pdfwizard.xyz` checks the live site from
+  outside: secrets in its scripts, headers, exposed files, every private page
+  and closed route signed out, and what the public Supabase key can read or
+  write (every table, function and bucket it can find). With a test account
+  it also checks what any signed-up user can read. GitHub runs it weekly and
+  after each push to `main` (`.github/workflows/live-check.yml`). See
+  [SECURITY.md](SECURITY.md#why-the-mybroadband-style-hacks-dont-apply-here).
 - `npm test` covers webhook signatures, billing replay, token signing and
-  refunds, the PPTX sanitiser and URL allow-lists.
+  refunds, the PPTX sanitiser, URL allow-lists, the build and source checks,
+  the CSP and the proxy's paths, the route list and the live checker
+  (against a made-up safe and unsafe site).
 
-**Settings to keep:** in Supabase, Auth → **Confirm email** must stay on
-(Team seats are granted to confirmed emails only). Set `MEDIA_SIGNING_SECRET`
-in production.
+The free plan's edit watermark and daily edit count are checked in the
+browser, where the file is made, so they are a soft limit. Everything that
+costs money or stores data (AI answers, downloads, cloud documents, team
+seats, plans) is enforced on the server or in the database.
+
+**Settings to keep:** see the [Owner-only checklist](#owner-only-checklist).
+
+## Owner-only checklist
+
+Only the site owner can do these; code can't. Do them once, and again when
+someone leaves or a key changes.
+
+1. Turn on two-factor sign-in (an authenticator app or passkey, not SMS) for
+   Vercel, Supabase, Paystack, Cloudflare, GitHub, Google (Analytics and
+   Search Console), Ollama and the domain registrar.
+2. Never put a secret in a `NEXT_PUBLIC_` variable: those are copied into
+   every visitor's browser. `NEXT_PUBLIC_SUPABASE_ANON_KEY` is the anon (or
+   `sb_publishable_`) key, never the service_role or `sb_secret_` key. The
+   build stops if one is wrong; fix the variable, don't work around it.
+3. Vercel → Project → Settings → Environment Variables: mark
+   `SUPABASE_SERVICE_ROLE_KEY`, `PAYSTACK_SECRET_KEY`, `OLLAMA_API_KEY`,
+   `MEDIA_WORKER_SECRET`, `MEDIA_SIGNING_SECRET` and `USAGE_HASH_SALT` as
+   **Sensitive**, and give Preview deployments test keys (Paystack
+   `sk_test_`). Set `MEDIA_SIGNING_SECRET` in production. Settings →
+   Deployment Protection: turn on Vercel Authentication for Preview
+   deployments.
+4. Rotate a key the moment it's exposed (a screenshot, a chat, a commit, a
+   `NEXT_PUBLIC_` variable): [SECURITY.md → If a key leaks](SECURITY.md#if-a-key-leaks)
+   has the steps for each key.
+5. Supabase → Authentication:
+   1. Email sign-in: keep **Confirm email** on (team seats depend on it),
+      and turn on **Secure password change**.
+   2. Passwords: minimum length **10**, letters and digits required, and
+      **leaked-password protection** on (Pro plan).
+   3. Rate limits: keep the defaults or lower; at most one email per
+      address every 60 seconds.
+   4. URL Configuration: Site URL `https://pdfwizard.xyz`; Redirect URLs only
+      `https://pdfwizard.xyz/auth/callback` (plus a preview pattern only if
+      you use one).
+   5. Optional: CAPTCHA protection with Cloudflare Turnstile, at the same
+      time as setting `NEXT_PUBLIC_TURNSTILE_SITE_KEY` in Vercel.
+   6. Custom SMTP from your own domain, so reset emails don't come from the
+      shared sender.
+6. Supabase → SQL editor: run each file in `supabase/migrations/` you
+   haven't run yet, once, in date order (the newest is
+   `20261018140000_private_by_default.sql`). Then run
+   [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
+   it again whenever you change anything by hand (a table, a bucket, a
+   function, a policy). Security Advisor should show no "RLS disabled" table.
+   Turn off `pg_graphql` if you don't use it.
+7. Optional, for the Live check: create an ordinary account used only for
+   it (sign up, confirm the email, never upload anything private), and add
+   its email and password as the GitHub Actions secrets `CHECK_LIVE_EMAIL`
+   and `CHECK_LIVE_PASSWORD`. The check then also proves that a signed-up
+   user sees only their own rows and files. It can't sign in while
+   Supabase's CAPTCHA is on.
+8. Cloudflare (DNS): turn on **DNSSEC** and add the DS record at the
+   registrar; add **CAA** records for the certificate authorities Vercel
+   uses (`letsencrypt.org`) plus `iodef` `mailto:security@pdfwizard.xyz`;
+   SPF, DKIM and DMARC for the mail domain; registrar lock on.
+9. Paystack: webhook URL `https://pdfwizard.xyz/api/billing/webhook` only.
+   Webhooks are verified with `PAYSTACK_SECRET_KEY`, so a new secret key goes
+   into Vercel straight away. Two-factor on, least-privilege team roles,
+   test keys outside production.
+10. GitHub (the repository is public): Settings → Code security: secret
+    scanning with push protection, Dependabot alerts and security updates,
+    private vulnerability reporting. Protect `main`: require a pull request
+    and the CI checks `app`, `secrets`, `build`, `database` and
+    `media-worker`; block force pushes. Actions → General: read-only workflow permissions, and
+    approval for workflows from forks. Add the variable `SITE_URL` =
+    `https://pdfwizard.xyz` for the Live check workflow.
+11. Media worker host: `MEDIA_ALLOWED_ORIGINS=https://pdfwizard.xyz`, and
+    `YTDLP_PROXY` credentials only in that host's secret store.
+12. After changing any of these: `npm run check:live -- https://pdfwizard.xyz`.
 
 ---
 
@@ -457,8 +578,9 @@ ffmpeg.wasm · mediabunny · JSZip · Radix UI · lucide-react · yt-dlp (media 
 
 ## Production notes
 
-- Security headers (HSTS, nosniff, frame options, permissions policy, a basic
-  CSP) are set in `next.config.ts`. See [Security](#security).
+- Security headers (HSTS, nosniff, frame options, permissions policy) are set
+  in `next.config.ts`, and the pages' nonce-based CSP in `proxy.ts`. See
+  [Security](#security).
 - Tool pages are statically generated with per-page metadata; `sitemap.xml` and
   `robots.txt` are generated automatically.
 - **Roadmap:** saved signatures, version history, shared team workspaces;
@@ -481,7 +603,8 @@ Variables** and redeploy:
 | Variable | Needed for |
 | -------- | ---------- |
 | `NEXT_PUBLIC_SUPABASE_URL` | accounts, dashboard, editor |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | accounts, dashboard, editor. The **anon** (or `sb_publishable_`) key: the build stops if this is the service_role or `sb_secret_` key |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional. Cloudflare Turnstile on log in, sign-up and Forgot password. Set it together with Supabase's CAPTCHA protection (see [Owner-only checklist](#owner-only-checklist)) |
 | `SUPABASE_SERVICE_ROLE_KEY` | billing (records payments, plans, team seats) and usage counters shared by every server instance |
 | `PAYSTACK_SECRET_KEY` | checkout, subscription management, webhook signatures |
 | `PAYSTACK_PLAN_PRO`, `PAYSTACK_PLAN_TEAM` | monthly subscriptions (`PLN_…` codes) |
@@ -501,6 +624,7 @@ Variables** and redeploy:
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Legal and contact pages: where privacy, refund and copyright requests go |
 | `NEXT_PUBLIC_BUSINESS_ADDRESS` | Legal and contact pages: physical address (Paystack and POPIA expect one) |
 | `NEXT_PUBLIC_CONTACT_PHONE` | Optional. Contact page phone number |
+| `NEXT_PUBLIC_SECURITY_EMAIL` | Optional. Where security reports go, on `/security` and in `/.well-known/security.txt` (default `security@pdfwizard.xyz`) |
 | `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
 | `NEXT_PUBLIC_ENABLE_YOUTUBE` | Optional. `1` brings back the YouTube tools (they are paused and hidden by default); needs the media worker |
@@ -516,7 +640,8 @@ Optional:
   CSP-restricted deployments.
 
 Then run [`supabase/schema.sql`](supabase/schema.sql) in your Supabase project
-(on an existing project, run the files in [`supabase/migrations/`](supabase/migrations))
+(on an existing project, run the files in [`supabase/migrations/`](supabase/migrations)
+you haven't run yet, once each, in date order)
 and set up Paystack as below.
 
 ## Legal pages, analytics and search

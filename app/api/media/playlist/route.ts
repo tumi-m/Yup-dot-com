@@ -2,6 +2,8 @@ import { z } from "zod";
 import { cleanTitle, isYoutubeId, maxHeightFor, parsePlaylistUrl, QUALITIES, youtubeWatchUrl } from "@/lib/media";
 import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
+import { refuseCrossSite } from "@/lib/cross-site";
+import { MEDIA_LOOKUP_MESSAGE, claimMediaLookup, usageSubject } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,6 +16,8 @@ const bodySchema = z.object({ url: z.string().min(4).max(2000) });
  * so plan rules and the daily quota apply per video.
  */
 export async function POST(request: Request) {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const playlist = parsed.success ? parsePlaylistUrl(parsed.data.url) : null;
   if (!playlist) return Response.json({ error: "Paste a YouTube playlist link." }, { status: 400 });
@@ -23,7 +27,10 @@ export async function POST(request: Request) {
     console.error(`YouTube downloads disabled: ${WORKER_CONFIG_HELP[config.reason]}`);
     return Response.json({ error: "YouTube downloads aren't switched on for this site yet." }, { status: 503 });
   }
-  const { tier } = await resolveTier();
+  const { user, tier } = await resolveTier();
+  if (!(await claimMediaLookup(usageSubject(request, user)))) {
+    return Response.json({ error: MEDIA_LOOKUP_MESSAGE }, { status: 429, headers: { "Retry-After": "60" } });
+  }
   const result = await callWorker(config, "/playlist", { url: playlist.canonical }, 55_000);
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
 

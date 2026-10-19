@@ -5,6 +5,8 @@ import { resolveTier } from "@/lib/tier";
 import { DirectResolveError, failureMessage, FETCH_UA, grantHeaders, isAllowedMediaUrl, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
 import { xAvailableQualities } from "@/lib/x-video";
 import { probeSizes, qualitySizes, workerQualitySizes } from "@/lib/media-size";
+import { refuseCrossSite } from "@/lib/cross-site";
+import { MEDIA_LOOKUP_MESSAGE, claimMediaLookup, usageSubject } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,12 +15,19 @@ const bodySchema = z.object({ url: z.string().min(4).max(2000) });
 
 /** Preview a link: title, thumbnail, duration, and which qualities this tier can take. */
 export async function POST(request: Request) {
+  // Each lookup makes this server call another site: only this site's pages
+  // may ask, a few times a minute.
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const media = parsed.success ? parseMediaUrl(parsed.data.url) : null;
   if (!media) {
     return Response.json({ error: "Paste an X, TikTok or Instagram video link." }, { status: 400 });
   }
-  const { tier } = await resolveTier();
+  const { user, tier } = await resolveTier();
+  if (!(await claimMediaLookup(usageSubject(request, user)))) {
+    return Response.json({ error: MEDIA_LOOKUP_MESSAGE }, { status: 429, headers: { "Retry-After": "60" } });
+  }
   const allowed = maxHeightFor(tier);
 
   // X, TikTok and Instagram: resolved here, no worker needed.

@@ -1,9 +1,10 @@
 -- ============================================================
 -- Security hardening: stored files and document privileges.
 --
--- Safe to run more than once. Run it in the Supabase SQL editor on a project
--- created from an earlier supabase/schema.sql. (A new project only needs
--- supabase/schema.sql, which already includes everything here.)
+-- Run each migration once, in date order, in the Supabase SQL editor, on a
+-- project created from an earlier supabase/schema.sql. Running one again
+-- later is safe (scripts/test-rls.sh checks it). A new project only needs
+-- supabase/schema.sql, which already includes everything here.
 --
 -- Before this, a signed-in Free user could keep any number of files in the
 -- documents bucket: the 5-document limit counts rows, and deleting a row (or

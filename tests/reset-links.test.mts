@@ -5,6 +5,8 @@
 // - "Forgot password?" dropped ?redirect, so a log-in that started on
 //   Pricing or a payment return ended on "Go to your documents".
 // - Supabase's "email rate limit exceeded" was shown as it came.
+// - Its answers told which emails have an account: a second "Forgot
+//   password" within a minute got a wait message only for real accounts.
 import { AuthApiError } from "@supabase/supabase-js";
 import {
   authErrorMessage,
@@ -14,6 +16,7 @@ import {
   NEW_PASSWORD_PATH,
   newPasswordPath,
   resetLinkTarget,
+  revealsAccount,
   safeRedirect,
 } from "../components/auth-redirect.ts";
 
@@ -49,12 +52,20 @@ check("and doesn't take one to another site", authSwitchHref("/forgot-password",
 const failedLink = authErrorMessage(`?error=auth&redirect=${encodeURIComponent(newPasswordPath("/pricing"))}`);
 check("a failed reset link that knew where to go back still says to ask again", !!failedLink && /Forgot password/.test(failedLink), failedLink);
 
-// Rate limits.
-const tooMany = authFailure(new AuthApiError("email rate limit exceeded", 429, "over_email_send_rate_limit"));
-check("too many emails: says what to do, in plain words", /^Too many emails/.test(tooMany) && /try again/.test(tooMany), tooMany);
-const wait = "For security purposes, you can only request this after 47 seconds.";
-check("the wait for one address is kept as it is", authFailure(new AuthApiError(wait, 429, "over_email_send_rate_limit")) === wait);
-check("other errors are kept", authFailure(new AuthApiError("Invalid login credentials", 400, "invalid_credentials")) === "Invalid login credentials");
+// Rate limits, and answers that would tell whether an email has an account.
+const tooMany = new AuthApiError("email rate limit exceeded", 429, "over_email_send_rate_limit");
+check("too many emails: says what to do, in plain words", /^Too many emails/.test(authFailure(tooMany)) && /try again/.test(authFailure(tooMany)), authFailure(tooMany));
+check("the site-wide email limit is still shown on Forgot password", !revealsAccount(tooMany, "reset"));
+const wait = new AuthApiError("For security purposes, you can only request this after 47 seconds.", 429, "over_email_send_rate_limit");
+check("the wait for one address (only real accounts get it) shows the usual reset message", revealsAccount(wait, "reset"));
+const taken = new AuthApiError("User already registered", 422, "user_already_exists");
+check("sign-up with an email that has an account shows the usual confirm message", revealsAccount(taken, "signup"));
+check("a wrong password is not hidden on log in", !revealsAccount(new AuthApiError("Invalid login credentials", 400, "invalid_credentials"), "login"));
+const wrong = authFailure(new AuthApiError("Invalid login credentials", 400, "invalid_credentials"));
+const unconfirmed = authFailure(new AuthApiError("Email not confirmed", 400, "email_not_confirmed"));
+check("log in: a wrong password and an unconfirmed email get the same answer", wrong === unconfirmed && /Wrong email or password/.test(wrong), { wrong, unconfirmed });
+const weak = "Password should be at least 10 characters.";
+check("other errors are kept", authFailure(new AuthApiError(weak, 422, "weak_password")) === weak);
 check("something that isn't an error", authFailure("nope") === "Something went wrong.");
 
 if (failed) {

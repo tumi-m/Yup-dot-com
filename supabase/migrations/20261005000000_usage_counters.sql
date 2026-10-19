@@ -1,9 +1,10 @@
 -- ============================================================
 -- Persistent usage counters.
 --
--- Safe to run more than once. Run it in the Supabase SQL editor on a project
--- created from an earlier supabase/schema.sql. (A new project only needs
--- supabase/schema.sql, which already includes everything here.)
+-- Run each migration once, in date order, in the Supabase SQL editor, on a
+-- project created from an earlier supabase/schema.sql. Running one again
+-- later is safe (scripts/test-rls.sh checks it). A new project only needs
+-- supabase/schema.sql, which already includes everything here.
 --
 -- Daily AI answers, edits, media downloads and link imports used to be
 -- counted in server memory, which resets per serverless instance. They are
