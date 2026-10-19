@@ -14,7 +14,11 @@ create role service_role nologin noinherit bypassrls;
 create role authenticator login noinherit;
 grant anon, authenticated, service_role to authenticator;
 end if; end $$;
-create extension if not exists pgcrypto;
+-- Supabase keeps extensions in their own schema, so app functions that use
+-- pgcrypto must have it on their search_path.
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+grant usage on schema extensions to anon, authenticated, service_role;
 
 create schema auth;
 create table auth.users (
