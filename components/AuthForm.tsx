@@ -87,10 +87,16 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
             ...captcha,
           },
         });
+        // A tester's code waits only in this tab, and the email's link may
+        // open another: their tester link brings it back.
+        const checkEmail =
+          redirectTo === "/redeem"
+            ? "Check your email to confirm your account. Then open your tester link again."
+            : "Check your email to confirm your account, then log in.";
         if (error) {
           // An email that already has an account gets the same answer as a new one.
           if (!revealsAccount(error, "signup")) throw error;
-          setMessage("Check your email to confirm your account, then log in.");
+          setMessage(checkEmail);
           return;
         }
         track("sign_up", { method: "email" });
@@ -100,13 +106,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
           router.push(redirectTo);
           router.refresh();
         } else {
-          // A tester's code waits only in this tab, and the email's link may
-          // open another: their tester link brings it back.
-          setMessage(
-            redirectTo === "/redeem"
-              ? "Check your email to confirm your account. Then open your tester link again."
-              : "Check your email to confirm your account, then log in."
-          );
+          setMessage(checkEmail);
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({
