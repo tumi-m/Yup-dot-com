@@ -369,6 +369,25 @@ select rlstest.expect('create: plan must be pro or team', 'postgres', null, 'sel
 select rlstest.expect('create: 1 to 365 days',          'postgres', null, 'select count(*) from public.create_tester_code(days => 0)', 'error:22023:');
 select rlstest.expect('create: at least one use',       'postgres', null, 'select count(*) from public.create_tester_code(max_uses => 0)', 'error:22023:');
 select rlstest.expect('server (service role) can make one', 'service_role', null, 'select count(*) from public.create_tester_code(note => $q$from the server$q$)', 'value:1');
+-- Granted on purpose, and nothing more: browsers may only read tester_access
+-- (their own row, by its one policy) and run none of the tester functions.
+select rlstest.expect('browsers: only SELECT on tester_access, nothing on the codes', 'postgres', null,
+  $$select coalesce(string_agg(r || ' ' || p || ' ' || t, ', ' order by r, t, p), 'none')
+      from unnest(array['anon', 'authenticated']) r,
+           unnest(array['access_codes', 'access_code_redemptions', 'tester_access']) t,
+           unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) p
+     where has_table_privilege(r, 'public.' || t, p)
+        or (p in ('select', 'insert', 'update', 'references') and has_any_column_privilege(r, 'public.' || t, p))$$,
+  'value:authenticated select tester_access');
+select rlstest.expect('tester tables: one policy, reading one''s own row', 'postgres', null,
+  $$select string_agg(tablename || ' ' || cmd || ' ' || array_to_string(roles, ',') || ' ' || qual, '; ')
+      from pg_policies where schemaname = 'public' and tablename in ('access_codes', 'access_code_redemptions', 'tester_access')$$,
+  'value:tester_access SELECT authenticated (auth.uid() = user_id)');
+select rlstest.expect('browsers: no tester function',   'postgres', null,
+  $$select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and (p.proname like '%tester_code%' or p.proname in ('own_plan', 'effective_plan'))
+       and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))$$, 'value:0');
+select rlstest.expect('server: reads tester time (Team owners)', 'service_role', null, 'select count(*) >= 0 from public.tester_access', 'value:true');
 
 -- Redeeming (the server, with the service role).
 select rlstest.expect('T1: check a code (dry run)',     'service_role', null, format('select rlstest.redeem(%L, %L, true)', :'T1', lower(:'code_pro')), 'value:pro');

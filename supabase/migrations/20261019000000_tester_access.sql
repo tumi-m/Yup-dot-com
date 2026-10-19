@@ -1,9 +1,10 @@
 -- ============================================================
 -- Tester access codes: free Pro or Team time for chosen testers.
 --
--- Safe to run more than once. Run it in the Supabase SQL editor on a project
--- created from an earlier supabase/schema.sql. (A new project only needs
--- supabase/schema.sql, which already includes everything here.)
+-- Run each migration once, in date order, in the Supabase SQL editor, on a
+-- project created from an earlier supabase/schema.sql. Running one again
+-- later is safe (scripts/test-rls.sh checks it). A new project only needs
+-- supabase/schema.sql, which already includes everything here.
 --
 -- Adds access_codes, access_code_redemptions and tester_access, the owner
 -- functions create_tester_code(), list_tester_codes() and

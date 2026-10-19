@@ -207,30 +207,37 @@ create trigger team_members_limit
 -- ---------- Plan resolution in SQL (mirrors lib/billing.ts) ----------
 
 -- The plan a user pays for: an active subscription (with a 3-day grace while
--- a renewal is processed) or an unexpired prepaid term.
-create or replace function public.own_plan(uid uuid)
-returns text language sql stable security definer set search_path = public as $$
-  select coalesce((
-    select case
-             when 'team' in (s, p) then 'team'
-             when 'pro' in (s, p) then 'pro'
-             else 'free'
-           end
-      from (
-        select
-          case when pr.subscription_plan is not null and (
-                 (pr.subscription_status in ('active', 'attention')
-                    and pr.current_period_end + interval '3 days' > now())
-                 or (pr.subscription_status in ('non-renewing', 'cancelled', 'complete')
-                    and pr.current_period_end > now()))
-               then pr.subscription_plan end as s,
-          case when pr.prepaid_plan is not null and pr.paid_until > now()
-               then pr.prepaid_plan end as p
-          from public.profiles pr
-         where pr.id = uid
-      ) x
-  ), 'free');
-$$;
+-- a renewal is processed) or an unexpired prepaid term. Once tester access is
+-- set up (20261019000000_tester_access.sql), own_plan() counts tester time
+-- too, and running this file again leaves that version in place.
+do $$
+begin
+  if to_regclass('public.tester_access') is null then
+    create or replace function public.own_plan(uid uuid)
+    returns text language sql stable security definer set search_path = public as $f$
+      select coalesce((
+        select case
+                 when 'team' in (s, p) then 'team'
+                 when 'pro' in (s, p) then 'pro'
+                 else 'free'
+               end
+          from (
+            select
+              case when pr.subscription_plan is not null and (
+                     (pr.subscription_status in ('active', 'attention')
+                        and pr.current_period_end + interval '3 days' > now())
+                     or (pr.subscription_status in ('non-renewing', 'cancelled', 'complete')
+                        and pr.current_period_end > now()))
+                   then pr.subscription_plan end as s,
+              case when pr.prepaid_plan is not null and pr.paid_until > now()
+                   then pr.prepaid_plan end as p
+              from public.profiles pr
+             where pr.id = uid
+          ) x
+      ), 'free');
+    $f$;
+  end if;
+end $$;
 
 -- Own plan, or Team when a verified email is on an active Team owner's list.
 create or replace function public.effective_plan(uid uuid)
