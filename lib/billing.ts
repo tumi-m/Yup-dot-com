@@ -21,7 +21,7 @@ import {
   type PaidPlanId,
   type PrepaidMonths,
 } from "./plans";
-import { testerActive, type TesterAccess } from "./tester-access";
+import { lastTesterTime, testerPlan, testerTimes, type TesterAccess, type TesterTime } from "./tester-access";
 import type { PlanId } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -120,8 +120,7 @@ export function paidPlan(row: BillingRow | null, now: Date): PlanId {
  * supabase/schema.sql). A Team tester can give seats, like a Team owner.
  */
 export function ownPlan(row: BillingRow | null, now: Date): PlanId {
-  const plan = paidPlan(row, now);
-  return testerActive(row?.tester, now) ? best(plan, row!.tester!.plan) : plan;
+  return best(paidPlan(row, now), testerPlan(row?.tester, now) ?? "free");
 }
 
 export type PlanSource = "subscription" | "prepaid" | "team" | "tester" | null;
@@ -148,9 +147,9 @@ export function resolveAccess(
   now: Date
 ): Access {
   const base = paidAccess(input, now);
-  const tester = input.own?.tester;
-  if (testerActive(tester, now) && RANK[tester!.plan] > RANK[base.plan]) {
-    return { plan: tester!.plan, source: "tester", teamOwnerId: null, base };
+  const tester = testerPlan(input.own?.tester, now);
+  if (tester && RANK[tester] > RANK[base.plan]) {
+    return { plan: tester, source: "tester", teamOwnerId: null, base };
   }
   return { ...base, base };
 }
@@ -191,8 +190,12 @@ export interface BillingSummary {
   } | null;
   prepaid: { plan: PaidPlanId; paidUntil: string; active: boolean } | null;
   teamOwnerEmail: string | null;
-  /** Free time from a tester code, running or ended. */
-  tester: { plan: PaidPlanId; until: string; active: boolean } | null;
+  /**
+   * Free time from tester codes. While it runs: the tester time now and
+   * any Pro time that follows Team time (`then`). Once it has all ended:
+   * the part that ended last, with `active` false.
+   */
+  tester: (TesterTime & { active: boolean; then: TesterTime | null }) | null;
   /** The plan without tester access: what is left when it ends. */
   base: Access["base"];
 }
@@ -222,7 +225,13 @@ export function summarize(
     row && isPaidPlan(row.prepaid_plan) && row.paid_until
       ? { plan: row.prepaid_plan, paidUntil: row.paid_until, active: prepaidActive(row, now) }
       : null;
-  const tester = row?.tester ? { ...row.tester, active: testerActive(row.tester, now) } : null;
+  const [current, then = null] = testerTimes(row?.tester, now);
+  const ended = current ? null : lastTesterTime(row?.tester);
+  const tester = current
+    ? { ...current, active: true, then }
+    : ended
+      ? { ...ended, active: false, then: null }
+      : null;
   return { plan: access.plan, source: access.source, subscription, prepaid, teamOwnerEmail, tester, base: access.base };
 }
 

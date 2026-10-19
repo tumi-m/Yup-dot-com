@@ -4,8 +4,9 @@
  *
  * Every check is in the database (redeem_tester_code in supabase/schema.sql,
  * callable only with the service role): unknown, revoked, expired and
- * used-up codes, one redemption per person per code, and max_uses under
- * concurrent redemptions. Here: sign-in, cross-site requests, the body's
+ * used-up codes, one redemption per person per code, max_uses under
+ * concurrent redemptions, and plans that already include what the code
+ * gives (the code isn't used). Here: sign-in, cross-site requests, the body's
  * shape, and a limit on tries per account and per IP address. Every answer
  * after the limit takes at least MIN_ANSWER_MS, and an unknown code and a
  * revoked one get the same answer from the same query, so neither the
@@ -19,6 +20,7 @@ import {
   REDEEM_TOO_MANY,
   REDEEM_UNAVAILABLE,
   TESTER_CODE_MAX_INPUT,
+  coveredMessage,
   isTesterCode,
   normalizeTesterCode,
   parseRedeemResult,
@@ -42,10 +44,13 @@ const DB_ERRORS: Record<string, RedeemError> = {
   code_expired: "expired",
   code_used_up: "used-up",
   already_redeemed: "already-redeemed",
+  already_covered: "covered",
 };
 
-/** The database's refusal (P0001 and one of its four reasons), or null for anything else. */
-export function redeemErrorOf(error: { code?: string; message?: string } | null | undefined): RedeemError | null {
+type DbError = { code?: string; message?: string; details?: string | null };
+
+/** The database's refusal (P0001 and one of its five reasons), or null for anything else. */
+export function redeemErrorOf(error: DbError | null | undefined): RedeemError | null {
   if (!error || error.code !== "P0001") return null;
   return DB_ERRORS[(error.message ?? "").trim()] ?? null;
 }
@@ -56,7 +61,7 @@ export interface RedeemDeps {
   /** Calls public.redeem_tester_code with the service role (supabase-js rpc result). */
   redeem: (args: { uid: string; code: string; dry_run: boolean }) => PromiseLike<{
     data: unknown;
-    error: { code?: string; message?: string } | null;
+    error: DbError | null;
   }>;
   /** lib/usage.ts consume: uses left, or -1 when the limit is reached. */
   consume: (subject: string, bucket: string, limit: number, window: UsageWindow) => Promise<number>;
@@ -114,9 +119,11 @@ export async function handleRedeem(request: Request, deps: RedeemDeps): Promise<
       const result = error ? null : parseRedeemResult(data);
       if (refusal) {
         status = 400;
-        body = { error: REDEEM_ERRORS[refusal], reason: refusal };
+        // "covered" names the code's plan (the refusal's DETAIL); nothing else from the database is passed on.
+        const message = refusal === "covered" ? coveredMessage(error?.details) : REDEEM_ERRORS[refusal];
+        body = { error: message, reason: refusal };
       } else if (result) {
-        body = { plan: result.plan, until: result.until, days: result.days, ...(check ? { check: true } : {}) };
+        body = { ...result, ...(check ? { check: true } : {}) };
       } else {
         // Never the database's words: they could say more than the four answers do.
         console.error("redeem_tester_code failed", error?.code ?? "", error?.message ?? "bad result");

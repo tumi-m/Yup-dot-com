@@ -354,7 +354,8 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   events, call the usage functions, keep files past the plan limit, read or
   redeem tester codes themselves) and fails if any of it works. It also
   redeems one code from two connections at once and checks it is used only
-  as often as allowed. Run it locally against any Postgres you can throw away:
+  as often as allowed, and two codes for one person at once and checks both
+  count. Run it locally against any Postgres you can throw away:
   `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
 - `scripts/check-bundle-secrets.mjs` builds with fake values in every server
   secret and fails if one appears in `.next/static`, `public/` or a
@@ -624,14 +625,15 @@ code can be used, default 30) and `site_url` (the link's address, default
 
 ```sql
 select * from list_tester_codes();
-select u.email, t.plan, t.until from tester_access t join auth.users u on u.id = t.user_id order by t.until desc;
+select u.email, t.team_until, t.pro_until from tester_access t join auth.users u on u.id = t.user_id
+ order by greatest(t.team_until, t.pro_until) desc;
 ```
 
 **Revoke a code** (by the `ref` from the list, or by the code):
 
 ```sql
 select * from revoke_tester_code('3f2a9c1b');
--- and end the tester time it already gave, for everyone who used it:
+-- and end the tester time of its plan (Pro or Team) for everyone who used it:
 select * from revoke_tester_code('3f2a9c1b', end_access => true);
 ```
 
@@ -640,9 +642,17 @@ back to the same page), and press **Activate Pro**. Or, signed in: Billing →
 **Have a tester code?**, and paste the code. Pro (or Team) works everywhere
 at once, Billing and the header show "Pro (tester) until 17 Nov 2026", and it
 ends by itself on that date, back to Free or to their paid plan. Nothing is
-charged and there is nothing to cancel. A second code adds its days on.
-Buying a plan meanwhile works as usual, and paid time starts when they pay.
-A Team tester can give seats to 4 people while it lasts.
+charged and there is nothing to cancel. Buying a plan meanwhile works as
+usual, and paid time starts when they pay. A Team tester can give seats to
+4 people while it lasts.
+
+Each code adds its own plan's days. Team time runs first and Pro time after
+it, so a Pro code never adds Team time and a Team code doesn't use up Pro
+days. Tester time starts after time they already have of that plan or
+higher (earlier tester time, a prepaid term, or a subscription that won't
+renew), and the page says from when. If their plan renews, or they have a
+seat in someone's Team (for a Pro code), the code would add nothing: it is
+refused, says so, and isn't used.
 
 Each code works once per person. The code sits after the `#`, which browsers
 never send to a server, and the page takes it out of the address bar at once,

@@ -36,10 +36,11 @@ export function PricingCards({
   const [error, setError] = useState<{ plan: PlanId; message: string } | null>(null);
   // The turning ring on the recommended plan stops while it is offscreen.
   const ring = useAmbient<HTMLDivElement>();
-  // On tester access with nothing paid, Free is what comes next: say when.
+  // On tester access with nothing paid, Free is what comes once all of it
+  // has ended: say when.
   const fallsBackOn =
     billing?.source === "tester" && billing.tester && billing.base.plan === "free"
-      ? formatBillingDate(billing.tester.until)
+      ? formatBillingDate((billing.tester.then ?? billing.tester).until)
       : null;
 
   async function choose(plan: PlanId, req?: CheckoutRequest) {

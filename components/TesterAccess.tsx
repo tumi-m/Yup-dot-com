@@ -53,16 +53,32 @@ const settled = (a: Answer) => a.ok || (a.status === 400 && a.reason !== null);
 
 const codeWindow = () => window as unknown as CodeWindow;
 
-/** "Pro is on" and when it ends. */
+const dayCount = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+
+/**
+ * "Pro is on" (or "Pro is added", when it starts after time the user
+ * already has) and its dates. Takes focus when it appears: the button that
+ * had it is gone, and keyboard and screen reader users land here.
+ */
 function Activated({ result, compact = false }: { result: RedeemResult; compact?: boolean }) {
   const name = PLANS[result.plan].name;
+  const title = useRef<HTMLParagraphElement>(null);
+  useEffect(() => title.current?.focus(), []);
   return (
     <div role="status" className={compact ? "flex items-center gap-4" : "text-center"}>
       <SuccessBadge size={compact ? 48 : 64} className={compact ? "mx-0" : undefined} />
       <div className={compact ? undefined : "mt-5"}>
-        <p className="text-lg font-semibold">{name} is on</p>
+        <p
+          ref={title}
+          tabIndex={-1}
+          className="inline-block rounded-md px-1.5 text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {name} is {result.starts ? "added" : "on"}
+        </p>
         <p className="text-sm text-muted-foreground" data-testid="tester-until">
-          Free until {formatBillingDate(result.until)}.
+          {result.starts
+            ? `Tester access from ${formatBillingDate(result.starts)} to ${formatBillingDate(result.until)}.`
+            : `Tester access until ${formatBillingDate(result.until)}.`}
         </p>
       </div>
     </div>
@@ -154,7 +170,10 @@ type Phase =
   | { kind: "signed-out"; hasCode: boolean }
   | { kind: "checking" }
   | { kind: "ready"; code: string; offer: RedeemResult }
-  | { kind: "enter"; code: string; error: string | null }
+  /** `n` is new for every answer, so the form starts afresh with it. */
+  | { kind: "enter"; code: string; error: string | null; n: number }
+  /** The user's plan already gives what the code gives: it wasn't used. */
+  | { kind: "covered"; message: string }
   | { kind: "done"; result: RedeemResult };
 
 /**
@@ -171,6 +190,14 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
   const [error, setError] = useState<string | null>(null);
   /** Bumped when another link is opened in this tab (only the fragment changed). */
   const [link, setLink] = useState(0);
+  const answers = useRef(0);
+  const enter = (code: string, error: string | null) => setPhase({ kind: "enter", code, error, n: ++answers.current });
+  /** A refusal: "covered" has its own calm step, the rest go back to the form. */
+  const refused = (answer: Answer & { ok: false }, code: string) => {
+    if (settled(answer)) forgetTesterCode(codeWindow());
+    if (answer.reason === "covered") setPhase({ kind: "covered", message: answer.error });
+    else enter(settled(answer) ? "" : code, answer.error);
+  };
 
   useEffect(() => {
     const again = () => setLink((n) => n + 1);
@@ -194,13 +221,13 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
       return;
     }
     if (!raw) {
-      setPhase({ kind: "enter", code: "", error: null });
+      enter("", null);
       return;
     }
     const code = formatTesterCode(raw);
     if (!code) {
       forgetTesterCode(codeWindow());
-      setPhase({ kind: "enter", code: "", error: "That link's code isn't complete. Paste the code instead." });
+      enter("", "That link's code isn't complete. Paste the code instead.");
       return;
     }
     setPhase({ kind: "checking" });
@@ -208,14 +235,13 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
       if (cancelled) return;
       if (answer.ok) setPhase({ kind: "ready", code, offer: answer.result });
       else if (answer.status === 401) setPhase({ kind: "signed-out", hasCode: true });
-      else {
-        if (settled(answer)) forgetTesterCode(codeWindow());
-        setPhase({ kind: "enter", code: settled(answer) ? "" : code, error: answer.error });
-      }
+      else refused(answer, code);
     });
     return () => {
       cancelled = true;
     };
+    // enter and refused only set state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, link]);
 
   function done(result: RedeemResult) {
@@ -234,8 +260,7 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
       forgetTesterCode(codeWindow());
       done(answer.result);
     } else if (settled(answer)) {
-      forgetTesterCode(codeWindow());
-      setPhase({ kind: "enter", code: "", error: answer.error });
+      refused(answer, code);
     } else {
       setError(answer.error);
     }
@@ -269,9 +294,19 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
           ) : phase.kind === "ready" ? (
             <>
               <p>
-                {PLANS[phase.offer.plan].name}, free until{" "}
+                {PLANS[phase.offer.plan].name} for {dayCount(phase.offer.days)},{" "}
+                {phase.offer.starts ? (
+                  <>
+                    from <span className="font-medium">{formatBillingDate(phase.offer.starts)}</span> to{" "}
+                  </>
+                ) : (
+                  "until "
+                )}
                 <span className="font-medium">{formatBillingDate(phase.offer.until)}</span>.
               </p>
+              {phase.offer.starts && (
+                <p className="mt-1 text-sm text-muted-foreground">It starts when the plan you have now ends.</p>
+              )}
               <Button className="mt-5 h-11 w-full" onClick={() => activate(phase.code)} disabled={activating}>
                 {activating && <Loader2 className="motion-safe:animate-spin" />}
                 Activate {PLANS[phase.offer.plan].name}
@@ -283,7 +318,19 @@ export function RedeemFlow({ signedIn }: { signedIn: boolean }) {
               <p className="mb-4 text-sm text-muted-foreground">
                 Paste your tester code, or open your tester link again.
               </p>
-              <TesterCodeForm initialCode={phase.code} initialError={phase.error} autoFocus onRedeemed={done} />
+              <TesterCodeForm key={phase.n} initialCode={phase.code} initialError={phase.error} autoFocus onRedeemed={done} />
+            </>
+          ) : phase.kind === "covered" ? (
+            <>
+              <p>{phase.message}</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button asChild className="h-11 px-6">
+                  <Link href="/tools">Open the tools</Link>
+                </Button>
+                <Button asChild variant="outline" className="h-11 px-6">
+                  <Link href="/settings/billing">Billing</Link>
+                </Button>
+              </div>
             </>
           ) : (
             <>

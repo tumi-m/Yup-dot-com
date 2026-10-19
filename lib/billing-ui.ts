@@ -7,7 +7,7 @@
  */
 import { PLANS, formatBillingDate, type PaidPlanId } from "./plans";
 import type { BillingSummary } from "./billing";
-import { testerPlanName } from "./tester-access";
+import { testerLabel, testerPlanName } from "./tester-access";
 import type { PlanId } from "./types";
 
 const RANK: Record<PlanId, number> = { free: 0, pro: 1, team: 2 };
@@ -122,16 +122,22 @@ function renewalNote(plan: PaidPlanId, billing: Billing): string | null {
 export function planStatus(billing: BillingSummary): string[] {
   const tester = billing.tester;
   if (billing.source === "tester" && tester) {
-    // What is left when it ends, then that plan's own lines.
-    const then = billing.base.source === "team" ? "your Team seat" : PLANS[billing.base.plan].name;
-    return [
-      `Until ${formatBillingDate(tester.until)}, then ${then}`,
-      ...paidStatus({ ...billing, plan: billing.base.plan, source: billing.base.source }),
+    // What comes when it ends (what is paid for, or Pro tester time after
+    // Team), then the paid plan's own lines.
+    const { base } = billing;
+    const paid = base.source === "team" ? "your Team seat" : base.plan !== "free" ? PLANS[base.plan].name : null;
+    const next = paid ?? (tester.then ? `${testerLabel(tester.then)}, then Free` : "Free");
+    const lines = [
+      `Until ${formatBillingDate(tester.until)}, then ${next}`,
+      ...paidStatus({ ...billing, plan: base.plan, source: base.source }),
     ];
+    if (paid && tester.then) lines.push(testerLabel(tester.then));
+    return lines;
   }
   const lines = paidStatus(billing);
   if (tester?.active) {
-    lines.push(`${testerPlanName(tester.plan)} until ${formatBillingDate(tester.until)}`);
+    lines.push(testerLabel(tester));
+    if (tester.then) lines.push(testerLabel(tester.then));
   } else if (tester && billing.source === null) {
     lines.push(`${testerPlanName(tester.plan)} ended ${formatBillingDate(tester.until)}`);
   }

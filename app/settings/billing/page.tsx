@@ -47,7 +47,8 @@ export default async function BillingPage({
 
   const status = planStatus(billing);
   // Tester access is free: no price, and buying stays possible but tucked away.
-  const tester = billing.source === "tester" && billing.tester ? billing.tester : null;
+  // The question is about when all of it ends (Pro time can follow Team time).
+  const tester = billing.source === "tester" && billing.tester ? (billing.tester.then ?? billing.tester) : null;
   const paying = billing.source === "subscription" || billing.source === "prepaid" || billing.source === null;
   const cards = <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />;
 

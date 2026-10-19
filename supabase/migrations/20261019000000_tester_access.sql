@@ -58,14 +58,17 @@ create table if not exists public.access_code_redemptions (
 
 create index if not exists access_code_redemptions_user_idx on public.access_code_redemptions (user_id);
 
--- Tester time per user. own_plan() counts it while `until` is in the future.
+-- Tester time per user, kept per plan: a Team code adds Team days only, and
+-- Pro time comes after Team time. own_plan() counts Team while team_until
+-- is in the future, else Pro while pro_until is.
 create table if not exists public.tester_access (
   user_id uuid primary key references auth.users (id) on delete cascade,
-  plan text not null check (plan in ('pro', 'team')),
-  until timestamptz not null,
+  team_until timestamptz,
+  pro_until timestamptz,
   -- The code redeemed last.
   code_id uuid references public.access_codes (id) on delete set null,
-  granted_at timestamptz not null default now()
+  granted_at timestamptz not null default now(),
+  check (team_until is not null or pro_until is not null)
 );
 
 alter table public.access_codes enable row level security;
@@ -194,13 +197,15 @@ $$;
 -- Owner, in the SQL editor:  select * from revoke_tester_code('<ref>');
 -- Takes the ref from list_tester_codes() (or the start of the id, or the
 -- code itself). The code can't be redeemed any more; with end_access => true
--- tester access ends now for everyone who redeemed it.
+-- the code's plan of tester time (Pro or Team) ends now for everyone who
+-- redeemed it.
 create or replace function public.revoke_tester_code(code_or_ref text, end_access boolean default false)
 returns table (ref text, note text, revoked_at timestamptz, access_ended integer)
 language plpgsql volatile security definer set search_path = public as $$
 declare
   v_key text := lower(btrim(coalesce(code_or_ref, '')));
   v_ids uuid[] := '{}';
+  v_plan text;
   v_ended integer := 0;
 begin
   if v_key ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
@@ -218,11 +223,13 @@ begin
     raise exception 'more than one code starts with %: give more of the ref', code_or_ref using errcode = '21000';
   end if;
 
-  update public.access_codes c set revoked_at = coalesce(c.revoked_at, now()) where c.id = v_ids[1];
+  update public.access_codes c set revoked_at = coalesce(c.revoked_at, now()) where c.id = v_ids[1]
+  returning c.plan into v_plan;
   if end_access then
     update public.tester_access t
-       set until = now()
-     where t.until > now()
+       set team_until = case when v_plan = 'team' then now() else t.team_until end,
+           pro_until = case when v_plan = 'pro' then now() else t.pro_until end
+     where (case when v_plan = 'team' then t.team_until else t.pro_until end) > now()
        and t.user_id in (select r.user_id from public.access_code_redemptions r where r.code_id = v_ids[1]);
     get diagnostics v_ended = row_count;
   end if;
@@ -234,18 +241,32 @@ $$;
 
 -- Server only (service role), for the signed-in user `uid`. Errors (P0001):
 -- invalid_code (unknown or revoked: the same answer, on the same path),
--- already_redeemed, code_expired, code_used_up. The code's row is locked, so
--- two people redeeming at once can't pass max_uses. Tester time adds on to
--- time still running and never shortens it. With dry_run nothing is written:
--- it says what the code would give. Returns {"plan", "until", "days"}.
+-- already_redeemed, code_expired, code_used_up, and already_covered (DETAIL:
+-- the code's plan) when a renewing subscription, or a Team seat for a Pro
+-- code, already gives what the code gives: the code is not used. The code's
+-- row is locked, so two people redeeming at once can't pass max_uses.
+--
+-- Tester time is kept per plan and starts after time the user already has
+-- of that plan or higher (tester time, a prepaid term, a subscription that
+-- won't renew), so none of it is lost. A Team code adds Team days only, and
+-- Pro tester time still to come moves back by as much. With dry_run nothing
+-- is written: it says what the code would give. Returns {"plan", "days",
+-- "until", "starts"}: the code's plan and days, when that time ends, and when
+-- it starts (null: now).
 create or replace function public.redeem_tester_code(uid uuid, code text, dry_run boolean default false)
 returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
 declare
   v_norm text := public.tester_code_normalize(code);
   v_code public.access_codes%rowtype;
-  v_plan text;
+  v_prof public.profiles%rowtype;
+  v_t public.tester_access%rowtype;
+  v_paid_team timestamptz; -- paid Team time with an end date
+  v_paid_pro timestamptz;  -- paid Pro or Team time with an end date
+  v_from timestamptz;
   v_until timestamptz;
+  v_team timestamptz;
+  v_pro timestamptz;
 begin
   if uid is null then
     raise exception 'uid is required' using errcode = '22004';
@@ -271,31 +292,72 @@ begin
     raise exception 'code_used_up' using errcode = 'P0001';
   end if;
 
-  if dry_run then
-    select case when t.until > now() and t.plan = 'team' then 'team' else v_code.plan end,
-           greatest(t.until, now()) + make_interval(days => v_code.days)
-      into v_plan, v_until
-      from public.tester_access t
-     where t.user_id = uid;
-    if not found then
-      v_plan := v_code.plan;
-      v_until := now() + make_interval(days => v_code.days);
-    end if;
-  else
-    insert into public.access_code_redemptions (code_id, user_id) values (v_code.id, uid);
-    update public.access_codes c set uses = c.uses + 1 where c.id = v_code.id;
-    -- Worked out against the stored row, so redemptions that race add up.
-    insert into public.tester_access as t (user_id, plan, until, code_id, granted_at)
-    values (uid, v_code.plan, now() + make_interval(days => v_code.days), v_code.id, now())
-    on conflict (user_id) do update
-      set plan = case when t.until > now() and t.plan = 'team' then 'team' else excluded.plan end,
-          until = greatest(t.until, now()) + make_interval(days => v_code.days),
-          code_id = excluded.code_id,
-          granted_at = excluded.granted_at
-    returning t.plan, t.until into v_plan, v_until;
+  -- One redemption at a time per user, so codes redeemed together add up.
+  if not dry_run then
+    perform pg_advisory_xact_lock(hashtext('tester_access:' || uid::text));
+  end if;
+  select * into v_prof from public.profiles p where p.id = uid;
+  select * into v_t from public.tester_access t where t.user_id = uid;
+
+  -- What renews (or a seat in someone's Team) has no end to start after:
+  -- the code would add nothing, so it isn't used.
+  if (v_prof.subscription_status in ('active', 'attention')
+        and v_prof.current_period_end + interval '3 days' > now()
+        and v_prof.subscription_plan in ('team', v_code.plan))
+     or (v_code.plan = 'pro' and exists (
+           select 1
+             from auth.users u
+             join public.team_members tm on tm.email = lower(u.email)
+            where u.id = uid
+              and u.email_confirmed_at is not null
+              and tm.owner_id <> uid
+              and public.own_plan(tm.owner_id) = 'team')) then
+    raise exception 'already_covered' using errcode = 'P0001', detail = v_code.plan;
   end if;
 
-  return jsonb_build_object('plan', v_plan, 'until', v_until, 'days', v_code.days);
+  -- Paid time with an end date (greatest() skips nulls).
+  v_paid_team := greatest(
+    case when v_prof.subscription_plan = 'team'
+          and v_prof.subscription_status in ('non-renewing', 'cancelled', 'complete')
+         then v_prof.current_period_end end,
+    case when v_prof.prepaid_plan = 'team' then v_prof.paid_until end);
+  v_paid_pro := greatest(v_paid_team,
+    case when v_prof.subscription_plan = 'pro'
+          and v_prof.subscription_status in ('non-renewing', 'cancelled', 'complete')
+         then v_prof.current_period_end end,
+    case when v_prof.prepaid_plan = 'pro' then v_prof.paid_until end);
+
+  v_team := v_t.team_until;
+  v_pro := v_t.pro_until;
+  if v_code.plan = 'team' then
+    v_from := greatest(now(), v_t.team_until, v_paid_team);
+    v_until := v_from + make_interval(days => v_code.days);
+    v_team := v_until;
+    -- Pro tester time not yet used (it runs once nothing higher is left)
+    -- keeps its length, after the new Team time.
+    if v_t.pro_until > greatest(v_from, v_paid_pro) then
+      v_pro := greatest(v_until, v_paid_pro) + (v_t.pro_until - greatest(v_from, v_paid_pro));
+    end if;
+  else
+    v_from := greatest(now(), v_t.team_until, v_t.pro_until, v_paid_pro);
+    v_until := v_from + make_interval(days => v_code.days);
+    v_pro := v_until;
+  end if;
+
+  if not dry_run then
+    insert into public.access_code_redemptions (code_id, user_id) values (v_code.id, uid);
+    update public.access_codes c set uses = c.uses + 1 where c.id = v_code.id;
+    insert into public.tester_access as t (user_id, team_until, pro_until, code_id, granted_at)
+    values (uid, v_team, v_pro, v_code.id, now())
+    on conflict (user_id) do update
+      set team_until = excluded.team_until,
+          pro_until = excluded.pro_until,
+          code_id = excluded.code_id,
+          granted_at = excluded.granted_at;
+  end if;
+
+  return jsonb_build_object('plan', v_code.plan, 'days', v_code.days, 'until', v_until,
+                            'starts', case when v_from > now() then v_from end);
 end;
 $$;
 
@@ -314,7 +376,8 @@ grant execute on function public.redeem_tester_code(uuid, text, boolean) to serv
 
 -- The user's own plan (not a Team seat), the highest of: an active
 -- subscription (with a 3-day grace while a renewal is processed), an
--- unexpired prepaid term, and tester access that hasn't ended.
+-- unexpired prepaid term, and tester time that hasn't ended (Team first,
+-- then Pro).
 create or replace function public.own_plan(uid uuid)
 returns text language sql stable security definer set search_path = public as $$
   select case
@@ -332,8 +395,9 @@ returns text language sql stable security definer set search_path = public as $$
              then pr.subscription_plan end as s,
         case when pr.prepaid_plan is not null and pr.paid_until > now()
              then pr.prepaid_plan end as p,
-        (select ta.plan from public.tester_access ta
-          where ta.user_id = u.id and ta.until > now()) as t
+        (select case when ta.team_until > now() then 'team'
+                     when ta.pro_until > now() then 'pro' end
+           from public.tester_access ta where ta.user_id = u.id) as t
         from (select uid as id) u
         left join public.profiles pr on pr.id = u.id
     ) x;

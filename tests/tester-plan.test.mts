@@ -28,7 +28,8 @@ const row = (extra: Partial<BillingRow> = {}): BillingRow => ({
   prepaid_plan: null, paid_until: null, paystack_customer_code: null, paystack_subscription_code: null,
   paystack_email_token: null, ...extra,
 });
-const tester = (plan: "pro" | "team", ms: number): TesterAccess => ({ plan, until: at(ms) });
+const tester = (plan: "pro" | "team", ms: number): TesterAccess =>
+  plan === "team" ? { teamUntil: at(ms), proUntil: null } : { teamUntil: null, proUntil: at(ms) };
 const resolve = (own: BillingRow, teamOwners: BillingRow[] = [], when = now) => {
   const access = resolveAccess({ own, emailVerified: true, teamOwners }, when);
   return { access, billing: summarize(own, access, when) };
@@ -57,6 +58,39 @@ const resolve = (own: BillingRow, teamOwners: BillingRow[] = [], when = now) => 
   check("after: Billing says when it ended", planTitle(ended.billing) === "Free" &&
     planStatus(ended.billing).includes("Pro (tester) ended 19 Oct 2026"), planStatus(ended.billing));
   check("after: Free limits again", LIMITS[ended.access.plan].watermark === true);
+}
+
+// ---------- Team, then Pro ----------
+{
+  // A 14-day Team code on top of 30 days of Pro: Team first, the Pro after it.
+  const own = row({ tester: { teamUntil: at(14 * day), proUntil: at(44 * day) } });
+  const { access, billing } = resolve(own);
+  check("Team then Pro: Team now", access.plan === "team" && access.source === "tester" && ownPlan(own, now) === "team");
+  check("Billing: Team (tester), then the Pro, then Free", planTitle(billing) === "Team (tester)" &&
+    planStatus(billing)[0] === "Until 2 Nov 2026, then Pro (tester) until 2 Dec 2026, then Free", planStatus(billing));
+  check("badge: Team (tester) until the Team time ends", JSON.stringify(planBadge(access.plan, billing)) ===
+    JSON.stringify({ name: "Team (tester)", until: "until 2 Nov 2026" }), planBadge(access.plan, billing));
+  const later = resolve(own, [], new Date(now.getTime() + 14 * day));
+  check("once Team ends: Pro (tester)", later.access.plan === "pro" && later.access.source === "tester" &&
+    planStatus(later.billing)[0] === "Until 2 Dec 2026, then Free", planStatus(later.billing));
+  const member = row({ id: "member" });
+  check("seats while Team runs, none after", resolve(member, [{ ...own, id: "owner" }]).access.plan === "team" &&
+    resolve(member, [{ ...own, id: "owner" }], new Date(now.getTime() + 14 * day)).access.plan === "free");
+  const ended = resolve(own, [], new Date(now.getTime() + 45 * day));
+  check("all over: Free, and the Pro end is the last one", ended.access.plan === "free" &&
+    planStatus(ended.billing).includes("Pro (tester) ended 2 Dec 2026"), planStatus(ended.billing));
+}
+{
+  // Prepaid Pro, a Team code, and Pro tester time after the paid term.
+  const own = row({ prepaid_plan: "pro", paid_until: at(60 * day), tester: { teamUntil: at(10 * day), proUntil: at(65 * day) } });
+  const { access, billing } = resolve(own);
+  check("prepaid Pro + Team then Pro tester time: every part is listed", access.source === "tester" && JSON.stringify(planStatus(billing)) ===
+    JSON.stringify(["Until 29 Oct 2026, then Pro", "Paid until 18 Dec 2026", "Pro (tester) until 23 Dec 2026"]), planStatus(billing));
+  const paid = resolve(own, [], new Date(now.getTime() + 11 * day));
+  check("Team over: the paid Pro shows, the tester Pro after it is listed", paid.access.source === "prepaid" &&
+    JSON.stringify(planStatus(paid.billing)) === JSON.stringify(["Paid until 18 Dec 2026", "Pro (tester) until 23 Dec 2026"]), planStatus(paid.billing));
+  const after = resolve(own, [], new Date(now.getTime() + 61 * day));
+  check("paid term over: Pro (tester) to the end", after.access.plan === "pro" && after.access.source === "tester");
 }
 
 // ---------- Paid + tester ----------
@@ -107,9 +141,9 @@ const resolve = (own: BillingRow, teamOwners: BillingRow[] = [], when = now) => 
 }
 // The app reads seats with the owners' tester time, as effective_plan() does.
 const store = readFileSync(new URL("../lib/billing-store.ts", import.meta.url), "utf8");
-check("team owners are read with their tester access", /from\("tester_access"\)\.select\("user_id, plan, until"\)\.in\("user_id", ids\)/.test(store));
+check("team owners are read with their tester access", /from\("tester_access"\)\.select\("user_id, team_until, pro_until"\)\.in\("user_id", ids\)/.test(store));
 const profile = readFileSync(new URL("../lib/profile.ts", import.meta.url), "utf8");
-check("the user's tester row is read as the user (RLS: own row only)", /supabase\.from\("tester_access"\)\.select\("plan, until"\)\.eq\("user_id", userId\)/.test(profile));
+check("the user's tester row is read as the user (RLS: own row only)", /supabase\.from\("tester_access"\)\.select\("team_until, pro_until"\)\.eq\("user_id", userId\)/.test(profile));
 check("the seat lookup goes by what is paid, not by tester time", /paidPlan\(row, now\) !== "team"/.test(profile));
 
 // ---------- Buying during tester access ----------
@@ -141,7 +175,7 @@ check("the seat lookup goes by what is paid, not by tester time", /paidPlan\(row
     customer: { customer_code: "CUS_t" }, metadata: { user_id: s.id, plan: "pro", mode: "once", months: 1 },
   }, { store: db, planForCode: () => null, now: () => now });
   check("a month bought on tester time: a full month from today", saved.prepaid_plan === "pro" && saved.paid_until === "2026-11-19T10:00:00.000Z", saved.paid_until);
-  check("tester time is not touched by a payment", saved.tester?.until === s.tester?.until);
+  check("tester time is not touched by a payment", saved.tester?.proUntil === s.tester?.proUntil);
   const after = resolve(saved, [], new Date(now.getTime() + 31 * day + 1));
   check("paid time outlasts tester time", resolve(saved, [], new Date(now.getTime() + 30 * day + 1)).access.plan === "pro" &&
     after.access.plan === "free");

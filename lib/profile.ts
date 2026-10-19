@@ -36,7 +36,7 @@ async function readTesterAccess(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string
 ): Promise<TesterAccess | null> {
-  const { data, error } = await supabase.from("tester_access").select("plan, until").eq("user_id", userId).maybeSingle();
+  const { data, error } = await supabase.from("tester_access").select("team_until, pro_until").eq("user_id", userId).maybeSingle();
   if (error) {
     if (!testerTableMissing) {
       testerTableMissing = true;

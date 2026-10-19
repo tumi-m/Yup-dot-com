@@ -24,8 +24,8 @@ function check(name: string, ok: boolean, detail: unknown = "") {
 
 const USER = { id: "5b0c8a8e-7d3f-4c55-9d6a-1f0e2a3b4c5d" };
 const CODE = "K7QM-8XRP-2D4N-W9HC";
-type DbAnswer = { data: unknown; error: { code?: string; message?: string } | null };
-const ok: DbAnswer = { data: { plan: "pro", until: "2026-11-18T10:00:00+00:00", days: 30 }, error: null };
+type DbAnswer = { data: unknown; error: { code?: string; message?: string; details?: string | null } | null };
+const ok: DbAnswer = { data: { plan: "pro", days: 30, until: "2026-11-18T10:00:00+00:00", starts: null }, error: null };
 const refusal = (message: string): DbAnswer => ({ data: null, error: { code: "P0001", message } });
 
 function setup(opts: { user?: { id: string } | null; db?: (args: { uid: string; code: string; dry_run: boolean }) => DbAnswer | Promise<DbAnswer>; minAnswerMs?: number } = {}) {
@@ -79,7 +79,8 @@ const json = async (res: Response) => ({ status: res.status, body: await res.jso
 {
   const s = setup();
   const r = await json(await post(s.deps, { code: " k7qm 8xrp 2d4n w9hc " }));
-  check("redeemed: plan and end date", r.status === 200 && r.body.plan === "pro" && r.body.until === "2026-11-18T10:00:00+00:00" && r.body.days === 30, r);
+  check("redeemed: plan, days and end date", r.status === 200 && r.body.plan === "pro" && r.body.until === "2026-11-18T10:00:00+00:00" &&
+    r.body.days === 30 && r.body.starts === null, r);
   check("never cached", r.cache === "no-store", r.cache);
   check("the database gets the user and the code, cleaned up", s.calls.length === 1 && s.calls[0].uid === USER.id &&
     s.calls[0].code === "K7QM8XRP2D4NW9HC" && s.calls[0].dry_run === false, s.calls);
@@ -94,6 +95,12 @@ const json = async (res: Response) => ({ status: res.status, body: await res.jso
   const r = await json(await post(s.deps, { code: CODE }));
   check("a Team code says Team", r.body.plan === "team" && r.body.days === 14, r);
 }
+{
+  // After time the user already has: says when it starts.
+  const s = setup({ db: () => ({ data: { plan: "pro", days: 5, until: "2027-01-06T00:00:00+00:00", starts: "2027-01-01T00:00:00+00:00" }, error: null }) });
+  const r = await json(await post(s.deps, { code: CODE, check: true }));
+  check("starts later: says from when", r.status === 200 && r.body.starts === "2027-01-01T00:00:00+00:00" && r.body.until === "2027-01-06T00:00:00+00:00", r);
+}
 
 // ---------- Refusals ----------
 for (const [db, reason] of [
@@ -105,6 +112,17 @@ for (const [db, reason] of [
   const s = setup({ db: () => refusal(db) });
   const r = await json(await post(s.deps, { code: CODE }));
   check(`${db}: 400, "${REDEEM_ERRORS[reason]}"`, r.status === 400 && r.body.reason === reason && r.body.error === REDEEM_ERRORS[reason], r);
+}
+{
+  // A plan that renews (or a Team seat) already gives it: refused, naming the
+  // code's plan from the DETAIL, and nothing else from the database.
+  const s = setup({ db: () => ({ data: null, error: { code: "P0001", message: "already_covered", details: "pro" } }) });
+  const r = await json(await post(s.deps, { code: CODE, check: true }));
+  check("already_covered: 400, names the plan", r.status === 400 && r.body.reason === "covered" &&
+    r.body.error === "Your plan already includes Pro, so this code would add nothing. It hasn't been used.", r);
+  const odd = setup({ db: () => ({ data: null, error: { code: "P0001", message: "already_covered", details: "<script>" } }) });
+  const r2 = await json(await post(odd.deps, { code: CODE }));
+  check("an odd DETAIL is not passed on", r2.body.error === REDEEM_ERRORS.covered && !JSON.stringify(r2.body).includes("script"), r2);
 }
 check("only P0001 with a known reason is a refusal", redeemErrorOf({ code: "P0001", message: "code_used_up" }) === "used-up" &&
   redeemErrorOf({ code: "23505", message: "already_redeemed" }) === null && redeemErrorOf({ code: "P0001", message: "other" }) === null &&

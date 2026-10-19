@@ -110,7 +110,7 @@ export async function teamOwnersFor(email: string, admin: Admin = createAdminCli
   if (ids.length === 0) return [];
   const [{ data, error: e2 }, testers] = await Promise.all([
     admin.from("profiles").select(COLUMNS).in("id", ids),
-    admin.from("tester_access").select("user_id, plan, until").in("user_id", ids),
+    admin.from("tester_access").select("user_id, team_until, pro_until").in("user_id", ids),
   ]);
   fail("read team owners", e2);
   // Without the tester table (migration not run yet) owners count as before.

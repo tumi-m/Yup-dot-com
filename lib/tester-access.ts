@@ -139,26 +139,69 @@ export function forgetTesterCode(w: CodeWindow): void {
 // Tester time
 // ---------------------------------------------------------------------------
 
-/** A user's row in public.tester_access (they may read their own). */
+/**
+ * A user's row in public.tester_access (they may read their own). Tester
+ * time is kept per plan: Team time runs first, then Pro time, so a Team
+ * code adds Team days only and a Pro code never adds Team time.
+ */
 export interface TesterAccess {
+  /** ISO time Team tester time ends, or null. */
+  teamUntil: string | null;
+  /** ISO time Pro tester time ends, or null. It runs once Team time is over. */
+  proUntil: string | null;
+}
+
+/** A stretch of tester time: its plan and when it ends. */
+export interface TesterTime {
   plan: PaidPlanId;
   /** ISO time it ends. */
   until: string;
 }
 
-/** Whether tester time is running at `now`: until the instant `until`, not at it (as own_plan()). */
-export function testerActive(t: TesterAccess | null | undefined, now: Date): boolean {
-  if (!t || (t.plan !== "pro" && t.plan !== "team")) return false;
-  const end = new Date(t.until).getTime();
-  return Number.isFinite(end) && end > now.getTime();
+const after = (iso: string | null, now: Date) => iso !== null && Date.parse(iso) > now.getTime();
+
+/** The tester plan at `now`, until the instant each part ends, not at it (as own_plan()). */
+export function testerPlan(t: TesterAccess | null | undefined, now: Date): PaidPlanId | null {
+  if (!t) return null;
+  if (after(t.teamUntil, now)) return "team";
+  if (after(t.proUntil, now)) return "pro";
+  return null;
 }
 
-/** A row as read from the database, or null when it isn't one. */
+/** Whether any tester time is running at `now`. */
+export function testerActive(t: TesterAccess | null | undefined, now: Date): boolean {
+  return testerPlan(t, now) !== null;
+}
+
+/** Tester time still to come, in order: Team, then Pro (only the part after Team). */
+export function testerTimes(t: TesterAccess | null | undefined, now: Date): TesterTime[] {
+  if (!t) return [];
+  const times: TesterTime[] = [];
+  const team = after(t.teamUntil, now);
+  if (team) times.push({ plan: "team", until: t.teamUntil! });
+  if (after(t.proUntil, now) && (!team || Date.parse(t.proUntil!) > Date.parse(t.teamUntil!))) {
+    times.push({ plan: "pro", until: t.proUntil! });
+  }
+  return times;
+}
+
+/** The tester time that ended last (to say when it ended), or null. */
+export function lastTesterTime(t: TesterAccess | null | undefined): TesterTime | null {
+  if (!t) return null;
+  const team = t.teamUntil ? Date.parse(t.teamUntil) : -Infinity;
+  const pro = t.proUntil ? Date.parse(t.proUntil) : -Infinity;
+  if (team === -Infinity && pro === -Infinity) return null;
+  return pro > team ? { plan: "pro", until: t.proUntil! } : { plan: "team", until: t.teamUntil! };
+}
+
+const isTime = (v: unknown): v is string | null => v === null || (typeof v === "string" && !Number.isNaN(Date.parse(v)));
+
+/** A row as read from the database ({team_until, pro_until}), or null when it isn't one. */
 export function parseTesterAccess(row: unknown): TesterAccess | null {
   if (!row || typeof row !== "object") return null;
-  const { plan, until } = row as Record<string, unknown>;
-  if ((plan !== "pro" && plan !== "team") || typeof until !== "string" || Number.isNaN(Date.parse(until))) return null;
-  return { plan, until };
+  const { team_until = null, pro_until = null } = row as Record<string, unknown>;
+  if (!isTime(team_until) || !isTime(pro_until) || (team_until === null && pro_until === null)) return null;
+  return { teamUntil: team_until, proUntil: pro_until };
 }
 
 /** "Pro (tester)" */
@@ -167,7 +210,7 @@ export function testerPlanName(plan: PaidPlanId): string {
 }
 
 /** "Pro (tester) until 17 Nov 2026" */
-export function testerLabel(t: TesterAccess): string {
+export function testerLabel(t: TesterTime): string {
   return `${testerPlanName(t.plan)} until ${formatBillingDate(t.until)}`;
 }
 
@@ -175,29 +218,48 @@ export function testerLabel(t: TesterAccess): string {
 // Answers from POST /api/access/redeem
 // ---------------------------------------------------------------------------
 
-/** Why a code was turned down. "invalid" covers unknown and revoked codes alike. */
-export type RedeemError = "invalid" | "expired" | "used-up" | "already-redeemed";
+/**
+ * Why a code was turned down. "invalid" covers unknown and revoked codes
+ * alike. "covered": a plan that renews (or a Team seat) already gives what
+ * the code gives, so it wasn't used.
+ */
+export type RedeemError = "invalid" | "expired" | "used-up" | "already-redeemed" | "covered";
 
 export const REDEEM_ERRORS: Record<RedeemError, string> = {
   invalid: "That code doesn't work. Check it and try again.",
   expired: "That code has expired.",
   "used-up": "That code has been used up.",
   "already-redeemed": "You've already used that code.",
+  covered: "Your plan already includes this, so the code would add nothing. It hasn't been used.",
 };
+
+/** The "covered" answer, naming the code's plan when it is known. */
+export function coveredMessage(plan: unknown): string {
+  return plan === "pro" || plan === "team"
+    ? `Your plan already includes ${PLANS[plan].name}, so this code would add nothing. It hasn't been used.`
+    : REDEEM_ERRORS.covered;
+}
 
 export const REDEEM_TOO_MANY = "Too many tries today. Try again tomorrow.";
 export const REDEEM_UNAVAILABLE = "Couldn't check the code just now. Try again.";
 
-/** What a successful answer carries: the plan and when tester time ends. */
+/** What a successful answer carries: what the code gives, and when. */
 export interface RedeemResult {
   plan: PaidPlanId;
-  until: string;
   /** Days the code gives. */
   days: number;
+  /** ISO time this tester time ends. */
+  until: string;
+  /** ISO time it starts, when that is later than now (after time the user already has). */
+  starts: string | null;
 }
 
 export function parseRedeemResult(data: unknown): RedeemResult | null {
-  const t = parseTesterAccess(data);
-  const days = Number((data as { days?: unknown } | null)?.days);
-  return t && Number.isInteger(days) && days > 0 ? { ...t, days } : null;
+  if (!data || typeof data !== "object") return null;
+  const { plan, days, until, starts = null } = data as Record<string, unknown>;
+  if (plan !== "pro" && plan !== "team") return null;
+  if (typeof until !== "string" || Number.isNaN(Date.parse(until))) return null;
+  if (!Number.isInteger(days) || (days as number) <= 0) return null;
+  if (starts !== null && (typeof starts !== "string" || Number.isNaN(Date.parse(starts)))) return null;
+  return { plan, days: days as number, until, starts };
 }
