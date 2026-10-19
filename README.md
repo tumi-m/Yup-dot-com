@@ -369,7 +369,8 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   schema (so an old copy of a function or policy can't undo a fix). It plays what anyone holding the anon key could try (read
   other users' rows and files, give themselves a paid plan, forge billing
   events, call the usage functions, keep files past the plan limit, read or
-  redeem tester codes themselves) and fails if any of it works. It also
+  redeem tester codes themselves, or reach any tester table beyond reading
+  their own `tester_access` row) and fails if any of it works. It also
   redeems one code from two connections at once and checks it is used only
   as often as allowed, and two codes for one person at once and checks both
   count. Run it locally against any Postgres you can throw away:
@@ -458,7 +459,7 @@ someone leaves or a key changes.
       shared sender.
 6. Supabase → SQL editor: run each file in `supabase/migrations/` you
    haven't run yet, once, in date order (the newest is
-   `20261018140000_private_by_default.sql`). Then run
+   `20261019000000_tester_access.sql`). Then run
    [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
    it again whenever you change anything by hand (a table, a bucket, a
    function, a policy). Security Advisor should show no "RLS disabled" table.
@@ -726,7 +727,10 @@ page, and no code or secret is in the site.
 
 On a project set up before this, run
 [`supabase/migrations/20261019000000_tester_access.sql`](supabase/migrations/20261019000000_tester_access.sql)
-once in the SQL editor (`supabase/schema.sql` already includes it).
+once in the SQL editor, after the migrations before it (`supabase/schema.sql`
+already includes it), then [`supabase/audit.sql`](supabase/audit.sql): it
+should still return no rows. Browsers get one thing from it on purpose: a
+signed-in user may read their own `tester_access` row.
 
 **Make a code** (Supabase → SQL editor → New query):
 

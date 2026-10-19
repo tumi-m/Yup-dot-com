@@ -117,12 +117,14 @@ switched off by mistake returns nothing. Tables, views and functions added
 later, by hand, are private too: an event trigger switches RLS on for each
 new table and won't let it be switched off, new views check RLS as the
 reader, and browsers can't use anything new until it is granted on purpose.
-`scripts/test-rls.sh` checks all of this on every push (and that no migration
-undoes it when run again). For anything changed by hand in the dashboard,
-run `supabase/audit.sql` in the SQL editor: it lists every table without RLS,
-view that skips it, privilege the public key has, callable `SECURITY DEFINER`
-function, public bucket and storage policy for visitors, and should return
-nothing.
+Tester access is granted just one thing that way: a signed-in user may read
+their own `tester_access` row; the codes, who used them and the tester
+functions stay out of reach. `scripts/test-rls.sh` checks all of this on
+every push (and that no migration undoes it when run again). For anything
+changed by hand in the dashboard, run `supabase/audit.sql` in the SQL
+editor: it lists every table without RLS, view that skips it, privilege the
+public key has, callable `SECURITY DEFINER` function, public bucket and
+storage policy for visitors, and should return nothing.
 
 **An injected script stealing the session.** Every page has a
 Content-Security-Policy with a fresh nonce, including paths that end in
