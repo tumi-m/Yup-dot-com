@@ -5,6 +5,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/server";
 import { BILLING_COLUMNS, type BillingPatch, type BillingRow, type BillingStore } from "@/lib/billing";
+import { parseTesterAccess } from "@/lib/tester-access";
 
 // The admin client is created via require() and is untyped.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,7 +96,10 @@ export async function removeTeamMember(ownerId: string, email: string, admin: Ad
   fail("remove member", error);
 }
 
-/** Billing rows of every owner whose Team lists this email. */
+/**
+ * Billing rows of every owner whose Team lists this email, with their tester
+ * access (a Team tester's seats count while it runs, as in effective_plan()).
+ */
 export async function teamOwnersFor(email: string, admin: Admin = createAdminClient()): Promise<BillingRow[]> {
   const { data: links, error } = await admin
     .from("team_members")
@@ -104,7 +108,13 @@ export async function teamOwnersFor(email: string, admin: Admin = createAdminCli
   fail("find teams", error);
   const ids = ((links as { owner_id: string }[]) ?? []).map((l) => l.owner_id);
   if (ids.length === 0) return [];
-  const { data, error: e2 } = await admin.from("profiles").select(COLUMNS).in("id", ids);
+  const [{ data, error: e2 }, testers] = await Promise.all([
+    admin.from("profiles").select(COLUMNS).in("id", ids),
+    admin.from("tester_access").select("user_id, plan, until").in("user_id", ids),
+  ]);
   fail("read team owners", e2);
-  return (data as BillingRow[]) ?? [];
+  // Without the tester table (migration not run yet) owners count as before.
+  const testerRows = ((testers?.error ? null : testers?.data) ?? []) as { user_id: string }[];
+  const tester = new Map<string, unknown>(testerRows.map((t) => [t.user_id, t]));
+  return ((data as BillingRow[]) ?? []).map((row) => ({ ...row, tester: parseTesterAccess(tester.get(row.id)) }));
 }

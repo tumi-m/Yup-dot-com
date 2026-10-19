@@ -222,7 +222,11 @@ const LINKS: NavLink[] = [
   { href: "/pricing", label: "Pricing" },
 ];
 
-export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
+export function MarketingNav({ isAuthed, loginHref = "/login" }: {
+  isAuthed: boolean;
+  /** Where "Log in" goes: a page that should be returned to after logging in passes loginHref(itself). */
+  loginHref?: string;
+}) {
   return (
     <NavShell
       links={LINKS}
@@ -234,7 +238,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
         ) : (
           <>
             <Button asChild variant="ghost" size="sm" className="pointer-coarse:h-11">
-              <Link href="/login">Log in</Link>
+              <Link href={loginHref}>Log in</Link>
             </Button>
             <Button asChild size="sm" className="shadow-md shadow-primary/25 pointer-coarse:h-11">
               <Link href="/tools">Start free</Link>
@@ -250,7 +254,7 @@ export function MarketingNav({ isAuthed }: { isAuthed: boolean }) {
         ) : (
           <div className="grid grid-cols-2 gap-2">
             <Button asChild variant="outline" className="h-11">
-              <Link href="/login">Log in</Link>
+              <Link href={loginHref}>Log in</Link>
             </Button>
             <Button asChild className="h-11">
               <Link href="/tools">Start free</Link>

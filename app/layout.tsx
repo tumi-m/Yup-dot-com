@@ -7,6 +7,7 @@ import { GA_ID, consentBootstrapScript } from "@/lib/analytics";
 import { MotionProvider } from "@/components/motion/primitives";
 import { SkipLink } from "@/components/SkipLink";
 import { Analytics } from "@/components/analytics/Analytics";
+import { REDEEM_FRAGMENT_SCRIPT } from "@/lib/tester-access";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -54,6 +55,12 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        {/* First thing on every page: a tester link's code (/redeem#CODE)
+            leaves the address bar before analytics or any other script can
+            see it (lib/tester-access.ts). Does nothing on other pages. */}
+        <script dangerouslySetInnerHTML={{ __html: REDEEM_FRAGMENT_SCRIPT }} />
+      </head>
       <body className="min-h-screen font-sans">
         {GA_ID && (
           // Consent Mode defaults (all denied) before any Google tag can load.

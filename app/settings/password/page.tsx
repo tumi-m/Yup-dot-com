@@ -16,7 +16,7 @@ export default async function PasswordPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="min-h-screen">
-      <AppNav plan={profile.plan} email={profile.email} />
+      <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <main id="main" className="container max-w-md py-10">
         <h1 className="text-3xl font-bold tracking-tight">New password</h1>
         <p className="mt-1 text-sm text-muted-foreground">For {profile.email}</p>

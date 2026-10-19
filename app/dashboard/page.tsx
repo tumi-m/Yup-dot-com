@@ -22,7 +22,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <AppNav plan={profile.plan} email={profile.email} />
+      <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <DashboardClient
         initialDocuments={(documents as DocumentRecord[]) ?? []}
         plan={profile.plan}

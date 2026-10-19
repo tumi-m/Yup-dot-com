@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, Loader2 } from "lucide-react";
-import { PLAN_LIST, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
+import { PLAN_LIST, formatBillingDate, formatPrice, isPaidPlan, prepaidPrice } from "@/lib/plans";
 import { displayPrice, type PriceDisplay } from "@/lib/currency";
-import { cardOffer } from "@/lib/billing-ui";
+import { cardOffer, planOnCards } from "@/lib/billing-ui";
 import type { BillingSummary } from "@/lib/billing";
 import { startCheckout, type CheckoutRequest } from "@/components/BillingClient";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,11 @@ export function PricingCards({
   const [error, setError] = useState<{ plan: PlanId; message: string } | null>(null);
   // The turning ring on the recommended plan stops while it is offscreen.
   const ring = useAmbient<HTMLDivElement>();
+  // On tester access with nothing paid, Free is what comes next: say when.
+  const fallsBackOn =
+    billing?.source === "tester" && billing.tester && billing.base.plan === "free"
+      ? formatBillingDate(billing.tester.until)
+      : null;
 
   async function choose(plan: PlanId, req?: CheckoutRequest) {
     setError(null);
@@ -67,7 +72,8 @@ export function PricingCards({
           feature onto two lines. */}
       <div className="mx-auto grid max-w-md items-stretch gap-6 lg:max-w-none lg:grid-cols-3">
         {PLAN_LIST.map((plan, i) => {
-          const isCurrent = currentPlan === plan.id;
+          // Tester access is free and ends by itself: it never makes a plan "current" here.
+          const isCurrent = planOnCards(currentPlan, billing) === plan.id;
           const offer = isPaidPlan(plan.id) ? cardOffer(plan.id, currentPlan, billing) : null;
           return (
             // Transform only, so the prices paint at once. A page can hold the
@@ -126,8 +132,8 @@ export function PricingCards({
                   >
                     {loading === `${plan.id}:subscription` && <Loader2 className="animate-spin" />}
                     {isCurrent
-                      ? "Current plan"
-                      : offer?.main === "included"
+                      ? fallsBackOn ? `From ${fallsBackOn}` : "Current plan"
+                      : offer?.main === "included" || (offer?.main === "subscribe" && offer.text)
                         ? offer.text
                         : plan.id === "free"
                           ? "Start free"

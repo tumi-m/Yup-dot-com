@@ -140,7 +140,8 @@ function view(r: BillingRow, at = now) {
   const page = readFileSync(new URL("../app/settings/billing/page.tsx", import.meta.url), "utf8");
   check("Billing shows Payment failed while the subscription is live", /sub\?\.pastDue && sub\.live &&/.test(page));
   check("Billing offers Manage subscription whenever it's manageable", /\{sub\?\.manageable && <ManageBillingButton \/>\}/.test(page));
-  check("no Upgrade section beside a live subscription", /!sub\?\.active && !sub\?\.live && billing\.source !== "prepaid"/.test(page));
+  // (billing.base: the plan without tester access, which never hides it.)
+  check("no Upgrade section beside a live subscription", /!sub\?\.active && !sub\?\.live && billing\.base\.source !== "prepaid"/.test(page));
   const manage = readFileSync(new URL("../app/api/billing/manage/route.ts", import.meta.url), "utf8");
   check("the manage route allows what the page offers", /profile\.billing\.subscription\?\.manageable/.test(manage) &&
     !/subscriptionActive/.test(manage));

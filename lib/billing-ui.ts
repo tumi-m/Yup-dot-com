@@ -7,6 +7,7 @@
  */
 import { PLANS, formatBillingDate, type PaidPlanId } from "./plans";
 import type { BillingSummary } from "./billing";
+import { testerPlanName } from "./tester-access";
 import type { PlanId } from "./types";
 
 const RANK: Record<PlanId, number> = { free: 0, pro: 1, team: 2 };
@@ -64,29 +65,40 @@ export function payOnceBlock(plan: PaidPlanId, billing: Billing): string | null 
 export interface CardOffer {
   /** The main button: current plan, part of a higher plan, subscribe, or a note instead. */
   main: "current" | "included" | "subscribe" | "blocked";
-  /** The button label for "included", the note for "blocked". */
+  /** The button label for "included" (and for "subscribe" when set), the note for "blocked". */
   text: string | null;
   payOnce: boolean;
   /** Shown with the pay-once links. */
   payOnceNote: string | null;
 }
 
+/**
+ * The plan the pricing cards treat as current. Tester access is free and
+ * ends on its own, so it never stands in the way of buying: the cards show
+ * the plan without it.
+ */
+export function planOnCards(current: PlanId | undefined, billing: Billing): PlanId | undefined {
+  return billing?.source === "tester" ? billing.base.plan : current;
+}
+
 /** What a paid plan's card offers someone on `current` (undefined when signed out). */
 export function cardOffer(plan: PaidPlanId, current: PlanId | undefined, billing: Billing): CardOffer {
-  const cur = current ?? "free";
+  const cur = planOnCards(current, billing) ?? "free";
   if (plan === cur) return { main: "current", text: null, payOnce: false, payOnceNote: null };
   if (RANK[plan] < RANK[cur]) {
     return { main: "included", text: `Included in ${PLANS[cur].name}`, payOnce: false, payOnceNote: null };
   }
   const block = subscribeBlock(plan, billing);
   const pre = billing?.prepaid;
+  const tester = billing?.tester?.active ? billing.tester : null;
   const notes = [
     pre?.active && pre.plan !== plan ? `Your ${PLANS[pre.plan].name} time left carries over.` : null,
     renewalNote(plan, billing),
+    tester ? "Paid time starts when you pay." : null,
   ].filter(Boolean);
   return {
     main: block ? "blocked" : "subscribe",
-    text: block,
+    text: block ?? (tester?.plan === plan ? `Subscribe to ${PLANS[plan].name}` : null),
     payOnce: !payOnceBlock(plan, billing),
     payOnceNote: notes.length ? notes.join(" ") : null,
   };
@@ -108,6 +120,38 @@ function renewalNote(plan: PaidPlanId, billing: Billing): string | null {
  * subscription or a Team seat, so paid time is never hidden either.
  */
 export function planStatus(billing: BillingSummary): string[] {
+  const tester = billing.tester;
+  if (billing.source === "tester" && tester) {
+    // What is left when it ends, then that plan's own lines.
+    const then = billing.base.source === "team" ? "your Team seat" : PLANS[billing.base.plan].name;
+    return [
+      `Until ${formatBillingDate(tester.until)}, then ${then}`,
+      ...paidStatus({ ...billing, plan: billing.base.plan, source: billing.base.source }),
+    ];
+  }
+  const lines = paidStatus(billing);
+  if (tester?.active) {
+    lines.push(`${testerPlanName(tester.plan)} until ${formatBillingDate(tester.until)}`);
+  } else if (tester && billing.source === null) {
+    lines.push(`${testerPlanName(tester.plan)} ended ${formatBillingDate(tester.until)}`);
+  }
+  return lines;
+}
+
+/** The plan's name on the Billing page: "Pro", or "Pro (tester)" while tester access gives it. */
+export function planTitle(billing: BillingSummary): string {
+  return billing.source === "tester" ? testerPlanName(billing.plan as PaidPlanId) : PLANS[billing.plan].name;
+}
+
+/** The plan badge in the signed-in header: "Pro", or "Pro (tester)" and "until 17 Nov 2026". */
+export function planBadge(plan: PlanId, billing: Billing): { name: string; until: string | null } {
+  if (billing?.source === "tester" && billing.tester && plan !== "free") {
+    return { name: testerPlanName(plan), until: `until ${formatBillingDate(billing.tester.until)}` };
+  }
+  return { name: PLANS[plan].name, until: null };
+}
+
+function paidStatus(billing: BillingSummary): string[] {
   const { subscription: sub, prepaid } = billing;
   if (billing.source === "subscription" && sub) {
     const label = sub.pastDue ? "Payment due" : sub.renews ? "Renews" : "Ends";

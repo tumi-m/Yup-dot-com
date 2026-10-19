@@ -23,7 +23,8 @@ In scope:
 - the code in this repository, including `supabase/schema.sql` (database
   rules) and `media-worker/`
 - access to other accounts' documents, files, profiles, plans or team seats
-- getting a paid plan or extra usage without paying
+- getting a paid plan or extra usage without paying, including through
+  tester codes (`/redeem`, `/api/access/redeem`)
 - server secrets reaching the browser, and server-side request forgery
   through the download and import routes
 - cross-site scripting, including through crafted PDF or PowerPoint files

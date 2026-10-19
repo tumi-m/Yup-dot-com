@@ -5,7 +5,9 @@
  *
  * Access is decided at read time from dates stored on the profile, so an
  * expired prepaid term or a lapsed subscription stops granting a plan the
- * moment it ends — no scheduled job is needed.
+ * moment it ends — no scheduled job is needed. Tester access (free time from
+ * a tester code, lib/tester-access.ts) is counted the same way, from its own
+ * table, and never changes a billing column.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
@@ -19,6 +21,7 @@ import {
   type PaidPlanId,
   type PrepaidMonths,
 } from "./plans";
+import { testerActive, type TesterAccess } from "./tester-access";
 import type { PlanId } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +49,8 @@ export interface BillingRow {
   paystack_customer_code: string | null;
   paystack_subscription_code: string | null;
   paystack_email_token: string | null;
+  /** From public.tester_access (not a profile column), when the user has a row there. */
+  tester?: TesterAccess | null;
 }
 
 export const BILLING_COLUMNS = [
@@ -101,33 +106,59 @@ export function prepaidActive(row: BillingRow | null, now: Date): boolean {
   return time(row.paid_until) > now.getTime();
 }
 
-/** The plan a user pays for themselves (ignoring team membership). */
-export function ownPlan(row: BillingRow | null, now: Date): PlanId {
+/** The plan a user pays for themselves: subscription or prepaid term. */
+export function paidPlan(row: BillingRow | null, now: Date): PlanId {
   let plan: PlanId = "free";
   if (subscriptionActive(row, now)) plan = best(plan, row!.subscription_plan!);
   if (prepaidActive(row, now)) plan = best(plan, row!.prepaid_plan!);
   return plan;
 }
 
-export type PlanSource = "subscription" | "prepaid" | "team" | null;
+/**
+ * The user's own plan, ignoring team membership: what they pay for, or
+ * tester access while it runs, whichever is higher (as own_plan() in
+ * supabase/schema.sql). A Team tester can give seats, like a Team owner.
+ */
+export function ownPlan(row: BillingRow | null, now: Date): PlanId {
+  const plan = paidPlan(row, now);
+  return testerActive(row?.tester, now) ? best(plan, row!.tester!.plan) : plan;
+}
+
+export type PlanSource = "subscription" | "prepaid" | "team" | "tester" | null;
 
 export interface Access {
   plan: PlanId;
   source: PlanSource;
   /** Set when the plan comes from someone else's Team. */
   teamOwnerId: string | null;
+  /** The plan without tester access: what is left when it ends. */
+  base: { plan: PlanId; source: Exclude<PlanSource, "tester"> };
 }
 
 /**
  * Effective plan for a user. `teamOwners` are the billing rows of every user
  * who listed this user's email as a Team member; they only count when the
  * email is verified (otherwise anyone could sign up as someone else's
- * address) and while the owner's own Team plan is active.
+ * address) and while the owner's own Team plan (paid or tester) is active.
+ * Tester access counts while it runs, when it is higher than the rest; on a
+ * tie the paid plan or seat is shown as the source.
  */
 export function resolveAccess(
   input: { own: BillingRow | null; emailVerified: boolean; teamOwners: BillingRow[] },
   now: Date
 ): Access {
+  const base = paidAccess(input, now);
+  const tester = input.own?.tester;
+  if (testerActive(tester, now) && RANK[tester!.plan] > RANK[base.plan]) {
+    return { plan: tester!.plan, source: "tester", teamOwnerId: null, base };
+  }
+  return { ...base, base };
+}
+
+function paidAccess(
+  input: { own: BillingRow | null; emailVerified: boolean; teamOwners: BillingRow[] },
+  now: Date
+): { plan: PlanId; source: Exclude<PlanSource, "tester">; teamOwnerId: string | null } {
   const { own } = input;
   const sub = subscriptionActive(own, now) ? own!.subscription_plan! : "free";
   const pre = prepaidActive(own, now) ? own!.prepaid_plan! : "free";
@@ -160,6 +191,10 @@ export interface BillingSummary {
   } | null;
   prepaid: { plan: PaidPlanId; paidUntil: string; active: boolean } | null;
   teamOwnerEmail: string | null;
+  /** Free time from a tester code, running or ended. */
+  tester: { plan: PaidPlanId; until: string; active: boolean } | null;
+  /** The plan without tester access: what is left when it ends. */
+  base: Access["base"];
 }
 
 export function summarize(
@@ -187,7 +222,8 @@ export function summarize(
     row && isPaidPlan(row.prepaid_plan) && row.paid_until
       ? { plan: row.prepaid_plan, paidUntil: row.paid_until, active: prepaidActive(row, now) }
       : null;
-  return { plan: access.plan, source: access.source, subscription, prepaid, teamOwnerEmail };
+  const tester = row?.tester ? { ...row.tester, active: testerActive(row.tester, now) } : null;
+  return { plan: access.plan, source: access.source, subscription, prepaid, teamOwnerEmail, tester, base: access.base };
 }
 
 export const FREE_SUMMARY: BillingSummary = {
@@ -196,6 +232,8 @@ export const FREE_SUMMARY: BillingSummary = {
   subscription: null,
   prepaid: null,
   teamOwnerEmail: null,
+  tester: null,
+  base: { plan: "free", source: null },
 };
 
 /**

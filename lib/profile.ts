@@ -4,12 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
   BILLING_COLUMNS,
-  ownPlan,
+  paidPlan,
   resolveAccess,
   summarize,
   type BillingRow,
 } from "@/lib/billing";
 import { isAdminConfigured, teamOwnersFor } from "@/lib/billing-store";
+import { parseTesterAccess, type TesterAccess } from "@/lib/tester-access";
 import type { Profile } from "@/lib/types";
 
 const COLUMNS = ["full_name", "created_at", ...BILLING_COLUMNS].join(",");
@@ -23,12 +24,35 @@ export interface Account {
   row: BillingRow;
 }
 
+// The project hasn't run the tester access migration yet: say so once.
+let testerTableMissing = false;
+
+/**
+ * The user's tester access, read as the user (RLS lets them read only their
+ * own row). Null when there is none, or when it can't be read: no tester
+ * time is ever assumed.
+ */
+async function readTesterAccess(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<TesterAccess | null> {
+  const { data, error } = await supabase.from("tester_access").select("plan, until").eq("user_id", userId).maybeSingle();
+  if (error) {
+    if (!testerTableMissing) {
+      testerTableMissing = true;
+      console.error("Tester access unavailable. Run supabase/migrations/20261019000000_tester_access.sql.", error.message);
+    }
+    return null;
+  }
+  return parseTesterAccess(data);
+}
+
 /**
  * The signed-in user with their profile, creating the profile on first
  * access. `profile.plan` is the plan in force right now: it is resolved from
- * the subscription and prepaid dates and Team membership on every read, so
- * expiry needs no scheduled job. Null when signed out or when Supabase is
- * not configured.
+ * the subscription and prepaid dates, tester access and Team membership on
+ * every read, so expiry needs no scheduled job. Null when signed out or when
+ * Supabase is not configured.
  */
 export const getAccount = cache(async (): Promise<Account | null> => {
   if (!isSupabaseConfigured()) return null;
@@ -39,6 +63,7 @@ export const getAccount = cache(async (): Promise<Account | null> => {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const testerRead = readTesterAccess(supabase, user.id).catch(() => null);
   let { data } = await supabase.from("profiles").select(COLUMNS).eq("id", user.id).maybeSingle();
   if (!data) {
     // Normally created by a trigger on sign-up; this covers older accounts.
@@ -57,12 +82,13 @@ export const getAccount = cache(async (): Promise<Account | null> => {
     }
   }
   if (!data) return null;
-  const row = data as unknown as Row;
+  const row = { ...(data as unknown as Row), tester: await testerRead };
 
   const now = new Date();
   const emailVerified = !!user.email_confirmed_at && !!user.email;
   let teamOwners: BillingRow[] = [];
-  if (emailVerified && ownPlan(row, now) !== "team" && isAdminConfigured()) {
+  // A Team seat outlasts tester time, so it is looked up whatever the tester plan.
+  if (emailVerified && paidPlan(row, now) !== "team" && isAdminConfigured()) {
     teamOwners = await teamOwnersFor(user.email!).catch(() => []);
   }
   const access = resolveAccess({ own: row, emailVerified, teamOwners }, now);

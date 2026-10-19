@@ -8,9 +8,10 @@ import {
   PaymentReturn,
   TeamSeats,
 } from "@/components/BillingClient";
-import { PLANS, TEAM_SEATS, formatPrice } from "@/lib/plans";
+import { TesterCodeEntry } from "@/components/TesterAccess";
+import { PLANS, TEAM_SEATS, formatBillingDate, formatPrice } from "@/lib/plans";
 import { ownPlan } from "@/lib/billing";
-import { planStatus } from "@/lib/billing-ui";
+import { planStatus, planTitle } from "@/lib/billing-ui";
 import { isAdminConfigured, listTeamMembers } from "@/lib/billing-store";
 import { isOurReference } from "@/lib/paystack";
 import { displayPrice } from "@/lib/currency";
@@ -45,10 +46,14 @@ export default async function BillingPage({
     : [];
 
   const status = planStatus(billing);
+  // Tester access is free: no price, and buying stays possible but tucked away.
+  const tester = billing.source === "tester" && billing.tester ? billing.tester : null;
+  const paying = billing.source === "subscription" || billing.source === "prepaid" || billing.source === null;
+  const cards = <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />;
 
   return (
     <div className="min-h-screen">
-      <AppNav plan={profile.plan} email={profile.email} />
+      <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <main id="main" className="container max-w-5xl py-10">
         <h1 className="text-3xl font-bold tracking-tight">Billing</h1>
 
@@ -58,14 +63,14 @@ export default async function BillingPage({
           <p className="text-sm text-muted-foreground">Current plan</p>
           <div className="mt-1 flex items-center justify-between gap-4">
             <div>
-              <p className="text-2xl font-bold">{plan.name}</p>
+              <p className="text-2xl font-bold">{planTitle(billing)}</p>
               {status.map((line) => (
                 <p key={line} className="text-sm text-muted-foreground">
                   {line}
                 </p>
               ))}
             </div>
-            {billing.source !== "team" && (
+            {paying && (
               <div className="text-right">
                 <p className="text-lg font-semibold">
                   {displayPrice(display, plan.priceMonthly)}
@@ -91,13 +96,15 @@ export default async function BillingPage({
             </div>
           )}
 
-          {sub?.manageable || (billing.source === "prepaid" && prepaid) ? (
+          {sub?.manageable || (billing.base.source === "prepaid" && prepaid) ? (
             <div className="mt-5 space-y-4 border-t border-border pt-5">
               {sub?.manageable && <ManageBillingButton />}
-              {billing.source === "prepaid" && prepaid && <ExtendButtons plan={prepaid.plan} display={display} />}
+              {billing.base.source === "prepaid" && prepaid && <ExtendButtons plan={prepaid.plan} display={display} />}
             </div>
           ) : null}
         </section>
+
+        <TesterCodeEntry />
 
         {(ownsTeam || members.length > 0) && (
           <section className="mt-10">
@@ -105,14 +112,22 @@ export default async function BillingPage({
           </section>
         )}
 
-        {!sub?.active && !sub?.live && billing.source !== "prepaid" && (
-          <>
-            <h2 className="mt-12 text-xl font-semibold">Upgrade</h2>
-            <div className="mt-6">
-              <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />
-            </div>
-          </>
-        )}
+        {!sub?.active && !sub?.live && billing.base.source !== "prepaid" &&
+          (tester ? (
+            <details className="group mt-10 rounded-2xl border border-border bg-card transition-shadow open:shadow-md" data-testid="tester-plans">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-4 font-medium [&::-webkit-details-marker]:hidden">
+                Keep {PLANS[tester.plan].name} after {formatBillingDate(tester.until)}?
+                <span aria-hidden className="text-xl leading-none text-primary transition-transform duration-base ease-in-out group-open:rotate-45 motion-reduce:transition-none">+</span>
+              </summary>
+              {/* Room above for the Most popular label, which sits over the card's edge. */}
+              <div className="px-5 pb-6 pt-8">{cards}</div>
+            </details>
+          ) : (
+            <>
+              <h2 className="mt-12 text-xl font-semibold">Upgrade</h2>
+              <div className="mt-6">{cards}</div>
+            </>
+          ))}
       </main>
     </div>
   );

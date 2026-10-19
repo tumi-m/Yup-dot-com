@@ -315,6 +315,13 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   counters are written only by the server with the service role. Functions
   that read plans or count usage are `SECURITY DEFINER` with a fixed
   `search_path` and can't be called from the browser.
+- **Tester codes.** Only a SHA-256 hash of each code is stored
+  (`access_codes`), and browsers can't read it. Codes are made, listed and
+  revoked only in the SQL editor; `redeem_tester_code` runs only with the
+  service role, for the signed-in user, with a row lock so a code can't be
+  used more times than allowed. A user can read only their own
+  `tester_access` row and can't write it. Tester time never changes billing
+  columns.
 - **Stored files.** The `documents` bucket is private, PDFs only. A file can
   be uploaded or read only when the user owns a document row for it, a row
   can't be pointed at another file, and a row can only be deleted after its
@@ -344,8 +351,10 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   on Postgres 16, against `supabase/schema.sql` and against the schema plus
   every migration. It plays what anyone holding the anon key could try (read
   other users' rows and files, give themselves a paid plan, forge billing
-  events, call the usage functions, keep files past the plan limit) and fails
-  if any of it works. Run it locally against any Postgres you can throw away:
+  events, call the usage functions, keep files past the plan limit, read or
+  redeem tester codes themselves) and fails if any of it works. It also
+  redeems one code from two connections at once and checks it is used only
+  as often as allowed. Run it locally against any Postgres you can throw away:
   `PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres npm run test:rls`.
 - `scripts/check-bundle-secrets.mjs` builds with fake values in every server
   secret and fails if one appears in `.next/static`, `public/` or a
@@ -375,7 +384,9 @@ pdf-wizard/
 │   ├── editor/[id]/             ← The PDF editor
 │   ├── settings/billing/        ← Plan, renewal, team seats
 │   ├── settings/password/       ← New password (reset links land here)
+│   ├── redeem/                  ← Tester links land here (/redeem#CODE)
 │   ├── api/billing/             ← checkout · verify · webhook · manage · team
+│   ├── api/access/redeem/       ← Redeems a tester code (server checks)
 │   ├── sitemap.ts, robots.ts    ← SEO
 │   └── icon.svg, error, loading ← Polish
 ├── components/
@@ -580,6 +591,64 @@ Paystack accounts in South Africa charge in ZAR only.
 The webhook handles `charge.success`, `subscription.create`,
 `subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
 `invoice.update`. Each delivery is applied once (`billing_events` records them).
+
+## Tester access (free Pro or Team for testers)
+
+Give chosen testers Pro or Team for free, for a limited time, with a code or
+a link. Codes are made only in the Supabase SQL editor: there is no admin
+page, and no code or secret is in the site.
+
+On a project set up before this, run
+[`supabase/migrations/20261019000000_tester_access.sql`](supabase/migrations/20261019000000_tester_access.sql)
+once in the SQL editor (`supabase/schema.sql` already includes it).
+
+**Make a code** (Supabase → SQL editor → New query):
+
+```sql
+-- Pro for 30 days, for one person:
+select * from create_tester_code(note => 'Thabo');
+
+-- Team for 14 days, for up to 3 people:
+select * from create_tester_code(plan => 'team', days => 14, max_uses => 3, note => 'Design studio');
+```
+
+The result shows the code (`K7QM-8XRP-2D4N-W9HC`) and its link
+(`https://pdfwizard.xyz/redeem#K7QM-8XRP-2D4N-W9HC`). Copy them then: only a
+hash is kept, so they can't be shown again. Options: `plan` (`'pro'` or
+`'team'`), `days` (tester time each person gets, 1 to 365), `max_uses`
+(how many people), `note` (who it's for), `code_valid_days` (how long the
+code can be used, default 30) and `site_url` (the link's address, default
+`https://pdfwizard.xyz`).
+
+**See codes and who used them:**
+
+```sql
+select * from list_tester_codes();
+select u.email, t.plan, t.until from tester_access t join auth.users u on u.id = t.user_id order by t.until desc;
+```
+
+**Revoke a code** (by the `ref` from the list, or by the code):
+
+```sql
+select * from revoke_tester_code('3f2a9c1b');
+-- and end the tester time it already gave, for everyone who used it:
+select * from revoke_tester_code('3f2a9c1b', end_access => true);
+```
+
+**How testers use it.** They open the link, sign up or log in (they come
+back to the same page), and press **Activate Pro**. Or, signed in: Billing →
+**Have a tester code?**, and paste the code. Pro (or Team) works everywhere
+at once, Billing and the header show "Pro (tester) until 17 Nov 2026", and it
+ends by itself on that date, back to Free or to their paid plan. Nothing is
+charged and there is nothing to cancel. A second code adds its days on.
+Buying a plan meanwhile works as usual, and paid time starts when they pay.
+A Team tester can give seats to 4 people while it lasts.
+
+Each code works once per person. The code sits after the `#`, which browsers
+never send to a server, and the page takes it out of the address bar at once,
+so it stays out of logs, referrers and analytics. Codes are checked only on
+the server, 20 tries a day per account and 50 per network address. Share a
+link privately: anyone who has it can use it until `max_uses` is reached.
 
 ## Third-party licences
 
