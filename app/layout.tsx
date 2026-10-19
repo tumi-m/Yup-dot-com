@@ -62,8 +62,10 @@ export default async function RootLayout({
       <head>
         {/* First thing on every page: a tester link's code (/redeem#CODE)
             leaves the address bar before analytics or any other script can
-            see it (lib/tester-access.ts). Does nothing on other pages. */}
-        <script dangerouslySetInnerHTML={{ __html: REDEEM_FRAGMENT_SCRIPT }} />
+            see it (lib/tester-access.ts). Does nothing on other pages. It
+            carries the nonce: the Content-Security-Policy runs no other
+            inline script. */}
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: REDEEM_FRAGMENT_SCRIPT }} />
       </head>
       <body className="min-h-screen font-sans">
         {GA_ID && (

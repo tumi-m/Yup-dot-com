@@ -1,8 +1,9 @@
 /**
  * Content-Security-Policy for pages, made per request with a fresh nonce
  * (proxy.ts). Only scripts carrying the nonce run (Next.js puts it on its
- * own scripts, app/layout.tsx on the consent script), plus the scripts
- * those load ('strict-dynamic': gtag.js, Turnstile, the tools' workers).
+ * own scripts, app/layout.tsx on the consent script and the tester-link
+ * script), plus the scripts those load ('strict-dynamic': gtag.js,
+ * Turnstile, the tools' workers).
  * An injected <script>, an onerror="" handler or a javascript: link does not
  * run, and fetch() can reach only this site and the services listed here,
  * so a script that did get in couldn't send a session elsewhere that way.

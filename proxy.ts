@@ -10,7 +10,7 @@ export async function proxy(request: NextRequest) {
   const nonce = newNonce();
   const csp = contentSecurityPolicy(nonce);
   // Next.js reads the nonce from the request's policy and puts it on its own
-  // scripts; app/layout.tsx reads x-nonce for the one it adds.
+  // scripts; app/layout.tsx reads x-nonce for the ones it adds.
   request.headers.set("x-nonce", nonce);
   request.headers.set("content-security-policy", csp);
   const response = await updateSession(request);

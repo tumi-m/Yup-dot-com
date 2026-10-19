@@ -197,6 +197,9 @@ check("the root layout runs the script in <head>, before analytics", head > 0 &&
   layout.indexOf("__html: REDEEM_FRAGMENT_SCRIPT", head) > head &&
   layout.indexOf("__html: REDEEM_FRAGMENT_SCRIPT", head) < layout.indexOf("</head>") &&
   layout.indexOf("</head>") < layout.indexOf("<Analytics"));
+check("with the response's nonce, so the Content-Security-Policy lets it run",
+  /<script nonce=\{nonce\} dangerouslySetInnerHTML=\{\{ __html: REDEEM_FRAGMENT_SCRIPT \}\} \/>/.test(layout) &&
+  /const nonce = \(await headers\(\)\)\.get\("x-nonce"\)/.test(layout));
 const page = read("app/redeem/page.tsx");
 check("/redeem is not indexed", /robots: \{ index: false/.test(page));
 const flow = read("components/TesterAccess.tsx");
