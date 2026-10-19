@@ -165,7 +165,7 @@ async function openPdf(data: Uint8Array, standardFontDataUrl?: string): Promise<
   configureWorker(pdfjsLib);
   try {
     // pdf.js detaches the buffer it is given, so pass a private copy.
-    return await pdfjsLib.getDocument({ data: data.slice(), standardFontDataUrl }).promise;
+    return await pdfjsLib.getDocument({ data: data.slice(), standardFontDataUrl, isEvalSupported: false }).promise;
   } catch (err) {
     if ((err as { name?: string })?.name === "PasswordException") {
       throw new Error("This PDF is password-protected. Unlock it first, then convert.");

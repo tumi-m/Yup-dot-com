@@ -1,9 +1,10 @@
 -- ============================================================
 -- Free files up to 50 MB in the cloud library.
 --
--- Safe to run more than once. Run it in the Supabase SQL editor on a project
--- created from an earlier supabase/schema.sql. (A new project only needs
--- supabase/schema.sql, which already includes everything here.)
+-- Run each migration once, in date order, in the Supabase SQL editor, on a
+-- project created from an earlier supabase/schema.sql. Running one again
+-- later is safe (scripts/test-rls.sh checks it). A new project only needs
+-- supabase/schema.sql, which already includes everything here.
 --
 -- The documents bucket allows 500 MB (the Pro limit) for everyone, and the
 -- 50 MB Free limit was only checked in the browser, so a Free account could

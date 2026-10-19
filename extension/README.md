@@ -33,6 +33,11 @@ Wizard's X downloader with the post's link already filled in.
 npm run pack:extension   # → dist/pdf-wizard-x-<version>.zip
 ```
 
+Only `manifest.json` and the files it names go into the zip, and the pack
+stops if any of them holds a secret key. A new file (a popup, a script) must
+be named in `manifest.json`, or loaded by a page that is. The command lists
+what it packed: check it before uploading.
+
 Bump `version` in `manifest.json` for every store update.
 
 ## Publish

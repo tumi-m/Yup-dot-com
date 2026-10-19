@@ -66,7 +66,7 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
   ensureWorker();
   // pdf.js transfers/detaches the buffer, so hand it a private copy.
   const bytes = data instanceof Uint8Array ? data.slice() : new Uint8Array(data.slice(0));
-  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
 
   return {
     numPages: doc.numPages,

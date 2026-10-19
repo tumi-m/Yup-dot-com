@@ -1,0 +1,52 @@
+name: Live check
+
+# Checks the live site from the outside (scripts/check-live.mjs): secrets in
+# its scripts, security headers, exposed files, private pages signed out,
+# and what the public Supabase key can read and write. Needs no secrets:
+# everything it uses is public. With the optional CHECK_LIVE_EMAIL and
+# CHECK_LIVE_PASSWORD secrets (a test account), it also checks what any
+# signed-up user can read.
+#
+# The site comes from the repository variable SITE_URL (Settings → Secrets
+# and variables → Actions → Variables), or https://pdfwizard.xyz.
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays, 07:17 in South Africa
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Site to check (empty = the SITE_URL variable)
+        required: false
+  # After a push to main, once Vercel has had time to deploy it. A slow
+  # deploy is checked against the previous version; the next run catches up.
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-check
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Wait for the Vercel deploy
+        if: github.event_name == 'push'
+        run: sleep 360
+      - name: Check the site
+        env:
+          SITE: ${{ inputs.url || vars.SITE_URL || 'https://pdfwizard.xyz' }}
+          # Optional: an ordinary account made only for this check, so it can
+          # also check what any signed-up user can read. Without them, those
+          # checks are skipped with a warning.
+          CHECK_LIVE_EMAIL: ${{ secrets.CHECK_LIVE_EMAIL }}
+          CHECK_LIVE_PASSWORD: ${{ secrets.CHECK_LIVE_PASSWORD }}
+        run: node scripts/check-live.mjs "$SITE"

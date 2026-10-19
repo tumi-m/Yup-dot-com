@@ -1,0 +1,20 @@
+# Secret scan of the repository and its whole history (CI "secrets" job;
+# locally: gitleaks git -c .gitleaks.toml). gitleaks' own rules find real
+# keys. The only exceptions are made-up values used on purpose: the CI
+# build's fake secrets (each contains "canary"), the tests of the secret
+# checks themselves, and a TikTok fixture whose ids look like keys.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Made-up values used on purpose"
+regexTarget = "line"
+regexes = [
+  '''canary''',
+  '''UrlKey: "v12044gd0000cfoo_''',
+]
+paths = [
+  '''^tests/build-guards\.test\.mts$''',
+  '''^tests/check-live\.test\.mts$''',
+  '''^tests/source-scan\.test\.mts$''',
+]

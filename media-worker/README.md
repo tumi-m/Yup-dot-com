@@ -21,7 +21,7 @@ list (titles, durations, ids; nothing is downloaded, at most
 `MEDIA_PLAYLIST_MAX_ITEMS`, default 200). The browser then downloads the
 videos it picked one by one through steps 2 and 3, so each counts against the
 daily quota. Workers deployed before playlists answer 404 there; redeploy, and
-`/api/media/health` reports `"playlists": "ready"`.
+the health check (step 4 below) reports `"playlists": "ready"`.
 
 Video bytes go straight from the worker to the browser and never pass through
 Vercel. The worker only accepts downloads signed by the web app, and only for
@@ -62,8 +62,16 @@ Any container host works: Railway, Fly.io, Render, or a small VPS.
 
 3. On Vercel, set `MEDIA_WORKER_URL` (the worker's public HTTPS URL) and the same
    `MEDIA_WORKER_SECRET`, then redeploy.
-4. Open `https://<your-site>/api/media/health`. It reports what's missing:
-   an unset variable, a worker that doesn't answer, or no JavaScript runtime.
+4. Check the setup. It reports what's missing: an unset variable, a worker
+   that doesn't answer, or no JavaScript runtime. In production it needs the
+   secret (anyone else gets a 404):
+
+   ```bash
+   curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<your-site>/api/media/health
+   ```
+
+   The worker's own `/health` tells uptime monitors only `{"ok": true}`; its
+   versions and settings go to the web app, which sends the secret.
 
 **Run exactly one instance.** Jobs live in the worker's memory, so with two
 replicas the browser's progress polls can land on the one that doesn't have

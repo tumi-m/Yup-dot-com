@@ -342,8 +342,10 @@ print(json.dumps(worker.estimate_sizes(f, 40)))
   check("/playlist maps a missing list to a friendly error", missing.status === 422 && missing.body.error === "This playlist is unavailable.", JSON.stringify(missing.body));
   check("/playlist never downloads media", mediaHits === 0, `${mediaHits} media requests`);
 
-  const health = await fetch(`${W}/health`).then((r) => r.json());
-  check("/health reports yt-dlp, JS runtime and EJS", typeof health.ytdlp === "string" && "jsRuntime" in health && "ejs" in health, JSON.stringify(health));
+  const health = await fetch(`${W}/health`, { headers: { Authorization: `Bearer ${SECRET}` } }).then((r) => r.json());
+  check("/health reports yt-dlp, JS runtime and EJS to the web app", typeof health.ytdlp === "string" && "jsRuntime" in health && "ejs" in health, JSON.stringify(health));
+  const open = await fetch(`${W}/health`).then((r) => r.json());
+  check("/health without the secret says only that it's up", JSON.stringify(open) === '{"ok":true}', JSON.stringify(open));
   check("HEAD /health answers (uptime monitors)", (await fetch(`${W}/health`, { method: "HEAD" })).status === 200);
   void body;
 } finally {
