@@ -19,6 +19,7 @@ export const PUBLIC_PAGES = [
   "/login",
   "/pricing",
   "/privacy",
+  "/redeem", // tester links: signed out it only offers sign up or log in; the code stays in the tab
   "/refunds",
   "/security",
   "/signup",
@@ -44,6 +45,7 @@ export const PUBLIC_ROUTES = [
 
 /** Routes a signed-out GET must not get 2xx from (they need an account, a signature, POST, or the owner). */
 export const CLOSED_ROUTES = [
+  "/api/access/redeem", // POST only, signed in, same site
   "/api/billing/checkout",
   "/api/billing/manage",
   "/api/billing/team",

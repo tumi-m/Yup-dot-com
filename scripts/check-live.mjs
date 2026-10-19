@@ -297,7 +297,7 @@ const routeList = await import(new URL("./routes.mjs", import.meta.url).href).ca
   PUBLIC_PAGES: [],
   PUBLIC_ROUTES: [],
   PRIVATE_PAGES: ["/dashboard", "/editor/[id]", "/settings/billing", "/settings/password"],
-  CLOSED_ROUTES: ["/api/billing/team", "/api/billing/verify", "/api/media/health"],
+  CLOSED_ROUTES: ["/api/access/redeem", "/api/billing/team", "/api/billing/verify", "/api/media/health"],
 }));
 const fill = (path) => path.replace(/\[\[?\.{0,3}[^\]]+\]\]?/g, () => randomUUID());
 const shown = (path) => path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>");
@@ -403,11 +403,23 @@ function appSchema() {
     functions.set(m[1], params);
   }
   const buckets = new Set([...sql.matchAll(/insert into storage\.buckets\s*\([^)]*\)\s*values\s*\(\s*'([^']+)'/gi)].map((m) => m[1]));
-  if (!tables.size) for (const t of ["profiles", "documents", "team_members", "billing_events", "usage_counters"]) tables.set(t, null);
+  if (!tables.size) {
+    for (const t of ["profiles", "documents", "team_members", "billing_events", "usage_counters", "access_codes", "access_code_redemptions", "tester_access"]) tables.set(t, null);
+  }
   if (!functions.size) {
     const uid = { uid: sampleArg("uuid") };
     const usage = { p_key: "x", p_bucket: "x", p_window: "day" };
-    for (const [n, p] of [["own_plan", uid], ["effective_plan", uid], ["consume_usage", { ...usage, p_limit: 1 }], ["refund_usage", usage], ["usage_count", usage]]) functions.set(n, p);
+    for (const [n, p] of [
+      ["own_plan", uid],
+      ["effective_plan", uid],
+      ["consume_usage", { ...usage, p_limit: 1 }],
+      ["refund_usage", usage],
+      ["usage_count", usage],
+      ["create_tester_code", {}],
+      ["list_tester_codes", {}],
+      ["revoke_tester_code", { code_or_ref: "x" }],
+      ["redeem_tester_code", { ...uid, code: "x", dry_run: true }],
+    ]) functions.set(n, p);
   }
   if (!buckets.size) buckets.add("documents");
   return { tables, functions, buckets };

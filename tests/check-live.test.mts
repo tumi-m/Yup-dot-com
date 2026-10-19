@@ -7,11 +7,13 @@
  * an RLS-off table, a table any signed-up user can read, an empty table
  * that accepts writes, a callable SECURITY DEFINER function the API lists
  * (and one that writes), a listable or public bucket, missing headers, a
- * route nobody classified and a source map with the code. The checker must
- * pass the first and fail the second on each of those.
+ * route nobody classified and a source map with the code; and for tester
+ * access, readable codes, other people's tester time, callable tester
+ * functions and a redeem route that answers a GET. The checker must pass
+ * the first and fail the second on each of those.
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,11 +89,14 @@ const supabase = await listen((req, res, body) => {
       if (table === "profiles") return send(200, [{ id: UID, email: "tester@example.com", full_name: "Tester" }]);
       if (table === "documents") return send(200, [{ id: "d1", owner_id: UID, name: "mine.pdf" }]);
       if (table === "team_members") return send(200, []);
+      // Tester time: the user's own row only (RLS), and nothing of the codes.
+      if (table === "tester_access") return send(200, unsafe ? [{ user_id: UID, pro_until: "2027-01-01T00:00:00Z" }, { user_id: "u2", team_until: "2027-03-01T00:00:00Z" }] : [{ user_id: UID, pro_until: "2027-01-01T00:00:00Z" }]);
       if (unsafe && table === "customer_notes") return send(200, [{ id: 1, email: "victim@corp.co.za", note: "card ending 4242" }]);
       return denied(`table ${table}`);
     }
     if (unsafe && table === "profiles") return send(200, [{ id: "u1", email: "alice@gmail.com", paystack_customer_code: "CUS_abcdefgh12" }]);
     if (unsafe && table === "waitlist") return send(200, []);
+    if (unsafe && table === "access_codes") return send(200, [{ id: "c1", code_hash: "f5".repeat(32), plan: "team", days: 365, max_uses: 100, uses: 0 }]);
     return denied(`table ${table}`);
   }
   const fn = /^\/rest\/v1\/rpc\/(\w+)$/.exec(url.pathname)?.[1];
@@ -100,6 +105,8 @@ const supabase = await listen((req, res, body) => {
     if (unsafe && fn === "consume_usage") return send(200, 99);
     if (unsafe && fn === "admin_list_emails") return send(200, ["bob@client.co.za"]);
     if (unsafe && fn === "wipe_waitlist") return send(405, { code: "25006", message: "cannot execute DELETE in a read-only transaction" });
+    if (unsafe && fn === "create_tester_code") return send(405, { code: "25006", message: "cannot execute INSERT in a read-only transaction" });
+    if (unsafe && fn === "redeem_tester_code") return send(400, { code: "P0001", message: "invalid_code" });
     return denied(`function ${fn}`);
   }
   if (url.pathname === "/storage/v1/bucket") return send(200, unsafe ? [{ id: "avatars", name: "avatars", public: true }] : []);
@@ -155,6 +162,8 @@ const site = await listen((req, res) => {
   }
   if (path === "/api/billing/team") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Sign in first."}` : `{"members":["carol@gmail.com"]}`, "api");
   if (path === "/api/billing/verify") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Sign in first."}` : `{"status":"paid","plan":"pro"}`, "api");
+  // POST only: a GET gets 405 (one that answers would be a route left open).
+  if (path === "/api/access/redeem") return send(safe ? 405 : 200, "application/json", safe ? "" : `{"plan":"team","days":365}`, "api");
   if (path === "/security.txt") return send(308, "text/plain", "", "static", { location: "/.well-known/security.txt" });
   if (path === "/api/prices") return send(200, "application/json", `{"currency":"ZAR"}`, "api");
   if (path === "/.well-known/security.txt") {
@@ -194,6 +203,12 @@ check("safe site: the bucket in supabase/schema.sql is private", /bucket documen
 check("safe site: signed in, the test account gets only its own rows and folder",
   /table profiles: only the account's own rows \(1\)/.test(safe.out) && /bucket documents: only the account's own folder/.test(safe.out), safe.out);
 check("safe site: no warnings when everything could be checked", !/WARN/.test(safe.out), safe.out);
+check("safe site: tester codes, redemptions and tester time refused to the public key",
+  ["access_codes", "access_code_redemptions", "tester_access"].every((t) => new RegExp(`table ${t}: read, insert, update and delete refused`).test(safe.out)), safe.out);
+check("safe site: every tester function refused, read-only",
+  ["create_tester_code", "list_tester_codes", "revoke_tester_code", "redeem_tester_code"].every((f) => new RegExp(`function ${f}\\(\\): refused`).test(safe.out)), safe.out);
+check("safe site: signed in, only the account's own tester time and no codes",
+  /table tester_access: only the account's own rows \(1\)/.test(safe.out) && /table access_codes: refused/.test(safe.out), safe.out);
 
 mode = "unsafe";
 const bad = await runChecker(["--routes", manifest], TEST_ACCOUNT);
@@ -219,6 +234,11 @@ check("unsafe: another bucket lists files and is public (RT-4)", failed(/bucket 
 check("unsafe: a bucket nothing names, found by guessing a common name", failed(/bucket uploads: lists 1 item/) && failed(/bucket uploads: is public/), bad.out);
 check("unsafe: a table any signed-up user can read (RT-1)", failed(/table customer_notes: any signed-up user gets 1 row/), bad.out);
 check("unsafe: Confirm email is off", failed(/Confirm email" is off/), bad.out);
+check("unsafe: tester codes readable with the public key", failed(/table access_codes: returns rows to anyone with the public key/), bad.out);
+check("unsafe: a signed-up user sees someone else's tester time", failed(/table tester_access: any signed-up user gets 1 row/), bad.out);
+check("unsafe: tester functions anyone can call (one would write)",
+  failed(/function create_tester_code\(\): runs for anyone .*nothing changed/) && failed(/function redeem_tester_code\(\): ran and failed .*P0001/), bad.out);
+check("unsafe: the redeem route answers a signed-out GET", failed(/\/api\/access\/redeem: HTTP 200/), bad.out);
 check("unsafe: no security.txt", failed(/security\.txt: missing/), bad.out);
 
 // The API won't list its schema: a warning that names the fallback, even with --quiet.
@@ -228,6 +248,35 @@ const nolist = await runChecker(["--quiet"]);
 listing = true;
 check("no API listing: still passes, with a warning printed even with --quiet",
   nolist.code === 0 && /WARN  Couldn't list the database API with the public key \(HTTP 401\).*supabase\/audit\.sql/.test(nolist.out) && /WARN  No test account/.test(nolist.out), nolist.out);
+
+// Copied out of the repository (no supabase/ or routes.mjs next to it): the
+// tables, functions and routes it knew when it was written, tester access too.
+{
+  const alone = mkdtempSync(join(tmpdir(), "check-live-alone-"));
+  mkdirSync(join(alone, "scripts"));
+  mkdirSync(join(alone, "lib"));
+  copyFileSync("scripts/check-live.mjs", join(alone, "scripts/check-live.mjs"));
+  copyFileSync("lib/secret-scan.cjs", join(alone, "lib/secret-scan.cjs"));
+  const run = (env: Record<string, string>) =>
+    new Promise<{ code: number | null; out: string }>((resolve) => {
+      const child = spawn(process.execPath, [join(alone, "scripts/check-live.mjs"), site.url], { env: { PATH: process.env.PATH ?? "", ...env } });
+      let out = "";
+      child.stdout.on("data", (d) => (out += d));
+      child.stderr.on("data", (d) => (out += d));
+      child.on("close", (code) => resolve({ code, out }));
+    });
+  mode = "safe";
+  const ok = await run(TEST_ACCOUNT);
+  check("outside the repository: still checks the tester tables, functions and route, and passes",
+    ok.code === 0 && /table access_codes: read and insert refused/.test(ok.out) && /function redeem_tester_code\(\): refused/.test(ok.out) &&
+      /4 closed routes/.test(ok.out), ok.out);
+  mode = "unsafe";
+  const leaky = await run(TEST_ACCOUNT);
+  mode = "safe";
+  check("outside the repository: and fails when the codes are readable",
+    leaky.code === 1 && leaky.out.split("\n").some((l) => l.includes("FAIL") && /table access_codes: returns rows/.test(l)), leaky.out);
+  rmSync(alone, { recursive: true, force: true });
+}
 
 const wrongPassword = await runChecker(["--quiet"], { ...TEST_ACCOUNT, CHECK_LIVE_PASSWORD: "wrong" });
 check("a test account that can't sign in fails the check", wrongPassword.code === 1 && /couldn't sign in the test account/.test(wrongPassword.out), wrongPassword.out);
