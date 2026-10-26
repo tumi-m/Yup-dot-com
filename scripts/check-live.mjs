@@ -47,6 +47,7 @@
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { mainAddress } from "./lib/site-redirect.mjs";
 
 const secretScan = createRequire(import.meta.url)("../lib/secret-scan.cjs");
 
@@ -62,7 +63,7 @@ if (!target || !/^https?:\/\//.test(target)) {
   console.error("Usage: npm run check:live -- https://your-site [--env-values] [--routes .next/app-path-routes-manifest.json] [--skip-supabase] [--supabase-url URL] [--quiet]");
   process.exit(2);
 }
-const SITE = new URL(target).origin;
+let SITE = new URL(target).origin;
 const HTTPS = SITE.startsWith("https:");
 const QUIET = flag("--quiet");
 const TIMEOUT = 20_000;
@@ -122,7 +123,17 @@ function scan(res, label = pathOf(res.url)) {
 
 // ---------- 1. Pages and scripts ----------
 section = "Secrets in what browsers download";
-const home = await get("/");
+let home = await get("/");
+// The address given may only send visitors on to the site's main address
+// (pdfwizard.xyz → www.pdfwizard.xyz, or the reverse): check that one, and say so.
+{
+  const main = [301, 302, 307, 308].includes(home.status) ? mainAddress(SITE, home.headers.get("location")) : null;
+  if (main) {
+    warn(`${SITE} redirects to ${main}, so ${main} was checked. Make the address you use everywhere (SITE_URL, NEXT_PUBLIC_SITE_URL, Supabase, Paystack) the main domain in Vercel, or set SITE_URL to ${main}.`);
+    SITE = main;
+    home = await get("/");
+  }
+}
 if (home.status === 0 || home.status >= 500) {
   const why = `Couldn't load ${SITE}/ (${home.error?.message ?? `HTTP ${home.status}`}).`;
   console.error(why);

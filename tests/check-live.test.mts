@@ -267,6 +267,8 @@ check("no API listing: still passes, with a warning printed even with --quiet",
   mkdirSync(join(alone, "lib"));
   copyFileSync("scripts/check-live.mjs", join(alone, "scripts/check-live.mjs"));
   copyFileSync("lib/secret-scan.cjs", join(alone, "lib/secret-scan.cjs"));
+  mkdirSync(join(alone, "scripts/lib"), { recursive: true });
+  copyFileSync("scripts/lib/site-redirect.mjs", join(alone, "scripts/lib/site-redirect.mjs"));
   const run = (env: Record<string, string>) =>
     new Promise<{ code: number | null; out: string }>((resolve) => {
       const child = spawn(process.execPath, [join(alone, "scripts/check-live.mjs"), site.url], { env: { PATH: process.env.PATH ?? "", ...env } });
