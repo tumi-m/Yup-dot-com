@@ -4,9 +4,9 @@
   "private": true,
   "description": "PDF Wizard — a PDF editor SaaS. Merge, split, compress, convert, edit, and sign PDFs in the browser.",
   "scripts": {
-    "predev": "node scripts/copy-vendor.mjs",
+    "predev": "node scripts/copy-vendor.mjs && node scripts/write-security-txt.mjs",
     "dev": "next dev",
-    "prebuild": "node scripts/check-env.mjs && node scripts/check-source.mjs && node scripts/copy-vendor.mjs",
+    "prebuild": "node scripts/check-env.mjs && node scripts/check-source.mjs && node scripts/copy-vendor.mjs && node scripts/write-security-txt.mjs",
     "build": "next build",
     "postbuild": "node scripts/check-bundle-secrets.mjs",
     "start": "next start",

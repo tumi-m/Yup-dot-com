@@ -108,6 +108,20 @@ async function pool(items, size, fn) {
   return out;
 }
 
+/** Who sent an unexpected answer (the host, a firewall or a CDN) and how it starts, for the report. */
+function answeredBy(res) {
+  const h = res.headers;
+  const who = [
+    h.get("server") && `server ${h.get("server")}`,
+    h.get("x-vercel-mitigated") && `Vercel firewall: ${h.get("x-vercel-mitigated")}`,
+    h.get("x-vercel-id") && "via Vercel",
+    h.get("cf-ray") && "via Cloudflare",
+    h.get("x-matched-path") && `matched ${h.get("x-matched-path")}`,
+  ].filter(Boolean);
+  const start = res.text.replace(/\s+/g, " ").trim().slice(0, 80);
+  return (who.length ? `; ${who.join(", ")}` : "") + (start ? `; body starts "${start}"` : "");
+}
+
 const pathOf = (url) => {
   const u = new URL(url);
   return u.pathname + u.search;
@@ -648,9 +662,13 @@ section = "Security contact";
   const res = await get("/.well-known/security.txt");
   const contact = /^Contact:\s*(\S+)/m.exec(res.text)?.[1];
   const expires = Date.parse(/^Expires:\s*(\S+)/m.exec(res.text)?.[1] ?? "");
-  if (res.status !== 200 || !contact) fail(`/.well-known/security.txt: missing (HTTP ${res.status})`);
+  if (res.status !== 200 || !contact) fail(`/.well-known/security.txt: missing (HTTP ${res.status}${answeredBy(res)})`);
   else if (!(expires > Date.now())) fail(`/.well-known/security.txt: expired or no Expires`);
-  else pass(`/.well-known/security.txt: ${contact}, expires ${new Date(expires).toISOString().slice(0, 10)}`);
+  else {
+    pass(`/.well-known/security.txt: ${contact}, expires ${new Date(expires).toISOString().slice(0, 10)}`);
+    // It is written at build time: a site not deployed for most of a year needs a redeploy.
+    if (expires - Date.now() < 30 * 86_400_000) warn("/.well-known/security.txt expires within 30 days: redeploy the site to renew it.");
+  }
 }
 
 // Secrets found anywhere above.

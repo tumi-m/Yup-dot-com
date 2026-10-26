@@ -31,14 +31,8 @@ const nextConfig: NextConfig = {
   // the browser (a page that tries fails instead of leaking it).
   experimental: { taint: true },
   // Browsers and crawlers still ask for /favicon.ico; answer with the SVG icon.
-  // security.txt is built at /well-known/ and served at /.well-known/: Vercel
-  // refuses (403) files it would have to serve from a folder whose name
-  // starts with a dot.
   async rewrites() {
-    return [
-      { source: "/favicon.ico", destination: "/icon.svg" },
-      { source: "/.well-known/security.txt", destination: "/well-known/security.txt" },
-    ];
+    return [{ source: "/favicon.ico", destination: "/icon.svg" }];
   },
   async headers() {
     return [
