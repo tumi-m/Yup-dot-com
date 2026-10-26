@@ -44,7 +44,7 @@
  * Needs Node 20 or later and nothing else. Exit code: 0 all passed,
  * 1 a check failed, 2 the site couldn't be checked.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 
@@ -124,7 +124,9 @@ function scan(res, label = pathOf(res.url)) {
 section = "Secrets in what browsers download";
 const home = await get("/");
 if (home.status === 0 || home.status >= 500) {
-  console.error(`Couldn't load ${SITE}/ (${home.error?.message ?? `HTTP ${home.status}`}).`);
+  const why = `Couldn't load ${SITE}/ (${home.error?.message ?? `HTTP ${home.status}`}).`;
+  console.error(why);
+  if (process.env.GITHUB_ACTIONS === "true") console.log(`::error title=Site unreachable::${why}`);
   process.exit(2);
 }
 
@@ -661,4 +663,24 @@ if (warnings.length) {
   for (const w of warnings) console.log(`  WARN  ${w}`);
 }
 console.log(`\n${failed.length ? `FAILED: ${failed.length} of ${results.length} checks` : `All ${results.length} checks passed`}.`);
+
+// In GitHub Actions: each failure and warning becomes an annotation on the
+// run (shown in the failure email and on the run page), and the report goes
+// into the job summary.
+if (process.env.GITHUB_ACTIONS === "true") {
+  const data = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  const prop = (s) => data(s).replace(/:/g, "%3A").replace(/,/g, "%2C");
+  for (const r of failed) console.log(`::error title=${prop(r.section)}::${data(r.msg)}`);
+  for (const w of warnings) console.log(`::warning title=Couldn't check::${data(w)}`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const md = [`## Live check: ${SITE}`, "", failed.length ? `**${failed.length} of ${results.length} checks failed.**` : `All ${results.length} checks passed.`, ""];
+    for (const s of order) {
+      md.push(`### ${s}`, "");
+      for (const r of results.filter((x) => x.section === s).sort((a, b) => Number(a.ok) - Number(b.ok))) md.push(`- ${r.ok ? "✅" : "❌"} ${r.msg}`);
+      md.push("");
+    }
+    if (warnings.length) md.push("### Couldn't check", "", ...warnings.map((w) => `- ⚠️ ${w}`), "");
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, md.join("\n") + "\n");
+  }
+}
 process.exit(failed.length ? 1 : 0);

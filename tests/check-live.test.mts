@@ -13,7 +13,7 @@
  * the first and fail the second on each of those.
  */
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -244,6 +244,16 @@ check("unsafe: no security.txt", failed(/security\.txt: missing/), bad.out);
 // The API won't list its schema: a warning that names the fallback, even with --quiet.
 mode = "safe";
 listing = false;
+// In GitHub Actions each failure becomes an annotation and the report goes to the job summary.
+{
+  const summaryFile = join(tmpdir(), `check-live-summary-${process.pid}.md`);
+  const gh = await runChecker(["--routes", manifest], { ...TEST_ACCOUNT, GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: summaryFile });
+  check("GitHub Actions: failures become ::error annotations", /^::error title=[^:]+::/m.test(gh.out) && gh.code === 1, gh.out.slice(-400));
+  const summary = existsSync(summaryFile) ? readFileSync(summaryFile, "utf8") : "";
+  check("GitHub Actions: the report is in the job summary", /checks failed/.test(summary) && /❌/.test(summary), summary.slice(0, 300));
+  rmSync(summaryFile, { force: true });
+}
+
 const nolist = await runChecker(["--quiet"]);
 listing = true;
 check("no API listing: still passes, with a warning printed even with --quiet",
