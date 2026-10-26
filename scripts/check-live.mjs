@@ -662,7 +662,9 @@ section = "Security contact";
   const res = await get("/.well-known/security.txt");
   const contact = /^Contact:\s*(\S+)/m.exec(res.text)?.[1];
   const expires = Date.parse(/^Expires:\s*(\S+)/m.exec(res.text)?.[1] ?? "");
-  if (res.status !== 200 || !contact) fail(`/.well-known/security.txt: missing (HTTP ${res.status}${answeredBy(res)})`);
+  if (res.headers.get("x-vercel-mitigated")) {
+    fail(`/.well-known/security.txt: Vercel's firewall answered with a ${res.headers.get("x-vercel-mitigated")} (HTTP ${res.status}), so tools can't read it. In Vercel → Firewall, add a rule: request path equals /.well-known/security.txt → Bypass.`);
+  } else if (res.status !== 200 || !contact) fail(`/.well-known/security.txt: missing (HTTP ${res.status}${answeredBy(res)})`);
   else if (!(expires > Date.now())) fail(`/.well-known/security.txt: expired or no Expires`);
   else {
     pass(`/.well-known/security.txt: ${contact}, expires ${new Date(expires).toISOString().slice(0, 10)}`);
