@@ -33,7 +33,7 @@ export const PRIVATE_PAGES = ["/dashboard", "/editor/[id]", "/settings/billing",
 
 /** Routes that answer anyone. */
 export const PUBLIC_ROUTES = [
-  "/.well-known/security.txt",
+  "/well-known/security.txt", // served at /.well-known/security.txt (next.config.ts)
   "/api/ai/chat", // GET: the visitor's own answers left today
   "/api/prices",
   "/icon.svg",

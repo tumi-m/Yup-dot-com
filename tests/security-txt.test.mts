@@ -24,7 +24,7 @@ check("Canonical is where it's served", field("Canonical")[0] === "https://pdfwi
 check("Policy is the security page", field("Policy")[0] === "https://pdfwizard.xyz/security");
 check("each field once, and the file ends with a newline", ["Contact", "Expires", "Canonical", "Policy", "Preferred-Languages"].every((f) => field(f).length === 1) && txt.endsWith("\n"));
 
-const route = await import("../app/.well-known/security.txt/route.ts");
+const route = await import("../app/well-known/security.txt/route.ts");
 const res = route.GET();
 const body = await res.text();
 check("the route serves it as plain text", res.headers.get("content-type")?.startsWith("text/plain") === true && body.startsWith("Contact: mailto:security@pdfwizard.xyz\n"), body);
