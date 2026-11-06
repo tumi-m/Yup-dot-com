@@ -1,0 +1,48 @@
+{
+ "created": "2026-11-01T10:00:00.000Z",
+ "count": 1,
+ "offset": 0,
+ "recordings": [
+  {
+   "id": "00000000-0000-4000-8000-00000000a201",
+   "score": 100,
+   "title": "Something's Got a Hold on Me",
+   "length": 170000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Etta James",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a0a",
+      "name": "Etta James",
+      "sort-name": "James, Etta",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "1962-02-01",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003401",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Etta James",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002401",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "Etta James",
+      "primary-type": "Album",
+      "secondary-types": []
+     },
+     "date": "1962",
+     "country": "US",
+     "track-count": 12,
+     "media": []
+    }
+   ]
+  }
+ ]
+}

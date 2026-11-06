@@ -50,6 +50,8 @@ import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
 import { canEncodeH264, MAX_IN_MEMORY, shortBytes } from "@/lib/video-quality";
 import { readToBlob } from "@/lib/read-response";
+import { finderForLink, SAMPLE_FINDER_PATH, songQuery } from "@/lib/samples/links";
+import { markSent } from "@/lib/journey";
 
 export interface MediaToolConfig {
   platform: MediaPlatform;
@@ -68,6 +70,8 @@ interface Info {
   qualities: { height: number; available: boolean; locked: boolean; size?: number; exact?: boolean; smaller?: number }[];
   /** The link this preview was made from; downloads always use it. */
   url: string;
+  /** TikTok: the post's sound. `original`: the creator's own audio. */
+  music?: { title: string; author: string | null; original: boolean } | null;
 }
 
 type Phase = "input" | "loading" | "preview" | "working" | "ready";
@@ -145,6 +149,11 @@ function duration(s?: number | null) {
   if (!s) return null;
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** The Sample Finder for a TikTok's sound, in words (no second TikTok request). */
+function musicHref(music: { title: string; author: string | null }) {
+  return `${SAMPLE_FINDER_PATH}?${new URLSearchParams({ q: songQuery({ artist: music.author ?? "", title: music.title }) })}`;
 }
 
 /**
@@ -728,9 +737,21 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
               )}
               {detected && detected.platform !== config.platform && (
                 <motion.p key="other" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground">
-                  {detected.platform === "youtube" && !YOUTUBE_ENABLED
-                    ? "YouTube downloads are paused for now."
-                    : <>That&apos;s a {PLATFORM_LABEL[detected.platform]} link — it works here too.</>}
+                  {detected.platform === "youtube" && !YOUTUBE_ENABLED ? (
+                    <>
+                      YouTube downloads are paused for now.{" "}
+                      <Link
+                        href={finderForLink(detected.canonical)}
+                        // Sent from this site: the Sample Finder starts by itself.
+                        onClick={() => markSent(finderForLink(detected.canonical))}
+                        className={cn("rounded font-semibold text-primary hover:underline", focusRing)}
+                      >
+                        Find this song&apos;s samples →
+                      </Link>
+                    </>
+                  ) : (
+                    <>That&apos;s a {PLATFORM_LABEL[detected.platform]} link — it works here too.</>
+                  )}
                 </motion.p>
               )}
             </AnimatePresence>
@@ -781,7 +802,22 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   {info.title}
                 </p>
                 {info.uploader && <p className="mt-1 truncate text-sm text-muted-foreground">{info.uploader}</p>}
-                <p className="mt-1 text-xs text-muted-foreground">{PLATFORM_LABEL[info.platform]}</p>
+                {info.music && !info.music.original ? (
+                  <p className="mt-1 truncate text-xs text-muted-foreground" data-testid="media-music">
+                    <span aria-hidden>♪ </span>
+                    {info.music.title}
+                    {info.music.author ? ` — ${info.music.author}` : ""} ·{" "}
+                    <Link
+                      href={musicHref(info.music)}
+                      onClick={() => info.music && markSent(musicHref(info.music))}
+                      className={cn("rounded font-semibold text-primary hover:underline", focusRing)}
+                    >
+                      Find samples
+                    </Link>
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">{PLATFORM_LABEL[info.platform]}</p>
+                )}
               </div>
             </div>
 

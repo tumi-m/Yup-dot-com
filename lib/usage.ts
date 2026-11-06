@@ -444,3 +444,74 @@ export async function claimEdit(subject: string, tier: Tier, doc: string, store:
   }
   return { allowed: true, remaining: left, watermark };
 }
+
+/* ------------------------------------------------------------------ */
+/* Sample Finder                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Song searches (/api/samples/identify) a minute, per person or guest IP. */
+export const SAMPLE_IDENTIFY_PER_MINUTE = 10;
+export const SAMPLE_IDENTIFY_MESSAGE = "Too many searches at once. Try again in a minute.";
+/** Requests to MusicBrainz a minute from the whole site (it asks for about one a second per address). */
+export const MUSICBRAINZ_PER_MINUTE = 50;
+
+/** Counts one song search. False when this minute's are used up. */
+export async function claimSampleIdentify(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "samples-id", SAMPLE_IDENTIFY_PER_MINUTE, "minute")) >= 0;
+}
+
+/**
+ * Counts one request to MusicBrainz against the site-wide minute budget,
+ * shared by every server instance. False when it's spent: the caller
+ * answers with the hand-checked results instead.
+ */
+export async function claimMusicBrainz(store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(GLOBAL_SUBJECT, "mb", MUSICBRAINZ_PER_MINUTE, "minute")) >= 0;
+}
+
+export interface SampleClaim {
+  allowed: boolean;
+  /** Lookups left today. */
+  remaining: number;
+  /** Already paid for today (another pick for the same search, or the same song again). */
+  free: boolean;
+  /** Gives the lookup back when it failed. A no-op for free ones. */
+  refund: () => Promise<void>;
+}
+
+/**
+ * One song lookup = one distinct input per UTC day: the link or text a
+ * search came from (so picking another match for it is free), or the song
+ * itself when it was opened directly. The same input again is free.
+ */
+export async function claimSampleLookup(subject: string, tier: Tier, inputKey: string, store: UsageStore = usageStore()): Promise<SampleClaim> {
+  const limit = LIMITS[tier].sampleLookupsPerDay;
+  const paid = `samples-in:${createHash("sha256").update(inputKey).digest("hex").slice(0, 32)}`;
+  const nothing = async () => {};
+  if ((await store.consume(subject, paid, 1, "day")) < 0) {
+    const used = await store.count(subject, "samples", "day");
+    return { allowed: true, remaining: Math.max(0, limit - used), free: true, refund: nothing };
+  }
+  const left = await store.consume(subject, "samples", limit, "day");
+  if (left < 0) {
+    await store.refund(subject, paid, "day");
+    return { allowed: false, remaining: 0, free: false, refund: nothing };
+  }
+  let refunded = false;
+  return {
+    allowed: true,
+    remaining: left,
+    free: false,
+    refund: async () => {
+      if (refunded) return;
+      refunded = true;
+      await store.refund(subject, "samples", "day");
+      await store.refund(subject, paid, "day");
+    },
+  };
+}
+
+/** Lookups left today, without spending one. */
+export async function sampleLookupsLeft(subject: string, tier: Tier, store: UsageStore = usageStore()): Promise<number> {
+  return Math.max(0, LIMITS[tier].sampleLookupsPerDay - (await store.count(subject, "samples", "day")));
+}

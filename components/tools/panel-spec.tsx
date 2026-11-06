@@ -9,6 +9,7 @@ export type PanelSpec =
   | { kind: "pptx-to-pdf" }
   | { kind: "pptx-editor" }
   | { kind: "slides-import"; format: "pdf" | "pptx" }
+  | { kind: "samples" }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -19,6 +20,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "pptx-to-pdf") return { kind: "pptx-to-pdf" };
   if (tool.custom === "pptx-editor") return { kind: "pptx-editor" };
   if (tool.custom === "slides-import" && tool.slides) return { kind: "slides-import", format: tool.slides.format };
+  if (tool.custom === "samples") return { kind: "samples" };
   return { kind: "workbench", slug: tool.slug };
 }
 
@@ -26,7 +28,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
 export function placeholderSize(kind: PanelSpec["kind"]): string {
   if (kind === "editor") return "h-[296px] sm:h-[244px]";
   if (kind === "assistant") return "h-[300px] sm:h-[272px]";
-  if (kind === "media" || kind === "playlist") return "h-[206px] sm:h-[150px]";
+  if (kind === "media" || kind === "playlist" || kind === "samples") return "h-[206px] sm:h-[150px]";
   if (kind === "slides-import") return "h-[158px] sm:h-[182px]";
   return "h-[292px]";
 }

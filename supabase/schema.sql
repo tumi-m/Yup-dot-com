@@ -952,6 +952,24 @@ grant execute on function public.consume_usage(text, text, integer, text) to ser
 grant execute on function public.refund_usage(text, text, text) to service_role;
 grant execute on function public.usage_count(text, text, text) to service_role;
 
+-- ---------- Sample Finder cache ----------
+
+-- Video titles from YouTube and MusicBrainz answers, keyed by the video or
+-- song only (yt:<id>, mbq:<query>, mbrec:<id>): who asked is never stored.
+-- Expired rows are deleted when read, and now and then all at once.
+create table if not exists public.sample_cache (
+  key text primary key check (length(key) between 1 and 400),
+  value jsonb not null,
+  expires_at timestamptz not null
+);
+
+create index if not exists sample_cache_expires_at_idx on public.sample_cache (expires_at);
+
+alter table public.sample_cache enable row level security;
+revoke all on public.sample_cache from public, anon, authenticated;
+grant select, insert, update, delete on public.sample_cache to service_role;
+-- No policies: only the server (service role) reads or writes it.
+
 -- ---------- Visitors without a session (the public anon key alone) ----------
 
 -- The app never reads or writes a table without a signed-in user, so the

@@ -103,6 +103,8 @@ check("all = everything", filterTools(TOOLS, "all", "  ").length === TOOLS.lengt
 check("search is case-insensitive", filterTools(TOOLS, "all", "MERGE").some((t) => t.slug === "merge-pdf"));
 check("search within a category", filterTools(TOOLS, "media", "mp3").every((t) => groupOf(t.category) === "media") && filterTools(TOOLS, "media", "mp3").length > 0);
 check("no match is empty", filterTools(TOOLS, "all", "zzzz").length === 0);
+check("search keywords find the Sample Finder", ["sample", "interpolation", "covers", "whosampled"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "sample-finder")));
+check("the Sample Finder is under Video & Audio, and stays while YouTube is paused", filterTools(TOOLS, "media", "").some((t) => t.slug === "sample-finder"));
 check("labels", pillLabel("all") === "All" && pillLabel("media") === "Video & Audio");
 
 // ?c= deep links

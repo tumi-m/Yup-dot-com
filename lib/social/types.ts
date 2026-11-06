@@ -10,6 +10,16 @@ export interface DirectVideo extends XVideo {
    * travel inside the signed download grant to /api/media/file.
    */
   fetchHeaders?: Record<string, string>;
+  /** TikTok: the sound the post uses. */
+  music?: TikTokMusic | null;
+}
+
+/** A TikTok post's sound. `original`: the creator's own audio, not a released song. */
+export interface TikTokMusic {
+  title: string;
+  author: string | null;
+  original: boolean;
+  album: string | null;
 }
 
 export type DirectFailure = "not-found" | "unavailable" | "no-video" | "login-required" | "unreachable" | "blocked";

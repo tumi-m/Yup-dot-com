@@ -1,0 +1,21 @@
+{
+ "id": "00000000-0000-4000-8000-00000000a101",
+ "title": "Levels",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2011-10-28",
+ "artist-credit": [
+  {
+   "name": "Avicii",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a0b",
+    "name": "Avicii",
+    "sort-name": "Avicii",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": []
+}

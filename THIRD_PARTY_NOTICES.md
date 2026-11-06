@@ -21,3 +21,11 @@ texts ship with each package in `node_modules/<name>/`.
 
 The source code of the MPL-2.0 and GPL-licensed components is available at the
 links above, for the exact versions listed.
+
+## Data
+
+The Sample Finder shows song relationships from
+[MusicBrainz](https://musicbrainz.org), whose core data is in the public domain
+(CC0 1.0). Credit isn't required; we give it on the tool's page anyway. The
+hand-checked sample list in `lib/samples/catalog.ts` was written for this site
+from widely published facts.

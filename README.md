@@ -44,6 +44,7 @@ work with or without an account.
 | **YouTube Playlist** | Lists a playlist (up to 200), downloads the picked videos as MP4 or MP3 two at a time (each counts toward the daily quota), and exports the list as CSV or TXT. *Needs the media worker.* |
 | **X (Twitter) to MP4 / MP3** | Save a post's video, or just its audio. Works with no extra setup. |
 | **Compress Video** | MP4, MOV or WebM in, a smaller H.264 MP4 out, in the browser (WebCodecs). Three presets; up to 4K. A file that's already lean comes back as it was. |
+| **Sample Finder** | Paste a YouTube or TikTok link, or type a song: what it samples, where it was sampled, covers and remixes. Reads only the video's title, so it works while YouTube downloads are paused. Data from MusicBrainz and a hand-checked list. [More below](#sample-finder). |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
@@ -90,7 +91,7 @@ batch caps), and Smallpdf (task-based prompts):
 Limits live in `lib/limits.ts` and `lib/usage.ts`; the upsell UI in
 `components/upsell/`. File and batch limits are enforced in the browser (tools
 run there). Daily allowances (AI answers, edits, video downloads, Slides
-imports) are counted on the server in Supabase (`usage_counters`, through
+imports, song lookups) are counted on the server in Supabase (`usage_counters`, through
 functions only the service role can call), keyed by user id or, for guests,
 by a salted SHA-256 of their IP (raw IPs are never stored). The IP is the
 one Vercel's edge reports (`x-real-ip`), never the first entry of
@@ -151,6 +152,45 @@ one download. After deploying, check what's missing with
 (without the secret it answers 404 in production).
 Read the worker README's **Things to know before launch** section: YouTube
 blocks cloud IPs, and there are legal points too.
+
+## Sample Finder
+
+`/tools/sample-finder` shows what a song samples, where it was sampled, its
+covers and its remixes. Paste a YouTube or TikTok link, or type
+"Artist – Title". It only reads a video's title, so it works while YouTube
+downloads are paused; the homepage's video box and the X, TikTok and
+Instagram tools offer it for YouTube links.
+
+1. **Which song** (`POST /api/samples/identify`). A YouTube link's title and
+   channel come from YouTube's public oEmbed endpoint (no key, no download); a
+   TikTok post's sound from its public page; typed text is read as it is.
+   `lib/samples/parse.ts` takes the artist and title out of the title
+   (Topic and VEVO channels, separators, quotes in any script, tags such as
+   "(Official Video)" dropped, live, remix or sped-up versions noted) and
+   scores how sure it is. One MusicBrainz search finds the recording. Sure:
+   the song is shown. Fairly sure: shown, with other matches behind "Not
+   this song?". Unsure: the page asks "Which song is this?" and offers a
+   form to type it. 10 searches a minute per visitor, no daily allowance.
+2. **Its connections** (`POST /api/samples/lookup`). One MusicBrainz
+   recording lookup (with the song's work, so covers come in the same
+   answer), merged with a hand-checked list of famous samples
+   (`lib/samples/catalog.ts`) that also says what each one takes: a hook,
+   vocals, drums, the bassline, or an interpolation (replayed, not lifted).
+   Each lookup spends one of the day's (guest 10, Free 30, Pro and Team 300);
+   another pick for the same search, the same song again that day, answers
+   already cached, shared links and the hand-checked list are free.
+
+MusicBrainz is asked politely: a User-Agent naming the site and its
+contact page, requests 1.1 s apart per server instance, at most 50 a minute
+across the site (`usage_counters`), one retry after a 503, and otherwise the
+hand-checked results with "MusicBrainz is busy". Answers are cached in
+Supabase (`sample_cache`: 30 days, video titles 7 days, misses 1 day),
+keyed by the song or video only, never who asked. Run
+[`supabase/migrations/20261107000000_sample_cache.sql`](supabase/migrations/20261107000000_sample_cache.sql)
+once (new projects get it from `supabase/schema.sql`); without it the cache
+is per server instance. `SAMPLES_MB_DISABLED=1` serves the hand-checked list
+alone. Only MusicBrainz's open data (CC0) and widely documented facts are
+used: no timestamps and no paid or closed sample databases.
 
 ## Layout-aware parsing
 
@@ -276,6 +316,12 @@ legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
 with outputs checked by independent readers.
 
+`npm run test:browser` drives the Sample Finder in Chrome (`playwright-core`,
+the system Chrome at `/usr/bin/google-chrome`, or `CHROME_PATH`) against
+`next dev` started with a preload (`tests/fakes/samples-net.cjs`) that
+answers YouTube oEmbed, MusicBrainz and TikTok from `tests/fixtures`, so it
+runs offline; nothing in the app knows about it.
+
 Bugs these caught before shipping include: column detection defeated by
 shared baselines; text form fields created with no widget; table columns
 mistaken for a page gutter; and every pdf.js tool failing when the CDN was
@@ -347,7 +393,10 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   `.env.example`.
 - **Downloads and imports.** Links users paste are fetched by the server only
   from allow-listed hosts (`video.twimg.com`, Google Slides), checked again on
-  every redirect. X download links
+  every redirect. The Sample Finder's server calls go to fixed addresses
+  (YouTube's oEmbed with a rebuilt watch link, musicbrainz.org with escaped
+  searches and checked ids, a TikTok post page) and never follow a redirect
+  off those hosts. X download links
   are signed with their own key, expire, and are refunded only if they never
   sent the file.
 - **Cross-site requests.** Routes that spend an allowance or change an
@@ -467,7 +516,7 @@ someone leaves or a key changes.
       shared sender.
 6. Supabase → SQL editor: run each file in `supabase/migrations/` you
    haven't run yet, once, in date order (the newest is
-   `20261019000000_tester_access.sql`). Then run
+   `20261107000000_sample_cache.sql`). Then run
    [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
    it again whenever you change anything by hand (a table, a bucket, a
    function, a policy). Security Advisor should show no "RLS disabled" table.
@@ -545,6 +594,7 @@ pdf-wizard/
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
+│   ├── samples/                  ← Sample Finder: title parsing, catalog, MusicBrainz, cache
 │   ├── supabase/                 ← browser · server · middleware clients
 │   ├── billing.ts                ← Plan resolution + Paystack event handling
 │   ├── paystack.ts, plans.ts, types.ts
@@ -638,6 +688,8 @@ Variables** and redeploy:
 | `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
 | `NEXT_PUBLIC_ENABLE_YOUTUBE` | Optional. `1` brings back the YouTube tools (they are paused and hidden by default); needs the media worker |
+| `MUSICBRAINZ_CONTACT` | Optional. The https page MusicBrainz is told to contact about the Sample Finder's requests (its User-Agent). Default: the site's `/contact` page. Never a personal email |
+| `SAMPLES_MB_DISABLED` | Optional. `1` makes the Sample Finder answer from its hand-checked list only, sending nothing to MusicBrainz |
 | `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Optional. Search Console HTML-tag token, if you don't verify by DNS |
 | `NEXT_PUBLIC_BING_SITE_VERIFICATION` | Optional. Bing Webmaster Tools `msvalidate.01` token |
 

@@ -34,6 +34,7 @@ import {
   FileDown,
   FileSliders,
   Shrink,
+  Disc3,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -62,13 +63,15 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples";
   /** Google Slides import settings: which file the deck is fetched as. */
   slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
   media?: { platform: MediaPlatform; kind: "mp4" | "mp3"; defaultHeight?: number };
   /** Optional ribbon shown on the tool card. */
   badge?: string;
+  /** Extra words the tools search matches (never shown). */
+  keywords?: string;
 }
 
 export const CATEGORY_LABELS: Record<ToolCategory, string> = {
@@ -438,6 +441,18 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-amber-100 text-amber-800",
     custom: "media",
     media: { platform: "instagram", kind: "mp3" },
+  },
+  {
+    slug: "sample-finder",
+    name: "Sample Finder",
+    title: "Sample Finder: see what samples a song uses",
+    description: "Paste a YouTube link or type a song.",
+    icon: Disc3,
+    category: "media",
+    tint: "bg-violet-100 text-violet-800",
+    badge: "New",
+    custom: "samples",
+    keywords: "sample samples sampled whosampled interpolation cover covers remix music song",
   },
   {
     slug: "compress-video",

@@ -48,6 +48,8 @@ export async function POST(request: Request) {
         duration: video.duration,
         thumbnail: video.thumbnail,
         hasAudio: video.hasAudio,
+        // TikTok: the post's sound, so the page can offer to find its samples.
+        music: video.music ?? null,
         qualities: QUALITIES.map((h) => ({ height: h, available: available.includes(h), locked: h > allowed, ...sizes[h] })),
       });
     } catch (err) {

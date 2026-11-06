@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ClipboardPaste,
   Clapperboard,
+  Disc3,
   FileDown,
   FileText,
   Film,
@@ -38,6 +39,8 @@ import {
   JOURNEY_CHOICES,
   markSent,
   mediaActions,
+  mediaHint,
+  mediaNote,
   slidesActions,
   type JourneyAction,
   type JourneyChoice,
@@ -61,6 +64,7 @@ const ACTION_ICONS: Record<string, LucideIcon> = {
   MP4: Film,
   MP3: Music2,
   Playlist: ListVideo,
+  "Find samples": Disc3,
 };
 
 /**
@@ -325,18 +329,13 @@ export function HeroJourney() {
                 {choice === "media" && (
                   <LinkBranch
                     id="journey-media-url"
-                    label={YOUTUBE_ENABLED ? "Video link" : "X, TikTok or Instagram link"}
-                    placeholder="tiktok.com/… or instagram.com/reel/…"
-                    hint={(url) =>
-                      !YOUTUBE_ENABLED && parseMediaUrl(linkIn(url))?.platform === "youtube"
-                        ? "YouTube downloads are paused for now."
-                        : YOUTUBE_ENABLED
-                          ? "Paste a YouTube, X, TikTok or Instagram video link."
-                          : "Paste an X, TikTok or Instagram video link."
-                    }
+                    label="Video link"
+                    placeholder="youtube.com/… or tiktok.com/…"
+                    hint={(url) => mediaHint(url)}
+                    note={(url) => mediaNote(url)}
                     actionsFor={mediaActions}
                     tag={(url) => {
-                      if (parsePlaylistUrl(linkIn(url))) return "YouTube playlist";
+                      if (YOUTUBE_ENABLED && parsePlaylistUrl(linkIn(url))) return "YouTube playlist";
                       const p = parseMediaUrl(linkIn(url));
                       return p ? PLATFORM_LABEL[p.platform] : null;
                     }}
@@ -376,6 +375,7 @@ function LinkBranch({
   label,
   placeholder,
   hint,
+  note,
   actionsFor,
   tag,
   autoFocus,
@@ -384,6 +384,8 @@ function LinkBranch({
   label: string;
   placeholder: string;
   hint: string | ((url: string) => string);
+  /** Shown under a link that does have actions, e.g. why some are missing. */
+  note?: (url: string) => string | null;
   actionsFor: (url: string) => JourneyAction[];
   tag?: (url: string) => string | null;
   autoFocus?: boolean;
@@ -395,6 +397,7 @@ function LinkBranch({
   const actions = url.trim() ? actionsFor(url) : [];
   const invalid = url.trim() !== "" && actions.length === 0;
   const platform = actions.length && tag ? tag(url) : null;
+  const told = actions.length && note ? note(url) : null;
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus({ preventScroll: true });
@@ -461,6 +464,7 @@ function LinkBranch({
           <p className="px-1 pt-2 text-xs font-medium text-amber-700">{typeof hint === "function" ? hint(url) : hint}</p>
         )}
         {pasteError && <p className="px-1 pt-2 text-xs font-medium text-amber-700">{pasteBlockedMessage()}</p>}
+        {told && <p className="px-1 pt-2 text-xs text-muted-foreground">{told}</p>}
         {platform && <span className="sr-only">{platform} link</span>}
       </div>
 

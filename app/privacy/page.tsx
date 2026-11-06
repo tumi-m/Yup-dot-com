@@ -122,9 +122,19 @@ export default function PrivacyPage() {
           previews load their thumbnail straight from the site the video is on.
         </p>
 
+        <h3>Sample Finder</h3>
+        <p>
+          When you look up a song, the link or text you enter goes to our server. For a YouTube link, our server asks
+          YouTube&apos;s public oEmbed service for the video&apos;s title, channel and thumbnail; for a TikTok link it
+          opens the public post as described above. We then search MusicBrainz, run by the MetaBrainz Foundation, using
+          only the artist and song title. Your IP address is never sent to MusicBrainz. We keep looked-up songs and their
+          connections, not who looked them up, for up to 30 days, so repeat lookups are fast. Thumbnails load straight
+          from YouTube or TikTok.
+        </p>
+
         <h3>Daily limits</h3>
         <p>
-          To apply daily limits (for example AI answers and downloads), we count uses per account or, for visitors
+          To apply daily limits (for example AI answers, downloads and song lookups), we count uses per account or, for visitors
           without an account, per salted one-way hash of the IP address. The counters never hold a raw IP address. Old
           counters are cleared automatically, usually within 40 days.
         </p>
@@ -208,7 +218,8 @@ export default function PrivacyPage() {
             <strong>Ollama</strong>: AI assistant answers (document text and questions only).
           </li>
           <li>
-            <strong>Google</strong>: Google Analytics, only if you accept analytics cookies.
+            <strong>Google</strong>: Google Analytics, only if you accept analytics cookies; and YouTube, whose oEmbed
+            service our server asks for a video&apos;s title (video links only).
           </li>
           <li>
             <strong>Our video download host</strong>: a cloud provider that runs our YouTube download server (video
@@ -218,6 +229,10 @@ export default function PrivacyPage() {
             <strong>Our email provider</strong>: sends account emails such as sign-up confirmations.
           </li>
         </ul>
+        <p>
+          The Sample Finder also searches <strong>MusicBrainz</strong> (the MetaBrainz Foundation), an open music
+          database. It gets artist and song titles only, from our server, so nothing about you.
+        </p>
         <p>
           We also share information when the law requires it, or to protect our rights or someone&apos;s safety. We
           don&apos;t sell personal information.
@@ -251,6 +266,9 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Daily limit counters</strong>: usually up to 40 days.
+          </li>
+          <li>
+            <strong>Sample Finder cache</strong>: songs looked up and their connections, never who asked, up to 30 days.
           </li>
           <li>
             <strong>Messages to us</strong>: as long as we need them to help you, and no more than two years.

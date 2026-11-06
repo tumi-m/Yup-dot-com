@@ -6,7 +6,8 @@
  */
 import { createHash } from "node:crypto";
 import { parseMediaUrl } from "../lib/media.ts";
-import { resolveTikTok, solveChallenge, isAllowedTikTokUrl, universalData } from "../lib/social/tiktok.ts";
+import { resolveTikTok, resolveTikTokMusic, solveChallenge, isAllowedTikTokUrl, tiktokMusic, universalData } from "../lib/social/tiktok.ts";
+import { tiktokMusicSlug } from "../lib/samples/parse.ts";
 import { resolveInstagram, shortcodeToPk, isAllowedInstagramUrl, lsdToken } from "../lib/social/instagram.ts";
 import { DirectResolveError, directFilename, failureMessage, grantHeaders, isAllowedMediaUrl } from "../lib/social/direct.ts";
 
@@ -131,6 +132,24 @@ check("non-numeric id → not-found without a request", (await kind(resolveTikTo
   check("short link expanded (HEAD, crawler UA) then resolved", v.id === ID && calls[0].init?.method === "HEAD" && calls[1].url.includes(`/@akihitoko1/video/${ID}`));
   const evil = fakeFetch((u) => (u.startsWith("https://vm.tiktok.com/") ? { status: 302, headers: [["location", "http://169.254.169.254/latest"]] } : "throw"));
   check("short link redirecting off TikTok → refused", (await kind(resolveTikTok({ id: "X1234", short: "https://vm.tiktok.com/X1234/" }, evil.f))) === "not-found" && evil.calls.length === 1);
+}
+// ---------- TikTok sounds (the Sample Finder) ----------
+{
+  const withSong = { ...item, music: { id: "1", title: "Stronger", authorName: "Kanye West", original: false, album: "Graduation" } };
+  check("music read from the itemStruct", JSON.stringify(tiktokMusic(withSong)) === JSON.stringify({ title: "Stronger", author: "Kanye West", original: false, album: "Graduation" }), tiktokMusic(withSong));
+  check("original sound flagged by TikTok", tiktokMusic({ music: { title: "my sound", authorName: "me", original: true } })?.original === true);
+  check("…or by its title", tiktokMusic({ music: { title: "original sound - catperson", authorName: "catperson" } })?.original === true);
+  check("no music → null", tiktokMusic({}) === null && tiktokMusic({ music: { title: "" } }) === null);
+  check("music text is cleaned", tiktokMusic({ music: { title: "Strong\u202Eer", authorName: " A  B " } })?.title === "Stronger");
+  const songPage = page({ "webapp.video-detail": { statusCode: 0, itemInfo: { itemStruct: withSong } } });
+  const v = await resolveTikTok({ id: ID, user: "akihitoko1" }, fakeFetch(() => ({ body: songPage })).f);
+  check("a download preview carries the sound (no extra request)", v.music?.title === "Stronger" && v.music.original === false);
+  const photo = page({ "webapp.video-detail": { statusCode: 0, itemInfo: { itemStruct: { id: ID, imagePost: { images: [] }, video: {}, desc: "pics", author: { uniqueId: "x" }, music: withSong.music } } } });
+  const m = await resolveTikTokMusic({ id: ID, user: "x" }, fakeFetch(() => ({ body: photo })).f);
+  check("a photo post's sound can still be read", m.music?.title === "Stronger" && m.id === ID);
+  const evilCover = page({ "webapp.video-detail": { statusCode: 0, itemInfo: { itemStruct: { ...withSong, video: { cover: "https://evil.example/c.jpg" } } } } });
+  check("covers only from TikTok's image hosts", (await resolveTikTokMusic({ id: ID }, fakeFetch(() => ({ body: evilCover })).f)).cover === null);
+  check("tiktok.com/music/<Song>-<id> → its words (the download tools still refuse it)", tiktokMusicSlug("/music/Harder-Better-Faster-Stronger-6922437245843145729") === "Harder Better Faster Stronger" && p("https://www.tiktok.com/music/x-123") === null);
 }
 check("tiktok allowlist", isAllowedTikTokUrl("https://v16-webapp-prime.tiktok.com/v.mp4") && isAllowedTikTokUrl("https://v19.tiktokcdn-us.com/v.mp4") &&
   !isAllowedTikTokUrl("https://www.tiktok.com/v.mp4") && !isAllowedTikTokUrl("http://v16.tiktokcdn.com/v.mp4") && !isAllowedTikTokUrl("https://tiktokcdn.com.evil.com/v.mp4") && !isAllowedTikTokUrl("https://vm.tiktok.com/x"));

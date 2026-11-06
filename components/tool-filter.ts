@@ -26,7 +26,7 @@ export function filterTools(tools: ToolMeta[], pill: ToolPill, query: string): T
   return tools.filter(
     (t) =>
       (pill === "all" || groupOf(t.category) === pill) &&
-      (!q || `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]}`.toLowerCase().includes(q))
+      (!q || `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]} ${t.keywords ?? ""}`.toLowerCase().includes(q))
   );
 }
 

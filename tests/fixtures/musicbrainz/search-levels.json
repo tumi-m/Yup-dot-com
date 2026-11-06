@@ -1,0 +1,48 @@
+{
+ "created": "2026-11-01T10:00:00.000Z",
+ "count": 1,
+ "offset": 0,
+ "recordings": [
+  {
+   "id": "00000000-0000-4000-8000-00000000a101",
+   "score": 100,
+   "title": "Levels",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Avicii",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a0b",
+      "name": "Avicii",
+      "sort-name": "Avicii",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2011-10-28",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003301",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Levels",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002301",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Single",
+      "secondary-types": []
+     },
+     "date": "2011-10-28",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ]
+  }
+ ]
+}

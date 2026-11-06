@@ -4,6 +4,8 @@ import {
   fileKind,
   isSlidesLink,
   mediaActions,
+  mediaHint,
+  mediaNote,
   slidesActions,
 } from "../lib/journey.ts";
 
@@ -60,8 +62,9 @@ check("slides invalid → none", slidesActions("hello").length === 0);
 // Media links
 const yt = mediaActions("https://youtu.be/dQw4w9WgXcQ", true);
 check(
-  "youtube → mp4 + mp3",
-  yt.length === 2 && yt[0].href.startsWith("/tools/youtube-to-mp4?url=https%3A%2F%2Fyoutu.be") && yt[1].href.startsWith("/tools/youtube-to-mp3?url="),
+  "youtube on → mp4 + mp3 + samples",
+  yt.length === 3 && yt[0].href.startsWith("/tools/youtube-to-mp4?url=https%3A%2F%2Fyoutu.be") && yt[1].href.startsWith("/tools/youtube-to-mp3?url=") &&
+    yt[2].label === "Find samples" && yt[2].href === `/tools/sample-finder?url=${encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}`,
   yt
 );
 const PL = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf";
@@ -75,7 +78,7 @@ check(
 const plVideo = mediaActions(`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${PL}&index=2`, true);
 check(
   "video in playlist → playlist, or this video alone",
-  plVideo.length === 3 && plVideo[0].label === "Playlist" &&
+  plVideo.length === 4 && plVideo[0].label === "Playlist" && plVideo[3].label === "Find samples" &&
     plVideo[1].href === `/tools/youtube-to-mp4?url=${encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}` &&
     plVideo[2].href.startsWith("/tools/youtube-to-mp3?url="),
   plVideo
@@ -87,7 +90,21 @@ check(
   x
 );
 check("media invalid → none", mediaActions("https://vimeo.com/123").length === 0);
-check("YouTube paused → no actions", mediaActions("https://youtu.be/dQw4w9WgXcQ", false).length === 0 && mediaActions(`https://www.youtube.com/playlist?list=${PL}`, false).length === 0);
+{
+  const paused = mediaActions("https://youtu.be/dQw4w9WgXcQ", false);
+  check(
+    "YouTube paused → Find samples only, with the canonical link",
+    paused.length === 1 && paused[0].label === "Find samples" && paused[0].href === `/tools/sample-finder?url=${encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}`,
+    paused
+  );
+  check("…and the box says downloads are paused", mediaNote("https://youtu.be/dQw4w9WgXcQ", false) === "Downloads are paused. You can still find this song's samples.");
+  const inList = mediaActions(`https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=${PL}`, false);
+  check("paused: a video in a playlist → that video's samples, without the list", inList.length === 1 && !inList[0].href.includes("list"), inList);
+  check("paused: a playlist-only link → nothing, and a hint", mediaActions(`https://www.youtube.com/playlist?list=${PL}`, false).length === 0 &&
+    mediaHint(`https://www.youtube.com/playlist?list=${PL}`, false) === "Paste one song's link to find its samples.");
+  check("no note when YouTube is on, or for other sites", mediaNote("https://youtu.be/dQw4w9WgXcQ", true) === null && mediaNote("https://x.com/NASA/status/1790866466429911046", false) === null);
+  check("Shorts links work too", mediaActions("https://www.youtube.com/shorts/dQw4w9WgXcQ", false)[0]?.label === "Find samples");
+}
 const tt = mediaActions("https://www.tiktok.com/@scout2015/video/6718335390845095173");
 check("tiktok → tiktok mp4 + mp3", tt.length === 2 && tt[0].href.startsWith("/tools/tiktok-to-mp4?url=") && tt[1].href.startsWith("/tools/tiktok-to-mp3?url="), JSON.stringify(tt));
 const ttShort = mediaActions("https://vm.tiktok.com/ZMabc123/");

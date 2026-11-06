@@ -1,0 +1,92 @@
+{
+ "created": "2026-11-01T10:00:00.000Z",
+ "count": 2,
+ "offset": 0,
+ "recordings": [
+  {
+   "id": "00000000-0000-4000-8000-00000000d001",
+   "score": 100,
+   "title": "Harder, Better, Faster, Stronger",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Daft Punk",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a02",
+      "name": "Daft Punk",
+      "sort-name": "Daft Punk",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2001-03-12",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003101",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Discovery",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002101",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": []
+     },
+     "date": "2001-03-12",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ]
+  },
+  {
+   "id": "00000000-0000-4000-8000-00000000d002",
+   "score": 81,
+   "title": "Harder, Better, Faster, Stronger / Around the World",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Daft Punk",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a02",
+      "name": "Daft Punk",
+      "sort-name": "Daft Punk",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2007-11-19",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003102",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Alive 2007",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002102",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": [
+       "Live"
+      ]
+     },
+     "date": "2007-11-19",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ],
+   "disambiguation": "live, 2007-06-14: Bercy, Paris"
+  }
+ ]
+}

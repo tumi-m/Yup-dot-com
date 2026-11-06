@@ -36,6 +36,14 @@ check("and nowhere else", !/https:\/\/\*(\s|$)|\shttps:(\s|$)|\*(\s|$)/.test(dir
   delete env.MEDIA_WORKER_URL;
   delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;
 }
+// The Sample Finder's calls (YouTube oEmbed, MusicBrainz, TikTok) are made by
+// the server; pages may only reach this site for them.
+{
+  const all = contentSecurityPolicy("x", { dev: false, analytics: false, turnstile: false });
+  check("connect-src stays this site only (the Sample Finder asks its own API)",
+    /^connect-src 'self' blob: data:$/m.test(all.split("; ").find((d) => d.startsWith("connect-src")) ?? ""), all);
+  check("no MusicBrainz, YouTube or TikTok host in the policy", !/musicbrainz|youtube|ytimg|tiktok/i.test(csp));
+}
 check("Analytics hosts only when Analytics is on", !contentSecurityPolicy("x", { ...prod, analytics: false }).includes("google"));
 check("Turnstile only when it's on", contentSecurityPolicy("x", { ...prod, turnstile: true }).includes("https://challenges.cloudflare.com") && !csp.includes("cloudflare"));
 check("no plugins, <base> changes, off-site forms or framing",

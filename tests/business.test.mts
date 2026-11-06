@@ -78,6 +78,7 @@ check("legal date is ISO", /^\d{4}-\d{2}-\d{2}$/.test(LEGAL_UPDATED) && !Number.
 {
   const urls = sitemap().map((e) => new URL(e.url).pathname);
   for (const p of ["/privacy", "/terms", "/refunds", "/contact"]) check(`sitemap lists ${p}`, urls.includes(p), urls);
+  check("sitemap lists the Sample Finder", urls.includes("/tools/sample-finder"));
   check("sitemap has no private routes", !urls.some((p) => /^\/(api|auth|dashboard|edit|editor|settings)(\/|$)/.test(p)));
   const rules = robots().rules;
   const disallow = (Array.isArray(rules) ? rules[0] : rules).disallow as string[];

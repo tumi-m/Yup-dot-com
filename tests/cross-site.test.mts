@@ -69,6 +69,8 @@ const refused = (r: Request, json?: boolean) => refuseCrossSite(r, { json })?.st
     ["download refunds", async () => (await import("../app/api/media/refund/route.ts")).POST(post("/api/media/refund"))],
     ["link previews", async () => (await import("../app/api/media/info/route.ts")).POST(post("/api/media/info"))],
     ["playlist lists", async () => (await import("../app/api/media/playlist/route.ts")).POST(post("/api/media/playlist"))],
+    ["song searches", async () => (await import("../app/api/samples/identify/route.ts")).POST(post("/api/samples/identify"))],
+    ["song lookups", async () => (await import("../app/api/samples/lookup/route.ts")).POST(post("/api/samples/lookup"))],
     ["slide imports", async () => (await import("../app/api/slides/export/route.ts")).GET(
       new Request("http://localhost/api/slides/export?url=x&format=pdf", { headers: { "sec-fetch-site": "cross-site" } }))],
     ["checkout", async () => (await import("../app/api/billing/checkout/route.ts")).POST(post("/api/billing/checkout"))],

@@ -1,0 +1,21 @@
+{
+ "id": "00000000-0000-4000-8000-00000000a003",
+ "title": "Stronger",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2007-09-11",
+ "artist-credit": [
+  {
+   "name": "Kanye West",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a01",
+    "name": "Kanye West",
+    "sort-name": "Kanye West",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": []
+}

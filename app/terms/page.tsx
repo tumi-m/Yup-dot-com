@@ -24,6 +24,7 @@ const S = {
   media: "Video and audio downloads",
   files: "Your files",
   ai: "The AI assistant",
+  samples: "The Sample Finder",
   billing: "Plans, billing and renewal",
   cancel: "Cancelling and refunds",
   free: "Free use and limits",
@@ -64,7 +65,8 @@ export default function TermsPage() {
       <Section id="service" title={S.service}>
         <p>
           {b.name} offers PDF and PowerPoint tools that run in your browser, a PDF editor, a cloud library for account
-          holders, an AI assistant for PDFs, Google Slides downloads, and video and audio downloads from X, TikTok and Instagram.
+          holders, an AI assistant for PDFs, Google Slides downloads, video and audio downloads from X, TikTok and Instagram,
+          and a Sample Finder that shows the samples, covers and remixes connected to a song.
           Some features need an account or a paid plan.
         </p>
       </Section>
@@ -125,6 +127,14 @@ export default function TermsPage() {
         </p>
       </Section>
 
+      <Section id="samples" title={S.samples}>
+        <p>
+          Results come from MusicBrainz, an open database its community writes, and our own hand-checked list. They are
+          for information only and may be incomplete or wrong. We aren&apos;t affiliated with the artists, labels or
+          MusicBrainz, and a result says nothing about who owns the rights to a song.
+        </p>
+      </Section>
+
       <Section id="billing" title={S.billing}>
         <ul>
           <li>
@@ -165,7 +175,7 @@ export default function TermsPage() {
 
       <Section id="free" title={S.free}>
         <p>
-          The tools are free to use with limits, such as file size, batch size, edits, AI answers and downloads per day.
+          The tools are free to use with limits, such as file size, batch size, edits, AI answers, downloads and song lookups per day.
           The current limits are on the <Link href="/pricing">Pricing</Link> page. We may change free limits at any
           time.
         </p>
@@ -180,8 +190,8 @@ export default function TermsPage() {
 
       <Section id="others" title={S.others}>
         <p>
-          The service relies on other providers, including Paystack, Supabase, Vercel, Ollama and Google, and fetches
-          content from sites such as X, TikTok, Instagram and Google Slides at your request. We aren&apos;t responsible for their
+          The service relies on other providers, including Paystack, Supabase, Vercel, Ollama, Google and MusicBrainz, and fetches
+          content from sites such as X, TikTok, Instagram, YouTube and Google Slides at your request. We aren&apos;t responsible for their
           content, availability or terms.
         </p>
       </Section>

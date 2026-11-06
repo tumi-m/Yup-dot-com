@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { cleanTitle } from "../media";
 import type { XVariant } from "../x-video";
-import { DirectResolveError, type DirectVideo, type Fetcher } from "./types";
+import { DirectResolveError, type DirectVideo, type Fetcher, type TikTokMusic } from "./types";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -143,6 +143,24 @@ function parseUrlKey(key: string): { codec: string; res: number; bitrate: number
   return m ? { codec: m[2], res: Number(m[3]) === 540 ? 576 : Number(m[3]), bitrate: Number(m[4]) } : null;
 }
 
+/**
+ * The sound a post uses, from its itemStruct (no extra request). A
+ * creator's own audio is marked `original` (TikTok's flag, or a title
+ * starting "original sound").
+ */
+export function tiktokMusic(item: Json): TikTokMusic | null {
+  const m = item?.music;
+  if (!m || typeof m !== "object") return null;
+  const title = cleanTitle(m.title).slice(0, 200);
+  if (!title) return null;
+  return {
+    title,
+    author: cleanTitle(m.authorName).slice(0, 120) || null,
+    original: m.original === true || /^original sound\b/i.test(title),
+    album: cleanTitle(m.album).slice(0, 200) || null,
+  };
+}
+
 /** Turns a webapp.video-detail itemStruct into variants, best first. */
 export function parseTikTokItem(id: string, item: Json, pageUrl: string, cookie: string): DirectVideo {
   const video: Json = item.video ?? {};
@@ -206,6 +224,7 @@ export function parseTikTokItem(id: string, item: Json, pageUrl: string, cookie:
     hasAudio: true,
     variants,
     fetchHeaders: { Referer: pageUrl, "User-Agent": UA, ...(cookie ? { Cookie: cookie } : {}) },
+    music: tiktokMusic(item),
   };
 }
 
@@ -259,10 +278,11 @@ export async function expandTikTokShortUrl(short: string, fetcher: Fetcher = fet
   throw new DirectResolveError("not-found");
 }
 
-export async function resolveTikTok(
+/** Loads a post's page (solving the proof-of-work page if shown) and returns its itemStruct. */
+async function loadTikTokItem(
   ref: { id: string; user?: string | null; short?: string | null },
-  fetcher: Fetcher = fetch
-): Promise<DirectVideo> {
+  fetcher: Fetcher
+): Promise<{ id: string; item: Json; pageUrl: string; cookie: string }> {
   let { id, user } = ref;
   try {
     if (ref.short) ({ id, user } = await expandTikTokShortUrl(ref.short, fetcher));
@@ -289,10 +309,54 @@ export async function resolveTikTok(
     if (status === 10204) throw new DirectResolveError("blocked");
     const item = detail.itemInfo?.itemStruct;
     if (status !== 0 || !item || typeof item !== "object") throw new DirectResolveError("not-found");
-    if (!item.video && item.isContentClassified) throw new DirectResolveError("login-required");
-    return parseTikTokItem(id, item, pageUrl, jar.header());
+    return { id, item, pageUrl, cookie: jar.header() };
   } catch (err) {
     if (err instanceof DirectResolveError) throw err;
     throw new DirectResolveError("unreachable");
+  }
+}
+
+export async function resolveTikTok(
+  ref: { id: string; user?: string | null; short?: string | null },
+  fetcher: Fetcher = fetch
+): Promise<DirectVideo> {
+  const { id, item, pageUrl, cookie } = await loadTikTokItem(ref, fetcher);
+  if (!item.video && item.isContentClassified) throw new DirectResolveError("login-required");
+  try {
+    return parseTikTokItem(id, item, pageUrl, cookie);
+  } catch (err) {
+    if (err instanceof DirectResolveError) throw err;
+    throw new DirectResolveError("unreachable");
+  }
+}
+
+/**
+ * A post's sound and cover, for the Sample Finder: the same page as a
+ * download, but photo posts work too (they have no video to resolve).
+ */
+export async function resolveTikTokMusic(
+  ref: { id: string; user?: string | null; short?: string | null },
+  fetcher: Fetcher = fetch
+): Promise<{ id: string; music: TikTokMusic | null; title: string; author: string | null; cover: string | null }> {
+  const { id, item } = await loadTikTokItem(ref, fetcher);
+  const author = typeof item.author === "object" ? item.author?.uniqueId : item.author;
+  const video: Json = item.video ?? {};
+  const cover = [video.cover, video.originCover].find((u) => typeof u === "string" && isTikTokImage(u)) ?? null;
+  return {
+    id,
+    music: tiktokMusic(item),
+    title: cleanTitle(item.desc).slice(0, 120),
+    author: typeof author === "string" ? author : null,
+    cover,
+  };
+}
+
+/** Covers shown in the page come only from TikTok's own image CDNs. */
+function isTikTokImage(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && /(^|\.)(tiktokcdn(-us|-eu)?\.com|ibyteimg\.com|muscdn\.com)$/.test(u.hostname);
+  } catch {
+    return false;
   }
 }

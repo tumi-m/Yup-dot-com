@@ -37,6 +37,18 @@ const deck = "https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOpQrStUvWxYz
 const slides = slidesActions(`Here are the slides: ${deck}`);
 check("Google Slides link in a message", slides.length === 3 && slides[0].href === `/tools/google-slides-to-pdf?url=${encodeURIComponent(deck)}`, slides);
 
+// A YouTube link shared from the app ("Check out this video on YouTube: …")
+// goes to the Sample Finder as its canonical link, without the share text.
+{
+  const yt = mediaActions("Check out this video on YouTube: https://youtu.be/dQw4w9WgXcQ?si=Ab12Cd34", false);
+  check("YouTube share text → Find samples", yt.length === 1 && yt[0].label === "Find samples", yt);
+  check(
+    "…with only the canonical link",
+    yt[0]?.href === `/tools/sample-finder?url=${encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ")}`,
+    yt[0]?.href
+  );
+}
+
 // The server still takes nothing but a link.
 check("parseMediaUrl itself stays strict", parseMediaUrl(share) === null);
 

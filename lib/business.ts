@@ -102,4 +102,4 @@ export const BUSINESS: Business = resolveBusiness(
 export const SECURITY_EMAIL = cleanEmail(process.env.NEXT_PUBLIC_SECURITY_EMAIL) ?? "security@pdfwizard.xyz";
 
 /** When the legal pages last changed (YYYY-MM-DD). Update it with every material change. */
-export const LEGAL_UPDATED = "2026-10-17";
+export const LEGAL_UPDATED = "2026-11-06";

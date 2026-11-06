@@ -302,3 +302,55 @@ export function trackDownload(filename: string, tool?: string): boolean {
   const where = tool ?? (typeof location !== "undefined" ? toolFromPath(location.pathname) : undefined);
   return track("file_download", { file_extension: fileExtension(filename), tool: where });
 }
+
+// ---------- Sample Finder ----------
+
+/**
+ * Sample Finder events. Parameters are kinds and counts only, never a song,
+ * an artist, a link or a video title: anything else is dropped before it is
+ * sent.
+ */
+export type SamplesEvent =
+  | { name: "samples_search"; input: "youtube" | "tiktok" | "text" }
+  | { name: "samples_identified"; confidence: "high" | "medium" | "low"; pick: "auto" | "alternative" | "typed" }
+  | { name: "samples_not_this_song" }
+  | { name: "samples_results"; samples: number; sampled_by: number; covers: number; remixes: number; mb: "ok" | "busy" | "off" }
+  | { name: "samples_tab"; tab: "samples" | "sampled" | "covers" | "remixes" }
+  | { name: "samples_listen"; role: "samples" | "sampledBy" | "covers" | "coveredBy" | "remixOf" | "remixedBy" }
+  | { name: "samples_explore" }
+  | { name: "samples_share"; method: "native" | "copy" }
+  | { name: "samples_limit"; tier: "guest" | "free" | "pro" | "team" };
+
+const SAMPLES_VALUES: Record<string, readonly string[] | "count"> = {
+  input: ["youtube", "tiktok", "text"],
+  confidence: ["high", "medium", "low"],
+  pick: ["auto", "alternative", "typed"],
+  samples: "count",
+  sampled_by: "count",
+  covers: "count",
+  remixes: "count",
+  mb: ["ok", "busy", "off"],
+  tab: ["samples", "sampled", "covers", "remixes"],
+  role: ["samples", "sampledBy", "covers", "coveredBy", "remixOf", "remixedBy"],
+  method: ["native", "copy"],
+  tier: ["guest", "free", "pro", "team"],
+};
+
+/** The event's parameters, keeping only known keys with known values (counts as whole numbers). */
+export function samplesParams(event: SamplesEvent): EventParams {
+  const out: EventParams = {};
+  for (const [k, v] of Object.entries(event)) {
+    const allowed = SAMPLES_VALUES[k];
+    if (!allowed) continue;
+    if (allowed === "count") {
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.max(0, Math.min(9999, Math.round(v)));
+    } else if (typeof v === "string" && allowed.includes(v)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export function trackSamples(event: SamplesEvent): boolean {
+  return track(event.name, samplesParams(event));
+}

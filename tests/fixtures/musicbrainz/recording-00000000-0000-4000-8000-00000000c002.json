@@ -1,0 +1,231 @@
+{
+ "id": "00000000-0000-4000-8000-00000000c002",
+ "title": "Hurt",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2002-11-05",
+ "artist-credit": [
+  {
+   "name": "Johnny Cash",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a06",
+    "name": "Johnny Cash",
+    "sort-name": "Johnny Cash",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": [
+  {
+   "type": "performance",
+   "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+   "direction": "forward",
+   "target-type": "work",
+   "attributes": [
+    "cover"
+   ],
+   "attribute-values": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "work": {
+    "id": "00000000-0000-4000-8000-00000000f003",
+    "title": "Hurt",
+    "type": "Song",
+    "type-id": "00000000-0000-4000-8000-000000007100",
+    "language": "eng",
+    "languages": [
+     "eng"
+    ],
+    "iswcs": [],
+    "disambiguation": "",
+    "attributes": [],
+    "relations": [
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000c001",
+       "title": "Hurt",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Nine Inch Nails",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a05",
+          "name": "Nine Inch Nails",
+          "sort-name": "Nine Inch Nails",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     },
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [
+       "live"
+      ],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000c003",
+       "title": "Hurt",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Nine Inch Nails",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a05",
+          "name": "Nine Inch Nails",
+          "sort-name": "Nine Inch Nails",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     },
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [
+       "cover"
+      ],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000c002",
+       "title": "Hurt",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Johnny Cash",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a06",
+          "name": "Johnny Cash",
+          "sort-name": "Johnny Cash",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     },
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [
+       "cover"
+      ],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000c004",
+       "title": "Hurt",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Leona Lewis",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a07",
+          "name": "Leona Lewis",
+          "sort-name": "Leona Lewis",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     },
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [
+       "cover",
+       "live"
+      ],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000c005",
+       "title": "Hurt (live)",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Johnny Cash",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a06",
+          "name": "Johnny Cash",
+          "sort-name": "Johnny Cash",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

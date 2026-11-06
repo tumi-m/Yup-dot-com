@@ -1,0 +1,194 @@
+{
+ "created": "2026-11-01T10:00:00.000Z",
+ "count": 4,
+ "offset": 0,
+ "recordings": [
+  {
+   "id": "00000000-0000-4000-8000-00000000a001",
+   "score": 100,
+   "title": "Stronger",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Kanye West",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a01",
+      "name": "Kanye West",
+      "sort-name": "Kanye West",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2007-07-31",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003001",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Graduation",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002001",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": []
+     },
+     "date": "2007-09-11",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    },
+    {
+     "id": "00000000-0000-4000-8000-000000003002",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Stronger",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002002",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Single",
+      "secondary-types": []
+     },
+     "date": "2007-07-31",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ]
+  },
+  {
+   "id": "00000000-0000-4000-8000-00000000a003",
+   "score": 100,
+   "title": "Stronger",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Kanye West",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a01",
+      "name": "Kanye West",
+      "sort-name": "Kanye West",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2007-09-11",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003003",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Graduation",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002001",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": []
+     },
+     "date": "2007-09-11",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ],
+   "disambiguation": "clean"
+  },
+  {
+   "id": "00000000-0000-4000-8000-00000000a002",
+   "score": 98,
+   "title": "Stronger",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Kanye West",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a01",
+      "name": "Kanye West",
+      "sort-name": "Kanye West",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2008-03-01",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003004",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "VH1 Storytellers",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002004",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": [
+       "Live"
+      ]
+     },
+     "date": "2010-02-12",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ],
+   "disambiguation": "live, 2008"
+  },
+  {
+   "id": "00000000-0000-4000-8000-00000000b001",
+   "score": 64,
+   "title": "Stronger",
+   "length": 311000,
+   "video": null,
+   "artist-credit": [
+    {
+     "name": "Britney Spears",
+     "joinphrase": "",
+     "artist": {
+      "id": "00000000-0000-4000-8000-000000001a03",
+      "name": "Britney Spears",
+      "sort-name": "Britney Spears",
+      "disambiguation": ""
+     }
+    }
+   ],
+   "first-release-date": "2000-05-16",
+   "releases": [
+    {
+     "id": "00000000-0000-4000-8000-000000003005",
+     "status-id": "00000000-0000-4000-8000-000000009997",
+     "count": 1,
+     "title": "Oops!... I Did It Again",
+     "status": "Official",
+     "release-group": {
+      "id": "00000000-0000-4000-8000-000000002005",
+      "type-id": "00000000-0000-4000-8000-000000009999",
+      "primary-type-id": "00000000-0000-4000-8000-000000009998",
+      "title": "x",
+      "primary-type": "Album",
+      "secondary-types": []
+     },
+     "date": "2000-05-16",
+     "country": "US",
+     "track-count": 14,
+     "media": []
+    }
+   ]
+  }
+ ]
+}

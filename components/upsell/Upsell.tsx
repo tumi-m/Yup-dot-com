@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Film, Infinity as InfinityIcon, Sparkles, Stamp, X, Zap } from "lucide-react";
+import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Sparkles, Stamp, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits";
+export type UpsellReason = "file-size" | "batch" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -52,6 +52,13 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
         ? `${LIMITS.free.mediaDownloadsPerDay} a day with a free account, ${LIMITS.pro.mediaDownloadsPerDay} with Pro.`
         : `${LIMITS.pro.mediaDownloadsPerDay} a day with Pro.`,
   },
+  samples: {
+    title: "Daily lookups used",
+    body: (t) =>
+      t === "guest"
+        ? `Free account: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`
+        : `Free: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`,
+  },
   save: {
     title: "Save to the cloud",
     body: () => "Open your documents on any device.",
@@ -65,6 +72,12 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
 const MEDIA_BENEFITS = [
   { icon: Film, text: "1080p downloads" },
   { icon: InfinityIcon, text: `${LIMITS.pro.mediaDownloadsPerDay} downloads a day` },
+  { icon: Sparkles, text: "Bigger files, more AI" },
+];
+
+const SAMPLE_BENEFITS = [
+  { icon: Disc3, text: `${LIMITS.pro.sampleLookupsPerDay} song lookups a day` },
+  { icon: Film, text: "1080p downloads" },
   { icon: Sparkles, text: "Bigger files, more AI" },
 ];
 
@@ -140,7 +153,14 @@ export function UpgradeDialog({
         </div>
         <div className="space-y-5 px-6 pb-6">
           <ul className="space-y-2.5 text-sm">
-            {(reason === "quality" || reason === "downloads" ? MEDIA_BENEFITS : reason === "edits" ? EDIT_BENEFITS : BENEFITS).map((b, i) => (
+            {(reason === "quality" || reason === "downloads"
+              ? MEDIA_BENEFITS
+              : reason === "edits"
+                ? EDIT_BENEFITS
+                : reason === "samples"
+                  ? SAMPLE_BENEFITS
+                  : BENEFITS
+            ).map((b, i) => (
               <motion.li
                 key={b.text}
                 initial={{ opacity: 0, y: 6 }}

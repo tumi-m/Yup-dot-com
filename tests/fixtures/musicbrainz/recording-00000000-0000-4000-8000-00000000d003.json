@@ -1,0 +1,57 @@
+{
+ "id": "00000000-0000-4000-8000-00000000d003",
+ "title": "Harder, Better, Faster, Stronger (The Neptunes remix)",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2003-12-01",
+ "artist-credit": [
+  {
+   "name": "Daft Punk",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a02",
+    "name": "Daft Punk",
+    "sort-name": "Daft Punk",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": [
+  {
+   "type": "remix",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "forward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-00000000d001",
+    "title": "Harder, Better, Faster, Stronger",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Daft Punk",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a02",
+       "name": "Daft Punk",
+       "sort-name": "Daft Punk",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  }
+ ]
+}

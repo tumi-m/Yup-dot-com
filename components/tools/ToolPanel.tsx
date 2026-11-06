@@ -11,6 +11,7 @@ const MediaDownloader = lazy(() => import("./MediaDownloader").then((m) => ({ de
 const PlaylistDownloader = lazy(() => import("./PlaylistDownloader").then((m) => ({ default: m.PlaylistDownloader })));
 const PptxToPdf = lazy(() => import("./PptxToPdf").then((m) => ({ default: m.PptxToPdf })));
 const PptxEditor = lazy(() => import("./PptxEditor").then((m) => ({ default: m.PptxEditor })));
+const SampleFinder = lazy(() => import("./SampleFinder").then((m) => ({ default: m.SampleFinder })));
 const SlidesImporter = lazy(() => import("./SlidesImporter").then((m) => ({ default: m.SlidesImporter })));
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
@@ -34,6 +35,8 @@ function panel(spec: PanelSpec, tier: Tier): ReactNode {
       return <PptxEditor tier={tier} />;
     case "slides-import":
       return <SlidesImporter tier={tier} format={spec.format} />;
+    case "samples":
+      return <SampleFinder tier={tier} />;
     case "workbench":
       return <ToolWorkbench slug={spec.slug} tier={tier} />;
   }

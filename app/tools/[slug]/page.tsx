@@ -14,6 +14,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 import { ToolHeader, RelatedTools } from "@/components/tools/ToolHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
+import { SampleFinderAbout } from "@/components/tools/SampleFinderAbout";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -71,6 +72,8 @@ export default async function ToolPage({
               </Suspense>
             </div>
           </div>
+
+          {tool.slug === "sample-finder" && <SampleFinderAbout />}
 
           <RelatedTools slug={tool.slug} />
         </div>

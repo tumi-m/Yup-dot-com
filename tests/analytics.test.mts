@@ -141,6 +141,28 @@ check("no page_view is ever sent by hand", events("page_view").length === 0);
   check("three distinct purchases sent", events("purchase").length === 3, events("purchase").length);
 }
 
+// Sample Finder: kinds and counts only.
+{
+  A.trackSamples({ name: "samples_search", input: "youtube" });
+  A.trackSamples({ name: "samples_identified", confidence: "medium", pick: "alternative" });
+  A.trackSamples({ name: "samples_results", samples: 3, sampled_by: 14.6, covers: 0, remixes: 1, mb: "busy" });
+  A.trackSamples({ name: "samples_tab", tab: "covers" });
+  A.trackSamples({ name: "samples_listen", role: "sampledBy" });
+  A.trackSamples({ name: "samples_share", method: "copy" });
+  A.trackSamples({ name: "samples_limit", tier: "guest" });
+  A.trackSamples({ name: "samples_not_this_song" });
+  A.trackSamples({ name: "samples_explore" });
+  const names = ["samples_search", "samples_identified", "samples_results", "samples_tab", "samples_listen", "samples_share", "samples_limit", "samples_not_this_song", "samples_explore"];
+  check("every Sample Finder event is sent", names.every((n) => events(n).length === 1), names.filter((n) => events(n).length !== 1));
+  const res = events("samples_results")[0]?.[2] as Record<string, unknown>;
+  check("samples_results: counts and the MusicBrainz state", res?.samples === 3 && res.sampled_by === 15 && res.covers === 0 && res.remixes === 1 && res.mb === "busy", res);
+  check("samples_identified: band and how it was picked", JSON.stringify(events("samples_identified")[0]?.[2]) === '{"confidence":"medium","pick":"alternative"}');
+  // A song, artist, link or title can't ride along, even by mistake.
+  const leaky = { name: "samples_search", input: "Kanye West - Stronger", title: "Stronger", url: "https://youtu.be/x" } as unknown as Parameters<typeof A.trackSamples>[0];
+  check("unknown keys and free text are dropped", JSON.stringify(A.samplesParams(leaky)) === "{}", A.samplesParams(leaky));
+  check("no event carries a song or a link", !JSON.stringify(entries().filter((a) => String(a[1]).startsWith("samples_"))).match(/Stronger|Kanye|https?:/));
+}
+
 // Withdrawal: back to no-op.
 check("applyConsent(denied) → no gtag.js", A.applyConsent("denied") === false);
 check("denied: ga-disable set", win["ga-disable-G-TEST123"] === true);

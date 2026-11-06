@@ -4,6 +4,7 @@
  * pasted link can go. Kept free of React so it can be unit tested.
  */
 import { linkIn, parseMediaUrl, parsePlaylistUrl, YOUTUBE_ENABLED } from "./media";
+import { finderForLink } from "./samples/links";
 
 export type JourneyChoice = "pdf" | "pptx" | "slides" | "media";
 
@@ -109,8 +110,10 @@ export function takeSent(href: string, store: NoteStore | null = tabStore()): bo
 
 /**
  * A playlist link goes to the playlist tool; one that also names a video
- * (watch?v=…&list=…) offers that single video too. Text around the link, as
- * a phone's share sheet copies it, is left behind.
+ * (watch?v=…&list=…) offers that single video too. A YouTube video can
+ * always go to the Sample Finder, which only reads its title, so it works
+ * while YouTube downloads are paused. Text around the link, as a phone's
+ * share sheet copies it, is left behind.
  */
 export function mediaActions(input: string, youtube: boolean = YOUTUBE_ENABLED): JourneyAction[] {
   const link = linkIn(input);
@@ -122,17 +125,34 @@ export function mediaActions(input: string, youtube: boolean = YOUTUBE_ENABLED):
   if (!parsed) return actions;
   // Single videos are passed on as their canonical link, without the list.
   const url = encodeURIComponent(playlist ? parsed.canonical : link);
-  // YouTube is paused (lib/media.ts): its links get no actions, and the box says why.
   if (parsed.platform === "youtube") {
-    if (!youtube) return [];
+    const samples: JourneyAction = { label: "Find samples", href: finderForLink(parsed.canonical) };
+    // YouTube downloads are paused (lib/media.ts): finding samples still works.
+    if (!youtube) return [samples];
     return [
       ...actions,
       { label: "MP4", href: `/tools/youtube-to-mp4?url=${url}` },
       { label: "MP3", href: `/tools/youtube-to-mp3?url=${url}` },
+      samples,
     ];
   }
   return [
     { label: "MP4", href: `/tools/${parsed.platform}-to-mp4?url=${url}` },
     { label: "MP3", href: `/tools/${parsed.platform}-to-mp3?url=${url}` },
   ];
+}
+
+/** What the homepage's link box says under a link, or null. */
+export function mediaNote(input: string, youtube: boolean = YOUTUBE_ENABLED): string | null {
+  if (youtube) return null;
+  const link = linkIn(input);
+  if (parseMediaUrl(link)?.platform === "youtube") return "Downloads are paused. You can still find this song's samples.";
+  return null;
+}
+
+/** Why a link in the homepage's video box has no actions. */
+export function mediaHint(input: string, youtube: boolean = YOUTUBE_ENABLED): string {
+  const link = linkIn(input);
+  if (!youtube && !parseMediaUrl(link) && parsePlaylistUrl(link)) return "Paste one song's link to find its samples.";
+  return "Paste a YouTube, X, TikTok or Instagram video link.";
 }

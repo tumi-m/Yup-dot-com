@@ -1,0 +1,172 @@
+{
+ "id": "00000000-0000-4000-8000-00000000a001",
+ "title": "Stronger",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2007-07-31",
+ "artist-credit": [
+  {
+   "name": "Kanye West",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a01",
+    "name": "Kanye West",
+    "sort-name": "Kanye West",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": [
+  {
+   "type": "samples material",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "forward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-00000000d001",
+    "title": "Harder, Better, Faster, Stronger",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Daft Punk",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a02",
+       "name": "Daft Punk",
+       "sort-name": "Daft Punk",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "performance",
+   "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+   "direction": "forward",
+   "target-type": "work",
+   "attributes": [],
+   "attribute-values": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "work": {
+    "id": "00000000-0000-4000-8000-00000000f001",
+    "title": "Stronger",
+    "type": "Song",
+    "type-id": "00000000-0000-4000-8000-000000007100",
+    "language": "eng",
+    "languages": [
+     "eng"
+    ],
+    "iswcs": [],
+    "disambiguation": "",
+    "attributes": [],
+    "relations": [
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000a001",
+       "title": "Stronger",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Kanye West",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a01",
+          "name": "Kanye West",
+          "sort-name": "Kanye West",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     },
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [
+       "live"
+      ],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000a002",
+       "title": "Stronger",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Kanye West",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a01",
+          "name": "Kanye West",
+          "sort-name": "Kanye West",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "free streaming",
+   "type-id": "00000000-0000-4000-8000-000000007200",
+   "direction": "forward",
+   "target-type": "url",
+   "attributes": [],
+   "attribute-values": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "url": {
+    "id": "00000000-0000-4000-8000-000000007201",
+    "resource": "https://www.youtube.com/watch?v=strongerVID"
+   }
+  }
+ ]
+}

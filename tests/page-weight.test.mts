@@ -49,13 +49,13 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all eight panels lazily",
-  lazy.join() === "EditorLaunch,MediaDownloader,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SlidesImporter,ToolWorkbench",
+  "ToolPanel loads all nine panels lazily",
+  lazy.join() === "EditorLaunch,MediaDownloader,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
   lazy
 );
 
@@ -71,9 +71,16 @@ for (const file of [
   "components/tools/PptxToPdf.tsx",
   "components/tools/PptxEditor.tsx",
   "components/tools/SlidesImporter.tsx",
+  "components/tools/SampleFinder.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
+}
+// The Sample Finder's page never carries the hand-checked list or the server's MusicBrainz code.
+{
+  const files = ["components/tools/SampleFinder.tsx", ...readdirSync(new URL("../components/tools/samples", import.meta.url)).map((f) => `components/tools/samples/${f}`)];
+  const server = files.flatMap((f) => staticImports(src(f), /^@\/lib\/samples\/(catalog|merge|musicbrainz|handlers|cache|oembed)$|^zod$/).map((m) => `${f}: ${m}`));
+  check("Sample Finder's page code imports no catalog or server module", server.length === 0, server);
 }
 check(
   "PptxEditor does not load the parser on mount",

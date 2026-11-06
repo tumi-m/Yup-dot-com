@@ -1,0 +1,311 @@
+{
+ "id": "00000000-0000-4000-8000-00000000d001",
+ "title": "Harder, Better, Faster, Stronger",
+ "length": 311000,
+ "disambiguation": "",
+ "video": false,
+ "first-release-date": "2001-03-12",
+ "artist-credit": [
+  {
+   "name": "Daft Punk",
+   "joinphrase": "",
+   "artist": {
+    "id": "00000000-0000-4000-8000-000000001a02",
+    "name": "Daft Punk",
+    "sort-name": "Daft Punk",
+    "disambiguation": ""
+   }
+  }
+ ],
+ "relations": [
+  {
+   "type": "samples material",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "forward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-00000000e001",
+    "title": "Cola Bottle Baby",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Edwin Birdsong",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a04",
+       "name": "Edwin Birdsong",
+       "sort-name": "Edwin Birdsong",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "samples material",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "backward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-00000000a001",
+    "title": "Stronger",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Kanye West",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a01",
+       "name": "Kanye West",
+       "sort-name": "Kanye West",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "remix",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "backward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-00000000d003",
+    "title": "Harder, Better, Faster, Stronger (The Neptunes remix)",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Daft Punk",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a02",
+       "name": "Daft Punk",
+       "sort-name": "Daft Punk",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "DJ-mix",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "backward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-000000009001",
+    "title": "Example Mix 2005",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "DJ Example",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a09",
+       "name": "DJ Example",
+       "sort-name": "DJ Example",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "mashes up",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "backward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-000000009002",
+    "title": "Example Mash-up",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "DJ Example",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a09",
+       "name": "DJ Example",
+       "sort-name": "DJ Example",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "edit",
+   "type-id": "00000000-0000-4000-8000-000000007000",
+   "direction": "backward",
+   "target-type": "recording",
+   "attributes": [],
+   "attribute-values": {},
+   "attribute-ids": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "recording": {
+    "id": "00000000-0000-4000-8000-000000009003",
+    "title": "Harder, Better, Faster, Stronger (radio edit)",
+    "disambiguation": "",
+    "length": 300000,
+    "video": false,
+    "artist-credit": [
+     {
+      "name": "Daft Punk",
+      "joinphrase": "",
+      "artist": {
+       "id": "00000000-0000-4000-8000-000000001a02",
+       "name": "Daft Punk",
+       "sort-name": "Daft Punk",
+       "disambiguation": ""
+      }
+     }
+    ],
+    "isrcs": [],
+    "aliases": []
+   }
+  },
+  {
+   "type": "performance",
+   "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+   "direction": "forward",
+   "target-type": "work",
+   "attributes": [],
+   "attribute-values": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "work": {
+    "id": "00000000-0000-4000-8000-00000000f002",
+    "title": "Harder, Better, Faster, Stronger",
+    "type": "Song",
+    "type-id": "00000000-0000-4000-8000-000000007100",
+    "language": "eng",
+    "languages": [
+     "eng"
+    ],
+    "iswcs": [],
+    "disambiguation": "",
+    "attributes": [],
+    "relations": [
+     {
+      "type": "performance",
+      "type-id": "a3005666-a872-32c3-ad06-98af558e99b0",
+      "direction": "backward",
+      "target-type": "recording",
+      "attributes": [],
+      "attribute-values": {},
+      "begin": null,
+      "end": null,
+      "ended": false,
+      "source-credit": "",
+      "target-credit": "",
+      "recording": {
+       "id": "00000000-0000-4000-8000-00000000d001",
+       "title": "Harder, Better, Faster, Stronger",
+       "disambiguation": "",
+       "length": 300000,
+       "video": false,
+       "artist-credit": [
+        {
+         "name": "Daft Punk",
+         "joinphrase": "",
+         "artist": {
+          "id": "00000000-0000-4000-8000-000000001a02",
+          "name": "Daft Punk",
+          "sort-name": "Daft Punk",
+          "disambiguation": ""
+         }
+        }
+       ],
+       "isrcs": [],
+       "aliases": []
+      }
+     }
+    ]
+   }
+  },
+  {
+   "type": "free streaming",
+   "type-id": "00000000-0000-4000-8000-000000007200",
+   "direction": "forward",
+   "target-type": "url",
+   "attributes": [],
+   "attribute-values": {},
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "source-credit": "",
+   "target-credit": "",
+   "url": {
+    "id": "00000000-0000-4000-8000-000000007201",
+    "resource": "https://www.youtube.com/watch?v=hbfsTopic01&feature=share"
+   }
+  }
+ ]
+}
