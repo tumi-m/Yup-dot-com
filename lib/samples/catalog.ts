@@ -10,6 +10,7 @@
  * An entry we couldn't date with confidence is left out rather than guessed.
  */
 import { artistKey, compact } from "./normalize";
+import { variantOf } from "./parse";
 import type { Relation, Role, SampleElement, SongRef } from "./types";
 
 export interface CatalogEntry {
@@ -88,7 +89,6 @@ export const CATALOG: CatalogEntry[] = [
   { artist: "Eric B. & Rakim", title: "Paid in Full", year: 1987, sourceArtist: "Dennis Edwards", sourceTitle: "Don't Look Any Further", sourceYear: 1984, element: "bass", note: "The bassline" },
   { artist: "Naughty by Nature", title: "O.P.P.", year: 1991, sourceArtist: "The Jackson 5", sourceTitle: "ABC", sourceYear: 1970, element: "multiple" },
   { artist: "House of Pain", title: "Jump Around", year: 1992, sourceArtist: "Bob & Earl", sourceTitle: "Harlem Shuffle", sourceYear: 1963, element: "hook-riff", note: "The horn intro" },
-  { artist: "Kendrick Lamar", title: "King Kunta", year: 2015, sourceArtist: "James Brown", sourceTitle: "The Payback", sourceYear: 1973, element: "multiple" },
   { artist: "Kendrick Lamar", title: "Money Trees", year: 2012, sourceArtist: "Beach House", sourceTitle: "Silver Soul", sourceYear: 2010, element: "multiple" },
   { artist: "Kendrick Lamar", title: "i", year: 2014, sourceArtist: "The Isley Brothers", sourceTitle: "That Lady (Part 1 & 2)", sourceYear: 1973, element: "hook-riff", note: "The guitar riff", sourceAliases: { title: ["That Lady"] } },
   { artist: "Travis Scott", title: "SICKO MODE", year: 2018, sourceArtist: "The Notorious B.I.G.", sourceTitle: "Gimme the Loot", sourceYear: 1994, element: "vocals-lyrics", sourceAliases: BIGGIE },
@@ -116,11 +116,11 @@ export const CATALOG: CatalogEntry[] = [
   { artist: "Will Smith", title: "Men in Black", year: 1997, sourceArtist: "Patrice Rushen", sourceTitle: "Forget Me Nots", sourceYear: 1982, element: "multiple" },
   { artist: "Will Smith", title: "Gettin' Jiggy wit It", year: 1997, sourceArtist: "Sister Sledge", sourceTitle: "He's the Greatest Dancer", sourceYear: 1979, element: "hook-riff" },
   { artist: "Blackstreet", title: "No Diggity", year: 1996, sourceArtist: "Bill Withers", sourceTitle: "Grandma's Hands", sourceYear: 1971, element: "multiple" },
-  { artist: "Fugees", title: "Ready or Not", year: 1996, sourceArtist: "Enya", sourceTitle: "Boadicea", sourceYear: 1987, element: "hook-riff" },
-  { artist: "Mario Winans", title: "I Don't Wanna Know", year: 2004, sourceArtist: "Enya", sourceTitle: "Boadicea", sourceYear: 1987, element: "hook-riff" },
+  { artist: "Fugees", title: "Ready or Not", year: 1996, sourceArtist: "Enya", sourceTitle: "Boadicea", sourceYear: 1987, element: "vocals-lyrics", note: "Enya's wordless vocal" },
+  { artist: "Mario Winans", title: "I Don't Wanna Know", year: 2004, sourceArtist: "Enya", sourceTitle: "Boadicea", sourceYear: 1987, element: "vocals-lyrics", note: "Enya's wordless vocal" },
   { artist: "En Vogue", title: "My Lovin' (You're Never Gonna Get It)", year: 1992, sourceArtist: "James Brown", sourceTitle: "The Payback", sourceYear: 1973, element: "hook-riff", note: "The guitar", aliases: { title: ["My Lovin'"] } },
   { artist: "Rob Base & DJ E-Z Rock", title: "It Takes Two", year: 1988, sourceArtist: "Lyn Collins", sourceTitle: "Think (About It)", sourceYear: 1972, element: "multiple" },
-  { artist: "Run-DMC", title: "Peter Piper", year: 1986, sourceArtist: "Bob James", sourceTitle: "Take Me to the Mardi Gras", sourceYear: 1975, element: "drums" },
+  { artist: "Run-DMC", title: "Peter Piper", year: 1986, sourceArtist: "Bob James", sourceTitle: "Take Me to the Mardi Gras", sourceYear: 1975, element: "multiple", note: "The bells and percussion" },
   { artist: "Ghostface Killah", title: "Daytona 500", year: 1996, sourceArtist: "Bob James", sourceTitle: "Nautilus", sourceYear: 1974, element: "multiple" },
   { artist: "Beastie Boys", title: "Rhymin & Stealin", year: 1986, sourceArtist: "Led Zeppelin", sourceTitle: "When the Levee Breaks", sourceYear: 1971, element: "drums", note: "John Bonham's drums" },
   { artist: "Afrika Bambaataa & the Soulsonic Force", title: "Planet Rock", year: 1982, sourceArtist: "Kraftwerk", sourceTitle: "Trans-Europe Express", sourceYear: 1977, element: "interpolation", note: "The melody, replayed on synth" },
@@ -136,11 +136,11 @@ export const CATALOG: CatalogEntry[] = [
   { artist: "Eminem", title: "Sing for the Moment", year: 2002, sourceArtist: "Aerosmith", sourceTitle: "Dream On", sourceYear: 1973, element: "multiple" },
   { artist: "Biz Markie", title: "Just a Friend", year: 1989, sourceArtist: "Freddie Scott", sourceTitle: "(You) Got What I Need", sourceYear: 1968, element: "interpolation", note: "The chorus, re-sung" },
   { artist: "Mase", title: "Feel So Good", year: 1997, sourceArtist: "Kool & the Gang", sourceTitle: "Hollywood Swinging", sourceYear: 1973, element: "hook-riff" },
-  { artist: "Puff Daddy", title: "Come with Me", year: 1998, sourceArtist: "Led Zeppelin", sourceTitle: "Kashmir", sourceYear: 1975, element: "multiple", aliases: PUFF },
+  { artist: "Puff Daddy", title: "Come with Me", year: 1998, sourceArtist: "Led Zeppelin", sourceTitle: "Kashmir", sourceYear: 1975, element: "multiple", note: "Built on Kashmir, with Jimmy Page replaying his part", aliases: PUFF },
   { artist: "Puff Daddy & Faith Evans", title: "I'll Be Missing You", year: 1997, sourceArtist: "The Police", sourceTitle: "Every Breath You Take", sourceYear: 1983, element: "multiple", note: "The guitar riff, with the melody re-sung", aliases: PUFF },
   { artist: "MC Hammer", title: "U Can't Touch This", year: 1990, sourceArtist: "Rick James", sourceTitle: "Super Freak", sourceYear: 1981, element: "hook-riff", aliases: { artist: ["M.C. Hammer", "Hammer"] } },
   { artist: "Nicki Minaj", title: "Super Freaky Girl", year: 2022, sourceArtist: "Rick James", sourceTitle: "Super Freak", sourceYear: 1981, element: "hook-riff" },
-  { artist: "Vanilla Ice", title: "Ice Ice Baby", year: 1990, sourceArtist: "Queen & David Bowie", sourceTitle: "Under Pressure", sourceYear: 1981, element: "bass", note: "The bassline" },
+  { artist: "Vanilla Ice", title: "Ice Ice Baby", year: 1989, sourceArtist: "Queen & David Bowie", sourceTitle: "Under Pressure", sourceYear: 1981, element: "bass", note: "The bassline" },
   { artist: "Sugarhill Gang", title: "Rapper's Delight", year: 1979, sourceArtist: "Chic", sourceTitle: "Good Times", sourceYear: 1979, element: "interpolation", note: "The bassline, replayed by the Sugar Hill house band" },
   { artist: "Jack Harlow", title: "First Class", year: 2022, sourceArtist: "Fergie", sourceTitle: "Glamorous", sourceYear: 2006, element: "vocals-lyrics" },
 
@@ -152,12 +152,11 @@ export const CATALOG: CatalogEntry[] = [
   { artist: "Destiny's Child", title: "Bootylicious", year: 2001, sourceArtist: "Stevie Nicks", sourceTitle: "Edge of Seventeen", sourceYear: 1981, element: "hook-riff", note: "The guitar riff" },
   { artist: "Rihanna", title: "Don't Stop the Music", year: 2007, sourceArtist: "Michael Jackson", sourceTitle: "Wanna Be Startin' Somethin'", sourceYear: 1982, element: "vocals-lyrics", note: "The \"mama-say mama-sa\" chant" },
   { artist: "Mariah Carey", title: "Fantasy", year: 1995, sourceArtist: "Tom Tom Club", sourceTitle: "Genius of Love", sourceYear: 1981, element: "multiple" },
-  { artist: "Alicia Keys", title: "Fallin'", year: 2001, sourceArtist: "James Brown", sourceTitle: "It's a Man's Man's Man's World", sourceYear: 1966, element: "interpolation" },
   { artist: "Mary J. Blige", title: "Real Love", year: 1992, sourceArtist: "Betty Wright", sourceTitle: "Clean Up Woman", sourceYear: 1971, element: "hook-riff", note: "The guitar riff" },
   { artist: "SWV", title: "Right Here (Human Nature Remix)", year: 1993, sourceArtist: "Michael Jackson", sourceTitle: "Human Nature", sourceYear: 1982, element: "multiple" },
   { artist: "Madonna", title: "Hung Up", year: 2005, sourceArtist: "ABBA", sourceTitle: "Gimme! Gimme! Gimme! (A Man After Midnight)", sourceYear: 1979, element: "hook-riff", sourceAliases: { title: ["Gimme! Gimme! Gimme!"] } },
   { artist: "Dua Lipa", title: "Break My Heart", year: 2020, sourceArtist: "INXS", sourceTitle: "Need You Tonight", sourceYear: 1987, element: "interpolation", note: "The riff, replayed and credited" },
-  { artist: "Ariana Grande", title: "7 rings", year: 2019, sourceArtist: "Rodgers & Hammerstein", sourceTitle: "My Favorite Things", sourceYear: 1959, element: "interpolation", note: "The melody, from The Sound of Music" },
+  { artist: "Ariana Grande", title: "7 rings", year: 2019, sourceArtist: "The Sound of Music (Original Broadway Cast)", sourceTitle: "My Favorite Things", sourceYear: 1959, element: "interpolation", note: "The melody, written by Rodgers & Hammerstein", sourceAliases: { artist: ["The Sound of Music", "Rodgers & Hammerstein"] } },
   { artist: "Doja Cat", title: "Paint the Town Red", year: 2023, sourceArtist: "Dionne Warwick", sourceTitle: "Walk On By", sourceYear: 1964, element: "vocals-lyrics" },
   { artist: "David Guetta & Bebe Rexha", title: "I'm Good (Blue)", year: 2022, sourceArtist: "Eiffel 65", sourceTitle: "Blue (Da Ba Dee)", sourceYear: 1998, element: "interpolation", aliases: { title: ["I'm Good"] }, sourceAliases: { title: ["Blue"] } },
   { artist: "Flo Rida", title: "Right Round", year: 2009, sourceArtist: "Dead or Alive", sourceTitle: "You Spin Me Round (Like a Record)", sourceYear: 1984, element: "interpolation", sourceAliases: { title: ["You Spin Me Round"] } },
@@ -208,6 +207,13 @@ function withoutBrackets(text: string): string {
   return text.replace(/\s*[([][^()[\]]*[)\]]\s*/g, " ").trim();
 }
 
+/** "(The Neptunes remix)", "(Live)", "- Acoustic": the title names one version of a song. */
+function namesVersion(title: string): boolean {
+  const brackets = [...title.matchAll(/[([]([^()[\]]*)[)\]]/g)].map((m) => m[1]);
+  const after = title.split(/\s+[-–—]\s+/).slice(1);
+  return [...brackets, ...after].some((part) => variantOf(part) !== null);
+}
+
 /** The names in a credit: "Jay-Z & Kanye West feat. Frank Ocean" → each of them. */
 export function creditNames(credit: string): string[] {
   return credit
@@ -221,11 +227,15 @@ export function creditNames(credit: string): string[] {
 /**
  * Same song title: equal after normalising (with or without a bracketed
  * part on the asked side), equal to an alias, or one inside the other when
- * the shorter is at least 6 characters and 60% of the longer.
+ * the shorter is at least 6 characters and 60% of the longer. A title that
+ * names a version ("(The Neptunes remix)", "(Live)") matches only an entry
+ * for that version: a remix isn't the record its original sampled.
  */
 export function titleMatches(asked: string, title: string, aliases: string[] = []): boolean {
-  const q = [...new Set([compact(asked), compact(withoutBrackets(asked))])].filter(Boolean);
   const e = [compact(title), ...aliases.map(compact)].filter(Boolean);
+  if (e.includes(compact(asked))) return true;
+  if (namesVersion(asked)) return false;
+  const q = [...new Set([compact(asked), compact(withoutBrackets(asked))])].filter(Boolean);
   if (q.some((x) => e.includes(x))) return true;
   return q.some((x) => e.some((y) => contains(x, y)));
 }

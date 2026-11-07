@@ -47,10 +47,13 @@ export function SongCard({
   variant,
   listen,
   shared,
+  picking = false,
+  pickerId,
   onShare,
   onNotThis,
   onReset,
   titleRef,
+  notThisRef,
 }: {
   song: SongRef;
   video: VideoInfo | null;
@@ -58,10 +61,14 @@ export function SongCard({
   /** A video MusicBrainz links to this recording. */
   listen: string | null;
   shared: boolean;
+  /** "Not this song?" has its picker open (the element `pickerId`). */
+  picking?: boolean;
+  pickerId?: string;
   onShare: () => void;
   onNotThis: () => void;
   onReset: () => void;
   titleRef?: (el: HTMLElement | null) => void;
+  notThisRef?: (el: HTMLElement | null) => void;
 }) {
   const watch = video?.url ?? listen ?? youtubeSearchUrl(song.artist, song.title);
   // A thumbnail that doesn't load (blocked, removed) shows the drawn record instead.
@@ -103,6 +110,10 @@ export function SongCard({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3 sm:px-5">
+        {/* The button's own words change too, but only a live region is read out. */}
+        <span className="sr-only" aria-live="polite" data-testid="share-status">
+          {shared ? "Link copied" : ""}
+        </span>
         <a
           href={watch}
           target="_blank"
@@ -121,19 +132,23 @@ export function SongCard({
           {shared ? <Check className="h-4 w-4 text-emerald-600" aria-hidden /> : <Share2 className="h-4 w-4" aria-hidden />}
           {shared ? "Link copied" : "Share"}
         </button>
-        <span className="ml-auto flex items-center gap-1 text-sm">
+        {/* On a phone, a row of its own, so neither label breaks over two lines. */}
+        <span className="-ml-2 flex w-full items-center gap-1 text-sm sm:ml-auto sm:w-auto">
           <button
             type="button"
+            ref={notThisRef}
             data-testid="not-this-song"
             onClick={onNotThis}
-            className={cn("inline-flex min-h-11 items-center rounded-lg px-2 font-medium text-primary hover:underline", focusRing)}
+            aria-expanded={picking}
+            aria-controls={picking ? pickerId : undefined}
+            className={cn("inline-flex min-h-11 items-center whitespace-nowrap rounded-lg px-2 font-medium text-primary hover:underline", focusRing)}
           >
             Not this song?
           </button>
           <button
             type="button"
             onClick={onReset}
-            className={cn("inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-muted-foreground hover:text-foreground", focusRing)}
+            className={cn("inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg px-2 text-muted-foreground hover:text-foreground", focusRing)}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden /> New search
           </button>

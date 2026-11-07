@@ -47,6 +47,13 @@ export function CandidatePicker({
       layout
       transition={{ layout: RESIZE_T }}
       data-testid="candidate-picker"
+      // Escape closes it, like "Keep this song", when it can be closed.
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && onCancel) {
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
       className="rounded-3xl border border-border bg-card p-4 shadow-xl shadow-primary/5 sm:p-5"
     >
       <h2 ref={headingRef} tabIndex={-1} className="rounded text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">

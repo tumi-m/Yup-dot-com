@@ -3,7 +3,7 @@
 import { useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { motion, useReducedMotion } from "motion/react";
-import { CountUp, SPRING_LAYOUT, SPRING_POP, SUCCESS } from "@/components/motion/primitives";
+import { SPRING_LAYOUT, SPRING_POP } from "@/components/motion/primitives";
 import { oldestSample, sampledSpan, TAB_ROLES, TABS } from "@/lib/samples/tabs";
 import { musicBrainzRecordingUrl } from "@/lib/samples/links";
 import type { Relation, Role, SongRef, Tab, TabCounts } from "@/lib/samples/types";
@@ -15,7 +15,9 @@ const SUBHEAD: Partial<Record<Role, string>> = { covers: "This covers", coveredB
 /** Rows shown before "Show all". */
 const FIRST_ROWS = 50;
 
-/** One line of fact for the open tab, only from years we know. */
+const years = (n: number) => `${n} ${n === 1 ? "year" : "years"}`;
+
+/** One line of fact for the open tab, only from years we know. Its numbers are final from the start: a sentence never counts up. */
 function fact(tab: Tab, song: SongRef, relations: Relation[]) {
   if (tab === "samples") {
     const dated = relations.filter((r) => r.role === "samples" && r.year);
@@ -24,13 +26,13 @@ function fact(tab: Tab, song: SongRef, relations: Relation[]) {
     if (dated.length === 1) {
       return (
         <>
-          {song.title} ({song.year}) samples a {oldest.year} record, <CountUp to={oldest.apart} duration={SUCCESS.count} /> years apart.
+          {song.title} ({song.year}) samples a {oldest.year} record, {oldest.apart === 0 ? "from the same year" : `${years(oldest.apart)} apart`}.
         </>
       );
     }
     return (
       <>
-        Oldest sample: {oldest.year}, <CountUp to={oldest.apart} duration={SUCCESS.count} /> years earlier.
+        Oldest sample: {oldest.year}{oldest.apart === 0 ? ", the same year" : `, ${years(oldest.apart)} earlier`}.
       </>
     );
   }
@@ -40,7 +42,7 @@ function fact(tab: Tab, song: SongRef, relations: Relation[]) {
     const span = s.from && s.to ? (s.from === s.to ? `, in ${s.from}` : `, ${s.from}–${s.to}`) : "";
     return (
       <>
-        Sampled <CountUp to={s.count} duration={SUCCESS.count} /> {s.count === 1 ? "time" : "times"}
+        Sampled {s.count} {s.count === 1 ? "time" : "times"}
         {span}.
       </>
     );
@@ -53,6 +55,7 @@ export function RelationTabs({
   relations,
   counts,
   tab,
+  unchecked = null,
   onTab,
   onListen,
   onExplore,
@@ -61,6 +64,13 @@ export function RelationTabs({
   relations: Relation[];
   counts: TabCounts;
   tab: Tab;
+  /**
+   * What an empty tab says when MusicBrainz wasn't asked about this song or
+   * couldn't answer (busy, an error, the day's lookups used, not on it).
+   * Its zero counts are left out then: nobody knows they're zero. Null once
+   * MusicBrainz has answered.
+   */
+  unchecked?: string | null;
   onTab: (t: Tab) => void;
   onListen: (r: Relation) => void;
   onExplore: (r: Relation) => void;
@@ -95,17 +105,14 @@ export function RelationTabs({
               data-testid={`tab-${t}`}
               className={cn(
                 "relative flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium outline-none transition-colors duration-fast focus-visible:ring-2 focus-visible:ring-ring",
-                active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                counts[t] === 0 && !active && "opacity-60"
+                active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
               )}
             >
               {active && (
                 <motion.span layoutId="samples-tab-pill" className="absolute inset-0 bg-background shadow" style={{ borderRadius: 8 }} transition={SPRING_LAYOUT} />
               )}
               <span className="relative z-[1]">{TAB_LABEL[t]}</span>
-              <span className="relative z-[1] tabular-nums text-xs text-muted-foreground">
-                <CountUp to={counts[t]} duration={SUCCESS.count} />
-              </span>
+              {(counts[t] > 0 || !unchecked) && <span className="relative z-[1] tabular-nums text-xs text-muted-foreground">{counts[t]}</span>}
             </Tabs.Trigger>
           );
         })}
@@ -122,8 +129,8 @@ export function RelationTabs({
           <Tabs.Content key={t} value={t} className="pt-1 outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {rows.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground" data-testid="empty-tab">
-                <p>Nothing on record yet.</p>
-                {song.mbid && (
+                <p>{unchecked ?? "Nothing on record yet."}</p>
+                {song.mbid && !unchecked && (
                   <a
                     href={musicBrainzRecordingUrl(song.mbid)}
                     target="_blank"

@@ -43,6 +43,9 @@ const NEGATIVE: [RegExp, string, number][] = [
   [/\bfull album\b|\bplaylist\b|\bcompilation\b|\bmegamix\b|\bmashup\b|\bmedley\b|\bgreatest hits\b|\bbest of\b|\bnon[- ]?stop\b/i, "collection", 0.4],
 ];
 
+/** The same words leading a title: "FIRST TIME HEARING Kanye West - Stronger". */
+const NEGATIVE_LEAD = /^(?:(?:my |our |(?:i|we) )?first time (?:hearing|listening to|reacting to)|(?:i |we )?react(?:s|ing|ion)? to|reaction:)\s+/i;
+
 /** The same words trailing a title: "Stronger REACTION!!", "Stronger 1 Hour Loop". */
 const NEGATIVE_TRAIL =
   /\s+(?:(?:first time )?(?:react(?:s|ion|ing)?)|type ?beat|tutorial|lesson|interview|\d+\s*(?:hours?|hrs?)(?:\s+loop(?:ed)?)?|loop(?:ed)?)\b[\s!?.]*$/i;
@@ -95,7 +98,7 @@ export function isDecoration(content: string): boolean {
 }
 
 /** The kind of version a bracket or trailing segment names, if any. */
-function variantOf(content: string): { variant: Variant; remixer: string | null } | null {
+export function variantOf(content: string): { variant: Variant; remixer: string | null } | null {
   const c = content.trim().toLowerCase();
   if (/\bcover\b/.test(c)) return { variant: "cover", remixer: null };
   const remix = /^(?:(.+?)\s+)?(?:remix|rmx|re-?edit)$/i.exec(content.trim()) ?? /^remix(?:ed)? by\s+(.+)$/i.exec(content.trim());
@@ -331,7 +334,8 @@ export function parseVideoTitle(rawTitle: string, rawChannel: string | null, opt
   const shorts = !!opts.shorts || /#shorts\b/i.test(text);
   let score = 0.2 - negatives(text, shorts, tags.signals);
 
-  // Hashtags trail most Shorts titles.
+  // Hashtags trail most Shorts titles. They aren't the song, but one may name the artist.
+  const hashtags = [...text.matchAll(/#([\p{L}\p{N}_]+)/gu)].map((m) => m[1]).filter((t) => !/^shorts?$|^fyp$/i.test(t)).slice(0, 10);
   text = text.replace(/(?:\s*#[\p{L}\p{N}_]+)+\s*$/u, "").replace(/#shorts\b/gi, "").trim();
   text = trimSymbols(stripBrackets(text, tags));
 
@@ -419,8 +423,9 @@ export function parseVideoTitle(rawTitle: string, rawChannel: string | null, opt
     }
   }
 
-  title = trimSymbols(unquote(takeFeatured(title.replace(NEGATIVE_TRAIL, ""), tags)));
-  const credit = trimSymbols(takeFeatured(artist, tags));
+  title = trimSymbols(unquote(takeFeatured(title.replace(NEGATIVE_TRAIL, "").replace(NEGATIVE_LEAD, ""), tags)));
+  // "FIRST TIME HEARING Kanye West": the reaction words aren't the artist.
+  const credit = trimSymbols(takeFeatured(artist.replace(NEGATIVE_LEAD, ""), tags));
   const { artist: main, aliases } = artistNames(credit);
 
   return finish({
@@ -432,6 +437,7 @@ export function parseVideoTitle(rawTitle: string, rawChannel: string | null, opt
     variant: tags.variant,
     remixer: tags.remixer,
     signals: [...new Set(tags.signals)],
+    ...(hashtags.length ? { hashtags } : {}),
     score,
   });
 }

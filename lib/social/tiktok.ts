@@ -280,14 +280,14 @@ export async function expandTikTokShortUrl(short: string, fetcher: Fetcher = fet
 
 /** Loads a post's page (solving the proof-of-work page if shown) and returns its itemStruct. */
 async function loadTikTokItem(
-  ref: { id: string; user?: string | null; short?: string | null },
+  ref: { id: string; user?: string | null; short?: string | null; photo?: boolean },
   fetcher: Fetcher
 ): Promise<{ id: string; item: Json; pageUrl: string; cookie: string }> {
   let { id, user } = ref;
   try {
     if (ref.short) ({ id, user } = await expandTikTokShortUrl(ref.short, fetcher));
     if (!/^\d{8,25}$/.test(id)) throw new DirectResolveError("not-found");
-    const pageUrl = `https://www.tiktok.com/@${user || "_"}/video/${id}`;
+    const pageUrl = `https://www.tiktok.com/@${user || "_"}/${ref.photo && !ref.short ? "photo" : "video"}/${id}`;
     const jar = new CookieJar();
     let { html } = await getPage(pageUrl, jar, fetcher);
     let data = universalData(html);
@@ -332,12 +332,13 @@ export async function resolveTikTok(
 
 /**
  * A post's sound and cover, for the Sample Finder: the same page as a
- * download, but photo posts work too (they have no video to resolve).
+ * download, but photo posts work too (they have no video to resolve; pass
+ * `photo` for a /photo/ link, so its own page is loaded).
  */
 export async function resolveTikTokMusic(
-  ref: { id: string; user?: string | null; short?: string | null },
+  ref: { id: string; user?: string | null; short?: string | null; photo?: boolean },
   fetcher: Fetcher = fetch
-): Promise<{ id: string; music: TikTokMusic | null; title: string; author: string | null; cover: string | null }> {
+): Promise<{ id: string; music: TikTokMusic | null; title: string; author: string | null; cover: string | null; photo: boolean }> {
   const { id, item } = await loadTikTokItem(ref, fetcher);
   const author = typeof item.author === "object" ? item.author?.uniqueId : item.author;
   const video: Json = item.video ?? {};
@@ -348,6 +349,7 @@ export async function resolveTikTokMusic(
     title: cleanTitle(item.desc).slice(0, 120),
     author: typeof author === "string" ? author : null,
     cover,
+    photo: !!ref.photo || !!item.imagePost,
   };
 }
 

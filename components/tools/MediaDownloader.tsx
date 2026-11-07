@@ -744,7 +744,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                         href={finderForLink(detected.canonical)}
                         // Sent from this site: the Sample Finder starts by itself.
                         onClick={() => markSent(finderForLink(detected.canonical))}
-                        className={cn("rounded font-semibold text-primary hover:underline", focusRing)}
+                        className={cn("inline-flex min-h-11 items-center rounded-lg font-semibold text-primary hover:underline", focusRing)}
                       >
                         Find this song&apos;s samples →
                       </Link>

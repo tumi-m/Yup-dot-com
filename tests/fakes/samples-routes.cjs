@@ -49,8 +49,10 @@ function route(input) {
     }
     if (url.pathname === "/ws/2/recording") {
       const q = (url.searchParams.get("query") ?? "").toLowerCase();
-      // "Levels" stands in for MusicBrainz being overloaded: 503 every time.
-      if (q.includes("levels")) return new Response("Service Unavailable", { status: 503 });
+      // "Levels" (a song on the hand-checked list) and "zz503" (one that
+      // isn't) stand in for MusicBrainz being overloaded: 503 every time,
+      // asking for a 1 s rest so the site's pause doesn't hold up other tests.
+      if (q.includes("levels") || q.includes("zz503")) return new Response("Service Unavailable", { status: 503, headers: { "retry-after": "1" } });
       const name = q.includes("etta")
         ? "search-etta"
         : q.includes("harder")
@@ -68,7 +70,7 @@ function route(input) {
   }
   if (url.hostname === "www.tiktok.com") {
     calls.push(url.href);
-    const id = /^\/@[\w.-]+\/video\/(\d+)$/.exec(url.pathname)?.[1];
+    const id = /^\/@[\w.-]+\/(?:video|photo)\/(\d+)$/.exec(url.pathname)?.[1];
     const body = id ? read(`tiktok/${id}.html`) : null;
     return body ? new Response(body, { status: 200, headers: { "content-type": "text/html" } }) : new Response("", { status: 404 });
   }

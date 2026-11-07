@@ -2,7 +2,8 @@
  * The MusicBrainz client (lib/samples/musicbrainz.ts) against a fake
  * network: how relationships become samples, "sampled in", covers and
  * remixes; escaped searches; the User-Agent; the 1.1s queue on a fake
- * clock; the site-wide minute budget; and 503s, timeouts and bad answers.
+ * clock, with one waiting place per visitor; the site-wide slot a second;
+ * the pause after 503s and timeouts; and bad answers.
  *
  * The fixtures (tests/fixtures/musicbrainz) follow the shape of real ws/2
  * JSON (a recording lookup with recording-rels, work-rels, work-level-rels
@@ -15,6 +16,8 @@ import { readFileSync } from "node:fs";
 import {
   COVERS_MAX,
   MusicBrainzBusy,
+  PAUSE_FIRST_MS,
+  Pause,
   Throttle,
   ambiguous,
   classifyRecording,
@@ -25,10 +28,12 @@ import {
   musicBrainzUserAgent,
   parseSearch,
   recordingQuery,
+  retryAfterMs,
   searchKey,
 } from "../lib/samples/musicbrainz.ts";
 import { parseTyped } from "../lib/samples/parse.ts";
-import { claimMusicBrainz, memoryUsageStore, MUSICBRAINZ_PER_MINUTE } from "../lib/usage.ts";
+import { memoryCache } from "../lib/samples/cache.ts";
+import { claimMusicBrainz, memoryUsageStore } from "../lib/usage.ts";
 
 const require = createRequire(import.meta.url);
 const { route } = require("./fakes/samples-routes.cjs");
@@ -130,7 +135,15 @@ check("no artist → free text", recordingQuery("kanye west stronger", "") === f
 check("retry: an alias", fallbackQuery(parseTyped("BTS (방탄소년단) – Dynamite")) === 'recording:"Dynamite" AND artist:"방탄소년단"');
 check("retry: the first name of a duo", fallbackQuery(parseTyped("Simon & Garfunkel – The Boxer")) === 'recording:"The Boxer" AND artist:"Simon"');
 check("retry: free text otherwise", fallbackQuery(parseTyped("Kanye West – Stronger"))!.startsWith('recording:"Kanye West Stronger" OR'));
-check("cache key ignores case and accents", searchKey(recordingQuery("Halo", "Beyoncé")) === searchKey(recordingQuery("halo", "beyonce")));
+{
+  // Once norm()ed, a backtick and an apostrophe vanish: "Et`ta James" and
+  // "Etta James" were one key, so an empty answer for one hid the other.
+  const real = recordingQuery("Something's Got a Hold on Me", "Etta James");
+  const forged = recordingQuery("Something's Got a Hold on Me", "Et`ta James");
+  check("cache key: the exact query, so another spelling never shares its answer", searchKey(real) !== searchKey(forged) && searchKey(real) === searchKey(real), [searchKey(real), searchKey(forged)]);
+  check("…case too", searchKey(recordingQuery("Halo", "Beyoncé")) !== searchKey(recordingQuery("halo", "beyonce")));
+  check("…and it stays short", /^mbq:[0-9a-f]{40}$/.test(searchKey("x".repeat(5000))));
+}
 
 // ---------- The client: User-Agent, queue, budget, failures ----------
 type Call = { url: string; at: number; headers: Record<string, string> };
@@ -141,15 +154,16 @@ function rig(answer: (url: string, n: number) => Response | Promise<Response> = 
     now += ms;
   };
   const throttle = new Throttle(() => now, sleep);
+  const pause = new Pause(() => now);
   const fetcher = async (url: string, init?: RequestInit) => {
     calls.push({ url, at: now, headers: init?.headers as Record<string, string> });
     return answer(url, calls.length);
   };
-  return { calls, throttle, fetcher, sleep, clock: () => now };
+  return { calls, throttle, pause, fetcher, sleep, clock: () => now, wait: (ms: number) => void (now += ms) };
 }
 {
   const r = rig();
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, userAgent: musicBrainzUserAgent({ NEXT_PUBLIC_SITE_URL: "https://pdfwizard.xyz" } as NodeJS.ProcessEnv) });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause, userAgent: musicBrainzUserAgent({ NEXT_PUBLIC_SITE_URL: "https://pdfwizard.xyz" } as NodeJS.ProcessEnv) });
   const d = await mb.recording(S);
   check("lookup through the client", d?.relations[0]?.title === "Harder, Better, Faster, Stronger");
   const h = r.calls[0].headers;
@@ -167,7 +181,7 @@ function rig(answer: (url: string, n: number) => Response | Promise<Response> = 
 }
 {
   const r = rig();
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
   for (const q of ["a", "b", "c"]) await mb.search(q);
   const gaps = r.calls.slice(1).map((c, i) => c.at - r.calls[i].at);
   check("one after another, 1.1s apart", gaps.length === 2 && gaps.every((g) => g >= 1100), gaps);
@@ -181,48 +195,134 @@ function rig(answer: (url: string, n: number) => Response | Promise<Response> = 
 }
 {
   const r = rig();
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: async () => {}, throttle: new Throttle(r.clock, async () => {}) });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: async () => {}, throttle: new Throttle(r.clock, async () => {}), pause: r.pause });
   const results = await Promise.allSettled(Array.from({ length: 7 }, (_, i) => mb.search(`q${i}`)));
   const busy = results.filter((x) => x.status === "rejected" && x.reason instanceof MusicBrainzBusy && x.reason.reason === "queue");
   check("a wait over 6s isn't queued: busy instead", busy.length === 1 && r.calls.length === 6, { busy: busy.length, calls: r.calls.length });
 }
 {
-  const store = memoryUsageStore(() => 5_000_000);
-  let ok = 0;
-  for (let i = 0; i < MUSICBRAINZ_PER_MINUTE + 5; i++) if (await claimMusicBrainz(store)) ok++;
-  check(`site-wide budget: ${MUSICBRAINZ_PER_MINUTE} a minute`, ok === MUSICBRAINZ_PER_MINUTE, ok);
-  const r = rig();
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, claim: () => claimMusicBrainz(store) });
-  const err = await mb.search("x").catch((e) => e);
-  check("budget spent → busy, and nothing is sent", err instanceof MusicBrainzBusy && err.reason === "budget" && r.calls.length === 0);
+  // One visitor's parallel requests: one goes, one waits, the rest are turned away at once.
+  const waits: number[] = [];
+  const t = new Throttle(() => 0, async (ms) => void waits.push(ms));
+  const mine = await Promise.all([t.turn("ip:a"), t.turn("ip:a"), t.turn("ip:a"), t.turn("ip:a")]);
+  check("one waiting place per visitor: 2 of 4 parallel requests from one visitor go", mine.filter(Boolean).length === 2, mine);
+  const other = await t.turn("ip:b");
+  check("…so someone else still gets a turn soon after", other && waits.at(-1) === 2200, waits);
+  const t2 = new Throttle(() => 0, async () => {});
+  check("…and the place is free again once that request has gone", (await t2.turn("ip:a")) && (await t2.turn("ip:a")) && (await t2.turn("ip:a")));
 }
 {
-  const r = rig((u, n) => (n === 1 ? new Response("", { status: 503 }) : (route(u) as Response)));
-  const before = r.clock();
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
+  // Eight server instances, each with its own queue, sharing one counter,
+  // on a fake clock that runs the earliest waiting timer next.
+  let now = 7_000_400;
+  const store = memoryUsageStore(() => now);
+  const sent: number[] = [];
+  const timers: { at: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => void timers.push({ at: now + ms, go }));
+  const settle = () => new Promise((r) => setImmediate(r));
+  async function run<T>(work: Promise<T>[]) {
+    let done = false;
+    const all = Promise.allSettled(work).then((x) => ((done = true), x));
+    while (!done) {
+      await settle();
+      timers.sort((a, b) => a.at - b.at);
+      const next = timers.shift();
+      if (!next) continue;
+      now = Math.max(now, next.at);
+      next.go();
+    }
+    return all;
+  }
+  const clients = Array.from({ length: 8 }, () =>
+    createMusicBrainz({
+      fetcher: async (u) => (sent.push(now), (route(u) as Response) ?? new Response("{}", { status: 200 })),
+      sleep,
+      now: () => now,
+      throttle: new Throttle(() => now, sleep),
+      pause: new Pause(() => now),
+      claim: () => claimMusicBrainz(store, now),
+    })
+  );
+  const results = await run(clients.map((mb) => mb.search("x")));
+  const perSecond = new Map<number, number>();
+  for (const at of sent) perSecond.set(Math.floor(at / 1000), (perSecond.get(Math.floor(at / 1000)) ?? 0) + 1);
+  check("8 instances together: at most one request a second", [...perSecond.values()].every((n) => n === 1) && sent.length >= 3, { sent: sent.length, perSecond: [...perSecond] });
+  check("…the rest answer busy (no free second soon enough), nothing extra sent", results.filter((x) => x.status === "rejected" && x.reason instanceof MusicBrainzBusy && x.reason.reason === "budget").length === 8 - sent.length);
+  now += 60_000;
+  const t0 = now;
+  check("a slot a second: the second claim in the same second fails, the next second's works", (await claimMusicBrainz(store, t0)) && !(await claimMusicBrainz(store, t0 + 10)) && (await claimMusicBrainz(store, t0 + 1000)));
+  const r = rig();
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, now: r.clock, throttle: r.throttle, pause: r.pause, claim: async () => false });
+  const err = await mb.search("x").catch((e) => e);
+  check("no free second → busy, and nothing is sent", err instanceof MusicBrainzBusy && err.reason === "budget" && r.calls.length === 0);
+}
+check("Retry-After: seconds or a date", retryAfterMs("120") === 120_000 && retryAfterMs(new Date(5_000_000 + 30_000).toUTCString(), 5_000_000) === 30_000 && retryAfterMs("soon") === null && retryAfterMs(null) === null);
+{
+  let n = 0;
+  const r = rig((u) => (n++ === 0 ? new Response("", { status: 503 }) : (route(u) as Response)));
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
+  const err = await mb.search(recordingQuery("Stronger", "Kanye West")).catch((e) => e);
+  check("503 → busy straight away, no retry", err instanceof MusicBrainzBusy && err.reason === "unavailable" && r.calls.length === 1, r.calls.length);
+  const again = await mb.search(recordingQuery("Stronger", "Kanye West")).catch((e) => e);
+  check("…then paused: busy at once, nothing sent", again instanceof MusicBrainzBusy && again.reason === "paused" && r.calls.length === 1);
+  r.wait(PAUSE_FIRST_MS);
   const found = await mb.search(recordingQuery("Stronger", "Kanye West"));
-  check("503 → one retry after 1.5s → answer", found.length === 4 && r.calls.length === 2 && r.calls[1].at - before >= 1500, r.calls.map((c) => c.at - before));
+  check(`…for ${PAUSE_FIRST_MS / 1000} s, then it asks again`, found.length === 4 && r.calls.length === 2);
 }
 {
   const r = rig(() => new Response("", { status: 503 }));
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
-  const err = await mb.search("x").catch((e) => e);
-  check("503 twice → busy", err instanceof MusicBrainzBusy && err.reason === "unavailable" && r.calls.length === 2);
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
+  const sentAt: number[] = [];
+  for (let i = 0; i < 50; i++) {
+    const before = r.calls.length;
+    await mb.search(`q${i}`).catch(() => {});
+    if (r.calls.length > before) sentAt.push(r.clock());
+    r.wait(5_000);
+  }
+  const gaps = sentAt.slice(1).map((t, i) => t - sentAt[i]);
+  check("503 after 503: the pause doubles (30 s, 60 s, 120 s…)", r.calls.length === 4 && gaps[0] >= 30_000 && gaps[1] >= 60_000 && gaps[2] >= 120_000, { calls: r.calls.length, gaps });
+}
+{
+  const r = rig(() => new Response("", { status: 429, headers: { "retry-after": "3" } }));
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
+  await mb.search("x").catch(() => {});
+  r.wait(2_000);
+  const during = await mb.search("y").catch((e) => e);
+  r.wait(1_500);
+  await mb.search("z").catch(() => {});
+  check("429 with Retry-After: 3 → paused 3 s, as asked", during instanceof MusicBrainzBusy && during.reason === "paused" && r.calls.length === 2, r.calls.length);
+}
+{
+  // The pause is shared: another instance holds back too, without sending anything.
+  let now = 9_000_000;
+  const cache = memoryCache(500, () => now);
+  const store = {
+    get: async () => (await cache.get<{ until: number }>("mb:pause"))?.until ?? null,
+    set: (until: number) => cache.set("mb:pause", { until }, Math.ceil((until - now) / 1000)),
+  };
+  const sleep = async (ms: number) => void (now += ms);
+  let sent = 0;
+  const instance = (status: number) =>
+    createMusicBrainz({ fetcher: async () => (sent++, new Response("", { status })), sleep, now: () => now, throttle: new Throttle(() => now, sleep), pause: new Pause(() => now, store) });
+  await instance(503).search("x").catch(() => {});
+  const other = await instance(200).search("y").catch((e) => e);
+  check("a pause one instance starts holds every instance back", other instanceof MusicBrainzBusy && other.reason === "paused" && sent === 1, { sent, other: String(other) });
 }
 {
   const r = rig(() => Promise.reject(new DOMException("The operation timed out.", "TimeoutError")));
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
   const err = await mb.recording(S).catch((e) => e);
   check("timeout → busy", err instanceof MusicBrainzBusy && err.reason === "unreachable");
+  check("…and a pause, as after a 503", ((await mb.recording(S).catch((e) => e)) as MusicBrainzBusy).reason === "paused" && r.calls.length === 1);
 }
 {
   const r = rig(() => new Response("<html>oops</html>", { status: 200 }));
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
   check("an answer that isn't JSON → busy", (await mb.search("x").catch((e) => e)) instanceof MusicBrainzBusy);
 }
 {
   const r = rig(() => new Response("x", { status: 200, headers: { "content-length": String(50_000_000) } }));
-  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle });
+  const mb = createMusicBrainz({ fetcher: r.fetcher, sleep: r.sleep, throttle: r.throttle, pause: r.pause });
   check("an oversized answer isn't read", (await mb.search("x").catch((e) => e)) instanceof MusicBrainzBusy);
 }
 

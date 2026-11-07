@@ -7,7 +7,7 @@ import { ClipboardPaste, Crown, Disc3, Link2, Loader2, RotateCcw, Search } from 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DUR, EASE_OUT, ENTER_T, EXIT, FADE_EXIT, InlineError, NOTICE_T } from "@/components/motion/primitives";
-import { useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { linkIn, parseMediaUrl, parsePlaylistUrl } from "@/lib/media";
 import { takeSent } from "@/lib/journey";
@@ -15,7 +15,8 @@ import { pasteBlockedMessage } from "@/lib/clipboard";
 import { trackSamples, trackToolUsed } from "@/lib/analytics";
 import type { Tier } from "@/lib/limits";
 import { parseTyped } from "@/lib/samples/parse";
-import { shareHref, songQuery } from "@/lib/samples/links";
+import { artistKey } from "@/lib/samples/normalize";
+import { INPUT_HELP, PLAYLIST_MESSAGE, SAMPLE_FINDER_PATH, linkProblem, shareHref, songQuery, splitSongQuery, tiktokPhotoLink } from "@/lib/samples/links";
 import { firstTab, tabCounts, TABS } from "@/lib/samples/tabs";
 import type { Candidate, Identified, LookupResult, Relation, SongRef, Tab, Variant, VideoInfo } from "@/lib/samples/types";
 import { cn } from "@/lib/utils";
@@ -37,14 +38,19 @@ interface Shown {
 type Results =
   | { state: "idle" }
   | { state: "loading"; catalog: Relation[] }
-  | { state: "done" | "busy" | "off" | "uncached" | "limit"; data: LookupResult }
+  | { state: "done" | "busy" | "off" | "limit"; data: LookupResult }
   | { state: "error"; message: string; catalog: Relation[] };
 
 type ApiError = { error?: string; typeIt?: boolean; reason?: string; upgrade?: boolean };
 
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/** A button inside an error pill: full height to tap, without making the pill taller. */
+const pillAction = "-my-3 inline-flex min-h-11 shrink-0 items-center rounded-lg px-2 font-semibold underline";
 const OFFLINE = "You're offline. Check your connection.";
+const SHARED_HINT = "Press Find samples to look this song up.";
+/** How long the box waits after the last key before saying a link can't be read. */
+const SETTLE_MS = 600;
 
 /** What the box holds: a link we can read, a playlist, a link we can't, or words. */
 function readBox(text: string): { tag: string | null; problem: string | null } {
@@ -52,12 +58,54 @@ function readBox(text: string): { tag: string | null; problem: string | null } {
   if (!text.trim()) return { tag: null, problem: null };
   const media = parseMediaUrl(link);
   if (media?.platform === "youtube") return { tag: "YouTube", problem: null };
-  if (media?.platform === "tiktok") return { tag: "TikTok", problem: null };
+  if (media?.platform === "tiktok" || tiktokPhotoLink(link)) return { tag: "TikTok", problem: null };
   if (/^(https?:\/\/)?(www\.|m\.)?tiktok\.com\/music\//i.test(link)) return { tag: "TikTok sound", problem: null };
-  if (parsePlaylistUrl(link)) return { tag: null, problem: "That's a playlist. Paste one song's link." };
-  if (media) return { tag: null, problem: "Paste a YouTube or TikTok link, or type Artist – Title." };
-  if (/^https?:\/\//i.test(link)) return { tag: null, problem: "Paste a YouTube or TikTok link, or type Artist – Title." };
+  if (parsePlaylistUrl(link)) return { tag: null, problem: PLAYLIST_MESSAGE };
+  const problem = linkProblem(link);
+  if (problem) return { tag: null, problem };
+  if (media || /^https?:\/\//i.test(link)) return { tag: null, problem: INPUT_HELP };
   return { tag: null, problem: null };
+}
+
+/**
+ * This page's own box sent the visitor here as a plain form submit: typed
+ * and sent before the page was ready, so the search is theirs to run.
+ */
+function submittedHere(): boolean {
+  try {
+    const from = new URL(document.referrer);
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    return from.origin === window.location.origin && from.pathname === SAMPLE_FINDER_PATH && nav?.type === "navigate" && nav.name === window.location.href;
+  } catch {
+    return false;
+  }
+}
+
+const tabParam = (value: string | null): Tab | null => (value && TABS.includes(value as Tab) ? (value as Tab) : null);
+
+/** Type it, filled in from what was read, leaving out what was only a guess. */
+function typedDefaults(ident: Identified | null): { artist: string; title: string } {
+  if (!ident) return { artist: "", title: "" };
+  const { parsed } = ident;
+  // A channel name is only a guess at the artist, and so is the artist in a
+  // reaction video's title, unless a song found has it.
+  const guessed =
+    parsed.signals.includes("channel-guess") ||
+    (parsed.signals.includes("reaction") && !ident.candidates.some((c) => artistKey(c.artist) === artistKey(parsed.artist)));
+  return { artist: guessed ? "" : parsed.artist, title: parsed.title };
+}
+
+/** The note above the tabs when MusicBrainz's side is missing; null when there's nothing to say. */
+function resultNote(state: Results["state"], rows: number, known: boolean): string | null {
+  if (state === "busy") {
+    return rows ? "MusicBrainz is busy, so these are our hand-checked results. Try again in a minute." : "MusicBrainz is busy and our list doesn't have this song. Try again in a minute.";
+  }
+  if (state === "off") return rows ? "Showing our hand-checked results only." : "Our hand-checked list doesn't have this song.";
+  if (state === "limit") return rows ? "Daily lookups used. Hand-checked results are below." : "Daily lookups used, and our hand-checked list doesn't have this song.";
+  if (state === "done" && !known) {
+    return rows ? "MusicBrainz doesn't have this song yet. These are our hand-checked results." : "MusicBrainz doesn't have this song yet, and it isn't on our list.";
+  }
+  return null;
 }
 
 const asResult = (song: SongRef, relations: Relation[], mb: LookupResult["mb"]): LookupResult => ({
@@ -73,15 +121,17 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   const params = useSearchParams();
   const pathname = usePathname();
   const [text, setText] = useState(() => params.get("q")?.trim() || params.get("url")?.trim() || "");
-  const [phase, setPhase] = useState<Phase>("input");
+  /** The box's text as of the last pause in typing (or leaving the box): only then is a link judged. */
+  const [settled, setSettled] = useState(text);
+  // A shared result opens from the cache: the box shows it's reading meanwhile.
+  const [phase, setPhase] = useState<Phase>(() => (params.get("q")?.trim() && MBID.test(params.get("rec")?.trim() ?? "") ? "identifying" : "input"));
   const [error, setError] = useState<{ message: string; typeIt: boolean } | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
   const [ident, setIdent] = useState<Identified | null>(null);
   const [shown, setShown] = useState<Shown | null>(null);
   const [results, setResults] = useState<Results>({ state: "idle" });
-  const [tab, setTab] = useState<Tab>(() => {
-    const t = params.get("tab") as Tab | null;
-    return t && TABS.includes(t) ? t : "samples";
-  });
+  const [tab, setTab] = useState<Tab>(() => tabParam(params.get("tab")) ?? "samples");
   const [picking, setPicking] = useState(false);
   const [shared, setShared] = useState(false);
   const [upsell, setUpsell] = useState(false);
@@ -90,9 +140,9 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   const seq = useRef(0);
   const usedOnce = useRef(false);
   /** The tab came from the address, so the first results keep it. */
-  const tabFromLink = useRef(!!params.get("tab"));
+  const tabFromLink = useRef(!!tabParam(params.get("tab")));
   const flow = useHeightLock<HTMLDivElement>();
-  const { next: focusNext, focusRef } = useFocusNext<"input" | "song" | "picker">();
+  const { next: focusNext, focusRef } = useFocusNext<"input" | "song" | "picker" | "notThis">();
 
   useEffect(() => {
     alive.current = true;
@@ -101,14 +151,19 @@ export function SampleFinder({ tier }: { tier: Tier }) {
     };
   }, []);
 
-  /** Keeps the address bar on the song (never the video link), so a refresh or a share shows the same. */
-  function syncAddress(href: string | null) {
+  /**
+   * Keeps the address bar on the song (never the video link), so a refresh
+   * or a share shows the same. `push` gives it its own entry, for Back.
+   */
+  function syncAddress(href: string | null, push = false) {
     const next = href ?? pathname;
-    if (window.location.pathname + window.location.search !== next) window.history.replaceState(null, "", next);
+    if (window.location.pathname + window.location.search === next) return;
+    if (push) window.history.pushState(null, "", next);
+    else window.history.replaceState(null, "", next);
   }
 
   // ?q=…&rec=… (a shared result) opens from the cache; ?url= or ?q= fills
-  // the box, and runs only when this site's homepage sent the visitor.
+  // the box, and runs only when this site sent the visitor.
   const started = useRef(false);
   useEffect(() => {
     if (started.current) return;
@@ -116,14 +171,71 @@ export function SampleFinder({ tier }: { tier: Tier }) {
     const q = params.get("q")?.trim() ?? "";
     const rec = params.get("rec")?.trim() ?? "";
     if (q && MBID.test(rec)) {
-      const typed = parseTyped(q);
-      open({ artist: typed.artist, title: typed.title, year: null, mbid: rec }, { video: null, variant: null, candidate: null, ident: null }, "typed", true);
+      void openShared(q, rec, { tab: tabParam(params.get("tab")) });
       return;
     }
+    // Typed before the page was ready: keep what's in the box.
+    const early = (document.getElementById("sample-input") as HTMLInputElement | null)?.value ?? "";
+    if (early && early !== text) {
+      setText(early);
+      setSettled(early);
+    }
     const value = params.get("url")?.trim() || q;
-    if (value && takeSent(window.location.href)) void identify(value, "auto", true);
+    if (value && (takeSent(window.location.href) || submittedHere())) void identify(value, "auto", { auto: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Back and Forward between songs opened here ("Find its samples" adds an entry).
+  const onPop = useRef(() => {});
+  useEffect(() => {
+    onPop.current = () => {
+      const p = new URLSearchParams(window.location.search);
+      const q = p.get("q")?.trim() ?? "";
+      const rec = p.get("rec")?.trim() ?? "";
+      const t = tabParam(p.get("tab"));
+      if (q && MBID.test(rec)) {
+        tabFromLink.current = !!t;
+        if (t) setTab(t);
+        void openShared(q, rec, { tab: t, inPlace: phase === "song", focus: true });
+        return;
+      }
+      // An entry with no song: the box, with whatever it held.
+      seq.current++;
+      setWorking(false);
+      setIdent(null);
+      setShown(null);
+      setResults({ state: "idle" });
+      setError(null);
+      setPicking(false);
+      setText(q);
+      setSettled(q);
+      focusNext.current = "input";
+      setPhase("input");
+    };
+  });
+  useEffect(() => {
+    const handler = () => onPop.current();
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  // A link is judged once typing pauses, not at every key.
+  useEffect(() => {
+    if (settled === text) return;
+    const timer = window.setTimeout(() => setSettled(text), SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [text, settled]);
+
+  const identifying = phase === "identifying";
+  // A wait that runs long (MusicBrainz slow) says what it's waiting for.
+  useEffect(() => {
+    if (!identifying) return;
+    const timer = window.setTimeout(() => setSlow(true), 3000);
+    return () => {
+      window.clearTimeout(timer);
+      setSlow(false);
+    };
+  }, [identifying]);
 
   async function post<T>(path: string, body: unknown): Promise<{ res: Response | null; data: (T & ApiError) | null }> {
     const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -131,12 +243,53 @@ export function SampleFinder({ tier }: { tier: Tier }) {
     return { res, data };
   }
 
-  /** Reads the box (or typed words) and picks the song, or asks which one. */
-  async function identify(input: string, how: "auto" | "typed", auto = false) {
-    const value = input.trim();
-    if (!value || working) return;
+  /**
+   * A shared result (?q=…&rec=…), from the cache only. It's shown once the
+   * cache has that recording, under MusicBrainz's own artist and title, never
+   * the link's words; one not looked up here yet goes in the box instead.
+   */
+  async function openShared(q: string, rec: string, opts: { tab: Tab | null; inPlace?: boolean; focus?: boolean }) {
     const n = ++seq.current;
     setError(null);
+    setHint(null);
+    setPicking(false);
+    setWorking(true);
+    if (!opts.inPlace) setPhase("identifying");
+    const { artist, title } = splitSongQuery(q);
+    const { res, data } = await post<LookupResult>("/api/samples/lookup", { rec, artist, title, cacheOnly: true });
+    if (!alive.current || n !== seq.current) return;
+    setWorking(false);
+    if (res?.ok && data?.relations && data.cached) {
+      setShown({ song: data.song, video: null, variant: null, candidate: null, ident: null });
+      setShared(false);
+      setPhase("song");
+      if (opts.focus) focusNext.current = "song";
+      syncAddress(shareHref(data.song, opts.tab));
+      landed({ state: "done", data });
+      return;
+    }
+    setShown(null);
+    setResults({ state: "idle" });
+    setText(q);
+    setSettled(q);
+    if (res?.ok && data?.relations) setHint(SHARED_HINT);
+    else setError({ message: data?.error ?? (res ? "Couldn't open that link. Try again." : OFFLINE), typeIt: false });
+    if (opts.focus) focusNext.current = "input";
+    setPhase("input");
+  }
+
+  /**
+   * Reads the box (or typed words) and picks the song, or asks which one.
+   * `auto`: the page started it, so focus stays put. `push`: the song gets
+   * its own history entry. `typeIt`: typed in the form, after asking.
+   */
+  async function identify(input: string, how: "auto" | "typed", opts: { auto?: boolean; push?: boolean; typeIt?: boolean } = {}) {
+    const value = input.trim();
+    if (!value || working) return;
+    const auto = !!opts.auto;
+    const n = ++seq.current;
+    setError(null);
+    setHint(null);
     setWorking(true);
     setPicking(false);
     if (phase !== "song") setPhase("identifying");
@@ -153,9 +306,15 @@ export function SampleFinder({ tier }: { tier: Tier }) {
     }
     setIdent(data);
     trackSamples({ name: "samples_search", input: data.source });
+    const from = { video: data.video, variant: data.parsed.variant, ident: data };
     if (data.band !== "low" && data.pick) {
       trackSamples({ name: "samples_identified", confidence: data.band, pick: how === "typed" ? "typed" : "auto" });
-      open(data.pick, { video: data.video, variant: data.parsed.variant, candidate: data.candidates[0] ?? null, ident: data }, how, false, auto);
+      open(data.pick, { ...from, candidate: data.candidates[0] ?? null }, how, { auto, push: opts.push });
+    } else if (opts.typeIt && data.mb === "ok" && !data.candidates.length && data.parsed.title) {
+      // Typed after asking, and MusicBrainz still has nothing: show what was
+      // typed, saying so, rather than ask the same question again.
+      trackSamples({ name: "samples_identified", confidence: data.band, pick: "typed" });
+      open({ artist: data.parsed.artist, title: data.parsed.title, year: null, mbid: null }, { ...from, candidate: null }, "typed", { push: opts.push });
     } else {
       if (!auto) focusNext.current = "picker";
       setShown(null);
@@ -165,20 +324,21 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   }
 
   /** Shows a song and looks up its connections. */
-  function open(song: SongRef, from: Omit<Shown, "song">, how: "auto" | "alternative" | "typed", cacheOnly = false, auto = false) {
+  function open(song: SongRef, from: Omit<Shown, "song">, how: "auto" | "alternative" | "typed", opts: { auto?: boolean; push?: boolean } = {}) {
     const next: Shown = { song, ...from };
     setShown(next);
     setPicking(false);
     setShared(false);
+    setHint(null);
     setPhase("song");
-    if (!auto) focusNext.current = "song";
-    if (!cacheOnly && !tabFromLink.current) setTab("samples");
-    syncAddress(shareHref(song, tabFromLink.current ? tab : null));
-    void lookup(next, cacheOnly);
+    if (!opts.auto) focusNext.current = "song";
+    if (!tabFromLink.current) setTab("samples");
+    syncAddress(shareHref(song, tabFromLink.current ? tab : null), opts.push);
+    void lookup(next);
     if (how === "alternative") trackSamples({ name: "samples_identified", confidence: from.ident?.band ?? "low", pick: "alternative" });
   }
 
-  async function lookup(s: Shown, cacheOnly: boolean) {
+  async function lookup(s: Shown) {
     const n = ++seq.current;
     const catalog = s.ident && s.ident.pick?.mbid === s.song.mbid ? s.ident.catalog : [];
     // MusicBrainz was busy or off when the song was read: only the hand-checked list.
@@ -193,7 +353,6 @@ export function SampleFinder({ tier }: { tier: Tier }) {
       artist: s.song.artist,
       title: s.song.title,
       ticket: s.ident?.ticket ?? null,
-      cacheOnly,
     });
     if (!alive.current || n !== seq.current) return;
     if (res?.status === 429 && data?.reason === "samples" && data.relations) {
@@ -205,9 +364,9 @@ export function SampleFinder({ tier }: { tier: Tier }) {
       setResults({ state: "error", message: data?.error ?? (res ? "Couldn't look that up. Try again." : OFFLINE), catalog });
       return;
     }
-    // Keep the song as shown, with the year and id MusicBrainz knows.
-    setShown((cur) => (cur && cur.song.title === s.song.title ? { ...cur, song: { ...cur.song, ...data.song, artist: cur.song.artist || data.song.artist } } : cur));
-    landed({ state: data.mb === "busy" ? "busy" : data.mb === "off" ? "off" : cacheOnly && data.cached === false ? "uncached" : "done", data });
+    // The song as MusicBrainz knows it: its artist and title, year and id.
+    setShown((cur) => (cur && cur.song.mbid === s.song.mbid ? { ...cur, song: { ...cur.song, ...data.song } } : cur));
+    landed({ state: data.mb === "busy" ? "busy" : data.mb === "off" ? "off" : "done", data });
   }
 
   function landed(r: Extract<Results, { data: LookupResult }>) {
@@ -230,12 +389,13 @@ export function SampleFinder({ tier }: { tier: Tier }) {
 
   function explore(r: Relation) {
     trackSamples({ name: "samples_explore" });
-    window.scrollTo({ top: Math.max(0, (flow.ref.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 96), behavior: "smooth" });
+    settleSlot(flow.ref.current);
+    // Its own history entry, so Back returns to this song.
     if (r.mbid) {
-      open({ artist: r.artist, title: r.title, year: r.year, mbid: r.mbid }, { video: null, variant: null, candidate: null, ident: null }, "typed");
+      open({ artist: r.artist, title: r.title, year: r.year, mbid: r.mbid }, { video: null, variant: null, candidate: null, ident: null }, "typed", { push: true });
     } else {
       setText(songQuery(r));
-      void identify(songQuery(r), "typed");
+      void identify(songQuery(r), "typed", { push: true });
     }
   }
 
@@ -264,7 +424,10 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   async function paste() {
     try {
       const clip = await navigator.clipboard.readText();
-      if (clip) setText(linkIn(clip));
+      if (clip) {
+        setText(linkIn(clip));
+        setSettled(linkIn(clip));
+      }
     } catch {
       setError({ message: pasteBlockedMessage(), typeIt: false });
     }
@@ -275,10 +438,12 @@ export function SampleFinder({ tier }: { tier: Tier }) {
     seq.current++;
     setWorking(false);
     setText("");
+    setSettled("");
     setIdent(null);
     setShown(null);
     setResults({ state: "idle" });
     setError(null);
+    setHint(null);
     setPicking(false);
     syncAddress(null);
     focusNext.current = "input";
@@ -286,26 +451,45 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   }
 
   const box = readBox(text);
-  const identifying = phase === "identifying";
-  // A channel name was only a guess at the artist: don't offer it as one.
-  const typedDefaults = ident
-    ? { artist: ident.parsed.signals.includes("channel-guess") ? "" : ident.parsed.artist, title: ident.parsed.title }
-    : { artist: "", title: "" };
+  // Said once typing pauses; while a problem is already showing, it follows the text at once.
+  const problem = box.problem && (settled === text || readBox(settled).problem) ? box.problem : null;
   const data = "data" in results ? results.data : null;
   const relations = data?.relations ?? ("catalog" in results ? results.catalog : []);
   const counts = data?.counts ?? tabCounts(relations);
   const remaining = data?.remaining ?? null;
+  const known = !!shown?.song.mbid;
+  const total = counts.samples + counts.sampled + counts.covers + counts.remixes;
+  // What an empty tab says when MusicBrainz wasn't asked about this song, or couldn't answer.
+  const unchecked =
+    results.state === "loading"
+      ? "Checking MusicBrainz…"
+      : results.state === "busy" || results.state === "error"
+        ? "Couldn't check MusicBrainz."
+        : results.state === "off" || results.state === "limit" || !known
+          ? "Not on our hand-checked list."
+          : null;
+  const note = resultNote(results.state, relations.length, known);
+  const summary = !data ? "" : results.state === "done" && known ? `${total} ${total === 1 ? "connection" : "connections"} found.` : (note ?? "");
 
   return (
     <div className="space-y-4">
       <div ref={flow.ref} className="flex flex-col" style={{ minHeight: flow.minHeight }}>
-        <AnimatePresence mode="popLayout" initial={false}>
+        {/* One view leaves before the next arrives: never both on screen at once. */}
+        <AnimatePresence mode="wait" initial={false}>
           {(phase === "input" || phase === "identifying") && (
             <motion.form
               key="input"
+              // Before the page is ready a press still searches: a plain submit
+              // brings the words back here (?q=), and the search runs then.
+              action={SAMPLE_FINDER_PATH}
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!box.problem) void identify(text, "auto");
+                if (!text.trim() || identifying) return;
+                if (box.problem) {
+                  setSettled(text);
+                  return;
+                }
+                void identify(text, "auto");
               }}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -323,20 +507,23 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                   <Link2 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <input
                     id="sample-input"
+                    name="q"
                     data-testid="sample-input"
                     ref={focusRef("input")}
                     value={text}
                     onChange={(e) => {
                       setText(e.target.value);
                       setError(null);
+                      setHint(null);
                     }}
+                    onBlur={() => setSettled(text)}
                     readOnly={identifying}
                     placeholder="Paste a YouTube or TikTok link, or type Artist – Title"
                     autoComplete="off"
                     spellCheck={false}
                     maxLength={500}
-                    aria-describedby="sample-input-status"
-                    aria-invalid={!!box.problem || undefined}
+                    aria-describedby="sample-input-status sample-input-tag"
+                    aria-invalid={!!problem || undefined}
                     className="h-12 w-full rounded-xl border border-input bg-background pl-10 pr-24 text-sm outline-none focus:ring-2 focus:ring-ring read-only:text-muted-foreground"
                   />
                   <button
@@ -351,22 +538,36 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                     <ClipboardPaste className="h-3.5 w-3.5" /> Paste
                   </button>
                 </div>
-                <Button type="submit" size="lg" className="h-12 min-w-40 shadow-lg shadow-primary/25" disabled={identifying || !text.trim() || !!box.problem}>
+                <Button type="submit" size="lg" className="h-12 min-w-40 shadow-lg shadow-primary/25" disabled={identifying}>
                   {identifying ? <Loader2 className="motion-safe:animate-spin" /> : <Search />}
                   {identifying ? "Reading…" : "Find samples"}
                 </Button>
               </div>
               <div id="sample-input-status" aria-live="polite">
-                <AnimatePresence initial={false}>
-                  {box.problem ? (
-                    <motion.p key="problem" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs font-medium text-amber-700">
-                      {box.problem}
+                <AnimatePresence initial={false} mode="wait">
+                  {slow ? (
+                    <motion.p key="slow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground" data-testid="input-slow">
+                      Still checking MusicBrainz…
                     </motion.p>
-                  ) : box.tag ? (
+                  ) : problem ? (
+                    <motion.p key="problem" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs font-medium text-amber-700" data-testid="input-problem">
+                      {problem}
+                    </motion.p>
+                  ) : hint ? (
+                    <motion.p key="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground" data-testid="input-hint">
+                      {hint}
+                    </motion.p>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+              {/* The kind of link, shown as it's typed; not announced at every key. */}
+              <div id="sample-input-tag">
+                <AnimatePresence initial={false}>
+                  {box.tag && !slow && !hint && (
                     <motion.p key="tag" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground" data-testid="input-tag">
                       {box.tag} link
                     </motion.p>
-                  ) : null}
+                  )}
                 </AnimatePresence>
               </div>
               <AnimatePresence initial={false}>
@@ -402,7 +603,7 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                 heading="Which song is this?"
                 headingRef={focusRef("picker")}
                 candidates={ident.candidates}
-                typed={typedDefaults}
+                typed={typedDefaults(ident)}
                 busy={working}
                 note={
                   ident.mb === "busy"
@@ -412,7 +613,7 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                       : "We couldn't find it on MusicBrainz. Type the song:"
                 }
                 onPick={(c) => open({ artist: c.artist, title: c.title, year: c.year, mbid: c.mbid }, { video: ident.video, variant: ident.parsed.variant, candidate: c, ident }, "alternative")}
-                onType={(s) => void identify(songQuery(s), "typed")}
+                onType={(s) => void identify(songQuery(s), "typed", { typeIt: true })}
               />
               <div className="flex justify-center">
                 <Button variant="ghost" className="h-11 text-muted-foreground" onClick={reset}>
@@ -430,18 +631,21 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                 variant={shown.variant}
                 listen={data?.listen ?? null}
                 shared={shared}
+                picking={picking}
+                pickerId="sample-picker"
                 titleRef={focusRef("song")}
+                notThisRef={focusRef("notThis")}
                 onShare={share}
                 onReset={reset}
                 onNotThis={() => {
                   trackSamples({ name: "samples_not_this_song" });
-                  focusNext.current = "picker";
+                  focusNext.current = picking ? "notThis" : "picker";
                   setPicking((p) => !p);
                 }}
               />
               <AnimatePresence initial={false}>
                 {picking && (
-                  <motion.div key="picker" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={ENTER_T}>
+                  <motion.div key="picker" id="sample-picker" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={ENTER_T}>
                     <CandidatePicker
                       heading="Not this song? Pick another"
                       headingRef={focusRef("picker")}
@@ -452,8 +656,11 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                       onPick={(c) =>
                         open({ artist: c.artist, title: c.title, year: c.year, mbid: c.mbid }, { video: shown.video, variant: shown.variant, candidate: c, ident: shown.ident }, "alternative")
                       }
-                      onType={(s) => void identify(songQuery(s), "typed")}
-                      onCancel={() => setPicking(false)}
+                      onType={(s) => void identify(songQuery(s), "typed", { typeIt: true })}
+                      onCancel={() => {
+                        focusNext.current = "notThis";
+                        setPicking(false);
+                      }}
                     />
                   </motion.div>
                 )}
@@ -462,10 +669,15 @@ export function SampleFinder({ tier }: { tier: Tier }) {
               <section aria-label="Results" className="rounded-3xl border border-border bg-card p-4 shadow-xl shadow-primary/5 sm:p-5" data-testid="results" data-state={results.state}>
                 <ResultNotes
                   results={results}
+                  note={note}
                   tier={tier}
                   remaining={remaining}
-                  onRetry={() => (shown.ident && !shown.song.mbid ? void identify(text || songQuery(shown.song), "auto") : void lookup(shown, false))}
-                  onLookUp={() => void lookup(shown, false)}
+                  onRetry={() => {
+                    // The note goes as it runs: focus waits on the song's title.
+                    focusNext.current = "song";
+                    if (shown.ident && !shown.song.mbid) void identify(text || songQuery(shown.song), "auto");
+                    else void lookup(shown);
+                  }}
                   onUpsell={() => setUpsell(true)}
                 />
                 {results.state === "loading" && relations.length === 0 ? (
@@ -480,19 +692,20 @@ export function SampleFinder({ tier }: { tier: Tier }) {
                       </div>
                     ))}
                   </div>
-                ) : results.state !== "idle" && (relations.length > 0 || results.state !== "loading") ? (
+                ) : results.state !== "idle" && (relations.length > 0 || unchecked === null) ? (
                   <RelationTabs
                     song={shown.song}
                     relations={relations}
                     counts={counts}
                     tab={tab}
+                    unchecked={unchecked}
                     onTab={changeTab}
                     onListen={(r) => trackSamples({ name: "samples_listen", role: r.role })}
                     onExplore={explore}
                   />
                 ) : null}
-                <p className="sr-only" aria-live="polite">
-                  {data ? `${counts.samples + counts.sampled + counts.covers + counts.remixes} connections found.` : ""}
+                <p className="sr-only" aria-live="polite" data-testid="results-summary">
+                  {summary}
                 </p>
               </section>
             </motion.div>
@@ -506,7 +719,7 @@ export function SampleFinder({ tier }: { tier: Tier }) {
             {error.typeIt && phase !== "song" && (
               <button
                 type="button"
-                className={cn("shrink-0 rounded font-semibold underline", focusRing)}
+                className={cn(pillAction, focusRing)}
                 onClick={() => {
                   setError(null);
                   setIdent({
@@ -541,23 +754,23 @@ export function SampleFinder({ tier }: { tier: Tier }) {
   );
 }
 
-/** Above the tabs: still checking, MusicBrainz busy, the day's lookups used, or a shared link not yet looked up. */
+/** Above the tabs: still checking, MusicBrainz busy or without the song, the day's lookups used, or an error. */
 function ResultNotes({
   results,
+  note,
   tier,
   remaining,
   onRetry,
-  onLookUp,
   onUpsell,
 }: {
   results: Results;
+  note: string | null;
   tier: Tier;
   remaining: number | null;
   onRetry: () => void;
-  onLookUp: () => void;
   onUpsell: () => void;
 }) {
-  const note = "mb-3 flex flex-wrap items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm";
+  const box = "mb-3 flex flex-wrap items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm";
   return (
     <AnimatePresence initial={false} mode="wait">
       {results.state === "loading" && (
@@ -567,25 +780,22 @@ function ResultNotes({
         </motion.p>
       )}
       {results.state === "busy" && (
-        <motion.div key="busy" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={NOTICE_T} className={cn(note, "bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")} data-testid="busy-note">
-          <span className="flex-1">MusicBrainz is busy, so these are our hand-checked results. Try again in a minute.</span>
+        <motion.div key="busy" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={NOTICE_T} className={cn(box, "bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")} data-testid="busy-note">
+          <span className="flex-1">{note}</span>
           <button type="button" onClick={onRetry} className={cn("inline-flex min-h-11 items-center rounded-lg px-2 font-semibold underline", focusRing)}>
             Try again
           </button>
         </motion.div>
       )}
       {results.state === "off" && (
-        <motion.p key="off" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mb-3 text-sm text-muted-foreground">
-          Showing our hand-checked results only.
+        <motion.p key="off" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mb-3 text-sm text-muted-foreground" data-testid="off-note">
+          {note}
         </motion.p>
       )}
-      {results.state === "uncached" && (
-        <motion.div key="uncached" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={NOTICE_T} className={cn(note, "bg-secondary")} data-testid="uncached-note">
-          <span className="flex-1">These are our hand-checked results. MusicBrainz may know more.</span>
-          <button type="button" onClick={onLookUp} className={cn("inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-primary underline", focusRing)}>
-            Look it up
-          </button>
-        </motion.div>
+      {results.state === "done" && note && (
+        <motion.p key="missing" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={FADE_EXIT} transition={NOTICE_T} className={cn(box, "bg-secondary")} data-testid="missing-note">
+          {note}
+        </motion.p>
       )}
       {results.state === "limit" && (
         <motion.button
@@ -597,23 +807,23 @@ function ResultNotes({
           exit={FADE_EXIT}
           transition={NOTICE_T}
           onClick={onUpsell}
-          className={cn(note, "min-h-11 w-full border border-amber-300/60 bg-amber-50 text-left text-amber-900 dark:bg-amber-950/30 dark:text-amber-200", focusRing)}
+          className={cn(box, "min-h-11 w-full border border-amber-300/60 bg-amber-50 text-left text-amber-900 dark:bg-amber-950/30 dark:text-amber-200", focusRing)}
         >
           <Crown className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
-          <span className="flex-1">Daily lookups used. Hand-checked results are below.</span>
+          <span className="flex-1">{note}</span>
           <span className="font-semibold underline">{tier === "pro" || tier === "team" ? "See plans" : "Get more"}</span>
         </motion.button>
       )}
       {results.state === "error" && (
         <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T}>
           <InlineError message={results.message} className="mb-3">
-            <button type="button" onClick={onRetry} className={cn("shrink-0 rounded font-semibold underline", focusRing)}>
+            <button type="button" onClick={onRetry} className={cn(pillAction, focusRing)}>
               Try again
             </button>
           </InlineError>
         </motion.div>
       )}
-      {results.state === "done" && remaining !== null && remaining <= 3 && (
+      {results.state === "done" && !note && remaining !== null && remaining <= 3 && (
         <motion.p key="left" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mb-3 text-xs text-muted-foreground" data-testid="lookups-left">
           {remaining === 0 ? "No lookups left today." : `${remaining} ${remaining === 1 ? "lookup" : "lookups"} left today.`}
         </motion.p>

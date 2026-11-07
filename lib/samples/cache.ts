@@ -1,7 +1,8 @@
 /**
  * Cache for the Sample Finder: video titles from YouTube, MusicBrainz
- * searches and lookups. Keys name only the video or song (yt:<id>,
- * mbq:<query>, mbrec:<id>); nothing about who asked is ever stored.
+ * searches and lookups, and the pause after MusicBrainz refuses. Keys name
+ * only the video or song (yt:<id>, mbq:<hash of the query>, mbrec:<id>) or
+ * the pause (mb:pause); nothing about who asked is ever stored.
  *
  * Production: a small in-memory LRU per server instance in front of the
  * sample_cache table in Supabase (service role only, RLS on with no
@@ -11,7 +12,8 @@
 import "server-only";
 
 export interface SampleCache {
-  get<T = unknown>(key: string): Promise<T | null>;
+  /** `fresh`: skip this instance's memory and read the shared copy (one another instance may have just changed). */
+  get<T = unknown>(key: string, opts?: { fresh?: boolean }): Promise<T | null>;
   /** `ttl` in seconds. */
   set(key: string, value: unknown, ttl: number): Promise<void>;
 }
@@ -112,7 +114,16 @@ export function layeredCache(front: SampleCache, back: SampleCache | null): Samp
     );
   };
   return {
-    async get<T>(key: string) {
+    async get<T>(key: string, opts?: { fresh?: boolean }) {
+      if (opts?.fresh && back) {
+        try {
+          const shared = await back.get<T>(key);
+          if (shared !== null) return shared;
+        } catch (err) {
+          warn(err);
+        }
+        return front.get<T>(key);
+      }
       const hit = await front.get<T>(key);
       if (hit !== null || !back) return hit;
       try {

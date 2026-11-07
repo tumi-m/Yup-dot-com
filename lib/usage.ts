@@ -452,8 +452,8 @@ export async function claimEdit(subject: string, tier: Tier, doc: string, store:
 /** Song searches (/api/samples/identify) a minute, per person or guest IP. */
 export const SAMPLE_IDENTIFY_PER_MINUTE = 10;
 export const SAMPLE_IDENTIFY_MESSAGE = "Too many searches at once. Try again in a minute.";
-/** Requests to MusicBrainz a minute from the whole site (it asks for about one a second per address). */
-export const MUSICBRAINZ_PER_MINUTE = 50;
+/** Requests to MusicBrainz a second from the whole site (it asks for about one a second per address). */
+export const MUSICBRAINZ_PER_SECOND = 1;
 
 /** Counts one song search. False when this minute's are used up. */
 export async function claimSampleIdentify(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
@@ -461,12 +461,14 @@ export async function claimSampleIdentify(subject: string, store: UsageStore = u
 }
 
 /**
- * Counts one request to MusicBrainz against the site-wide minute budget,
- * shared by every server instance. False when it's spent: the caller
- * answers with the hand-checked results instead.
+ * Takes this second's slot for one request to MusicBrainz, shared by every
+ * server instance, so together they send about one a second however many
+ * are running. False when another request has it: the caller tries the next
+ * second, then answers with the hand-checked results. (One counter per
+ * second, kept in the minute window so old ones are cleared within the hour.)
  */
-export async function claimMusicBrainz(store: UsageStore = usageStore()): Promise<boolean> {
-  return (await store.consume(GLOBAL_SUBJECT, "mb", MUSICBRAINZ_PER_MINUTE, "minute")) >= 0;
+export async function claimMusicBrainz(store: UsageStore = usageStore(), now: number = Date.now()): Promise<boolean> {
+  return (await store.consume(GLOBAL_SUBJECT, `mb:${Math.floor(now / 1000)}`, MUSICBRAINZ_PER_SECOND, "minute")) >= 0;
 }
 
 export interface SampleClaim {

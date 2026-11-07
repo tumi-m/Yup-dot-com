@@ -57,6 +57,8 @@ export interface ParsedSong {
   confidence: number;
   /** Why: short machine labels, e.g. "topic", "split", "reaction". */
   signals: string[];
+  /** A video title's hashtags ("#kanye" on a Short), used to put that artist's songs first. */
+  hashtags?: string[];
 }
 
 /** One song a search found, with the recordings of it grouped. */

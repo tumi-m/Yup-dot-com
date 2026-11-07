@@ -170,7 +170,9 @@ Instagram tools offer it for YouTube links.
    scores how sure it is. One MusicBrainz search finds the recording. Sure:
    the song is shown. Fairly sure: shown, with other matches behind "Not
    this song?". Unsure: the page asks "Which song is this?" and offers a
-   form to type it. 10 searches a minute per visitor, no daily allowance.
+   form to type it. A clear reading MusicBrainz doesn't have (typed, or on
+   the artist's own channel) is shown, saying so. 10 searches a minute per
+   visitor, no daily allowance.
 2. **Its connections** (`POST /api/samples/lookup`). One MusicBrainz
    recording lookup (with the song's work, so covers come in the same
    answer), merged with a hand-checked list of famous samples
@@ -178,14 +180,19 @@ Instagram tools offer it for YouTube links.
    vocals, drums, the bassline, or an interpolation (replayed, not lifted).
    Each lookup spends one of the day's (guest 10, Free 30, Pro and Team 300);
    another pick for the same search, the same song again that day, answers
-   already cached, shared links and the hand-checked list are free.
+   already cached, shared links and the hand-checked list are free. A
+   shared link (`?q=…&rec=…`) opens from the cache only, under MusicBrainz's
+   own title for that recording; one not cached yet just fills the box.
 
 MusicBrainz is asked politely: a User-Agent naming the site and its
-contact page, requests 1.1 s apart per server instance, at most 50 a minute
-across the site (`usage_counters`), one retry after a 503, and otherwise the
-hand-checked results with "MusicBrainz is busy". Answers are cached in
+contact page, requests 1.1 s apart per server instance with at most one
+waiting per visitor, one a second across the site (`usage_counters`), and
+after a 503, 429 or timeout nothing at all for a while (its Retry-After, or
+30 s doubling to 5 minutes), shared by every instance. Meanwhile visitors get
+the hand-checked results with "MusicBrainz is busy". Answers are cached in
 Supabase (`sample_cache`: 30 days, video titles 7 days, misses 1 day),
-keyed by the song or video only, never who asked. Run
+keyed by the song or video, or a search by a hash of the exact query sent;
+never who asked. Run
 [`supabase/migrations/20261107000000_sample_cache.sql`](supabase/migrations/20261107000000_sample_cache.sql)
 once (new projects get it from `supabase/schema.sql`); without it the cache
 is per server instance. `SAMPLES_MB_DISABLED=1` serves the hand-checked list

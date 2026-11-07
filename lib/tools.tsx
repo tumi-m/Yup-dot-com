@@ -452,7 +452,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-violet-100 text-violet-800",
     badge: "New",
     custom: "samples",
-    keywords: "sample samples sampled whosampled interpolation cover covers remix music song",
+    keywords: "sample samples sampled interpolation cover covers remix music song",
   },
   {
     slug: "compress-video",

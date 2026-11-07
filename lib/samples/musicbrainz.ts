@@ -4,18 +4,21 @@
  *
  * Etiquette it asks for, and gets: a User-Agent naming the site, at most
  * about one request a second (each server instance queues its requests 1.1s
- * apart, and a site-wide budget keeps all instances together under it), one
- * retry after a 503, and caching (lib/samples/cache.ts). Only artist names
- * and song titles are sent; never anything about the visitor.
+ * apart, and every request also takes that second's one slot in a counter
+ * all instances share), a pause for the whole site after a 503, 429 or
+ * timeout (its Retry-After when it gives one), and caching
+ * (lib/samples/cache.ts). Only artist names and song titles are sent; never
+ * anything about the visitor.
  *
  * Only fixed URLs on musicbrainz.org are built here: ids are checked to be
  * MusicBrainz ids and search text is escaped, so nothing a visitor types can
  * point a request elsewhere.
  */
 import "server-only";
+import { createHash } from "node:crypto";
 import { siteUrl } from "../site";
 import { parseMediaUrl } from "../media";
-import { compact, dice, escapeLucene, norm } from "./normalize";
+import { compact, dice, escapeLucene } from "./normalize";
 import { creditNames } from "./catalog";
 import type { Candidate, ParsedSong, Relation, Variant } from "./types";
 
@@ -24,9 +27,9 @@ export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 const BASE = "https://musicbrainz.org/ws/2";
 export const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** MusicBrainz didn't answer in time, refused (503), or the queue is too long. */
+/** MusicBrainz didn't answer in time, refused (503), is paused after refusing, or the queue is too long. */
 export class MusicBrainzBusy extends Error {
-  constructor(public readonly reason: "queue" | "budget" | "unavailable" | "unreachable" | "error") {
+  constructor(public readonly reason: "queue" | "budget" | "paused" | "unavailable" | "unreachable" | "error") {
     super(`MusicBrainz busy: ${reason}`);
   }
 }
@@ -35,30 +38,113 @@ const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 /**
  * Spaces this instance's requests at least `gap` ms apart, in the order they
- * asked. A request that would wait longer than `maxWait` isn't queued.
+ * asked. A request that would wait longer than `maxWait` isn't queued, and
+ * neither is a second one from someone who already has one waiting, so one
+ * visitor can't fill the queue in front of everyone else.
  */
 export class Throttle {
   private next = 0;
+  private waiting = new Map<string, number>();
   constructor(
     private readonly now: () => number = Date.now,
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
     readonly gap = 1100,
-    readonly maxWait = 6000
+    readonly maxWait = 6000,
+    readonly perOwner = 1
   ) {}
 
   /** Waits for this request's turn. False (and nothing reserved) when the wait would be too long. */
-  async turn(): Promise<boolean> {
+  async turn(owner?: string): Promise<boolean> {
     const t = this.now();
     const at = Math.max(t, this.next);
     if (at - t > this.maxWait) return false;
+    if (at <= t) {
+      this.next = at + this.gap;
+      return true;
+    }
+    if (owner && (this.waiting.get(owner) ?? 0) >= this.perOwner) return false;
     this.next = at + this.gap;
-    if (at > t) await this.sleep(at - t);
+    if (owner) this.waiting.set(owner, (this.waiting.get(owner) ?? 0) + 1);
+    try {
+      await this.sleep(at - t);
+    } finally {
+      if (owner) {
+        const n = (this.waiting.get(owner) ?? 1) - 1;
+        if (n > 0) this.waiting.set(owner, n);
+        else this.waiting.delete(owner);
+      }
+    }
     return true;
   }
 }
 
 /** One queue per server instance. */
 const sharedThrottle = new Throttle();
+
+/** Where a pause is kept so every server instance sees it (the sample cache). */
+export interface PauseStore {
+  /** When the current pause ends (ms since 1970), or null. */
+  get(): Promise<number | null>;
+  set(until: number): Promise<void>;
+}
+
+/** The pause after the first refusal with no Retry-After; it doubles with each refusal in a row. */
+export const PAUSE_FIRST_MS = 30_000;
+export const PAUSE_MAX_MS = 5 * 60_000;
+
+/**
+ * After MusicBrainz refuses (503, 429) or doesn't answer, nothing is sent to
+ * it for a while: the Retry-After it gave, or 30 s doubling with each refusal
+ * in a row up to 5 minutes. Requests meanwhile are answered "busy" at once.
+ */
+export class Pause {
+  private until = 0;
+  private strikes = 0;
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly shared: PauseStore | null = null
+  ) {}
+
+  /** Paused in this instance's memory. */
+  local(): boolean {
+    return this.until > this.now();
+  }
+
+  /** Paused here or by another instance. A shared store that fails counts as no pause. */
+  async active(): Promise<boolean> {
+    if (this.local()) return true;
+    const other = this.shared ? await this.shared.get().catch(() => null) : null;
+    if (typeof other === "number" && other > this.now()) {
+      this.until = other;
+      return true;
+    }
+    return false;
+  }
+
+  /** A refusal: pause, for `retryAfterMs` when MusicBrainz said how long. */
+  async start(retryAfterMs: number | null): Promise<void> {
+    this.strikes = Math.min(this.strikes + 1, 8);
+    const ms = retryAfterMs !== null ? Math.min(Math.max(retryAfterMs, 1000), 10 * 60_000) : Math.min(PAUSE_FIRST_MS * 2 ** (this.strikes - 1), PAUSE_MAX_MS);
+    this.until = Math.max(this.until, this.now() + ms);
+    await this.shared?.set(this.until).catch(() => {});
+  }
+
+  /** An answer: the next refusal starts from the shortest pause again. */
+  answered(): void {
+    this.strikes = 0;
+  }
+}
+
+/** One per server instance, unless the caller gives one that also shares it. */
+const localPause = new Pause();
+
+/** Retry-After in ms: seconds or an HTTP date; null when missing or unreadable. */
+export function retryAfterMs(value: string | null, now: number = Date.now()): number | null {
+  const v = value?.trim() ?? "";
+  if (/^\d{1,6}$/.test(v)) return Number(v) * 1000;
+  const at = v ? Date.parse(v) : NaN;
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
 
 /** `PDFWizard/1.0 ( https://site/contact )`. MUSICBRAINZ_CONTACT may name another https page; never an email. */
 export function musicBrainzUserAgent(env: NodeJS.ProcessEnv = process.env): string {
@@ -385,8 +471,13 @@ export function ambiguous(candidates: Candidate[]): boolean {
 export interface MusicBrainzDeps {
   fetcher?: Fetcher;
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
   throttle?: Throttle;
-  /** The site-wide minute budget (lib/usage.ts claimMusicBrainz); false when it's spent. */
+  /** Who is asking (a usage subject): at most one of their requests waits in the queue. */
+  owner?: string;
+  /** The site-wide pause after a refusal; this instance's own when left out. */
+  pause?: Pause;
+  /** This second's one site-wide slot (lib/usage.ts claimMusicBrainz); false when another instance has it. */
   claim?: () => Promise<boolean>;
   userAgent?: string;
   /** Per request. */
@@ -402,58 +493,73 @@ export interface MusicBrainz {
 /** The most of an answer we read (a much-covered song's lookup can be large). */
 const MAX_BYTES = 4_000_000;
 
+/** Seconds tried for a site-wide slot before answering "busy". */
+const SLOT_TRIES = 3;
+
 export function createMusicBrainz(deps: MusicBrainzDeps = {}): MusicBrainz {
   const fetcher = deps.fetcher ?? fetch;
   const sleep = deps.sleep ?? defaultSleep;
+  const now = deps.now ?? Date.now;
   const throttle = deps.throttle ?? sharedThrottle;
+  const pause = deps.pause ?? localPause;
   const ua = deps.userAgent ?? musicBrainzUserAgent();
+
+  /** This second's slot, or the next free one within a few seconds. */
+  async function slot(): Promise<boolean> {
+    if (!deps.claim) return true;
+    for (let i = 0; i < SLOT_TRIES; i++) {
+      if (i > 0) await sleep(1000 - (now() % 1000));
+      if (await deps.claim()) return true;
+    }
+    return false;
+  }
 
   async function get(path: string, params: Record<string, string>): Promise<Json | null> {
     const url = `${BASE}${path}?${new URLSearchParams({ ...params, fmt: "json" })}`;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (!(await throttle.turn())) throw new MusicBrainzBusy("queue");
-      if (deps.claim && !(await deps.claim())) throw new MusicBrainzBusy("budget");
-      let res: Response;
-      try {
-        res = await fetcher(url, {
-          headers: { "User-Agent": ua, Accept: "application/json" },
-          signal: AbortSignal.timeout(deps.timeoutMs ?? 8000),
-          redirect: "error",
-          cache: "no-store",
-        });
-      } catch {
-        throw new MusicBrainzBusy("unreachable");
-      }
-      if (res.status === 503 || res.status === 429) {
-        await res.body?.cancel().catch(() => {});
-        if (attempt === 0) {
-          await sleep(1500);
-          continue;
-        }
-        throw new MusicBrainzBusy("unavailable");
-      }
-      // 400 (a malformed id or query) and 404 both mean: nothing to show.
-      if (res.status === 404 || res.status === 400) {
-        await res.body?.cancel().catch(() => {});
-        return null;
-      }
-      if (!res.ok) {
-        await res.body?.cancel().catch(() => {});
-        throw new MusicBrainzBusy("error");
-      }
-      if (Number(res.headers.get("content-length")) > MAX_BYTES) {
-        await res.body?.cancel().catch(() => {});
-        throw new MusicBrainzBusy("error");
-      }
-      try {
-        const text = await res.text();
-        if (text.length > MAX_BYTES) throw new Error("too large");
-        return JSON.parse(text);
-      } catch {
-        throw new MusicBrainzBusy("error");
-      }
+    // Paused after a refusal: nothing is sent until it ends.
+    if (await pause.active()) throw new MusicBrainzBusy("paused");
+    if (!(await throttle.turn(deps.owner))) throw new MusicBrainzBusy("queue");
+    if (pause.local()) throw new MusicBrainzBusy("paused");
+    if (!(await slot())) throw new MusicBrainzBusy("budget");
+    let res: Response;
+    try {
+      res = await fetcher(url, {
+        headers: { "User-Agent": ua, Accept: "application/json" },
+        signal: AbortSignal.timeout(deps.timeoutMs ?? 8000),
+        redirect: "error",
+        cache: "no-store",
+      });
+    } catch {
+      // A timeout or no connection: give it the same rest as a refusal.
+      await pause.start(null);
+      throw new MusicBrainzBusy("unreachable");
     }
-    throw new MusicBrainzBusy("unavailable");
+    if (res.status === 503 || res.status === 429 || res.status === 502 || res.status === 504) {
+      await res.body?.cancel().catch(() => {});
+      await pause.start(retryAfterMs(res.headers.get("retry-after"), now()));
+      throw new MusicBrainzBusy("unavailable");
+    }
+    pause.answered();
+    // 400 (a malformed id or query) and 404 both mean: nothing to show.
+    if (res.status === 404 || res.status === 400) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
+      throw new MusicBrainzBusy("error");
+    }
+    if (Number(res.headers.get("content-length")) > MAX_BYTES) {
+      await res.body?.cancel().catch(() => {});
+      throw new MusicBrainzBusy("error");
+    }
+    try {
+      const text = await res.text();
+      if (text.length > MAX_BYTES) throw new Error("too large");
+      return JSON.parse(text);
+    } catch {
+      throw new MusicBrainzBusy("error");
+    }
   }
 
   return {
@@ -469,7 +575,11 @@ export function createMusicBrainz(deps: MusicBrainzDeps = {}): MusicBrainz {
   };
 }
 
-/** The cache key for a search: the query, normalised, so spelling-only differences share one entry. */
+/**
+ * The cache key for a search: the exact query sent, hashed. Never a
+ * normalised form: two different queries sharing a key would let an empty
+ * answer for one spelling stand in for another's.
+ */
 export function searchKey(query: string): string {
-  return `mbq:${norm(query).slice(0, 300)}`;
+  return `mbq:${createHash("sha256").update(query.slice(0, 600)).digest("hex").slice(0, 40)}`;
 }

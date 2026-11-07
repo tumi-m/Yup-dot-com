@@ -955,7 +955,8 @@ grant execute on function public.usage_count(text, text, text) to service_role;
 -- ---------- Sample Finder cache ----------
 
 -- Video titles from YouTube and MusicBrainz answers, keyed by the video or
--- song only (yt:<id>, mbq:<query>, mbrec:<id>): who asked is never stored.
+-- song only (yt:<id>, mbq:<hash of the query>, mbrec:<id>), and the pause after
+-- MusicBrainz refuses (mb:pause): who asked is never stored.
 -- Expired rows are deleted when read, and now and then all at once.
 create table if not exists public.sample_cache (
   key text primary key check (length(key) between 1 and 400),

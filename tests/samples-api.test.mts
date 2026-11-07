@@ -3,12 +3,14 @@
  * TikTok and MusicBrainz (tests/fakes/samples-routes.cjs), counters in
  * memory and the cache in memory: input checks, playlist and private-video
  * messages, confidence bands, the daily allowance per plan, free re-picks,
- * refunds, cache-only share links, the kill switch and MusicBrainz busy.
+ * refunds, cache-only share links, the kill switch and MusicBrainz busy;
+ * songs MusicBrainz doesn't have, covers, reactions and Shorts' hashtags,
+ * TikTok photo posts, and searches no other spelling can poison.
  */
 import { createRequire } from "node:module";
-import { handleIdentify, handleLookup, ORIGINAL_SOUND_MESSAGE, PLAYLIST_MESSAGE, type SampleDeps } from "../lib/samples/handlers.ts";
-import { Throttle, createMusicBrainz } from "../lib/samples/musicbrainz.ts";
-import { memoryCache } from "../lib/samples/cache.ts";
+import { cachedPause, handleIdentify, handleLookup, ORIGINAL_SOUND_MESSAGE, PLAYLIST_MESSAGE, type SampleDeps } from "../lib/samples/handlers.ts";
+import { Pause, Throttle, createMusicBrainz } from "../lib/samples/musicbrainz.ts";
+import { layeredCache, memoryCache } from "../lib/samples/cache.ts";
 import { memoryUsageStore, setUsageStore, type UsageStore } from "../lib/usage.ts";
 import type { Tier } from "../lib/limits.ts";
 import type { Identified, LookupResult } from "../lib/samples/types.ts";
@@ -45,7 +47,7 @@ function rig(opts: { env?: NodeJS.ProcessEnv; answer?: (url: string) => Response
     if (custom) return custom;
     return (route(input) as Response | null) ?? new Response("", { status: 404 });
   };
-  const mb = createMusicBrainz({ fetcher, sleep: async () => {}, throttle: new Throttle(Date.now, async () => {}, 0) });
+  const mb = createMusicBrainz({ fetcher, sleep: async () => {}, throttle: new Throttle(Date.now, async () => {}, 0), pause: new Pause() });
   return {
     calls,
     store,
@@ -94,6 +96,10 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   check("a playlist-only link → its own message", playlist.status === 400 && playlist.body.error === PLAYLIST_MESSAGE, playlist.body);
   const other = await identify(r, "https://x.com/someone/status/1234567890");
   check("an X link → what to paste instead", other.status === 400 && /YouTube or TikTok/.test(other.body.error ?? ""));
+  const spotify = await identify(r, "https://open.spotify.com/track/7oDd86yk8itslrA9HRP2ki");
+  check("a Spotify link → says Spotify can't be read", spotify.status === 400 && spotify.body.error === "Spotify links can't be read. Type Artist – Title.", spotify.body);
+  const channel = await identify(r, "https://www.youtube.com/@KanyeWest");
+  check("a YouTube channel → asks for one video", channel.status === 400 && channel.body.error === "That's a channel. Paste one video's link.", channel.body);
   const evil = await identify(r, "https://evil.example/watch?v=strongerVID");
   check("another host is never fetched", evil.status === 400 && r.calls.length === 0, r.calls);
   const symbols = await identify(r, "!!! ???");
@@ -135,6 +141,38 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   check("a bare title from a random channel → low confidence, asks", body.band === "low" && body.candidates.length >= 2, { band: body.band, c: body.candidates.length });
 }
 
+{
+  // A song MusicBrainz hasn't got, read clearly: shown, not asked about forever.
+  const r = rig();
+  const video = await identify(r, "https://www.youtube.com/watch?v=unknownVid1");
+  check("not on MusicBrainz, from the artist's own channel → shown (medium), no MusicBrainz id", video.status === 200 && video.body.mb === "ok" && video.body.candidates.length === 0 && video.body.band === "medium" && video.body.pick?.title === "Nowhere Song" && video.body.pick.mbid === null, video.body);
+  const typed = await identify(r, "The Unlisted Band – Nowhere Song");
+  check("…and typed the same way → shown too", typed.body.band === "medium" && typed.body.pick?.artist === "The Unlisted Band", typed.body);
+  const bare = await identify(r, "nowhere song");
+  check("…but a bare title still asks", bare.body.band === "low");
+}
+{
+  const r = rig();
+  const cover = await identify(r, "https://www.youtube.com/watch?v=coverVid001");
+  check("a cover titled \"Song - Original Artist (Cover)\" → the form starts the right way round", cover.body.parsed.artist === "Johnny Cash" && cover.body.parsed.title === "Hurt" && cover.body.parsed.variant === "cover", cover.body.parsed);
+  const react = await identify(r, "https://www.youtube.com/watch?v=reactVid001");
+  check("a reaction: \"FIRST TIME HEARING\" isn't part of the artist", react.body.parsed.artist === "Kanye West" && react.body.parsed.title === "Stronger" && react.body.parsed.signals.includes("reaction"), react.body.parsed);
+  const short = await identify(r, "https://www.youtube.com/watch?v=shortsVid01");
+  check("a Short's #kanye puts Kanye West first among the songs found", short.body.band === "low" && short.body.candidates[0]?.artist === "Kanye West" && short.body.candidates.length === 2, short.body.candidates.map((c) => c.artist));
+}
+{
+  // Poisoning: "Et`ta James" used to share a cache key with "Etta James", so
+  // its empty answer hid the real song from everyone for a day.
+  const r = rig({ who: "ip:attacker" });
+  const forged = await identify(r, "Et`ta James – Something's Got a Hold on Me");
+  check("a spelling MusicBrainz doesn't know finds nothing", forged.status === 200 && forged.body.candidates.length === 0);
+  r.deps.usageSubject = () => "ip:someone-else";
+  const real = await identify(r, "Etta James – Something's Got a Hold on Me");
+  check("…and doesn't stop anyone else finding the real song", real.body.pick?.mbid === id("a201") && real.body.candidates.length === 1, real.body.pick);
+  const viaVideo = await identify(r, "https://www.youtube.com/watch?v=strongerVID");
+  check("…(other searches unaffected)", viaVideo.body.pick?.mbid === S);
+}
+
 // ---------- Typed ----------
 {
   const r = rig();
@@ -154,6 +192,9 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   check("…never more than medium on a sound's credit alone", song.body.parsed.confidence <= 0.6);
   const original = await identify(r, "https://www.tiktok.com/@catperson/video/7300000000000000002");
   check("a TikTok original sound → message", original.status === 422 && original.body.error === ORIGINAL_SOUND_MESSAGE && original.body.typeIt === true, original.body);
+  const photo = await identify(r, "https://www.tiktok.com/@liftsalot/photo/7300000000000000003");
+  check("a TikTok photo post → its sound", photo.status === 200 && photo.body.pick?.title === "Stronger" && photo.body.video?.url === "https://www.tiktok.com/@liftsalot/photo/7300000000000000003", photo.body);
+  check("…its own page is read", r.calls.some((u) => u === "https://www.tiktok.com/@liftsalot/photo/7300000000000000003"), r.calls.filter((u) => u.includes("tiktok")));
   const music = await identify(r, "https://www.tiktok.com/music/Stronger-Kanye-West-6814435937396410373");
   check("a tiktok.com/music/ link → searched from its words, no TikTok request", music.status === 200 && music.body.candidates.some((c) => c.mbid === S) && !r.calls.some((u) => u.includes("/music/")), music.body);
   check("…as a guess", music.body.parsed.confidence <= 0.2);
@@ -219,7 +260,7 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   const res = await lookup(r, { rec: S, artist: "Kanye West", title: "Stronger" });
   check("MusicBrainz busy → hand-checked results, mb: busy", res.status === 200 && res.body.mb === "busy" && res.body.relations.length > 0, res.body);
   check("…and the lookup is given back", (await r.store.count("ip:test", "samples", "day")) === 0);
-  check("…after one retry", mbCalls(r) === 2);
+  check("…with no retry (MusicBrainz is left to rest)", mbCalls(r) === 1, mbCalls(r));
 }
 {
   const r = rig({ answer: (u) => (u.includes("/ws/2/") ? new Response("", { status: 503 }) : null) });
@@ -232,6 +273,17 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   const res = await lookup(r, { rec: S, artist: "Kanye West", title: "Stronger" });
   check("kill switch → catalog only, nothing sent to MusicBrainz", ident.body.mb === "off" && res.body.mb === "off" && mbCalls(r) === 0 && res.body.relations.length > 0);
   check("…and nothing spent", (await r.store.count("ip:test", "samples", "day")) === 0);
+}
+{
+  const r = rig();
+  // "Find its samples" on the Neptunes remix: the remix isn't the record Kanye sampled.
+  const remix = await lookup(r, { rec: id("d003"), artist: "Daft Punk", title: "Harder, Better, Faster, Stronger (The Neptunes remix)" });
+  check("a remix doesn't take the original's hand-checked rows", remix.status === 200 && remix.body.relations.every((x) => x.source === "musicbrainz") && remix.body.relations.some((x) => x.role === "remixOf"), remix.body.relations.map((x) => `${x.role}:${x.title}/${x.source}`));
+  // Whatever artist and title come with an id, MusicBrainz's own are shown, and matched.
+  const mixed = await lookup(r, { rec: S, artist: "Foo Fighters", title: "Everlong" });
+  check("artist and title come from MusicBrainz, not from what was sent", mixed.body.song.artist === "Kanye West" && mixed.body.song.title === "Stronger" && mixed.body.relations.some((x) => x.source === "catalog" && x.title === "Harder, Better, Faster, Stronger"), mixed.body.song);
+  const spoof = await lookup(r, { rec: S, artist: "PDF Wizard Support", title: "Your account is locked", cacheOnly: true });
+  check("…on a shared link too", spoof.body.cached === true && spoof.body.song.title === "Stronger" && spoof.body.song.artist === "Kanye West", spoof.body.song);
 }
 {
   const r = rig();
@@ -251,6 +303,20 @@ const mbCalls = (r: Rig) => r.calls.filter((u) => u.startsWith("https://musicbra
   check("a malformed id → 400", bad.status === 400);
   const none = await lookup(r, { rec: id("beef"), artist: "x", title: "y" });
   check("an id MusicBrainz doesn't know → refunded", none.status === 200 && (await r.store.count("ip:test", "samples", "day")) === 0);
+}
+{
+  // Two server instances, each with its own memory in front of one shared table.
+  let now = 50_000_000;
+  const clock = () => now;
+  const shared = memoryCache(500, clock);
+  const a = new Pause(clock, cachedPause(layeredCache(memoryCache(500, clock), shared), clock));
+  const b = new Pause(clock, cachedPause(layeredCache(memoryCache(500, clock), shared), clock));
+  await a.start(2_000);
+  const first = await b.active();
+  now += 5_000; // that pause is over; b's memory may still hold it
+  const over = await b.active();
+  await a.start(30_000);
+  check("a pause one instance starts reaches the others, every time (not an old copy in memory)", first && !over && (await b.active()), { first, over });
 }
 {
   const r = rig();
