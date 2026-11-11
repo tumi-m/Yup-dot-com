@@ -24,6 +24,8 @@ const servedBucket = (ref: string) => `media-served:${ref}`;
  * life and let a sent one be refunded.
  */
 const MARKERS: UsageWindow = "month";
+/** No limit: the served marker counts every send of a grant. */
+const NO_LIMIT = 2_147_483_647;
 
 /** How long after a grant expires it can still be refunded (jobs may run 20 min). */
 export const REFUND_GRACE_SECONDS = 2 * 60 * 60;
@@ -84,14 +86,18 @@ export async function wasRefunded(store: UsageStore, ref: GrantRef, now = Date.n
 /**
  * Call before sending a file. `ok` false: the grant was refunded meanwhile,
  * so don't send. `first`: no earlier request sent this grant's file.
+ * Every send is counted, so a broken first send can tell whether another
+ * request on the grant sent the file too (refundBrokenFirstServe).
  */
 export async function startServing(store: UsageStore, ref: GrantRef, now = Date.now()): Promise<{ ok: boolean; first: boolean }> {
-  const first = (await store.consume(ref.s, servedBucket(ref.c), 1, MARKERS)) >= 0;
+  const first = (await store.consume(ref.s, servedBucket(ref.c), NO_LIMIT, MARKERS)) === NO_LIMIT - 1;
   return { ok: !(await wasRefunded(store, ref, now)), first };
 }
 
+const serves = (store: UsageStore, ref: GrantRef) => store.count(ref.s, servedBucket(ref.c), MARKERS);
+
 export async function wasServed(store: UsageStore, ref: GrantRef): Promise<boolean> {
-  return (await store.count(ref.s, servedBucket(ref.c), MARKERS)) > 0;
+  return (await serves(store, ref)) > 0;
 }
 
 /** Refunds a grant that never sent its file. True if this call refunded it. */
@@ -100,7 +106,23 @@ export async function refundUnserved(store: UsageStore, ref: GrantRef, now = Dat
   if (!(await refundGrant(store, ref, now))) return false;
   if (await wasServed(store, ref)) {
     // Lost a race with a request that is sending the file: charge it again.
-    await store.consume(ref.s, MEDIA_BUCKET, 2_147_483_647, "day");
+    await store.consume(ref.s, MEDIA_BUCKET, NO_LIMIT, "day");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Refunds a grant whose first send broke off, unless another request on the
+ * grant started sending the file too: that one may have delivered it whole.
+ * True if this call refunded it.
+ */
+export async function refundBrokenFirstServe(store: UsageStore, ref: GrantRef, now = Date.now()): Promise<boolean> {
+  if ((await serves(store, ref)) > 1) return false;
+  if (!(await refundGrant(store, ref, now))) return false;
+  if ((await serves(store, ref)) > 1) {
+    // Another send started while we refunded: charge it again.
+    await store.consume(ref.s, MEDIA_BUCKET, NO_LIMIT, "day");
     return false;
   }
   return true;
