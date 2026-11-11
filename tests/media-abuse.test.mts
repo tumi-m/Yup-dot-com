@@ -22,9 +22,16 @@ const check = (name: string, ok: boolean, extra = "") => {
 const SIZE = 5000;
 const CDN_URL = "https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/640x360/a.mp4";
 let cdnDown = false;
+// Calls that look a post up on X; `postMissing` makes every one a 404.
+let lookups = 0;
+let postMissing = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = String(input instanceof Request ? input.url : input);
+  if (/^https:\/\/(cdn\.syndication\.twimg\.com|api\.fxtwitter\.com|api\.vxtwitter\.com)\//.test(url)) {
+    lookups++;
+    if (postMissing) return new Response("", { status: 404 });
+  }
   if (url.startsWith("https://cdn.syndication.twimg.com/")) {
     return Response.json({
       user: { screen_name: "someone" },
@@ -87,6 +94,30 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
   check("the link still downloads the file", ok.status === 200 && (await ok.arrayBuffer()).byteLength === SIZE);
   const tampered = await getFile(fresh.body.href.replace(/t=(.)/, (_: string, c: string) => `t=${c === "A" ? "B" : "A"}`), "203.0.113.8");
   check("a tampered link is refused", tampered.status === 403);
+}
+
+// The bug: a guest with no downloads left still made the server look the
+// post up on X, and lookups that failed were never counted at all.
+{
+  setUsageStore(memoryUsageStore());
+  const ip = "203.0.113.10";
+  for (let i = 0; i < 5; i++) await getLink(ip);
+  const before = lookups;
+  const over = await getLink(ip);
+  check("used up: refused without asking X", over.status === 429 && over.body.reason === "quota" && lookups === before, `${over.status} ${lookups - before}`);
+
+  setUsageStore(memoryUsageStore());
+  postMissing = true;
+  const statuses: number[] = [];
+  let afterLimit = 0;
+  for (let i = 0; i < 25; i++) {
+    if (i === 20) afterLimit = lookups;
+    statuses.push((await getLink("203.0.113.11")).status);
+  }
+  postMissing = false;
+  check("failing links: 20 lookups a minute, then 429",
+    statuses.slice(0, 20).every((s) => s === 422) && statuses.slice(20).every((s) => s === 429), statuses.join(","));
+  check("failing links: X isn't asked after that", lookups === afterLimit, `${lookups - afterLimit} more calls`);
 }
 
 // File links are encrypted, not just signed.

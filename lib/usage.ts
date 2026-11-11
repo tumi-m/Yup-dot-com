@@ -393,12 +393,37 @@ export function consumeDaily(subject: string, bucket: string, limit: number, sto
   return store.consume(subject, bucket, limit, "day");
 }
 
+/** Gives back one of today's `bucket` allowance. */
+export function refundDaily(subject: string, bucket: string, store: UsageStore = usageStore()): Promise<void> {
+  return store.refund(subject, bucket, "day");
+}
+
+/** Uses of today's `bucket` allowance left, without spending one. */
+export async function dailyLeft(subject: string, bucket: string, limit: number, store: UsageStore = usageStore()): Promise<number> {
+  return Math.max(0, limit - (await store.count(subject, bucket, "day")));
+}
+
+/** Tries at a Google Slides export a minute, per person or guest IP. */
+export const SLIDES_FETCHES_PER_MINUTE = 10;
+
+/**
+ * Counts one try at a Slides export (/api/slides/export), whatever Google
+ * answers. Each makes the server call Google, up to six times with
+ * redirects, and an import Google failed is given back, so without this the
+ * same broken link could be retried without end and get the site's address
+ * throttled by Google. False when this minute's tries are used up.
+ */
+export async function claimSlidesFetch(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "slides-fetch", SLIDES_FETCHES_PER_MINUTE, "minute")) >= 0;
+}
+
 /** Link previews and playlist lists a minute, per person or guest IP. */
 export const MEDIA_LOOKUPS_PER_MINUTE = 20;
 export const MEDIA_LOOKUP_MESSAGE = "Too many links at once. Try again in a minute.";
 
 /**
- * Counts one link lookup (/api/media/info, /api/media/playlist). Each makes
+ * Counts one link lookup (/api/media/info, /api/media/playlist, and the X,
+ * TikTok or Instagram lookup behind /api/media/link). Each makes
  * the server call X, TikTok, Instagram or the media worker, so without a
  * limit anyone could use the site as a free lookup service and get its
  * address blocked. False when this minute's lookups are used up.

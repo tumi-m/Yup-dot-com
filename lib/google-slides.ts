@@ -277,19 +277,31 @@ export interface SlidesExportDeps {
   resolveTier: () => Promise<{ user: { id: string } | null; tier: Tier }>;
   /** Spends one of today's allowance; uses left, or -1 when spent (lib/usage.ts). */
   consumeDaily: (subject: string, bucket: string, limit: number) => Promise<number> | number;
+  /** Gives one of today's allowance back (lib/usage.ts). */
+  refundDaily: (subject: string, bucket: string) => Promise<void> | void;
+  /** Counts one try at Google this minute; false when they're used up (lib/usage.ts claimSlidesFetch). */
+  claimFetch: (subject: string) => Promise<boolean> | boolean;
   /** Who the request counts against (lib/usage.ts usageSubject). */
   usageSubject: (request: Request, user: { id: string } | null) => string;
 }
 
 const noStore = { "Cache-Control": "private, no-store" };
 
+export const SLIDES_BURST_MESSAGE = "Too many links at once. Try again in a minute.";
+
+/** Failures on Google's side, given back. A wrong or private link is the visitor's, and counts. */
+const REFUNDED: readonly SlidesFailure[] = ["rate-limited", "unreachable"];
+
 function fail(kind: SlidesFailure) {
   return Response.json({ error: SLIDES_FAILURE_MESSAGE[kind] }, { status: SLIDES_FAILURE_STATUS[kind], headers: noStore });
 }
 
 /**
- * GET /api/slides/export?url=<share link>&format=pdf|pptx. The daily import
- * allowance is only spent once Google has actually sent the file.
+ * GET /api/slides/export?url=<share link>&format=pdf|pptx. One of today's
+ * imports is spent before Google is asked, so a visitor who has used them up
+ * (or keeps trying made-up links) can't make the server fetch anything. It is
+ * given back when Google was busy or didn't answer; every try still counts
+ * against a per-minute limit, so those can't be repeated without end.
  */
 export async function handleSlidesExport(request: Request, deps: SlidesExportDeps): Promise<Response> {
   const params = new URL(request.url).searchParams;
@@ -306,27 +318,39 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
   const format = parsed.data.format;
 
   const { user, tier } = await deps.resolveTier();
+  const subject = deps.usageSubject(request, user);
+
+  const remaining = await deps.consumeDaily(subject, "slides", limitsFor(tier).linkImportsPerDay);
+  if (remaining < 0) {
+    return Response.json(
+      { error: "You've used today's imports.", upgrade: tier !== "pro" && tier !== "team", reason: "quota" },
+      { status: 429, headers: noStore }
+    );
+  }
+  const giveBack = () => Promise.resolve(deps.refundDaily(subject, "slides")).catch(() => {});
+  let claimed: boolean;
+  try {
+    claimed = await deps.claimFetch(subject);
+  } catch (err) {
+    await giveBack();
+    throw err;
+  }
+  if (!claimed) {
+    await giveBack();
+    return Response.json(
+      { error: SLIDES_BURST_MESSAGE, reason: "burst" },
+      { status: 429, headers: { ...noStore, "Retry-After": "60" } }
+    );
+  }
 
   let file: SlidesFile;
   try {
     file = await fetchSlidesExport(id, format, deps.fetcher ?? fetch, request.signal);
   } catch (err) {
-    return fail(err instanceof SlidesError ? err.kind : "unreachable");
-  }
-
-  let remaining: number;
-  try {
-    remaining = await deps.consumeDaily(deps.usageSubject(request, user), "slides", limitsFor(tier).linkImportsPerDay);
-  } catch (err) {
-    await file.cancel();
-    throw err;
-  }
-  if (remaining < 0) {
-    await file.cancel();
-    return Response.json(
-      { error: "You've used today's imports.", upgrade: tier !== "pro" && tier !== "team", reason: "quota" },
-      { status: 429, headers: noStore }
-    );
+    const kind = err instanceof SlidesError ? err.kind : "unreachable";
+    // A visitor who cancelled gets nothing back: that was their doing.
+    if (REFUNDED.includes(kind) && !request.signal.aborted) await giveBack();
+    return fail(kind);
   }
 
   const headers = new Headers({
