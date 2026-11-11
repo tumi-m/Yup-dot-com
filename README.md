@@ -789,7 +789,8 @@ The webhook handles `charge.success`, `subscription.create`,
 Only payments started by this site's checkout change a plan: checkout signs
 its metadata with a key derived from the secret key (see
 [SECURITY.md](SECURITY.md#payments)). A `subscription.create` that arrives
-before its first charge gets a 503, so Paystack sends it again.
+before its first charge, or a cancel or invoice event that arrives before
+its `subscription.create`, gets a 503, so Paystack sends it again.
 
 ## Tester access (free Pro or Team for testers)
 

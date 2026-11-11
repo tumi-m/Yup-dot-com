@@ -661,7 +661,6 @@ export async function handlePaystackEvent(
       await deps.store.releaseEvent(key);
       return { status: "ignored", reason: "nothing to change" };
     }
-    if (!known) p.paystack_subscription_code = code;
     await deps.store.updateRow(userId, p);
     return { status: "applied", userId, key };
   } catch (err) {
@@ -681,17 +680,25 @@ function statusOf(s: unknown): SubscriptionStatus | null {
  * it: null when it may, else why not. Paystack keeps one customer per email,
  * so anyone paying with this customer's email gets events that look like
  * theirs. Only the subscription our checkout started is taken up: the row's
- * signed first charge set its plan and left it waiting for a code. Events
- * for an older, replaced subscription don't touch the current one.
+ * signed first charge set its plan and left it waiting for a code, and only
+ * a create for that plan brings the code. Events for an older, replaced
+ * subscription don't touch the current one.
  */
 function unboundSubscription(create: boolean, row: BillingRow, plan: PaidPlanId | null, now: Date): EventResult | null {
   const waiting = !row.paystack_subscription_code && isPaidPlan(row.subscription_plan) &&
     (row.subscription_status === "active" || row.subscription_status === "attention");
-  if (waiting && (!plan || plan === row.subscription_plan)) return null;
-  if (!create) return { status: "ignored", reason: row.paystack_subscription_code ? "stale subscription" : "no subscription waiting" };
+  if (!create) {
+    // A cancel or invoice carries no plan to check, and may be for an older
+    // or someone else's subscription. While a create is awaited it is sent
+    // again: it applies once the create has stored its code, or is ignored
+    // as stale if the code turns out to be another.
+    if (waiting) return { status: "retry", reason: "waiting for its subscription.create" };
+    return { status: "ignored", reason: row.paystack_subscription_code ? "stale subscription" : "no subscription waiting" };
+  }
+  if (waiting && plan === row.subscription_plan) return null;
   if (waiting || hasLiveSubscription(row, now)) return { status: "ignored", reason: "not this account's subscription" };
-  // Not started here yet: the first charge may still be on its way.
-  return { status: "retry", reason: "no first charge yet" };
+  // No first charge here is waiting for a code: it may still be on its way.
+  return { status: "retry", reason: "no first charge waiting for it" };
 }
 
 /** By subscription code, then customer code. Never by email: anyone can pay with someone's email. */

@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
  * URL in the Paystack dashboard. Requests are authenticated by an
  * HMAC-SHA512 of the raw body with the secret key. A non-2xx response makes
  * Paystack retry, so failures to record return 500, and an event that can't
- * apply yet (a subscription.create before its first charge) 503; anything we
- * deliberately ignore returns 200.
+ * apply yet (a subscription.create before its first charge, or another event
+ * before its subscription.create) 503; anything we deliberately ignore
+ * returns 200.
  */
 export async function POST(request: Request) {
   const secret = process.env.PAYSTACK_SECRET_KEY?.trim();

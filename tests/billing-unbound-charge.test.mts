@@ -260,6 +260,38 @@ const teamSub = {
   check("signed for Pro, charged on the Team plan: ignored", signedWrongPlan.status === "ignored", signedWrongPlan);
 }
 
+// Between a signed first charge and its subscription.create, an event for another code (the
+// account's own ended subscription, or someone else's on the same customer) doesn't take the
+// row: it waits, and once the create has stored the real code it is stale.
+for (const [label, start, other] of [
+  ["the account's ended subscription", {
+    subscription_plan: "pro", subscription_status: "non-renewing", current_period_end: "2026-10-01T08:00:00.000Z",
+    paystack_customer_code: "CUS_v", paystack_subscription_code: "SUB_old", paystack_email_token: "tok_old",
+  }, { subscription_code: "SUB_old", status: "complete", plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" } }],
+  ["someone else's Team subscription", { paystack_customer_code: "CUS_v" },
+    { subscription_code: "SUB_att", status: "cancelled", plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_v" } }],
+] as const) {
+  const s = setup([row(V, "v@x.co", start)]);
+  const first = await s.deliver("charge.success", {
+    status: "success", reference: "pw_w1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+    metadata: checkoutMetadata("pw_w1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+  });
+  const early = await s.deliver("subscription.disable", other);
+  check(`${label}: its disable in the window waits and writes nothing`, first.status === "applied" && early.status === "retry" &&
+    s.get(V).paystack_subscription_code === null && s.get(V).subscription_status === "active", { early, row: s.get(V) });
+  const create = await s.deliver("subscription.create", {
+    subscription_code: "SUB_new", status: "active", email_token: "tok_new", next_payment_date: "2026-11-04T08:00:00.000Z",
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+  });
+  const late = await s.deliver("subscription.disable", other);
+  const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_new", status: "non-renewing", customer: { customer_code: "CUS_v" } });
+  check(`${label}: the account's own create and cancel apply, the other code is stale`,
+    create.status === "applied" && late.status === "ignored" && cancel.status === "applied" &&
+      s.get(V).paystack_subscription_code === "SUB_new" && s.get(V).paystack_email_token === "tok_new" &&
+      s.get(V).subscription_status === "non-renewing", { create, late, cancel, row: s.get(V) });
+}
+
 // The routes: checkout signs what it sells; the webhook and the return check it; "retry" isn't a 200.
 {
   const checkout = readFileSync(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");

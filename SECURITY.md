@@ -63,8 +63,11 @@ reference, and only a charge carrying that signature starts a subscription,
 buys prepaid time or records a customer code (`applyCharge` in
 `lib/billing.ts`). Any other charge can only renew the subscription the
 customer's row already holds, on the same plan. A subscription code is only
-taken up by the row whose signed first charge is waiting for it, and never
-found by email. `tests/billing-unbound-charge.test.mts` checks this.
+taken up from a `subscription.create` for the plan that the row's signed
+first charge is waiting on, and never found by email; a cancel or invoice
+event for a code the row doesn't hold waits for that create, then applies
+only if its code is the one stored. `tests/billing-unbound-charge.test.mts`
+checks this.
 
 ## Why the MyBroadband-style hacks don't apply here
 
