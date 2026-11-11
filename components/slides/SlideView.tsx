@@ -129,8 +129,10 @@ function stops(colors: { pos: string; color: string }[]) {
 export function fillToCss(fill: Fill | undefined): CSSProperties {
   if (!fill) return {};
   switch (fill.type) {
-    case "color":
-      return fill.value ? { backgroundColor: fill.value } : {};
+    case "color": {
+      const c = safeCssColor(fill.value, "");
+      return c ? { backgroundColor: c } : {};
+    }
     case "gradient": {
       const list = stops(fill.value.colors)
         .map((s) => `${s.color} ${s.offset}%`)
@@ -146,19 +148,25 @@ export function fillToCss(fill: Fill | undefined): CSSProperties {
         ? { backgroundImage: `url("${src}")`, backgroundSize: "100% 100%", backgroundRepeat: "no-repeat" }
         : {};
     }
-    case "pattern":
-      return { backgroundColor: fill.value.backgroundColor || fill.value.foregroundColor };
+    case "pattern": {
+      const c = safeCssColor(fill.value.backgroundColor, "") || safeCssColor(fill.value.foregroundColor, "");
+      return c ? { backgroundColor: c } : {};
+    }
     default:
       return {};
   }
 }
 
-/** SVG paint for a shape fill; emits a <defs> entry when one is needed. */
+/**
+ * SVG paint for a shape fill; emits a <defs> entry when one is needed.
+ * File colours go through safeCssColor: a url(...) here would load a paint
+ * server from any host. Only our own url(#id) references are emitted.
+ */
 function svgPaint(fill: PFill | null | undefined, id: string): { paint: string; defs?: ReactNode; opacity?: number } {
   if (!fill) return { paint: "none" };
   switch (fill.type) {
     case "color":
-      return { paint: fill.value || "none" };
+      return { paint: safeCssColor(fill.value, "none") };
     case "gradient": {
       const s = stops(fill.value.colors);
       if (!s.length) return { paint: "none" };
@@ -197,8 +205,8 @@ function svgPaint(fill: PFill | null | undefined, id: string): { paint: string; 
         paint: `url(#${id})`,
         defs: (
           <pattern id={id} patternUnits="userSpaceOnUse" width="6" height="6">
-            <rect width="6" height="6" fill={bg || "#FFFFFF"} />
-            <rect width="3" height="3" fill={fg || "#000000"} />
+            <rect width="6" height="6" fill={safeCssColor(bg, "#FFFFFF")} />
+            <rect width="3" height="3" fill={safeCssColor(fg, "#000000")} />
           </pattern>
         ),
       };
@@ -482,7 +490,7 @@ function ShapeBody({ el, id, linkColor }: { el: WithExtras<PShape | PText>; id: 
   const d = (isShape && connectorPath(el as PShape)) || (isShape && (el as PShape).path ? (el as PShape).path! : rectPath(w, h));
   const vb = (isShape && (el as PShape).pathViewBox) || { x: 0, y: 0, width: w, height: h };
   const { paint, defs, opacity } = lineLike ? { paint: "none" } as ReturnType<typeof svgPaint> : svgPaint(el.fill, `${id}-f`);
-  const stroke = el.borderWidth > 0 && el.borderColor ? el.borderColor : "none";
+  const stroke = el.borderWidth > 0 ? safeCssColor(el.borderColor, "none") : "none";
   const head = isShape ? marker((el as PShape).headEnd, `${id}-h`, stroke, true) : null;
   const tail = isShape ? marker((el as PShape).tailEnd, `${id}-t`, stroke, false) : null;
   const drawn = paint !== "none" || stroke !== "none";

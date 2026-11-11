@@ -1,5 +1,6 @@
 import type { Chart } from "pptxtojson";
 import type { ChartInfo } from "@/lib/pptx/ooxml";
+import { safeCssColor } from "@/lib/pptx/sanitize";
 
 /**
  * A plain SVG rendering of the chart data pptxtojson extracts: bars/columns
@@ -75,7 +76,8 @@ export function ChartView({ chart, info, accents }: { chart: Chart; info?: Chart
   const palette = accents && accents.length >= 6 ? accents.slice(0, 6) : FALLBACK;
   // Past the six accents, Office cycles them darker.
   const auto = (i: number) => palette[i % palette.length];
-  const colors = (i: number) => chart.colors?.[i] || auto(i);
+  // Chart and theme colours come from the file; only plain colours become SVG paint.
+  const colors = (i: number) => safeCssColor(chart.colors?.[i], "") || safeCssColor(auto(i), FALLBACK[i % FALLBACK.length]);
   const font = info?.fontSize ?? Math.max(7, Math.min(12, height / 22));
   const { series, labels } = data;
   const type = chart.chartType;

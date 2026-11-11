@@ -117,8 +117,10 @@ export function safeHref(href: string | null | undefined): string | null {
 /**
  * pptxtojson copies colour values from the file verbatim ("#" + srgbClr val).
  * They end up in multi-value CSS (gradients, drop-shadow), where a
- * crafted value could close the function and add url(...) layers, so only
- * plain colour syntax gets through.
+ * crafted value could close the function and add url(...) layers, and in SVG
+ * fill/stroke attributes, where url(...) loads a paint server from any host.
+ * So only plain colour syntax gets through, both when a deck is parsed and
+ * again where colours are drawn.
  */
 export function safeCssColor(c: unknown, fallback = "transparent"): string {
   if (typeof c !== "string") return fallback;

@@ -212,6 +212,48 @@ const render = (deck: Deck, i = 0) =>
   check("solid theme style: no gradient", themeGradient(path(parseXml('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'), "a:solidFill"), "#000000", { scheme: {}, map: {} }) === undefined);
 }
 
+/* ---------------- file colours never become an external paint url ---------------- */
+{
+  // url(...) as SVG paint loads a paint server from any host, so opening a
+  // deck would ping a server of the file author's choosing.
+  const U = "url(https://x.test/p.svg#a)";
+  const shape = (id: number, spPr: string) => `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="S${id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${id * 1300000}" y="0"/><a:ext cx="1270000" cy="1270000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</p:spPr></p:sp>`;
+  const deck = await parsePptx(
+    await buildPptx([
+      slideXml(
+        shape(4, `<a:solidFill><a:srgbClr val="${U}"/></a:solidFill>`) +
+          shape(5, `<a:pattFill prst="pct50"><a:fgClr><a:srgbClr val="${U}"/></a:fgClr><a:bgClr><a:srgbClr val="${U}"/></a:bgClr></a:pattFill>`) +
+          shape(6, `<a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>`) +
+          shape(7, `<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="25400"><a:solidFill><a:srgbClr val="${U}"/></a:solidFill></a:ln>`)
+      ),
+    ])
+  );
+  const external = (html: string) => Array.from(html.matchAll(/(?:fill|stroke|stop-color)="(url\((?!#)[^"]*)"/g), (m) => m[1]);
+  const html = render(deck);
+  check("file colours never become an external paint url", external(html).length === 0, JSON.stringify(external(html)));
+  check("a plain hex fill still renders", /fill="#FF0000"/i.test(html) && /fill="#00FF00"/i.test(html));
+  check("a pattern fill falls back to its default colours", /<pattern[^>]*><rect[^>]*fill="#FFFFFF"[^>]*><\/rect><rect[^>]*fill="#000000"/.test(html));
+
+  // SlideView checks again where it draws, for a deck model from anywhere.
+  const base = { left: 0, top: 0, width: 50, height: 50, borderWidth: 2, borderType: "solid", content: "", shapType: "rect", order: 0 };
+  const slide = {
+    number: 1, hidden: false, note: "", part: "ppt/slides/slide1.xml", layoutElements: [],
+    fill: { type: "color", value: U },
+    elements: [
+      { ...base, type: "shape", id: "1", fill: { type: "color", value: U }, borderColor: U },
+      { ...base, type: "shape", id: "2", fill: { type: "pattern", value: { type: "pct50", foregroundColor: U, backgroundColor: U } }, borderColor: "" },
+      { ...base, type: "shape", id: "3", fill: { type: "color", value: "#0000FF" }, borderColor: "#123456" },
+      {
+        type: "chart", id: "4", left: 0, top: 0, width: 200, height: 100, order: 0, chartType: "barChart", barDir: "col",
+        colors: [U], data: [{ key: "S", values: [{ x: "a", y: 1 }], xlabels: { 0: "a" } }],
+      },
+    ],
+  } as unknown as Deck["slides"][number];
+  const raw = renderToStaticMarkup(createElement(SlideView, { slide, deckWidth: 400, deckHeight: 300, scale: 1, themeColors: Array(6).fill(U) }));
+  check("SlideView drops url() colours in a deck model", external(raw).length === 0 && !raw.includes("x.test"), JSON.stringify(external(raw)));
+  check("SlideView keeps plain colours in a deck model", /fill="#0000FF"/.test(raw) && /stroke="#123456"/.test(raw) && /<rect[^>]*fill="#4472C4"/.test(raw));
+}
+
 const passed = results.filter(Boolean).length;
 console.log(`\n${passed}/${results.length} passed`);
 if (passed !== results.length) process.exit(1);

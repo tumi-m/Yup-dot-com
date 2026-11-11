@@ -1,12 +1,15 @@
 import JSZip from "jszip";
 import { parse as pptxToJson } from "pptxtojson";
 import type {
+  Border as PBorder,
   Element as PElement,
   Fill as PFill,
   Group as PGroup,
+  TableCell as PTableCell,
 } from "pptxtojson";
 import { analyzeSlide, slideOrder, type ChartInfo, type ParaInfo, type SlideAnalysis, type TableFlags } from "./ooxml";
 import { PptxError, PPTX_MESSAGES } from "./errors";
+import { safeCssColor } from "./sanitize";
 
 export { PptxError, PPTX_MESSAGES, pptxErrorMessage } from "./errors";
 
@@ -118,6 +121,80 @@ function isGroup(el: PElement): el is PGroup {
   return el.type === "group";
 }
 
+/*
+ * pptxtojson copies colours from the file verbatim, so a crafted deck can put
+ * url(...) or other CSS where a colour belongs. Anything that isn't plain
+ * colour syntax is dropped here ("" draws nothing); SlideView checks again
+ * where it draws.
+ */
+const color = (c: string) => safeCssColor(c, "");
+const optColor = (c: string | undefined) => (c === undefined ? c : color(c));
+
+function cleanFill(fill: Fill | undefined): Fill | undefined {
+  if (!fill) return fill;
+  switch (fill.type) {
+    case "color":
+      return color(fill.value) ? fill : null;
+    case "gradient":
+      return { ...fill, value: { ...fill.value, colors: (fill.value.colors ?? []).map((s) => ({ ...s, color: color(s.color) })) } };
+    case "pattern":
+      return {
+        ...fill,
+        value: { ...fill.value, foregroundColor: color(fill.value.foregroundColor), backgroundColor: color(fill.value.backgroundColor) },
+      };
+    default:
+      return fill;
+  }
+}
+
+type Borders = Partial<Record<"top" | "bottom" | "left" | "right", PBorder>>;
+
+function cleanBorders(b: Borders | undefined): Borders | undefined {
+  if (!b) return b;
+  const out: Borders = {};
+  for (const [k, v] of Object.entries(b) as [keyof Borders, PBorder | undefined][]) {
+    if (v) out[k] = { ...v, borderColor: color(v.borderColor) };
+  }
+  return out;
+}
+
+/** Cleans the colours of one element (a shallow copy) in place. */
+function cleanColors(el: DeckElement) {
+  const e = el as unknown as {
+    type: string;
+    fill?: Fill;
+    borderColor?: string;
+    shadow?: { color: string };
+    colors?: string[];
+    borders?: Borders;
+    data?: PTableCell[][];
+    elements?: DeckElement[];
+  };
+  if (e.fill) e.fill = cleanFill(e.fill);
+  if (typeof e.borderColor === "string") e.borderColor = color(e.borderColor);
+  if (e.shadow) e.shadow = { ...e.shadow, color: color(e.shadow.color) };
+  if (Array.isArray(e.colors)) e.colors = e.colors.map(color);
+  if (e.borders) e.borders = cleanBorders(e.borders);
+  if (Array.isArray(e.data)) {
+    e.data = e.data.map((row) =>
+      row.map((cell) => ({
+        ...cell,
+        fillColor: optColor(cell.fillColor),
+        fontColor: optColor(cell.fontColor),
+        borders: cleanBorders(cell.borders) as PTableCell["borders"],
+      }))
+    );
+  }
+  // SmartArt children are drawn like shapes but aren't walked by prepare().
+  if (e.type === "diagram" && Array.isArray(e.elements)) {
+    e.elements = e.elements.map((c) => {
+      const out = { ...c };
+      cleanColors(out);
+      return out;
+    });
+  }
+}
+
 /** Sorts shapes back-to-front and attaches paragraph metadata, recursively. */
 function prepare(elements: PElement[], info: SlideAnalysis | null, zOf?: (el: PElement) => number): DeckElement[] {
   const z = zOf ?? ((el: PElement) => info?.zOrder[el.id] ?? Number.MAX_SAFE_INTEGER);
@@ -147,6 +224,7 @@ function prepare(elements: PElement[], info: SlideAnalysis | null, zOf?: (el: PE
     } else if (info && el.type === "chart" && info.charts[el.id]) {
       out.chartInfo = info.charts[el.id];
     }
+    cleanColors(out);
     return out;
   });
 }
@@ -230,7 +308,7 @@ export async function parsePptx(input: ArrayBuffer | Uint8Array): Promise<Deck> 
     slides.push({
       number: slides.length + 1,
       hidden: info?.hidden ?? false,
-      fill: src.fill ?? null,
+      fill: cleanFill(src.fill ?? null) ?? null,
       elements: prepare(src.elements ?? [], info),
       layoutElements: info ? orderLayoutElements(src.layoutElements ?? [], info) : prepare(src.layoutElements ?? [], null),
       note: src.note ?? "",
@@ -245,6 +323,7 @@ export async function parsePptx(input: ArrayBuffer | Uint8Array): Promise<Deck> 
     width: json.size.width,
     height: json.size.height,
     slides,
-    themeColors: json.themeColors ?? [],
+    // Accents colour charts and built-in table styles; keep their positions.
+    themeColors: (json.themeColors ?? []).map((c) => safeCssColor(c, "#000000")),
   };
 }
