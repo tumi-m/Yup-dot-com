@@ -95,6 +95,14 @@ async function collect(gen: AsyncGenerator<string, { doneReason: string | null }
   }
   return { text, reason: r.value.doneReason };
 }
+async function unsent(p: Promise<unknown>): Promise<boolean | string> {
+  try {
+    await p;
+    return "ok";
+  } catch (e) {
+    return e instanceof OllamaError ? e.unsent : `other:${(e as Error).message}`;
+  }
+}
 async function kind(p: Promise<unknown>) {
   try {
     await p;
@@ -135,6 +143,17 @@ async function kind(p: Promise<unknown>) {
 {
   const { fn, calls } = fakeFetch([() => { throw new TypeError("fetch failed"); }, () => { throw new TypeError("fetch failed"); }]);
   check("network failure retried once, then unavailable", (await kind(collect(streamChat(cfg, { messages: [] }, { fetch: fn, retryDelayMs: 5 })))) === "unavailable" && calls.length === 2);
+}
+{
+  // Whether the model may have run decides if the site-wide count is given back.
+  const run = (...rs: Parameters<typeof fakeFetch>[0]) => unsent(collect(streamChat(cfg, { messages: [] }, { fetch: fakeFetch(rs).fn, retryDelayMs: 5 })));
+  const fail = () => { throw new TypeError("fetch failed"); };
+  check("unsent: no connection", (await run(fail, fail)) === true);
+  check("unsent: 503 then no connection", (await run(() => new Response("busy", { status: 503 }), fail)) === true);
+  check("unsent: 401", (await run(() => new Response("no", { status: 401 }))) === true);
+  check("sent: 500 then no connection (the first may have run)", (await run(() => new Response("oops", { status: 500 }), fail)) === false);
+  check("sent: 429 and 400", (await run(() => new Response("x", { status: 429 }))) === false && (await run(() => new Response("x", { status: 400 }))) === false);
+  check("sent: in-stream error", (await run(() => new Response(streamOf('{"error":"overloaded"}\n', [8]), { status: 200 }))) === false);
 }
 {
   const { fn } = fakeFetch([() => new Response(streamOf('{"message":{"content":"a"},"done":false}\n{"error":"overloaded"}\n', [8]), { status: 200 })]);

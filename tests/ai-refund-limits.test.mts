@@ -1,14 +1,20 @@
 // Chat with PDF: a question that gets no answer text gives back the visitor's
-// daily allowance, but not the per-minute burst or the site-wide day. Those
-// bound calls to the model, which did the work either way; if they were
-// given back too, a loop of stopped or empty questions would never hit them.
+// daily allowance (the first few a day), but not the per-minute burst or the
+// site-wide day. Those bound calls to the model, which did the work either
+// way; if they were given back too, a loop of stopped or empty questions
+// would never hit them. When the model was never reached, the site-wide day
+// is given back as well.
+import net from "node:net";
 import http from "node:http";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 
 // The route loads lib/usage.ts through require(); so must this test, or it
 // would get a second copy whose store the route never sees.
-const { memoryUsageStore, setUsageStore } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
+const usage = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
+const { memoryUsageStore, setUsageStore } = usage;
+// A fixed time, so a run never straddles a minute and splits the burst.
+const T0 = Date.UTC(2026, 0, 1, 12, 0, 10);
 
 let failed = 0;
 function check(name: string, ok: boolean, detail: unknown = "") {
@@ -67,7 +73,7 @@ const remaining = async (ip: string) =>
 {
   // Burst: two a minute. Two unanswered questions still use them up.
   process.env.AI_BURST_PER_MINUTE = "2";
-  setUsageStore(memoryUsageStore());
+  setUsageStore(memoryUsageStore(() => T0));
   const ip = "192.0.2.81";
   const start = await remaining(ip);
 
@@ -89,13 +95,41 @@ const remaining = async (ip: string) =>
   // Site-wide: two a day. Unanswered questions still use them up.
   delete process.env.AI_BURST_PER_MINUTE;
   process.env.AI_GLOBAL_DAILY_LIMIT = "2";
-  setUsageStore(memoryUsageStore());
+  setUsageStore(memoryUsageStore(() => T0));
   calls = 0;
   const a = await ask("192.0.2.82", "EMPTY please");
   const b = await ask("192.0.2.83", "EMPTY please");
   const c = await ask("192.0.2.84", "EMPTY please");
   check("two unanswered questions site-wide reach the model", a.status === 200 && b.status === 200 && calls === 2, { a: a.status, b: b.status, calls });
   check("the site-wide day still counts them: the third is busy", c.status === 503 && c.events[0]?.reason === "busy", c);
+  delete process.env.AI_GLOBAL_DAILY_LIMIT;
+}
+{
+  // Only the first 3 unanswered a day (the guest allowance) are given back.
+  setUsageStore(memoryUsageStore(() => T0));
+  const ip = "192.0.2.85";
+  for (let i = 0; i < 4; i++) await ask(ip, "EMPTY please");
+  check("the fourth unanswered question costs an answer", (await remaining(ip)) === 2, await remaining(ip));
+}
+{
+  // Ollama can't be reached: nothing ran, so the site-wide day is given back.
+  const closed = net.createServer();
+  await new Promise<void>((r) => closed.listen(0, "127.0.0.1", r));
+  const port = (closed.address() as AddressInfo).port;
+  await new Promise((r) => closed.close(r));
+  const host = process.env.OLLAMA_HOST;
+  process.env.OLLAMA_HOST = `http://127.0.0.1:${port}`;
+  process.env.AI_GLOBAL_DAILY_LIMIT = "1";
+  const store = memoryUsageStore(() => T0);
+  setUsageStore(store);
+  const errors = console.error;
+  console.error = () => {};
+  const a = await ask("192.0.2.86", "hello");
+  const b = await ask("192.0.2.87", "hello");
+  console.error = errors;
+  check("model unreachable: neither question is busy", a.status === 200 && b.status === 200, { a: a.status, b: b.status });
+  check("and the site-wide day is given back", (await store.count("site", "ai", "day")) === 0, await store.count("site", "ai", "day"));
+  process.env.OLLAMA_HOST = host;
   delete process.env.AI_GLOBAL_DAILY_LIMIT;
 }
 
