@@ -321,7 +321,9 @@ export type AiClaim =
  * Claims one AI answer: the caller's day (and month), then the per-minute
  * burst, then the site-wide day. A refused claim leaves every count as it
  * was (the burst counts only answers that passed the daily check); `refund`
- * gives the answer back when none was delivered.
+ * gives back the caller's day (and month) when no answer was delivered. The
+ * burst and site-wide counts stay: the model still did the work, and they
+ * are what bound calls to it.
  */
 export async function claimAiAnswer(subject: string, tier: Tier, opts: { env?: NodeJS.ProcessEnv; store?: UsageStore } = {}): Promise<AiClaim> {
   const s = opts.store ?? usageStore();
@@ -369,8 +371,7 @@ export async function claimAiAnswer(subject: string, tier: Tier, opts: { env?: N
     refund: async () => {
       if (refunded) return;
       refunded = true;
-      await giveBack();
-      await s.refund(GLOBAL_SUBJECT, "ai", "day");
+      for (const w of taken) if (w !== "minute") await s.refund(subject, "ai", w);
     },
   };
 }

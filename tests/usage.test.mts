@@ -294,9 +294,24 @@ const claims = async (n: number, subject: string, tier: Tier, store: UsageStore,
   if (a.ok) {
     await a.refund();
     await a.refund();
-    check("refund: gives back the user's and the site's answer, once", (await store.count("u:a", "ai", "day")) === 0 && (await store.count("site", "ai", "day")) === 1);
+    check("refund: gives back the user's answer, once", (await store.count("u:a", "ai", "day")) === 0);
+    check("refund: the site's count stays (the model still ran)", (await store.count("site", "ai", "day")) === 2);
   }
-  check("global: after a refund, one more fits", (await claimAiAnswer("u:c", "pro", { store, env })).ok);
+  check("global: a refund doesn't make room for one more", !(await claimAiAnswer("u:c", "pro", { store, env })).ok);
+}
+{
+  // Refund: the burst count stays too, so unanswered questions can't loop past it.
+  const c = clock();
+  const store = memoryUsageStore(c.now);
+  const env = { AI_BURST_PER_MINUTE: "2", AI_LIMIT_PRO_MONTH: "5" } as unknown as NodeJS.ProcessEnv;
+  for (let i = 0; i < 2; i++) {
+    const r = await claimAiAnswer("u:r", "pro", { store, env });
+    if (r.ok) await r.refund();
+  }
+  const third = await claimAiAnswer("u:r", "pro", { store, env });
+  check("refund: burst still counts refunded answers", !third.ok && third.status === 429 && third.reason === "burst", third);
+  check("refund: day and month given back", (await store.count("u:r", "ai", "day")) === 0 && (await store.count("u:r", "ai", "month")) === 0);
+  check("refund: minute count kept", (await store.count("u:r", "ai", "minute")) === 2);
 }
 
 // ---------- daily allowances ----------

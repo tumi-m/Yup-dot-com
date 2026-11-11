@@ -99,7 +99,8 @@ one Vercel's edge reports (`x-real-ip`), never the first entry of
 `TRUSTED_PROXY_HOPS`; without it every guest shares one allowance. Without
 `SUPABASE_SERVICE_ROLE_KEY` they are counted in server memory instead (fine for
 local dev, not for Vercel). AI also has a burst limit (6 a minute) and a
-site-wide daily cap; an answer that never arrives is given back. An edit is
+site-wide daily cap; an answer that never arrives is given back to the
+daily allowance, but still counts toward those two. An edit is
 one distinct document saved or downloaded per UTC day; the same unchanged
 document again is free.
 
