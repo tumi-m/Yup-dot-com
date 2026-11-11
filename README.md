@@ -409,7 +409,12 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
 - **Cross-site requests.** Routes that spend an allowance or change an
   account refuse requests from other sites' pages (`Sec-Fetch-Site`,
   `Origin`) and bodies that aren't JSON (`lib/cross-site.ts`), so another
-  site can't use up a guest's free edit, AI answers or downloads.
+  site can't use up a guest's free edit, AI answers or downloads. An email
+  link with a token hash works in any browser, so `/auth/callback` only
+  keeps it (an HttpOnly cookie) and signs in when Continue on
+  `/auth/confirm` posts from this site (`lib/auth-callback.ts`): another
+  site can't open an attacker's link in your browser and sign you in to
+  the attacker's account.
 - **Limits per address** (guests' allowances, tester code tries) count the
   address Vercel's edge saw, or the one a declared proxy appended
   (`TRUSTED_PROXY_HOPS`), never one the visitor wrote into
@@ -629,7 +634,10 @@ npm install
    `<a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Reset password</a>`
    (the app's address already has a `?`), so a reset link works in any
    browser, a phone's mail app too. The default link only works in the
-   browser that asked for it.
+   browser that asked for it. A link like this opens a short page with a
+   Continue button first (`/auth/confirm`), so a link someone else sends
+   can't sign you in to their account; nothing in the template changes for
+   that.
 2. **Paystack** — see [Billing setup](#billing-setup-paystack).
 3. **Env** — copy `.env.example` to `.env.local` and fill in the values.
 4. **Run** — `npm run dev`, then open <http://localhost:3000>.
