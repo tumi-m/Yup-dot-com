@@ -368,7 +368,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     if (!res?.ok) {
       // The button was disabled while starting; give focus back to it.
       focusNext.current = "download";
-      if (res?.status === 429) {
+      // A 429 for too many links in a minute passes; only the daily quota stays.
+      if (res?.status === 429 && data?.reason === "quota") {
         setLimit({ upgrade: !!data?.upgrade });
         if (data?.upgrade) setUpsell("downloads");
         else setError(data?.error ?? "You've used today's downloads.");

@@ -111,6 +111,48 @@ const refused = (r: Request, json?: boolean) => refuseCrossSite(r, { json })?.st
   globalThis.fetch = realFetch;
 }
 
+// Download links resolve X, TikTok and Instagram posts the same way, so they
+// count as lookups too: a failed resolve used to cost nothing, and kept
+// calling X after today's downloads were spent.
+{
+  const store = memoryUsageStore();
+  setUsageStore(store);
+  const { MEDIA_LOOKUPS_PER_MINUTE, usageSubject } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
+  const { MEDIA_BUCKET } = await import("../lib/media-refund.ts");
+  const { LIMITS } = await import("../lib/limits.ts");
+  const link = await import("../app/api/media/link/route.ts");
+  const headers = (ip: string) => ({ ...JSON_TYPE, origin: "http://localhost", "sec-fetch-site": "same-origin", "x-forwarded-for": ip });
+  const ask = (ip: string) =>
+    link.POST(new Request("http://localhost/api/media/link", {
+      method: "POST",
+      headers: headers(ip),
+      body: JSON.stringify({ url: "https://x.com/someone/status/1234567890", kind: "mp4", height: 360 }),
+    }));
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => (calls++, new Response("", { status: 404 }))) as typeof fetch;
+  const statuses: number[] = [];
+  for (let i = 0; i < MEDIA_LOOKUPS_PER_MINUTE; i++) statuses.push((await ask("192.0.2.79")).status);
+  const callsBefore = calls;
+  const last = await ask("192.0.2.79");
+  statuses.push(last.status);
+  check(`download links: ${MEDIA_LOOKUPS_PER_MINUTE} lookups a minute, then 429 without calling out`,
+    statuses.slice(0, -1).every((s) => s !== 429) && statuses.at(-1) === 429 && callsBefore > 0 && calls === callsBefore, `${statuses.join(",")} calls ${callsBefore}→${calls}`);
+  check("…and it isn't mistaken for the daily limit", (await last.json()).reason !== "quota");
+  check("another visitor still gets theirs", (await ask("192.0.2.80")).status !== 429);
+
+  // Today's downloads spent: refused before X is called.
+  const ip = "192.0.2.81";
+  const subject = usageSubject(new Request("http://l", { headers: headers(ip) }), null);
+  for (let i = 0; i < LIMITS.guest.mediaDownloadsPerDay; i++) await store.consume(subject, MEDIA_BUCKET, LIMITS.guest.mediaDownloadsPerDay, "day");
+  const spentBefore = calls;
+  const spent = await ask(ip);
+  const body = await spent.json();
+  check("download links: today's downloads spent, 429 without calling out",
+    spent.status === 429 && body.reason === "quota" && calls === spentBefore, `${spent.status} ${JSON.stringify(body)} calls ${spentBefore}→${calls}`);
+  globalThis.fetch = realFetch;
+}
+
 setUsageStore(null);
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

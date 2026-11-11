@@ -393,15 +393,21 @@ export function consumeDaily(subject: string, bucket: string, limit: number, sto
   return store.consume(subject, bucket, limit, "day");
 }
 
-/** Link previews and playlist lists a minute, per person or guest IP. */
+/** True when today's `bucket` allowance is already used up. A cheap early no; consumeDaily still decides. */
+export async function dailySpent(subject: string, bucket: string, limit: number, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.count(subject, bucket, "day")) >= limit;
+}
+
+/** Link previews, playlist lists and download links a minute, per person or guest IP. */
 export const MEDIA_LOOKUPS_PER_MINUTE = 20;
 export const MEDIA_LOOKUP_MESSAGE = "Too many links at once. Try again in a minute.";
 
 /**
- * Counts one link lookup (/api/media/info, /api/media/playlist). Each makes
- * the server call X, TikTok, Instagram or the media worker, so without a
- * limit anyone could use the site as a free lookup service and get its
- * address blocked. False when this minute's lookups are used up.
+ * Counts one link lookup (/api/media/info, /api/media/playlist, and an X,
+ * TikTok or Instagram link at /api/media/link). Each makes the server call
+ * X, TikTok, Instagram or the media worker, so without a limit anyone could
+ * use the site as a free lookup service and get its address blocked. False
+ * when this minute's lookups are used up.
  */
 export async function claimMediaLookup(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
   return (await store.consume(subject, "media-lookup", MEDIA_LOOKUPS_PER_MINUTE, "minute")) >= 0;
