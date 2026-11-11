@@ -6,7 +6,7 @@
 // keeps what came after it. Events for an older subscription still don't
 // touch the current one.
 import {
-  applyCharge, handlePaystackEvent, resolveAccess, summarize,
+  applyCharge, checkoutMetadata, handlePaystackEvent, resolveAccess, summarize,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
 import { planStatus } from "../lib/billing-ui.ts";
@@ -42,14 +42,14 @@ function setup(extra: Partial<BillingRow> = {}) {
     },
     async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
   };
-  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), now: () => clock };
+  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock };
   const deliver = (event: string, data: unknown) => {
     const raw = JSON.stringify({ event, data });
     return handlePaystackEvent(JSON.parse(raw), raw, deps);
   };
   const firstCharge = (ref: string) => applyCharge({
     status: "success", reference: ref, amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer, metadata: JSON.stringify({ user_id: USER, plan: "pro", mode: "subscription" }),
+    plan: "PLN_pro", customer, metadata: JSON.stringify(checkoutMetadata(ref, { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test")),
   }, deps);
   const lines = () => {
     const r = db.get(USER)!;
@@ -100,13 +100,16 @@ for (const [event, data, status] of [
   check("then a cancel: non-renewing", s.row().subscription_status === "non-renewing");
 }
 
-// The create lands before the first charge (the webhook beat the return): the code stays.
+// The create lands before the first charge (the webhook beat the return): it
+// waits for Paystack's retry, which finds the subscription the charge started.
 {
   const s = setup();
-  await s.deliver("subscription.create", create("SUB_B"));
+  const early = await s.deliver("subscription.create", create("SUB_B"));
   await s.firstCharge("pw_first");
-  check("create, then the first charge: code and status kept",
-    s.row().paystack_subscription_code === "SUB_B" && s.row().subscription_status === "active", s.row());
+  const retried = await s.deliver("subscription.create", create("SUB_B"));
+  check("create, then the first charge, then the retried create: code and status kept",
+    early.status === "retry" && retried.status === "applied" &&
+      s.row().paystack_subscription_code === "SUB_B" && s.row().subscription_status === "active", s.row());
 }
 
 // Subscribing again after an older subscription ended: its code no longer counts.

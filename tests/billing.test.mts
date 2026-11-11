@@ -5,7 +5,7 @@
  * network.
  */
 import {
-  addMonths, applyCharge, checkNewMember, handlePaystackEvent, hasLiveSubscription, ownPlan,
+  addMonths, applyCharge, checkNewMember, checkoutMetadata, handlePaystackEvent, hasLiveSubscription, ownPlan,
   resolveAccess, signPaystackBody, summarize, verifyPaystackSignature, RENEWAL_GRACE_MS,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
@@ -65,7 +65,7 @@ function fakeStore(rows: BillingRow[]) {
 
 let clock = new Date("2026-10-04T08:00:00Z");
 const deps = (store: BillingStore): EventDeps => ({
-  store, planForCode: (c) => planForCode(c, CODES), now: () => clock,
+  store, planForCode: (c) => planForCode(c, CODES), checkoutSecret: SECRET, now: () => clock,
 });
 const deliver = (store: BillingStore, event: string, data: unknown) => {
   const raw = JSON.stringify({ event, data });
@@ -93,7 +93,7 @@ const deliver = (store: BillingStore, event: string, data: unknown) => {
 const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   status: "success", reference: ref, amount, currency: "ZAR", paid_at: clock.toISOString(),
   customer: { customer_code: "CUS_user", email: "u@x.co" },
-  metadata: { user_id: USER, plan, mode: "once", months },
+  metadata: checkoutMetadata(ref, { user_id: USER, plan: plan as "pro", mode: "once", months: months as 1 }, SECRET),
 });
 {
   clock = new Date("2026-10-04T08:00:00Z");
@@ -122,7 +122,7 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   check("unsuccessful charge ignored", failed.status === "ignored");
   const usd = await deliver(store, "charge.success", { ...onceTx("pw_f", "pro", 1, 4900), currency: "USD" });
   check("non-ZAR charge ignored", usd.status === "ignored");
-  const strMeta = await applyCharge({ ...onceTx("pw_g", "team", 1, 19900), metadata: JSON.stringify(onceTx("", "team", 1, 0).metadata) }, deps(store));
+  const strMeta = await applyCharge({ ...onceTx("pw_g", "team", 1, 19900), metadata: JSON.stringify(onceTx("pw_g", "team", 1, 19900).metadata) }, deps(store));
   // 396 days of Pro left are worth 396 × 49/199 ≈ 97.5 days of Team, then the month.
   check("metadata as a JSON string is understood; a different plan carries the time left over",
     strMeta.status === "applied" && store.db.get(USER)!.prepaid_plan === "team" && store.db.get(USER)!.paid_until === "2027-02-09T20:10:51.256Z",
@@ -176,7 +176,7 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const firstCharge = {
     status: "success", reference: "pw_s1", amount: 4900, currency: "ZAR", paid_at: "2026-10-04T08:00:00.000Z",
     customer: { customer_code: "CUS_u", email: "u@x.co" }, plan: { plan_code: "PLN_pro", name: "Pro" },
-    metadata: { user_id: USER, plan: "pro", mode: "subscription" },
+    metadata: checkoutMetadata("pw_s1", { user_id: USER, plan: "pro", mode: "subscription" }, SECRET),
   };
   const a = await deliver(store, "charge.success", firstCharge);
   let u = store.db.get(USER)!;
@@ -264,17 +264,27 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   check("charge from an unknown customer is ignored", stranger.status === "ignored");
 }
 
-// subscription.create can beat charge.success: matched by email.
+// subscription.create can beat charge.success: it waits for Paystack's retry
+// (never matched by email: anyone can pay with someone else's email).
 {
   clock = new Date("2026-10-04T08:00:00Z");
   const store = fakeStore([row(USER, "u@x.co")]);
-  const r = await deliver(store, "subscription.create", {
+  const created = {
     subscription_code: "SUB_9", email_token: "t9", status: "active", next_payment_date: "2026-11-04T08:00:00.000Z",
     plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_9", email: "U@X.co" },
+  };
+  const early = await deliver(store, "subscription.create", created);
+  check("subscription.create before charge.success: retried later, nothing changed", early.status === "retry" &&
+    store.db.get(USER)!.subscription_plan === null && store.events.size === 0, JSON.stringify(early));
+  await deliver(store, "charge.success", {
+    status: "success", reference: "pw_s9", amount: 19900, currency: "ZAR", paid_at: clock.toISOString(),
+    customer: { customer_code: "CUS_9" }, plan: { plan_code: "PLN_team" },
+    metadata: checkoutMetadata("pw_s9", { user_id: USER, plan: "team", mode: "subscription" }, SECRET),
   });
+  const r = await deliver(store, "subscription.create", created);
   const u = store.db.get(USER)!;
-  check("subscription.create before charge.success matches by email", r.status === "applied" &&
-    u.subscription_plan === "team" && u.paystack_customer_code === "CUS_9" && ownPlan(u, clock) === "team");
+  check("…and the retry after the first charge applies", r.status === "applied" && u.subscription_plan === "team" &&
+    u.paystack_subscription_code === "SUB_9" && u.paystack_customer_code === "CUS_9" && ownPlan(u, clock) === "team");
 }
 
 // A new subscription after a cancelled one renews a month after its own first charge.
@@ -287,7 +297,7 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const r = await deliver(store, "charge.success", {
     status: "success", reference: "pw_re", amount: 19900, currency: "ZAR", paid_at: "2026-10-17T08:00:00.000Z",
     customer: { customer_code: "CUS_u" }, plan: { plan_code: "PLN_team" },
-    metadata: { user_id: USER, plan: "team", mode: "subscription" },
+    metadata: checkoutMetadata("pw_re", { user_id: USER, plan: "team", mode: "subscription" }, SECRET),
   });
   const u = store.db.get(USER)!;
   check("resubscribing after a cancel renews a month after the new charge", r.status === "applied" &&

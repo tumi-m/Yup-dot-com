@@ -786,6 +786,10 @@ Paystack accounts in South Africa charge in ZAR only.
 The webhook handles `charge.success`, `subscription.create`,
 `subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
 `invoice.update`. Each delivery is applied once (`billing_events` records them).
+Only payments started by this site's checkout change a plan: checkout signs
+its metadata with a key derived from the secret key (see
+[SECURITY.md](SECURITY.md#payments)). A `subscription.create` that arrives
+before its first charge gets a 503, so Paystack sends it again.
 
 ## Tester access (free Pro or Team for testers)
 

@@ -49,9 +49,7 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
     async findUserId(by) {
       const [column, value] = by.subscriptionCode
         ? ["paystack_subscription_code", by.subscriptionCode]
-        : by.customerCode
-          ? ["paystack_customer_code", by.customerCode]
-          : ["email", by.email?.toLowerCase()];
+        : ["paystack_customer_code", by.customerCode];
       if (!value) return null;
       const { data, error } = await admin.from("profiles").select("id").eq(column, value).limit(1);
       fail("find customer", error);

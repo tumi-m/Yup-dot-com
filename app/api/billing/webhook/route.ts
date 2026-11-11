@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
  * Paystack webhook. Set https://<domain>/api/billing/webhook as the Webhook
  * URL in the Paystack dashboard. Requests are authenticated by an
  * HMAC-SHA512 of the raw body with the secret key. A non-2xx response makes
- * Paystack retry, so failures to record return 500; anything we deliberately
- * ignore returns 200.
+ * Paystack retry, so failures to record return 500, and an event that can't
+ * apply yet (a subscription.create before its first charge) 503; anything we
+ * deliberately ignore returns 200.
  */
 export async function POST(request: Request) {
   const secret = process.env.PAYSTACK_SECRET_KEY?.trim();
@@ -32,7 +33,12 @@ export async function POST(request: Request) {
     const result = await handlePaystackEvent(event, raw, {
       store: supabaseBillingStore(),
       planForCode: (c) => planForCode(c),
+      checkoutSecret: secret,
     });
+    if (result.status === "retry") {
+      console.info("paystack event deferred", event.event, result.reason);
+      return json({ error: "Not processed yet." }, 503);
+    }
     if (result.status === "ignored") console.info("paystack event ignored", event.event, result.reason);
     return json({ received: true, status: result.status });
   } catch (err) {

@@ -5,7 +5,7 @@
 // now waits until the row grants what was bought and names the plan in use.
 import { readFileSync } from "node:fs";
 import {
-  applyCharge, confirmCharge,
+  applyCharge, checkoutMetadata, confirmCharge,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
 import { paymentOutcome, paymentPlanName } from "../lib/billing-ui.ts";
@@ -33,12 +33,12 @@ function setup(extra: Partial<BillingRow> = {}) {
     async findUserId() { return USER; },
     async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
   };
-  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), now: () => clock };
+  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock };
   return { db, events, store, deps };
 }
 const once = (ref: string, plan = "pro", months = 1, amount = 4900) => ({
   status: "success", reference: ref, amount, currency: "ZAR", paid_at: clock.toISOString(),
-  customer: { customer_code: "CUS_u" }, metadata: { user_id: USER, plan, mode: "once", months },
+  customer: { customer_code: "CUS_u" }, metadata: checkoutMetadata(ref, { user_id: USER, plan: plan as "pro", mode: "once", months: months as 1 }, "sk_test"),
 });
 
 // The return comes first: the charge is applied here, and the answer names the new plan.
@@ -84,7 +84,7 @@ const once = (ref: string, plan = "pro", months = 1, amount = 4900) => ({
   const s = setup();
   const tx = {
     status: "success", reference: "pw_sub", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer: { customer_code: "CUS_u" }, metadata: { user_id: USER, plan: "pro", mode: "subscription" },
+    plan: "PLN_pro", customer: { customer_code: "CUS_u" }, metadata: checkoutMetadata("pw_sub", { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test"),
   };
   await s.store.claimEvent("charge:pw_sub", "charge.success");
   check("subscription, webhook still writing: pending", (await confirmCharge(tx, USER, "free", s.deps)).status === "pending");

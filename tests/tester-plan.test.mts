@@ -6,7 +6,7 @@
 // watermark, AI and media allowances follow the plan, so they unlock too.
 import { readFileSync } from "node:fs";
 import {
-  applyCharge, ownPlan, paidPlan, resolveAccess, summarize,
+  applyCharge, checkoutMetadata, ownPlan, paidPlan, resolveAccess, summarize,
   type BillingPatch, type BillingRow, type BillingStore,
 } from "../lib/billing.ts";
 import { cardOffer, payOnceBlock, planBadge, planOnCards, planStatus, planTitle, subscribeBlock } from "../lib/billing-ui.ts";
@@ -172,8 +172,8 @@ check("the seat lookup goes by what is paid, not by tester time", /paidPlan\(row
   };
   await applyCharge({
     status: "success", reference: "pw_t1", amount: 4900, currency: "ZAR", paid_at: now.toISOString(),
-    customer: { customer_code: "CUS_t" }, metadata: { user_id: s.id, plan: "pro", mode: "once", months: 1 },
-  }, { store: db, planForCode: () => null, now: () => now });
+    customer: { customer_code: "CUS_t" }, metadata: checkoutMetadata("pw_t1", { user_id: s.id, plan: "pro", mode: "once", months: 1 }, "sk_test"),
+  }, { store: db, planForCode: () => null, checkoutSecret: "sk_test", now: () => now });
   check("a month bought on tester time: a full month from today", saved.prepaid_plan === "pro" && saved.paid_until === "2026-11-19T10:00:00.000Z", saved.paid_until);
   check("tester time is not touched by a payment", saved.tester?.proUntil === s.tester?.proUntil);
   const after = resolve(saved, [], new Date(now.getTime() + 31 * day + 1));

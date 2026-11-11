@@ -337,7 +337,7 @@ export interface BillingStore {
   /** Undoes a claim after a failure so Paystack's retry is processed. */
   releaseEvent(key: string): Promise<void>;
   getRow(userId: string): Promise<BillingRow | null>;
-  findUserId(by: { customerCode?: string; subscriptionCode?: string; email?: string }): Promise<string | null>;
+  findUserId(by: { customerCode?: string; subscriptionCode?: string }): Promise<string | null>;
   updateRow(userId: string, patch: BillingPatch): Promise<void>;
 }
 
@@ -345,13 +345,17 @@ export interface EventDeps {
   store: BillingStore;
   /** Maps a Paystack plan code (PLN_…) to our plan. */
   planForCode: (code: string | null | undefined) => PaidPlanId | null;
+  /** The Paystack secret key: checks the signature checkout puts on its metadata. */
+  checkoutSecret: string;
   now?: () => Date;
 }
 
 export type EventResult =
   | { status: "applied"; userId: string; key: string }
   | { status: "duplicate"; key: string }
-  | { status: "ignored"; reason: string };
+  | { status: "ignored"; reason: string }
+  /** Not yet: answer non-2xx so Paystack delivers it again later. */
+  | { status: "retry"; reason: string };
 
 /** Paystack returns metadata as an object, or as the string it was sent as. */
 export function parseMetadata(meta: unknown): Record<string, unknown> {
@@ -389,6 +393,46 @@ export interface CheckoutMetadata {
   months?: PrepaidMonths;
 }
 
+/*
+ * A Paystack-signed charge only says Paystack took a payment. Whoever starts
+ * a payment chooses its email and metadata, and Paystack keeps one customer
+ * per email, so neither says the payment came from our checkout or is for
+ * the account it names. Checkout signs what it sold (who, which plan, which
+ * term) together with the payment's reference, under a key derived from the
+ * Paystack secret, and only a charge carrying that signature starts or
+ * changes a plan. Any other
+ * charge can only renew a subscription the customer's row already holds.
+ */
+const checkoutKey = (secret: string) => createHmac("sha256", secret).update("pdf-wizard/checkout/v1").digest();
+
+function signCheckout(reference: string, meta: CheckoutMetadata, secret: string): string {
+  const fields = [reference, meta.user_id, meta.mode, meta.plan, meta.mode === "once" ? String(meta.months) : ""];
+  return createHmac("sha256", checkoutKey(secret)).update(fields.join("|")).digest("hex");
+}
+
+/** The metadata checkout sends to Paystack, with its signature. */
+export function checkoutMetadata(reference: string, meta: CheckoutMetadata, secret: string) {
+  return { ...meta, sig: signCheckout(reference, meta, secret) };
+}
+
+/** What our checkout sold for this reference, or null when the charge didn't come from it. */
+function signedCheckout(reference: string, meta: Record<string, unknown>, secret: string): CheckoutMetadata | null {
+  if (!secret || typeof meta.sig !== "string" || !/^[0-9a-f]{64}$/.test(meta.sig)) return null;
+  if (typeof meta.user_id !== "string" || !UUID_RE.test(meta.user_id) || !isPaidPlan(meta.plan)) return null;
+  let sold: CheckoutMetadata;
+  if (meta.mode === "once") {
+    const months = Number(meta.months);
+    if (!isPrepaidMonths(months)) return null;
+    sold = { user_id: meta.user_id, plan: meta.plan, mode: "once", months };
+  } else if (meta.mode === "subscription") {
+    sold = { user_id: meta.user_id, plan: meta.plan, mode: "subscription" };
+  } else {
+    return null;
+  }
+  const expected = Buffer.from(signCheckout(reference, sold, secret), "hex");
+  return timingSafeEqual(Buffer.from(meta.sig, "hex"), expected) ? sold : null;
+}
+
 /**
  * Applies a successful charge — from the `charge.success` webhook or from
  * verifying the reference on return from checkout. Both paths share the
@@ -402,25 +446,29 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
   if (tx.currency && tx.currency !== CURRENCY) return { status: "ignored", reason: "currency" };
 
   const meta = parseMetadata(tx.metadata);
-  const metaUser = typeof meta.user_id === "string" && UUID_RE.test(meta.user_id) ? meta.user_id : null;
+  const sold = signedCheckout(tx.reference, meta, deps.checkoutSecret);
   const customerCode: string | null = tx.customer?.customer_code ?? null;
   const amount = Number(tx.amount);
 
   let kind: { mode: "once"; plan: PaidPlanId; months: PrepaidMonths } | { mode: "subscription"; plan: PaidPlanId };
-  if (meta.mode === "once") {
-    const months = Number(meta.months);
-    if (!isPaidPlan(meta.plan) || !isPrepaidMonths(months)) return { status: "ignored", reason: "bad metadata" };
-    if (amount !== toSubunit(prepaidPrice(meta.plan, months))) return { status: "ignored", reason: "amount mismatch" };
-    kind = { mode: "once", plan: meta.plan, months };
+  if (sold?.mode === "once") {
+    const months = sold.months!;
+    if (amount !== toSubunit(prepaidPrice(sold.plan, months))) return { status: "ignored", reason: "amount mismatch" };
+    kind = { mode: "once", plan: sold.plan, months };
+  } else if (meta.mode === "once") {
+    // A once-off payment our checkout didn't start: there's nothing it could renew.
+    return { status: "ignored", reason: "not our checkout" };
   } else {
     const plan = deps.planForCode(planCodeOf(tx));
     if (!plan) return { status: "ignored", reason: "no known plan" };
+    if (sold && sold.plan !== plan) return { status: "ignored", reason: "plan mismatch" };
     if (!(amount >= toSubunit(PLANS[plan].priceMonthly))) return { status: "ignored", reason: "amount mismatch" };
     kind = { mode: "subscription", plan };
   }
 
-  const userId =
-    metaUser ?? (customerCode ? await deps.store.findUserId({ customerCode }) : null);
+  // Our checkout names the account. Anything else is a renewal, found by the
+  // customer it charged, whatever its metadata says.
+  const userId = sold?.user_id ?? (customerCode ? await deps.store.findUserId({ customerCode }) : null);
   if (!userId) return { status: "ignored", reason: "unknown customer" };
 
   const key = `charge:${tx.reference}`;
@@ -428,8 +476,20 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
   try {
     const row = await deps.store.getRow(userId);
     if (!row) throw new Error(`No profile for ${userId}`);
+    // A renewal is for the subscription the row already holds, on its plan.
+    // It only moves the period on: someone paying with this customer's email
+    // for another plan changes nothing here.
+    if (!sold && (row.subscription_plan !== kind.plan || !row.paystack_subscription_code)) {
+      await deps.store.releaseEvent(key);
+      return { status: "ignored", reason: "no subscription to renew" };
+    }
     const patch: BillingPatch = { plan: kind.plan };
-    if (customerCode) patch.paystack_customer_code = customerCode;
+    if (sold && customerCode && customerCode !== row.paystack_customer_code) {
+      // Paystack keeps one customer per email. One that another account holds
+      // (an email given up and signed up with again) stays with that account.
+      const holder = await deps.store.findUserId({ customerCode });
+      if (!holder || holder === userId) patch.paystack_customer_code = customerCode;
+    }
 
     if (kind.mode === "once") {
       // The new term starts after the time left on the current one. On a
@@ -446,8 +506,8 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     } else {
       const paidAt = tx.paid_at ? new Date(tx.paid_at) : now;
       const end = iso(addMonths(Number.isNaN(paidAt.getTime()) ? now : paidAt, 1));
-      const firstCharge = metaUser !== null;
-      patch.subscription_plan = kind.plan;
+      const firstCharge = sold !== null;
+      if (firstCharge) patch.subscription_plan = kind.plan;
       // A new subscription renews a month after its first charge, whatever
       // an older, ended one ran to.
       patch.current_period_end = firstCharge ? end : later(row.current_period_end, end);
@@ -519,7 +579,12 @@ export async function handlePaystackEvent(
 
   if (type === "charge.success") return applyCharge(data, deps);
 
-  const handlers: Record<string, () => Promise<{ code: string | null; userId: string | null; patch: (row: BillingRow) => BillingPatch | null }>> = {
+  const handlers: Record<string, () => Promise<{
+    code: string | null;
+    userId: string | null;
+    plan?: PaidPlanId | null;
+    patch: (row: BillingRow) => BillingPatch | null;
+  }>> = {
     "subscription.create": async () => {
       const code: string | null = data.subscription_code ?? null;
       const plan = deps.planForCode(data.plan?.plan_code);
@@ -527,6 +592,7 @@ export async function handlePaystackEvent(
       return {
         code,
         userId,
+        plan,
         patch: (row) => {
           if (!plan || !code) return null;
           // A retried create can come after a later event for the same
@@ -538,7 +604,7 @@ export async function handlePaystackEvent(
             subscription_status: (known && row.subscription_status) || (statusOf(data.status) ?? "active"),
             paystack_subscription_code: code,
             paystack_email_token: data.email_token ?? row.paystack_email_token,
-            paystack_customer_code: data.customer?.customer_code ?? row.paystack_customer_code,
+            paystack_customer_code: row.paystack_customer_code ?? data.customer?.customer_code ?? null,
             current_period_end: known
               ? later(row.current_period_end, data.next_payment_date ?? null)
               : (data.next_payment_date ?? row.current_period_end),
@@ -570,24 +636,25 @@ export async function handlePaystackEvent(
   const handler = handlers[type];
   if (!handler) return { status: "ignored", reason: `unhandled ${type || "event"}` };
 
-  const { code, userId, patch } = await handler();
+  const { code, userId, plan, patch } = await handler();
   if (!code) return { status: "ignored", reason: "no subscription code" };
-  if (!userId) return { status: "ignored", reason: "unknown customer" };
+  const create = type === "subscription.create";
+  if (create && !plan) return { status: "ignored", reason: "no known plan" };
+  // A create can come before the first charge that records its customer.
+  if (!userId) return create ? { status: "retry", reason: "no first charge yet" } : { status: "ignored", reason: "unknown customer" };
 
   const key = `${type}:${sha256(rawBody)}`;
   if (!(await deps.store.claimEvent(key, type))) return { status: "duplicate", key };
   try {
     const row = await deps.store.getRow(userId);
     if (!row) throw new Error(`No profile for ${userId}`);
-    // Only the subscription we know about may change state: a late event
-    // from an older, replaced subscription must not touch the current one.
-    // With no code stored, the event is about the subscription whose
-    // subscription.create hasn't arrived yet (Paystack retries it), so it
-    // applies, and the code is kept.
     const known = row.paystack_subscription_code;
-    if (type !== "subscription.create" && known && known !== code) {
-      await deps.store.releaseEvent(key);
-      return { status: "ignored", reason: "stale subscription" };
+    if (known !== code) {
+      const refused = unboundSubscription(create, row, plan ?? null, deps.now?.() ?? new Date());
+      if (refused) {
+        await deps.store.releaseEvent(key);
+        return refused;
+      }
     }
     const p = patch(row);
     if (!p) {
@@ -609,17 +676,31 @@ function statusOf(s: unknown): SubscriptionStatus | null {
     : null;
 }
 
+/**
+ * Whether an event for a subscription code the row doesn't hold may change
+ * it: null when it may, else why not. Paystack keeps one customer per email,
+ * so anyone paying with this customer's email gets events that look like
+ * theirs. Only the subscription our checkout started is taken up: the row's
+ * signed first charge set its plan and left it waiting for a code. Events
+ * for an older, replaced subscription don't touch the current one.
+ */
+function unboundSubscription(create: boolean, row: BillingRow, plan: PaidPlanId | null, now: Date): EventResult | null {
+  const waiting = !row.paystack_subscription_code && isPaidPlan(row.subscription_plan) &&
+    (row.subscription_status === "active" || row.subscription_status === "attention");
+  if (waiting && (!plan || plan === row.subscription_plan)) return null;
+  if (!create) return { status: "ignored", reason: row.paystack_subscription_code ? "stale subscription" : "no subscription waiting" };
+  if (waiting || hasLiveSubscription(row, now)) return { status: "ignored", reason: "not this account's subscription" };
+  // Not started here yet: the first charge may still be on its way.
+  return { status: "retry", reason: "no first charge yet" };
+}
+
+/** By subscription code, then customer code. Never by email: anyone can pay with someone's email. */
 async function findCustomer(store: BillingStore, customer: Json | undefined, subscriptionCode: string | null) {
   if (subscriptionCode) {
     const id = await store.findUserId({ subscriptionCode });
     if (id) return id;
   }
-  if (customer?.customer_code) {
-    const id = await store.findUserId({ customerCode: customer.customer_code });
-    if (id) return id;
-  }
-  const email = normalizeEmail(customer?.email);
-  return email ? store.findUserId({ email }) : null;
+  return customer?.customer_code ? store.findUserId({ customerCode: customer.customer_code }) : null;
 }
 
 async function subscriptionChange(

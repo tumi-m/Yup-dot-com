@@ -52,6 +52,20 @@ short: database access rules are tested on every push
 (`scripts/test-rls.sh`), every build stops if a secret would reach the
 browser, and the live site is checked from outside every week.
 
+## Payments
+
+Paystack signs every webhook, but that only says Paystack took a payment:
+whoever starts a payment picks its email and metadata, and Paystack keeps
+one customer per email. So a signed event alone never changes someone's
+plan. Checkout signs what it sells (account, plan, monthly or prepaid term)
+with a key derived from `PAYSTACK_SECRET_KEY`, bound to the payment's
+reference, and only a charge carrying that signature starts a subscription,
+buys prepaid time or records a customer code (`applyCharge` in
+`lib/billing.ts`). Any other charge can only renew the subscription the
+customer's row already holds, on the same plan. A subscription code is only
+taken up by the row whose signed first charge is waiting for it, and never
+found by email. `tests/billing-unbound-charge.test.mts` checks this.
+
 ## Why the MyBroadband-style hacks don't apply here
 
 In October 2026 MyBroadband reported a South African site, built with an AI
@@ -177,7 +191,9 @@ the commit doesn't un-leak it.
    secret, which also changes the anon key and signs everyone out).
 2. **Paystack** (`PAYSTACK_SECRET_KEY`): Paystack → Settings → API Keys &
    Webhooks → generate a new secret key, then update Vercel and redeploy
-   straight away: the same key checks webhook signatures.
+   straight away: the same key checks webhook signatures and signs
+   checkouts, so a checkout started before the change and paid after it
+   isn't applied on its own (find it in Paystack and apply it by hand).
 3. **Ollama** (`OLLAMA_API_KEY`): ollama.com → Settings → Keys: delete it,
    create a new one, update Vercel.
 4. **Media worker** (`MEDIA_WORKER_SECRET`): make a new one
