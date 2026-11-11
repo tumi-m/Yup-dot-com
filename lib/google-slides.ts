@@ -17,7 +17,13 @@ export const SLIDES_MIME: Record<SlidesFormat, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
-export type SlidesFailure = "invalid" | "published" | "private" | "not-found" | "rate-limited" | "unreachable";
+/**
+ * "unreachable": Google failed (5xx, or no answer). "bad-answer": Google
+ * answered, but not with the file (another 4xx, a redirect off its hosts or
+ * too many, the wrong type), which says something about the link. Both read
+ * the same to the visitor.
+ */
+export type SlidesFailure = "invalid" | "published" | "private" | "not-found" | "rate-limited" | "unreachable" | "bad-answer";
 
 export const SLIDES_FAILURE_MESSAGE: Record<SlidesFailure, string> = {
   invalid: "Paste a Google Slides link.",
@@ -26,6 +32,7 @@ export const SLIDES_FAILURE_MESSAGE: Record<SlidesFailure, string> = {
   "not-found": "That deck doesn't exist, or the link is wrong.",
   "rate-limited": "Google is busy. Try again in a few minutes.",
   unreachable: "Google Slides isn't responding. Try again in a minute.",
+  "bad-answer": "Google Slides isn't responding. Try again in a minute.",
 };
 
 export const SLIDES_FAILURE_STATUS: Record<SlidesFailure, number> = {
@@ -35,6 +42,7 @@ export const SLIDES_FAILURE_STATUS: Record<SlidesFailure, number> = {
   "not-found": 404,
   "rate-limited": 429,
   unreachable: 502,
+  "bad-answer": 502,
 };
 
 export class SlidesError extends Error {
@@ -178,16 +186,16 @@ export async function fetchSlidesExport(
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
       await discard(res);
-      if (!location) throw new SlidesError("unreachable");
+      if (!location) throw new SlidesError("bad-answer");
       let next: URL;
       try {
         next = new URL(location, url);
       } catch {
-        throw new SlidesError("unreachable");
+        throw new SlidesError("bad-answer");
       }
       if (isSignInUrl(next)) throw new SlidesError("private");
       if (isBotCheckUrl(next)) throw new SlidesError("rate-limited");
-      if (!isAllowedSlidesHost(next.href) || hop + 1 > MAX_HOPS) throw new SlidesError("unreachable");
+      if (!isAllowedSlidesHost(next.href) || hop + 1 > MAX_HOPS) throw new SlidesError("bad-answer");
       url = next.href;
       continue;
     }
@@ -197,16 +205,16 @@ export async function fetchSlidesExport(
       if (res.status === 401 || res.status === 403) throw new SlidesError("private");
       if (res.status === 404 || res.status === 410) throw new SlidesError("not-found");
       if (res.status === 429) throw new SlidesError("rate-limited");
-      throw new SlidesError("unreachable");
+      throw new SlidesError(res.status >= 500 ? "unreachable" : "bad-answer");
     }
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (type !== SLIDES_MIME[format]) {
       await discard(res);
       // Google answers a private deck with its sign-in page.
-      throw new SlidesError(type === "text/html" ? "private" : "unreachable");
+      throw new SlidesError(type === "text/html" ? "private" : "bad-answer");
     }
-    if (!res.body) throw new SlidesError("unreachable");
+    if (!res.body) throw new SlidesError("bad-answer");
 
     const encoding = (res.headers.get("content-encoding") ?? "identity").toLowerCase();
     const length = Number(res.headers.get("content-length"));
@@ -277,8 +285,8 @@ export interface SlidesExportDeps {
   resolveTier: () => Promise<{ user: { id: string } | null; tier: Tier }>;
   /** Spends one of today's allowance; uses left, or -1 when spent (lib/usage.ts). */
   consumeDaily: (subject: string, bucket: string, limit: number) => Promise<number> | number;
-  /** Gives one of today's allowance back (lib/usage.ts). */
-  refundDaily: (subject: string, bucket: string) => Promise<void> | void;
+  /** Gives back one of the allowance spent at `spentAt`, on that UTC day only (lib/usage.ts). */
+  refundDaily: (subject: string, bucket: string, spentAt: number) => Promise<unknown> | unknown;
   /** Counts one try at Google this minute; false when they're used up (lib/usage.ts claimSlidesFetch). */
   claimFetch: (subject: string) => Promise<boolean> | boolean;
   /** Who the request counts against (lib/usage.ts usageSubject). */
@@ -289,7 +297,10 @@ const noStore = { "Cache-Control": "private, no-store" };
 
 export const SLIDES_BURST_MESSAGE = "Too many links at once. Try again in a minute.";
 
-/** Failures on Google's side, given back. A wrong or private link is the visitor's, and counts. */
+/**
+ * Failures on Google's side, given back: busy, 5xx or no answer. Anything
+ * else Google says is about the link, and counts, as a wrong or private one does.
+ */
 const REFUNDED: readonly SlidesFailure[] = ["rate-limited", "unreachable"];
 
 function fail(kind: SlidesFailure) {
@@ -320,6 +331,8 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
   const { user, tier } = await deps.resolveTier();
   const subject = deps.usageSubject(request, user);
 
+  // Taken just before it is spent: a refund after midnight would come off the next day's.
+  const spentAt = Date.now();
   const remaining = await deps.consumeDaily(subject, "slides", limitsFor(tier).linkImportsPerDay);
   if (remaining < 0) {
     return Response.json(
@@ -327,7 +340,7 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
       { status: 429, headers: noStore }
     );
   }
-  const giveBack = () => Promise.resolve(deps.refundDaily(subject, "slides")).catch(() => {});
+  const giveBack = () => Promise.resolve(deps.refundDaily(subject, "slides", spentAt)).catch(() => {});
   let claimed: boolean;
   try {
     claimed = await deps.claimFetch(subject);
@@ -347,7 +360,7 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
   try {
     file = await fetchSlidesExport(id, format, deps.fetcher ?? fetch, request.signal);
   } catch (err) {
-    const kind = err instanceof SlidesError ? err.kind : "unreachable";
+    const kind = err instanceof SlidesError ? err.kind : "bad-answer";
     // A visitor who cancelled gets nothing back: that was their doing.
     if (REFUNDED.includes(kind) && !request.signal.aborted) await giveBack();
     return fail(kind);

@@ -76,7 +76,8 @@ export async function POST(request: Request) {
   if (isDirectPlatform(media.platform)) {
     const platform = media.platform;
     if (!(await claimMediaLookup(subject))) {
-      return Response.json({ error: MEDIA_LOOKUP_MESSAGE }, { status: 429, headers: { "Retry-After": "60" } });
+      // Not "quota": the page keeps its Download button for this one.
+      return Response.json({ error: MEDIA_LOOKUP_MESSAGE, reason: "burst" }, { status: 429, headers: { "Retry-After": "60" } });
     }
     let video;
     try {

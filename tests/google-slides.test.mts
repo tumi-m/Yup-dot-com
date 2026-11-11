@@ -10,7 +10,7 @@ import {
   handleSlidesExport, SLIDES_MIME, SLIDES_FAILURE_MESSAGE,
 } from "../lib/google-slides.ts";
 import { LIMITS } from "../lib/limits.ts";
-import { claimSlidesFetch, memoryUsageStore, SLIDES_FETCHES_PER_MINUTE, type UsageStore } from "../lib/usage.ts";
+import { claimSlidesFetch, consumeDaily, memoryUsageStore, refundDaily, SLIDES_FETCHES_PER_MINUTE, type UsageStore } from "../lib/usage.ts";
 
 const results: boolean[] = [];
 const check = (name: string, ok: boolean, extra = "") => {
@@ -148,14 +148,14 @@ for (const target of [
 ]) {
   const { f, calls } = fakeFetch((u) => (u === exportUrl(ID, "pdf") ? redirect(target) : pdfOk()));
   const k = await kind(fetchSlidesExport(ID, "pdf", f));
-  check(`SSRF: redirect to ${target} not followed`, k === "unreachable" && calls.length === 1, `${k}, ${calls.length} calls`);
+  check(`SSRF: redirect to ${target} not followed`, k === "bad-answer" && calls.length === 1, `${k}, ${calls.length} calls`);
 }
 
 // Redirect loop capped at 5 hops.
 {
   const { f, calls } = fakeFetch((u) => redirect(`${u.split("?")[0]}?n=${Math.random()}`));
   const k = await kind(fetchSlidesExport(ID, "pdf", f));
-  check("redirect loop capped", k === "unreachable" && calls.length === 6, `${k} after ${calls.length} requests`);
+  check("redirect loop capped", k === "bad-answer" && calls.length === 6, `${k} after ${calls.length} requests`);
 }
 {
   let n = 0;
@@ -197,23 +197,28 @@ for (const s of [401, 403]) {
   const { f } = fakeFetch(() => ({ status: 500 }));
   check("500 → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
 }
+// Google answered, so these say something about the link (and count).
+for (const s of [400, 405, 414]) {
+  const { f } = fakeFetch(() => ({ status: s }));
+  check(`${s} → bad-answer`, (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
+}
 {
   const { f } = fakeFetch(() => "throw");
   check("network error → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
 }
 {
   const { f } = fakeFetch(() => ({ status: 302 }));
-  check("redirect without location → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
+  check("redirect without location → bad-answer", (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
 }
 
 // Content types.
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": "application/pdf" }, body: PDF_BYTES }));
-  check("pptx request refuses a PDF", (await kind(fetchSlidesExport(ID, "pptx", f))) === "unreachable");
+  check("pptx request refuses a PDF", (await kind(fetchSlidesExport(ID, "pptx", f))) === "bad-answer");
 }
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": "application/octet-stream" }, body: PDF_BYTES }));
-  check("octet-stream refused", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
+  check("octet-stream refused", (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
 }
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": `${SLIDES_MIME.pptx}; charset=binary` }, body: PDF_BYTES }));
@@ -301,7 +306,14 @@ const failures: [string, Reply, number, string, boolean][] = [
   ["not found", { status: 404 }, 404, SLIDES_FAILURE_MESSAGE["not-found"], false],
   ["google 429", { status: 429 }, 429, SLIDES_FAILURE_MESSAGE["rate-limited"], true],
   ["unreachable", { status: 503 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
-  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
+  ["network error", "throw", 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
+  // The bug: any other answer was taken for Google failing and given back,
+  // so made-up links Google answered that way were never counted.
+  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
+  ["400", { status: 400 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
+  ["redirect off Google", redirect("https://drive.google.com/file/d/x/view"), 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
+  ["redirect without location", { status: 302 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
+  ["wrong type", { status: 200, headers: { "content-type": "application/json" }, body: "{}" }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
 ];
 for (const [name, reply, status, message, given] of failures) {
   const { f } = fakeFetch(() => reply);
@@ -366,6 +378,42 @@ for (const [name, reply] of [["not found", { status: 404 }], ["unreachable", { s
     `${calls.length} fetches, ${refused.length} refused`);
   // A refused try doesn't cost an import.
   check(`route ${name}: refused tries don't spend imports`, left() === 1000 - (reply.status === 404 ? SLIDES_FETCHES_PER_MINUTE : 0), String(left()));
+}
+// The bug: an import spent just before midnight and failed after it was
+// given back from the next day's count.
+{
+  const realNow = Date.now;
+  let now = Date.UTC(2026, 10, 11, 23, 59, 50);
+  Date.now = () => now;
+  try {
+    const store = memoryUsageStore(() => now);
+    const s = "ip:203.0.113.9";
+    // While Google takes its time, midnight passes and an import is made on the new day.
+    const { f } = fakeFetch(() => {
+      now = Date.UTC(2026, 10, 12, 0, 0, 10);
+      void consumeDaily(s, "slides", 20, store);
+      return { status: 503 };
+    });
+    const d = {
+      fetcher: f,
+      resolveTier: async () => ({ user: null, tier: "guest" as const }),
+      consumeDaily: (subject: string, bucket: string, limit: number) => consumeDaily(subject, bucket, limit, store),
+      refundDaily: (subject: string, bucket: string, spentAt: number) => refundDaily(subject, bucket, spentAt, store),
+      claimFetch: (subject: string) => claimSlidesFetch(subject, store),
+      usageSubject: () => s,
+    };
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    check("route: a try failed after midnight isn't given back from the new day",
+      res.status === 502 && (await store.count(s, "slides", "day")) === 1, `${res.status} ${await store.count(s, "slides", "day")}`);
+    now = Date.UTC(2026, 10, 12, 0, 5);
+    const spentAt = now;
+    check("refundDaily: the same day, it is given back",
+      (await refundDaily(s, "slides", spentAt, store, now + 60_000)) && (await store.count(s, "slides", "day")) === 0);
+    await consumeDaily(s, "slides", 20, store);
+    check("refundDaily: not on another day", !(await refundDaily(s, "slides", spentAt, store, Date.UTC(2026, 10, 13, 0, 1))));
+  } finally {
+    Date.now = realNow;
+  }
 }
 // A visitor who cancels doesn't get the import back.
 {

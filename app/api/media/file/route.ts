@@ -1,8 +1,8 @@
 import { UrlSource } from "mediabunny";
 import { audioOnlyMp4, NoAudioError } from "@/lib/audio-only";
 import { openToken, signingSecret } from "@/lib/media-server";
-import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
-import { usageStore } from "@/lib/usage";
+import { claimGrantRequest, grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
+import { claimMediaFile, MEDIA_FILE_MESSAGE, usageStore } from "@/lib/usage";
 import { FETCH_UA, grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
 
 export const runtime = "nodejs";
@@ -25,6 +25,10 @@ export const maxDuration = 300;
  *
  * An audio-only grant (an MP3 from a video above the visitor's plan) gets
  * the sound alone, as an M4A made here; the video never leaves this route.
+ *
+ * Every request, HEAD and Range ones too, asks the CDN, so each counts
+ * against a per-minute limit for whoever the download was counted against,
+ * and one grant answers only REQUESTS_PER_GRANT of them.
  *
  * Redirects are followed by hand, and only to allowed hosts.
  */
@@ -72,7 +76,13 @@ async function handle(request: Request, method: "GET" | "HEAD") {
   const store = usageStore();
   const expired = () =>
     Response.json({ error: "This download link expired. Start the download again." }, { status: 403 });
-  if (ref && (await wasRefunded(store, ref).catch(() => false))) return expired();
+  // Every grant /api/media/link makes has one; without it nothing here could be counted.
+  if (!ref) return expired();
+  if (await wasRefunded(store, ref).catch(() => false)) return expired();
+  if (!(await claimMediaFile(ref.s, store))) {
+    return Response.json({ error: MEDIA_FILE_MESSAGE }, { status: 429, headers: { "Retry-After": "60" } });
+  }
+  if (!(await claimGrantRequest(store, ref))) return expired();
   const range = request.headers.get("range");
   let firstServe = false;
   /**
@@ -82,7 +92,7 @@ async function handle(request: Request, method: "GET" | "HEAD") {
    * answer 416), so its failure says nothing about the file.
    */
   const giveBack = async (streamBroke = false): Promise<boolean> => {
-    if (!ref || method !== "GET" || range) return false;
+    if (method !== "GET" || range) return false;
     if (streamBroke) return firstServe ? refundGrant(store, ref).catch(() => false) : false;
     return refundUnserved(store, ref).catch(() => false);
   };
@@ -161,7 +171,7 @@ async function handle(request: Request, method: "GET" | "HEAD") {
       { status: 502 }
     );
   }
-  if (ref && method === "GET") {
+  if (method === "GET") {
     const serving = await startServing(store, ref).catch(() => ({ ok: true, first: false }));
     if (!serving.ok) {
       await upstream.body?.cancel();

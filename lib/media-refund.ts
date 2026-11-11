@@ -17,6 +17,7 @@ import { periodStart, type UsageStore, type UsageWindow } from "./usage";
 export const MEDIA_BUCKET = "media";
 const refundBucket = (ref: string) => `media-refund:${ref}`;
 const servedBucket = (ref: string) => `media-served:${ref}`;
+const askedBucket = (ref: string) => `media-asked:${ref}`;
 /**
  * Where the refunded/served markers are kept. They must outlive the grant
  * (30 minutes, and REFUND_GRACE_SECONDS more for a refund): in the daily
@@ -24,6 +25,12 @@ const servedBucket = (ref: string) => `media-served:${ref}`;
  * life and let a sent one be refunded.
  */
 const MARKERS: UsageWindow = "month";
+
+/**
+ * Requests one grant answers, of any kind: enough to save the file, save it
+ * again or resume it, not to stream it over and over for 30 minutes.
+ */
+export const REQUESTS_PER_GRANT = 10;
 
 /** How long after a grant expires it can still be refunded (jobs may run 20 min). */
 export const REFUND_GRACE_SECONDS = 2 * 60 * 60;
@@ -88,6 +95,11 @@ export async function wasRefunded(store: UsageStore, ref: GrantRef, now = Date.n
 export async function startServing(store: UsageStore, ref: GrantRef, now = Date.now()): Promise<{ ok: boolean; first: boolean }> {
   const first = (await store.consume(ref.s, servedBucket(ref.c), 1, MARKERS)) >= 0;
   return { ok: !(await wasRefunded(store, ref, now)), first };
+}
+
+/** Counts one request on a grant (/api/media/file). False once it has had REQUESTS_PER_GRANT. */
+export async function claimGrantRequest(store: UsageStore, ref: GrantRef): Promise<boolean> {
+  return (await store.consume(ref.s, askedBucket(ref.c), REQUESTS_PER_GRANT, MARKERS)) >= 0;
 }
 
 export async function wasServed(store: UsageStore, ref: GrantRef): Promise<boolean> {

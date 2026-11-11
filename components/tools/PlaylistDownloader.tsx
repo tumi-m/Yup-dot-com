@@ -321,7 +321,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
       }).catch(() => null);
       const grant = await res?.json().catch(() => null);
       if (!res?.ok || grant?.mode !== "worker") {
-        if (res?.status === 429) throw new Halt(grant?.upgrade ? "downloads" : "limit");
+        // Only the day's quota stops the list; a per-minute 429 fails this video alone.
+        if (res?.status === 429 && grant?.reason === "quota") throw new Halt(grant?.upgrade ? "downloads" : "limit");
         if (grant?.upgrade) throw new Halt(grant.reason === "quality" ? "quality" : "downloads");
         const message = grant?.error ?? (res ? "Couldn't start this download." : "You're offline.");
         throw res?.status === 503 || !res ? new ServerDown(message) : new Error(message);

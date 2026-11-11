@@ -179,7 +179,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [note, setNote] = useState<string | null>(null);
   const [upsell, setUpsell] = useState<UpsellReason | null>(null);
   const [wantedLocked, setWantedLocked] = useState(false);
-  /** Set after a 429: the day's downloads are spent. */
+  /** Set after a quota 429: the day's downloads are spent. */
   const [limit, setLimit] = useState<{ upgrade: boolean } | null>(null);
   const [starting, setStarting] = useState(false);
   /** "Smaller file": re-encode in this tab. Offered only where the browser can make H.264. */
@@ -368,7 +368,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     if (!res?.ok) {
       // The button was disabled while starting; give focus back to it.
       focusNext.current = "download";
-      if (res?.status === 429) {
+      // A per-minute 429 says to try again in a minute, so it leaves the button alone.
+      if (res?.status === 429 && data?.reason === "quota") {
         setLimit({ upgrade: !!data?.upgrade });
         if (data?.upgrade) setUpsell("downloads");
         else setError(data?.error ?? "You've used today's downloads.");
