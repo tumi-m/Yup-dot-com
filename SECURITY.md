@@ -182,7 +182,9 @@ the commit doesn't un-leak it.
    create a new one, update Vercel.
 4. **Media worker** (`MEDIA_WORKER_SECRET`): make a new one
    (`openssl rand -hex 32`) and set it on the worker host and in Vercel
-   together.
+   together. Until both have it, YouTube downloads fail and aren't given
+   back (a worker that refuses the site's key can't say whether a file was
+   sent), so keep that gap short.
 5. **`MEDIA_SIGNING_SECRET`, `USAGE_HASH_SALT`**: make new ones, set them in
    Vercel, redeploy. Download links being used at that moment stop working
    and guests' daily counts start again.
