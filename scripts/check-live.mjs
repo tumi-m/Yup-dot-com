@@ -663,7 +663,7 @@ section = "Security contact";
   const contact = /^Contact:\s*(\S+)/m.exec(res.text)?.[1];
   const expires = Date.parse(/^Expires:\s*(\S+)/m.exec(res.text)?.[1] ?? "");
   if (res.headers.get("x-vercel-mitigated")) {
-    fail(`/.well-known/security.txt: Vercel's firewall answered with a ${res.headers.get("x-vercel-mitigated")} (HTTP ${res.status}), so tools can't read it. In Vercel → Firewall, add a rule: request path equals /.well-known/security.txt → Bypass.`);
+    fail(`/.well-known/security.txt: Vercel's firewall answered with a ${res.headers.get("x-vercel-mitigated")} (HTTP ${res.status}), so tools can't read it. In Vercel → Firewall, add a rule: request path equals /.well-known/security.txt → Bypass, then Review Changes → Publish. If the rule is already there, check it's published and that Attack Challenge Mode is off: Vercel runs that challenge before custom rules, so a Bypass rule can't let anything past it.`);
   } else if (res.status !== 200 || !contact) fail(`/.well-known/security.txt: missing (HTTP ${res.status}${answeredBy(res)})`);
   else if (!(expires > Date.now())) fail(`/.well-known/security.txt: expired or no Expires`);
   else {
