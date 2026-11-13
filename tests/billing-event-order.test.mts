@@ -2,11 +2,12 @@
 // subscription.create had been recorded was claimed and dropped as "stale",
 // and the retried create then set the subscription back to active, so
 // Billing said "Renews" for a cancelled subscription. An event for a
-// subscription whose create hasn't landed now applies, and a late create
-// keeps what came after it. Events for an older subscription still don't
-// touch the current one.
+// subscription whose create hasn't landed now gets a 503, so Paystack sends
+// it again and it applies after the create; a create sent again keeps what
+// came after it. Events for an older subscription still don't touch the
+// current one.
 import {
-  applyCharge, handlePaystackEvent, resolveAccess, summarize,
+  applyCharge, checkoutMetadata, handlePaystackEvent, resolveAccess, summarize,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
 import { planStatus } from "../lib/billing-ui.ts";
@@ -42,14 +43,15 @@ function setup(extra: Partial<BillingRow> = {}) {
     },
     async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
   };
-  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), now: () => clock };
+  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock };
   const deliver = (event: string, data: unknown) => {
     const raw = JSON.stringify({ event, data });
     return handlePaystackEvent(JSON.parse(raw), raw, deps);
   };
   const firstCharge = (ref: string) => applyCharge({
     status: "success", reference: ref, amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer, metadata: JSON.stringify({ user_id: USER, plan: "pro", mode: "subscription" }),
+    plan: "PLN_pro", customer, authorization: { authorization_code: "AUTH_u" },
+    metadata: JSON.stringify(checkoutMetadata(ref, { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test")),
   }, deps);
   const lines = () => {
     const r = db.get(USER)!;
@@ -60,7 +62,7 @@ function setup(extra: Partial<BillingRow> = {}) {
 
 const create = (code: string) => ({
   subscription_code: code, status: "active", email_token: `tok_${code}`, next_payment_date: "2026-11-18T08:00:00.000Z",
-  plan: { plan_code: "PLN_pro" }, customer,
+  plan: { plan_code: "PLN_pro" }, customer, authorization: { authorization_code: "AUTH_u" },
 });
 
 // The reported order: first charge on return, the create delivery failed (500) and waits for
@@ -68,12 +70,18 @@ const create = (code: string) => ({
 {
   const s = setup();
   await s.firstCharge("pw_first");
-  const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_B", status: "non-renewing", customer });
-  check("cancel before create: applied", cancel.status === "applied" && s.row().subscription_status === "non-renewing" &&
-    s.row().paystack_subscription_code === "SUB_B", s.row());
+  const cancelData = { subscription_code: "SUB_B", status: "non-renewing", customer };
+  const cancel = await s.deliver("subscription.not_renew", cancelData);
+  check("cancel before create: sent again later, nothing written or kept", cancel.status === "retry" &&
+    s.row().subscription_status === "active" && s.row().paystack_subscription_code === null && s.events.size === 1, { cancel, row: s.row() });
   const late = await s.deliver("subscription.create", create("SUB_B"));
-  check("the retried create keeps the cancel", late.status === "applied" && s.row().subscription_status === "non-renewing" &&
+  const again = await s.deliver("subscription.not_renew", cancelData);
+  check("the create, then the cancel sent again: non-renewing", late.status === "applied" && again.status === "applied" &&
+    s.row().subscription_status === "non-renewing" && s.row().paystack_subscription_code === "SUB_B" &&
     s.row().paystack_email_token === "tok_SUB_B", s.row());
+  const createAgain = await s.deliver("subscription.create", { ...create("SUB_B"), email_token: "tok_SUB_B2" });
+  check("a create sent again after the cancel keeps it", createAgain.status === "applied" &&
+    s.row().subscription_status === "non-renewing", s.row());
   check("Billing says Ends, not Renews", JSON.stringify(s.lines()) === JSON.stringify(["Ends 18 Nov 2026"]), s.lines());
 }
 
@@ -86,7 +94,9 @@ for (const [event, data, status] of [
   await s.firstCharge("pw_first");
   const r = await s.deliver(event, data);
   await s.deliver("subscription.create", create("SUB_B"));
-  check(`${event} before create: ${status} is kept`, r.status === "applied" && s.row().subscription_status === status, s.row());
+  const again = await s.deliver(event, data);
+  check(`${event} before create: sent again, then ${status}`, r.status === "retry" && again.status === "applied" &&
+    s.row().subscription_status === status, { r, again, row: s.row() });
 }
 
 // The usual order is unchanged.
@@ -100,13 +110,16 @@ for (const [event, data, status] of [
   check("then a cancel: non-renewing", s.row().subscription_status === "non-renewing");
 }
 
-// The create lands before the first charge (the webhook beat the return): the code stays.
+// The create lands before the first charge (the webhook beat the return): it
+// waits for Paystack's retry, which finds the subscription the charge started.
 {
   const s = setup();
-  await s.deliver("subscription.create", create("SUB_B"));
+  const early = await s.deliver("subscription.create", create("SUB_B"));
   await s.firstCharge("pw_first");
-  check("create, then the first charge: code and status kept",
-    s.row().paystack_subscription_code === "SUB_B" && s.row().subscription_status === "active", s.row());
+  const retried = await s.deliver("subscription.create", create("SUB_B"));
+  check("create, then the first charge, then the retried create: code and status kept",
+    early.status === "retry" && retried.status === "applied" &&
+      s.row().paystack_subscription_code === "SUB_B" && s.row().subscription_status === "active", s.row());
 }
 
 // Subscribing again after an older subscription ended: its code no longer counts.
@@ -119,10 +132,13 @@ for (const [event, data, status] of [
   const sum = summarize(s.row(), resolveAccess({ own: s.row(), emailVerified: true, teamOwners: [] }, clock), clock);
   check("new first charge: the old code is dropped, so Manage doesn't open the ended subscription",
     s.row().paystack_subscription_code === null && sum.subscription?.manageable === false && sum.plan === "pro", s.row());
-  const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_B", status: "non-renewing", customer });
+  const cancelData = { subscription_code: "SUB_B", status: "non-renewing", customer };
+  const cancel = await s.deliver("subscription.not_renew", cancelData);
   await s.deliver("subscription.create", create("SUB_B"));
-  check("a cancel of the new one before its create still counts",
-    cancel.status === "applied" && s.row().subscription_status === "non-renewing" && s.row().paystack_subscription_code === "SUB_B", s.row());
+  const again = await s.deliver("subscription.not_renew", cancelData);
+  check("a cancel of the new one before its create still counts once sent again",
+    cancel.status === "retry" && again.status === "applied" && s.row().subscription_status === "non-renewing" &&
+      s.row().paystack_subscription_code === "SUB_B", { cancel, again, row: s.row() });
 }
 
 // A late event from an older subscription is still ignored, and its claim isn't kept.

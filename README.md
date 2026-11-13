@@ -541,7 +541,7 @@ someone leaves or a key changes.
       shared sender.
 6. Supabase → SQL editor: run each file in `supabase/migrations/` you
    haven't run yet, once, in date order (the newest is
-   `20261107000000_sample_cache.sql`). Then run
+   `20261113000000_subscription_starts.sql`). Then run
    [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
    it again whenever you change anything by hand (a table, a bucket, a
    function, a policy). Security Advisor should show no "RLS disabled" table.
@@ -808,6 +808,27 @@ Paystack accounts in South Africa charge in ZAR only.
 The webhook handles `charge.success`, `subscription.create`,
 `subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
 `invoice.update`. Each delivery is applied once (`billing_events` records them).
+Only payments started by this site's checkout change a plan: checkout signs
+its metadata with a key derived from the secret key (see
+[SECURITY.md](SECURITY.md#payments)). A `subscription.create` that arrives
+before its first charge, or a cancel or invoice event that arrives before
+its `subscription.create`, gets a 503, so Paystack sends it again. A
+subscription's code is only stored from a `subscription.create` paid with
+the same card as its signed first charge: on a project set up before this,
+run
+[`supabase/migrations/20261113000000_subscription_starts.sql`](supabase/migrations/20261113000000_subscription_starts.sql)
+before deploying (without it a new subscription's first charge isn't applied
+and Paystack keeps sending it).
+
+A checkout started before this was deployed, or before a change of
+`PAYSTACK_SECRET_KEY`, isn't signed with the key in use when it is paid, so
+its payment isn't applied on its own. Deploy and change keys when few people
+are paying, then look in the logs from around then for `paystack event
+ignored charge.success`, find each payment in Paystack and apply it by hand.
+Renewals still apply while a subscription waits for its create, if paid with
+the card of its first charge. A create logged as `not paid with its first
+charge's card` whose card (last four digits in Paystack) is the one the
+account's first payment used is the account's own: store its code by hand.
 
 ## Tester access (free Pro or Team for testers)
 

@@ -5,7 +5,7 @@
 // could start beside it. It now stays live and manageable until cancelled.
 import { readFileSync } from "node:fs";
 import {
-  applyCharge, handlePaystackEvent, hasLiveSubscription, ownPlan, resolveAccess, summarize,
+  applyCharge, checkoutMetadata, handlePaystackEvent, hasLiveSubscription, ownPlan, resolveAccess, summarize,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
 import { cardOffer, planStatus, subscribeBlock } from "../lib/billing-ui.ts";
@@ -103,19 +103,20 @@ function view(r: BillingRow, at = now) {
     async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
   };
   let clock = new Date("2026-09-01T08:00:00Z");
-  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), now: () => clock };
+  const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock };
   const deliver = (event: string, data: unknown) => {
     const raw = JSON.stringify({ event, data });
     return handlePaystackEvent(JSON.parse(raw), raw, deps);
   };
   const customer = { customer_code: "CUS_u", email: "u@x.co" };
+  const authorization = { authorization_code: "AUTH_u" };
   await applyCharge({
     status: "success", reference: "pw_first", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer, metadata: { user_id: USER, plan: "pro", mode: "subscription" },
+    plan: "PLN_pro", customer, authorization, metadata: checkoutMetadata("pw_first", { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test"),
   }, deps);
   await deliver("subscription.create", {
     subscription_code: "SUB_A", email_token: "tok", status: "active", next_payment_date: "2026-10-01T08:00:00.000Z",
-    plan: { plan_code: "PLN_pro" }, customer,
+    plan: { plan_code: "PLN_pro" }, customer, authorization,
   });
   clock = new Date("2026-10-01T09:00:00Z");
   await deliver("invoice.payment_failed", { subscription: { subscription_code: "SUB_A", status: "attention" }, customer });

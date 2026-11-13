@@ -228,6 +228,7 @@ select rlstest.expect('anon: write billing_events',     'anon', null, 'insert in
 select rlstest.expect('anon: write usage_counters',     'anon', null, 'insert into public.usage_counters values ($q$k$q$, $q$b$q$, $q$day$q$, now(), 0)', 'denied');
 select rlstest.expect('anon: read sample_cache',        'anon', null, 'select count(*) from public.sample_cache', 'denied');
 select rlstest.expect('anon: write sample_cache',       'anon', null, 'insert into public.sample_cache values ($q$mbrec:x$q$, $q${}$q$, now())', 'denied');
+select rlstest.expect('anon: read subscription_starts', 'anon', null, 'select count(*) from public.subscription_starts', 'denied');
 select rlstest.expect('anon: rpc own_plan',             'anon', null, format('select public.own_plan(%L)', :'B'), 'denied');
 select rlstest.expect('anon: rpc effective_plan',       'anon', null, format('select public.effective_plan(%L)', :'B'), 'denied');
 select rlstest.expect('anon: rpc consume_usage',        'anon', null, 'select public.consume_usage($q$x$q$, $q$y$q$, 100, $q$day$q$)', 'denied');
@@ -279,6 +280,8 @@ select rlstest.expect('A: forge a billing event',       'authenticated', :'A', '
 select rlstest.expect('A: read usage_counters',         'authenticated', :'A', 'select count(*) from public.usage_counters', 'denied');
 select rlstest.expect('A: read sample_cache',           'authenticated', :'A', 'select count(*) from public.sample_cache', 'denied');
 select rlstest.expect('A: poison sample_cache',         'authenticated', :'A', 'insert into public.sample_cache values ($q$mbrec:x$q$, $q${}$q$, now() + interval $q$1 day$q$)', 'denied');
+select rlstest.expect('A: read subscription_starts',    'authenticated', :'A', 'select count(*) from public.subscription_starts', 'denied');
+select rlstest.expect('A: pick the card for a start',  'authenticated', :'A', format('insert into public.subscription_starts (user_id, authorization_hash) values (%L, %L)', :'A', repeat('a', 64)), 'denied');
 select rlstest.expect('A: rpc effective_plan',          'authenticated', :'A', format('select public.effective_plan(%L)', :'A'), 'denied');
 select rlstest.expect('A: rpc refund_usage',            'authenticated', :'A', format('select public.refund_usage(%L, %L, %L)', 'u:' || :'A', 'ai', 'day'), 'denied');
 select rlstest.expect('A: rpc consume_usage',           'authenticated', :'A', 'select public.consume_usage($q$x$q$, $q$y$q$, 100, $q$day$q$)', 'denied');
@@ -354,6 +357,7 @@ select rlstest.expect('B: its 400 MB file is stored',  'postgres', null, format(
 
 -- ---------- Server (service role) ----------
 select rlstest.expect('server: writes sample_cache',    'service_role', null, 'insert into public.sample_cache values ($q$yt:test$q$, $q${"title": "x"}$q$, now() + interval $q$1 day$q$)', 'rows:1');
+select rlstest.expect('server: records a start',      'service_role', null, format('insert into public.subscription_starts (user_id, authorization_hash) values (%L, %L)', :'B', repeat('b', 64)), 'rows:1');
 select rlstest.expect('server: 3rd team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm3@example.com'), 'rows:1');
 select rlstest.expect('server: 4th team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm4@example.com'), 'rows:1');
 select rlstest.expect('server: 5th team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm5@example.com'), 'error:P0001:');

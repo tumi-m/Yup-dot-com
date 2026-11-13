@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkoutMetadata, type CheckoutMetadata } from "@/lib/billing";
 import { siteUrl } from "@/lib/site";
 import { payOnceBlock, subscribeBlock } from "@/lib/billing-ui";
 import { billingContext, json } from "@/lib/billing-route";
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
   let amount: number;
   let plan: string | undefined;
   let channels: readonly string[];
-  const metadata: Record<string, unknown> = { user_id: account.user.id, plan: input.plan, mode: input.mode };
+  const sold: CheckoutMetadata = { user_id: account.user.id, plan: input.plan, mode: input.mode };
 
   if (input.mode === "subscription") {
     plan = planCodes()[input.plan] ?? undefined;
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     const block = payOnceBlock(input.plan, account.profile.billing);
     if (block) return json({ error: block }, 409);
     amount = toSubunit(prepaidPrice(input.plan, input.months));
-    metadata.months = input.months;
+    sold.months = input.months;
     channels = ONCE_OFF_CHANNELS;
   }
 
@@ -73,7 +74,8 @@ export async function POST(request: Request) {
       amount,
       reference,
       callbackUrl,
-      metadata,
+      // Signed, so the webhook knows this checkout (and only this one) was ours.
+      metadata: checkoutMetadata(reference, sold, paystack.secretKey),
       channels,
       plan,
     });

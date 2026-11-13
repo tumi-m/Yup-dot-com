@@ -40,6 +40,7 @@ export async function GET(request: Request) {
     const result = await confirmCharge(tx, account.user.id, account.profile.plan, {
       store: supabaseBillingStore(),
       planForCode: (c) => planForCode(c),
+      checkoutSecret: paystack.secretKey,
     });
     if (result.status === "ignored") {
       // Paystack took the money but it doesn't match a plan we sell.
