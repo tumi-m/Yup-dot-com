@@ -377,8 +377,11 @@ export async function resolveInstagram(shortcode: string, fetcher: Fetcher = fet
           note(undefined, "media");
           return parseInstagramMedia(shortcode, product, index);
         }
-        // A video whose embed leaves the file out (music it can't show off Instagram).
-        if (media.is_video || media.__typename === "GraphVideo") return note(undefined, "no video in embed");
+        // A video whose embed leaves the file out (music it can't show off
+        // Instagram), alone or as a carousel slide: the API may still have it.
+        const isVideo = (n: Json) => n?.is_video === true || n?.__typename === "GraphVideo";
+        const children: Json[] = media.edge_sidecar_to_children?.edges?.map((e: Json) => e?.node) ?? [];
+        if (isVideo(media) || children.some(isVideo)) return note(undefined, "no video in embed");
         note(undefined, "photo only");
         throw new DirectResolveError("no-video");
       }
@@ -448,9 +451,11 @@ export async function resolveInstagram(shortcode: string, fetcher: Fetcher = fet
     if (viaGraphql) return viaGraphql;
   }
 
+  // A post withheld from logged-out visitors, or a private link (its long
+  // shortcode), won't come through later either, whatever else refused us.
   const failure =
     seen.definitive ??
-    new DirectResolveError(seen.refused ? "blocked" : seen.gated || shortcode.length > 28 ? "login-required" : "unreachable");
+    new DirectResolveError(seen.gated || shortcode.length > 28 ? "login-required" : seen.refused ? "blocked" : "unreachable");
   // One line per failed resolve for the server logs: steps and statuses only.
   console.warn(`Instagram resolve failed (${failure.kind}): ${steps.map((s) => `${s.step}${s.status ? ` ${s.status}` : ""} ${s.reason}`).join("; ")}`);
   throw failure;

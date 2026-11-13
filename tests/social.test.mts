@@ -304,6 +304,30 @@ async function logged(p: Promise<unknown>) {
   check("instagram: photo-only post (embed) → no-video", (await kind(resolveInstagram(CODE, ig({ embed: { body: embedPage({ __typename: "GraphImage", is_video: false, display_url: "https://scontent.cdninstagram.com/p.jpg" }, { type: "GraphImage" }) } }).f))) === "no-video");
   check("instagram: ruling \"Restricted Video\" → login-required", (await kind(resolveInstagram(CODE, ig({ ruling: { body: '{"title":"Restricted Video","description":"You must be 18 years old or over to see this video.","status":"ok"}' } }).f))) === "login-required");
   check("instagram: withheld logged out (empty product) → login-required", (await kind(resolveInstagram(CODE, ig({ page: { body: postPage(null) }, embed: { status: 500 }, graphql: gqlBody(null) }).f))) === "login-required");
+  check("instagram: withheld logged out, GraphQL 429 as it really answers → still login-required", (await kind(resolveInstagram(CODE, ig({ page: { body: postPage(null) } }).f))) === "login-required");
+  check("instagram: age-restricted error page → login-required", (await kind(resolveInstagram(CODE, ig({ page: { body: errorPage.replace('"restricted_age":null', '"restricted_age":18') } }).f))) === "login-required");
+
+  // Only the API's answer decides these: the page fails without refusing, and
+  // the embed carries the lsd token but leaves the file out.
+  const musicEmbed = { body: embedPage({ ...embedVideo, video_url: undefined }, { copyright_blocked: true }).replace("<html>", `<html>${eqmc}`) };
+  const quiet = (graphql: Reply) => ig({ page: { status: 500 }, embed: musicEmbed, graphql }).f;
+  check("instagram: GraphQL \"please wait a few minutes\" JSON alone → blocked", (await kind(resolveInstagram(CODE, quiet({ body: '{"message":"Please wait a few minutes before you try again.","require_login":true,"status":"fail"}' })))) === "blocked");
+  check("instagram: GraphQL 429 alone → blocked", (await kind(resolveInstagram(CODE, quiet({ status: 429 })))) === "blocked");
+  check("instagram: GraphQL empty answer alone → unreachable, not blocked", (await kind(resolveInstagram(CODE, quiet({ body: "{}" })))) === "unreachable");
+
+  // A carousel whose video slides have blocked music: the embed lists them without a file.
+  const silentSlide = (n: number, video: boolean) => ({ __typename: video ? "GraphVideo" : "GraphImage", is_video: video, display_url: `https://scontent.cdninstagram.com/${n}.jpg` });
+  const musicSidecar = { __typename: "GraphSidecar", is_video: false, edge_sidecar_to_children: { edges: [{ node: silentSlide(1, false) }, { node: silentSlide(2, true) }] } };
+  const sideRun = ig({ page: { status: 500 }, embed: { body: embedPage(musicSidecar, { type: "GraphSidecar", copyright_blocked: true }).replace("<html>", `<html>${eqmc}`) } });
+  const side = await logged(resolveInstagram(CODE, sideRun.f));
+  check("instagram: music-blocked carousel in the embed → not \"no video\"; GraphQL still asked", side.k === "blocked" && side.lines[0]?.includes("embed 200 no video in embed") && sideRun.calls.some((c) => igPath(c.url) === "/api/graphql"), `${side.k} ${side.lines[0]}`);
+
+  // A private post's link has 28 extra characters in its shortcode.
+  const LONG = `${CODE}${"A".repeat(28)}`;
+  const longFetch = (embed: Reply) =>
+    fakeFetch((u) => (igPath(u) === `/p/${LONG}/embed/captioned/` ? embed : { status: 302, headers: [["location", "https://www.instagram.com/accounts/login/"]] })).f;
+  check("instagram: private link refused everywhere → login-required, not blocked", (await kind(resolveInstagram(LONG, longFetch({ status: 302, headers: [["location", "https://www.instagram.com/accounts/login/"]] })))) === "login-required");
+  check("instagram: private link with a broken embed → login-required", (await kind(resolveInstagram(LONG, longFetch({ body: brokenEmbed })))) === "login-required");
 
   check("instagram: network down → unreachable", (await kind(resolveInstagram(CODE, fakeFetch(() => "throw").f))) === "unreachable");
   check("instagram: 5xx everywhere → unreachable", (await kind(resolveInstagram(CODE, fakeFetch(() => ({ status: 503 })).f))) === "unreachable");
@@ -321,6 +345,7 @@ check("grant headers: only Cookie/Referer/User-Agent, no line breaks", JSON.stri
 check("filenames", directFilename({ platform: "tiktok", id: ID, author: "akihitoko1", index: null } as never, "mp4", 720) === `tiktok-akihitoko1-${ID}-720p.mp4` &&
   directFilename({ platform: "instagram", id: "C4Hm4z2oEVp", author: null, index: 2 } as never, "mp3") === "instagram-C4Hm4z2oEVp-2.mp3");
 check("messages name the platform", failureMessage("tiktok", "blocked").startsWith("TikTok") && failureMessage("instagram", "login-required").includes("Instagram"));
+check("login message reads right for every platform", (["x", "tiktok", "instagram"] as const).every((p) => !/\ba [AEIOUX]/.test(failureMessage(p, "login-required"))));
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

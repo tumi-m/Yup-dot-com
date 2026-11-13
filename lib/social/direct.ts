@@ -31,7 +31,7 @@ export function failureMessage(platform: DirectPlatform, kind: DirectFailure): s
     case "no-video":
       return `That ${what} doesn't contain a video.`;
     case "login-required":
-      return `That ${what} is private or needs a ${name} login, so it can't be downloaded.`;
+      return `That ${what} is private or only shows after logging in to ${name}, so it can't be downloaded.`;
     case "blocked":
       // Instagram refuses logged-out requests from servers at times, whatever the post.
       if (platform === "instagram") return "Instagram is limiting downloads from servers right now. Try again in a few minutes.";
