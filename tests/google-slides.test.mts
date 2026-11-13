@@ -91,7 +91,8 @@ function fakeFetch(route: (url: string) => Reply) {
   const f = async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     const r = route(url);
-    if (r === "throw") throw new Error("network down");
+    // What Node's fetch throws when nothing answers.
+    if (r === "throw") throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
     const body = r.body === undefined ? null : r.body;
     const stream = body === null ? null : new Response(body).body!;
     const tracked = stream && new ReadableStream<Uint8Array>({
@@ -206,6 +207,28 @@ for (const s of [400, 405, 414]) {
   const { f } = fakeFetch(() => "throw");
   check("network error → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
 }
+// Only no answer is "unreachable". The bug: fetch also throws on an answer it
+// can't read (headers over 16 KB, which a long deck title makes), and that
+// was given back too.
+const failed = (cause?: unknown) => new TypeError("fetch failed", { cause });
+const coded = (code: string) => Object.assign(new Error(code), { code });
+for (const [name, err, want] of [
+  ["ECONNRESET", failed(coded("ECONNRESET")), "unreachable"],
+  ["ENOTFOUND", failed(coded("ENOTFOUND")), "unreachable"],
+  ["connect timeout", failed(coded("UND_ERR_CONNECT_TIMEOUT")), "unreachable"],
+  ["headers timeout", failed(coded("UND_ERR_HEADERS_TIMEOUT")), "unreachable"],
+  ["socket closed", failed(coded("UND_ERR_SOCKET")), "unreachable"],
+  ["every address refused", failed(Object.assign(new AggregateError([coded("ECONNREFUSED"), coded("ECONNREFUSED")]), { code: "ECONNREFUSED" })), "unreachable"],
+  ["headers overflow", failed(coded("UND_ERR_HEADERS_OVERFLOW")), "bad-answer"],
+  ["parser error", failed(coded("HPE_INVALID_HEADER_TOKEN")), "bad-answer"],
+  ["length mismatch", failed(coded("UND_ERR_RES_CONTENT_LENGTH_MISMATCH")), "bad-answer"],
+  ["no cause", failed(), "bad-answer"],
+  ["plain error", new Error("boom"), "bad-answer"],
+  ["aborted", new DOMException("aborted", "AbortError"), "bad-answer"],
+] as const) {
+  const k = await kind(fetchSlidesExport(ID, "pdf", async () => { throw err; }));
+  check(`fetch threw (${name}) → ${want}`, k === want, k);
+}
 {
   const { f } = fakeFetch(() => ({ status: 302 }));
   check("redirect without location → bad-answer", (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
@@ -267,6 +290,8 @@ function deps(
       fetcher,
       resolveTier: async () => ({ user: opts.user ? { id: opts.user } : null, tier: opts.tier ?? "guest" }),
       consumeDaily: async (subject: string, bucket: string, limit: number) => {
+        // Refunds given back today go through the real counter.
+        if (bucket !== "slides") return store.consume(subject, bucket, limit, "day");
         if (left <= 0) return -1;
         consumed.push({ key: `${bucket}:${subject}`, limit });
         return --left;
@@ -309,12 +334,15 @@ const failures: [string, Reply, number, string, boolean][] = [
   ["network error", "throw", 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
   // The bug: any other answer was taken for Google failing and given back,
   // so made-up links Google answered that way were never counted.
-  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
-  ["400", { status: 400 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
-  ["redirect off Google", redirect("https://drive.google.com/file/d/x/view"), 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
-  ["redirect without location", { status: 302 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
-  ["wrong type", { status: 200, headers: { "content-type": "application/json" }, body: "{}" }, 502, SLIDES_FAILURE_MESSAGE.unreachable, false],
+  // These counted but still said to try again in a minute, which spent another.
+  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["400", { status: 400 }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["redirect off Google", redirect("https://drive.google.com/file/d/x/view"), 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["redirect without location", { status: 302 }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["wrong type", { status: 200, headers: { "content-type": "application/json" }, body: "{}" }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
 ];
+check("bad-answer message doesn't say to try again", !/try again/i.test(SLIDES_FAILURE_MESSAGE["bad-answer"])
+  && SLIDES_FAILURE_MESSAGE["bad-answer"] !== SLIDES_FAILURE_MESSAGE.unreachable);
 for (const [name, reply, status, message, given] of failures) {
   const { f } = fakeFetch(() => reply);
   const { d, consumed, refunded } = deps(f);
@@ -378,6 +406,96 @@ for (const [name, reply] of [["not found", { status: 404 }], ["unreachable", { s
     `${calls.length} fetches, ${refused.length} refused`);
   // A refused try doesn't cost an import.
   check(`route ${name}: refused tries don't spend imports`, left() === 1000 - (reply.status === 404 ? SLIDES_FETCHES_PER_MINUTE : 0), String(left()));
+}
+// The bug: a deck Google kept failing on was given back every time, so it
+// could be tried at the per-minute limit all day.
+{
+  let now = Date.UTC(2026, 10, 11, 12, 0);
+  const store = memoryUsageStore(() => now);
+  const { f, calls } = fakeFetch(() => ({ status: 503 }));
+  const { d, consumed, refunded } = deps(f, { left: LIMITS.guest.linkImportsPerDay, store });
+  const bodies: { reason?: string }[] = [];
+  for (let i = 0; i < 2 * LIMITS.guest.linkImportsPerDay + 3; i++) {
+    now += 61_000;
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    bodies.push(await res.json().catch(() => ({})));
+  }
+  check("route: Google failing is given back a day's allowance of times, then counts",
+    refunded.length === LIMITS.guest.linkImportsPerDay && calls.length === 2 * LIMITS.guest.linkImportsPerDay
+      && consumed.length === 2 * LIMITS.guest.linkImportsPerDay && bodies.slice(-3).every((b) => b.reason === "quota"),
+    `${refunded.length} given back, ${calls.length} fetches, ${bodies.slice(-3).map((b) => b.reason).join(",")}`);
+}
+// Through Node's real fetch and a loopback "Google". The bug: headers over
+// Node's 16 KB limit (a deck's owner sets the title in Content-Disposition)
+// made fetch throw, which was taken for no answer and given back, so one
+// deck could be exported at 10 a minute all day without spending an import.
+{
+  const http = await import("node:http");
+  const titleBytes = 17_000;
+  const server = http.createServer({ maxHeaderSize: 1 << 20 }, (_q, rs) => {
+    rs.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-length": String(PDF_BYTES.length),
+      "content-disposition": `attachment; filename="deck.pdf"; filename*=UTF-8''${"%F0%9F%93%8A".repeat(Math.ceil(titleBytes / 12))}.pdf`,
+    });
+    rs.end(PDF_BYTES);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as { port: number }).port;
+  let asked = 0;
+  const loopback = (u: string, init?: RequestInit) => { asked++; return fetch(`http://127.0.0.1:${port}${new URL(u).pathname}`, init); };
+  // The handler stamps spentAt with Date.now, so it runs on the same clock.
+  const realNow = Date.now;
+  let now = Date.UTC(2026, 10, 11, 12, 0);
+  Date.now = () => now;
+  try {
+    const store = memoryUsageStore(() => now);
+    const s = "ip:203.0.113.9";
+    const limit = LIMITS.guest.linkImportsPerDay;
+    const d = {
+      fetcher: loopback,
+      resolveTier: async () => ({ user: null, tier: "guest" as const }),
+      consumeDaily: (subject: string, bucket: string, lim: number) => consumeDaily(subject, bucket, lim, store),
+      refundDaily: (subject: string, bucket: string, spentAt: number) => refundDaily(subject, bucket, spentAt, store),
+      claimFetch: (subject: string) => claimSlidesFetch(subject, store),
+      usageSubject: () => s,
+    };
+    const first = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    const firstBody = await first.json().catch(() => ({}));
+    check("loopback: oversized headers → 502 bad-answer, import spent",
+      first.status === 502 && firstBody.error === SLIDES_FAILURE_MESSAGE["bad-answer"] && (await store.count(s, "slides", "day")) === 1,
+      `${first.status} ${JSON.stringify(firstBody)} used=${await store.count(s, "slides", "day")}`);
+    const statuses: number[] = [];
+    const reasons: (string | undefined)[] = [];
+    for (let i = 0; i < 2 * limit; i++) {
+      now += 61_000;
+      const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+      statuses.push(res.status);
+      reasons.push((await res.json().catch(() => ({}))).reason);
+    }
+    check("loopback: a day's allowance of tries, then refused with reason quota",
+      asked === limit && (await store.count(s, "slides", "day")) === limit
+        && statuses.slice(limit - 1).every((x) => x === 429) && reasons.slice(limit - 1).every((r) => r === "quota"),
+      `${asked} asked, used=${await store.count(s, "slides", "day")}, ${statuses.join(",")}`);
+  } finally {
+    Date.now = realNow;
+    server.close();
+  }
+  // The same real fetch to a port nothing listens on: no answer, given back.
+  {
+    const { createServer } = await import("node:net");
+    const probe = createServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+    const closed = (probe.address() as { port: number }).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+    const refusing = (u: string, init?: RequestInit) => fetch(`http://127.0.0.1:${closed}${new URL(u).pathname}`, init);
+    const { d, consumed, refunded } = deps(refusing);
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    const body = await res.json().catch(() => ({}));
+    check("loopback: connection refused → 502 unreachable, given back",
+      res.status === 502 && body.error === SLIDES_FAILURE_MESSAGE.unreachable && consumed.length === 1 && refunded.length === 1,
+      `${res.status} ${JSON.stringify(body)} ${consumed.length}/${refunded.length}`);
+  }
 }
 // The bug: an import spent just before midnight and failed after it was
 // given back from the next day's count.

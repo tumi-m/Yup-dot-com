@@ -409,7 +409,8 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   video platform, and each ask also counts against a per-minute limit. A
   download link answers at most 10 requests (`/api/media/file`, HEAD and
   Range ones included), each counted against 120 a minute, and a Slides
-  import is given back only when Google itself failed. So used-up or broken
+  import is given back only when Google itself failed (busy, 5xx or no
+  answer at all), at most a day's allowance of times. So used-up or broken
   links can't make the server fetch without end.
 - **Cross-site requests.** Routes that spend an allowance or change an
   account refuse requests from other sites' pages (`Sec-Fetch-Site`,
