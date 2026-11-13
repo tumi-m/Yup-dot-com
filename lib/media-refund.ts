@@ -140,19 +140,21 @@ export async function refundBrokenFirstServe(store: UsageStore, ref: GrantRef, n
   return true;
 }
 
-export type WorkerVerdict = "failed" | "unused" | "rejected" | "unreachable" | "used" | "unknown";
+export type WorkerVerdict = "failed" | "unused" | "unreachable" | "used" | "unknown";
 
 /**
  * Voids a grant at the worker, so it can no longer start a job, and returns
- * what the worker knows about it. "failed", "unused" and "rejected" allow a
- * refund: the visitor got no file.
+ * what the worker knows about it. Only "failed" and "unused" allow a refund:
+ * the worker took our secret and says the visitor got no file.
  *
  * The worker keeps its record in memory, so it can only vouch for a grant
  * made after it started: one that restarted since (a redeploy, a crash, a
  * host waking from sleep) may have run the job and forgotten it. A worker
  * that doesn't answer may have run it too ("unreachable"). A worker too old
  * to void grants answers 404: "unknown", since the grant would still work
- * there. "rejected": the worker refuses our secret, so it refused the grant.
+ * there. A worker that refuses our secret (401, mid-rotation) never looked
+ * at the grant, and one that restarted with the new secret may have sent
+ * its file: "unknown" too.
  */
 export async function askWorker(
   workerUrl: string,
@@ -174,10 +176,13 @@ export async function askWorker(
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   // A sleeping host's HTML page.
   if (!body) return "unreachable";
-  if (res.status === 401) return "rejected";
+  if (res.status === 401) {
+    console.error("media worker /refs: 401 — MEDIA_WORKER_SECRET differs between the web app and the worker; no refund.");
+    return "unknown";
+  }
   if (!res.ok || typeof body.used !== "boolean") return "unknown";
   if (body.used) return body.status === "error" ? "failed" : "used";
   return typeof body.since === "number" && body.since < ref.t ? "unused" : "unknown";
 }
 
-export const REFUNDABLE: readonly WorkerVerdict[] = ["failed", "unused", "rejected"];
+export const REFUNDABLE: readonly WorkerVerdict[] = ["failed", "unused"];

@@ -84,8 +84,12 @@ const check = (name: string, ok: boolean, extra = "") => {
   const down = await ask(0, null, true);
   check("worker down or too slow → no refund", down.v === "unreachable" && !REFUNDABLE.includes(down.v));
   check("sleeping host (HTML) → no refund", !REFUNDABLE.includes((await ask(503, "<html>waking up</html>")).v));
+  // Mid-rotation the worker may have restarted with a new secret after
+  // sending the file: a 401 says nothing about the grant.
   const rejected = await ask(401, { error: "Unauthorized." });
-  check("worker rejects our secret (so it rejected the job too) → refund", rejected.v === "rejected" && REFUNDABLE.includes(rejected.v));
+  check("worker refuses our secret (it never looked at the grant) → no refund", rejected.v === "unknown" && !REFUNDABLE.includes(rejected.v));
+  check("401 with a 'never used' body → still no refund", !REFUNDABLE.includes((await ask(401, { used: false, since: 900 })).v));
+  check("only an authenticated failed/unused answer refunds", REFUNDABLE.length === 2 && REFUNDABLE.every((v) => v === "failed" || v === "unused"));
   check("anything else → no refund", !REFUNDABLE.includes((await ask(500, { error: "x" })).v));
 }
 
