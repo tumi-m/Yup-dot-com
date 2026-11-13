@@ -120,10 +120,17 @@ yt-dlp's web method): the server loads the public post page, reads the
 TikTok's proof-of-work page when it shows one. The page's cookies and Referer
 travel inside the signed download grant, because TikTok's CDN wants them.
 
-**Instagram** (`lib/social/instagram.ts`) tries yt-dlp's logged-out GraphQL
-query, then the post page's embedded JSON, then the embed page. Instagram
-limits logged-out access hard, especially from cloud servers, so expect
-"Instagram is limiting downloads right now" at times.
+**Instagram** (`lib/social/instagram.ts`) reads the public post page's
+embedded JSON, then the embed page (its escaped `contextJSON`), then tries
+yt-dlp's logged-out GraphQL query after the `get_ruling_for_content` check.
+Every request sends a browser's `Sec-Fetch-*` headers: without them
+Instagram answers pages with its error page and the API with "SecFetch
+Policy violation". The GraphQL query is refused (HTTP 429) to plain HTTP
+clients, and the embed leaves the file out of posts with blocked music.
+Instagram limits logged-out access hard, especially from cloud servers, so
+expect "Instagram is limiting downloads from servers right now" at times.
+Each failed resolve logs one `Instagram resolve failed (…)` line with every
+step's status and reason, to see in the server logs what Instagram answered.
 
 TikTok and Instagram are unofficial, change without notice, and forbid
 downloading in their terms; files only ever come from their own CDNs
