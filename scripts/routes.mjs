@@ -13,6 +13,7 @@
 /** Pages anyone may see. */
 export const PUBLIC_PAGES = [
   "/",
+  "/auth/confirm", // an email link's Continue page: without the link's cookie it sends to /login
   "/contact",
   "/edit/[id]", // the no-account editor: the document stays in the browser
   "/forgot-password",
@@ -60,6 +61,6 @@ export const CLOSED_ROUTES = [
   "/api/samples/lookup", // POST only, same site
   "/api/slides/export",
   "/api/usage/edit",
-  "/auth/callback",
+  "/auth/callback", // GET: an OAuth code, or on to /auth/confirm; POST: Continue, same site
   "/auth/signout",
 ];
