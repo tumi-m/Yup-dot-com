@@ -405,9 +405,54 @@ export function consumeDaily(subject: string, bucket: string, limit: number, sto
   return store.consume(subject, bucket, limit, "day");
 }
 
-/** True when today's `bucket` allowance is already used up. A cheap early no; consumeDaily still decides. */
-export async function dailySpent(subject: string, bucket: string, limit: number, store: UsageStore = usageStore()): Promise<boolean> {
-  return (await store.count(subject, bucket, "day")) >= limit;
+/**
+ * Gives back one of `bucket`'s allowance spent at `spentAt`, only on that
+ * UTC day: after midnight that day's is gone anyway, and taking one off
+ * today's would be a gift. True if it was given back.
+ */
+export async function refundDaily(
+  subject: string,
+  bucket: string,
+  spentAt: number,
+  store: UsageStore = usageStore(),
+  now = Date.now()
+): Promise<boolean> {
+  if (periodStart("day", spentAt) !== periodStart("day", now)) return false;
+  await store.refund(subject, bucket, "day");
+  return true;
+}
+
+/** Uses of today's `bucket` allowance left, without spending one. */
+export async function dailyLeft(subject: string, bucket: string, limit: number, store: UsageStore = usageStore()): Promise<number> {
+  return Math.max(0, limit - (await store.count(subject, bucket, "day")));
+}
+
+/** Tries at a Google Slides export a minute, per person or guest IP. */
+export const SLIDES_FETCHES_PER_MINUTE = 10;
+
+/**
+ * Counts one try at a Slides export (/api/slides/export), whatever Google
+ * answers. Each makes the server call Google, up to six times with
+ * redirects, and an import Google failed is given back, so without this the
+ * same broken link could be retried without end and get the site's address
+ * throttled by Google. False when this minute's tries are used up.
+ */
+export async function claimSlidesFetch(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "slides-fetch", SLIDES_FETCHES_PER_MINUTE, "minute")) >= 0;
+}
+
+/** Requests for a download's file a minute, per person or guest IP it was counted against. */
+export const MEDIA_FILE_PER_MINUTE = 120;
+export const MEDIA_FILE_MESSAGE = "Too many downloads at once. Try again in a minute.";
+
+/**
+ * Counts one request to /api/media/file, HEAD and Range ones too. Each makes
+ * the server ask the platform's video CDN, and a grant lasts 30 minutes, so
+ * without this one download could be fetched again and again without end.
+ * False when this minute's are used up.
+ */
+export async function claimMediaFile(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "media-file", MEDIA_FILE_PER_MINUTE, "minute")) >= 0;
 }
 
 /** Link previews, playlist lists and download links a minute, per person or guest IP. */

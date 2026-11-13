@@ -5,7 +5,7 @@ import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
 import { MEDIA_BUCKET, newGrantRef, type GrantRef } from "@/lib/media-refund";
 import { refuseCrossSite } from "@/lib/cross-site";
-import { MEDIA_LOOKUP_MESSAGE, claimMediaLookup, consumeDaily, dailySpent, usageSubject } from "@/lib/usage";
+import { MEDIA_LOOKUP_MESSAGE, claimMediaLookup, consumeDaily, dailyLeft, usageSubject } from "@/lib/usage";
 import { directFilename, DirectResolveError, failureMessage, grantHeaders, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
 import { audioSourceVariant, pickXVariant, variantQuality } from "@/lib/x-video";
 
@@ -31,9 +31,9 @@ const bodySchema = z.object({
  * Each grant records who it was counted against, when, and a random
  * reference, so a download that fails is given back (lib/media-refund.ts).
  *
- * Resolving an X, TikTok or Instagram post counts as a link lookup, like a
- * preview, so failed or over-quota requests can't make the server call the
- * platform without limit.
+ * The allowance is checked before a platform is asked, and each ask counts
+ * as a link lookup, so used-up or failing links can't make the server call
+ * X, TikTok or Instagram without limit. It is spent once a link is made.
  */
 export async function POST(request: Request) {
   const refused = refuseCrossSite(request);
@@ -50,15 +50,6 @@ export async function POST(request: Request) {
   const { kind } = parsed.data;
 
   const { user, tier } = await resolveTier();
-  const subject = usageSubject(request, user);
-  const dailyLimit = limitsFor(tier).mediaDownloadsPerDay;
-  const quotaSpent = () => {
-    const paid = tier === "pro" || tier === "team";
-    return Response.json(
-      { error: paid ? "You've used today's downloads." : "You've used today's free downloads.", upgrade: !paid, reason: "quota" },
-      { status: 429 }
-    );
-  };
   const height = kind === "mp3" ? 0 : (parsed.data.height ?? 720);
   if (kind === "mp4" && !(QUALITIES as readonly number[]).includes(height)) {
     return Response.json({ error: "Unsupported quality." }, { status: 400 });
@@ -70,15 +61,23 @@ export async function POST(request: Request) {
     );
   }
 
+  const subject = usageSubject(request, user);
+  const limit = limitsFor(tier).mediaDownloadsPerDay;
+  const paid = tier === "pro" || tier === "team";
+  const spent = () =>
+    Response.json(
+      { error: paid ? "You've used today's downloads." : "You've used today's free downloads.", upgrade: !paid, reason: "quota" },
+      { status: 429 }
+    );
+  if ((await dailyLeft(subject, MEDIA_BUCKET, limit)) <= 0) return spent();
+
   // Resolve (X) or check configuration (YouTube) before spending the quota.
   let grant: (ref: GrantRef) => Record<string, unknown>;
   if (isDirectPlatform(media.platform)) {
     const platform = media.platform;
-    // Resolving calls the platform: not once today's downloads are spent, and
-    // no more often than a link preview (lib/usage.ts claimMediaLookup).
-    if (await dailySpent(subject, MEDIA_BUCKET, dailyLimit)) return quotaSpent();
     if (!(await claimMediaLookup(subject))) {
-      return Response.json({ error: MEDIA_LOOKUP_MESSAGE }, { status: 429, headers: { "Retry-After": "60" } });
+      // Not "quota": the page keeps its Download button for this one.
+      return Response.json({ error: MEDIA_LOOKUP_MESSAGE, reason: "burst" }, { status: 429, headers: { "Retry-After": "60" } });
     }
     let video;
     try {
@@ -132,7 +131,8 @@ export async function POST(request: Request) {
   }
 
   const made = Math.floor(Date.now() / 1000);
-  const remaining = await consumeDaily(subject, MEDIA_BUCKET, dailyLimit);
-  if (remaining < 0) return quotaSpent();
+  // Spent here, so a race at the limit is still refused.
+  const remaining = await consumeDaily(subject, MEDIA_BUCKET, limit);
+  if (remaining < 0) return spent();
   return Response.json({ ...grant({ s: subject, c: newGrantRef(), t: made }), remaining });
 }

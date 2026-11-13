@@ -4,12 +4,12 @@
  */
 process.env.MEDIA_SIGNING_SECRET = "abuse-test-secret";
 import { createRequire } from "node:module";
-import { MEDIA_BUCKET } from "../lib/media-refund.ts";
+import { MEDIA_BUCKET, REQUESTS_PER_GRANT } from "../lib/media-refund.ts";
 import type { UsageStore } from "../lib/usage.ts";
 
 // The routes load lib/usage.ts through require(); so must this test, or it
 // would get a second copy whose store the routes never see.
-const { memoryUsageStore, setUsageStore, usageSubject } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
+const { MEDIA_FILE_PER_MINUTE, memoryUsageStore, setUsageStore, usageSubject } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
 
 const results: boolean[] = [];
 const check = (name: string, ok: boolean, extra = "") => {
@@ -24,9 +24,17 @@ const SIZE = 5000;
 const CDN_URL = "https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/640x360/a.mp4";
 let cdnDown = false;
 let cdnBreak: Promise<void> | null = null;
+let cdnCalls = 0;
+// Calls that look a post up on X; `postMissing` makes every one a 404.
+let lookups = 0;
+let postMissing = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = String(input instanceof Request ? input.url : input);
+  if (/^https:\/\/(cdn\.syndication\.twimg\.com|api\.fxtwitter\.com|api\.vxtwitter\.com)\//.test(url)) {
+    lookups++;
+    if (postMissing) return new Response("", { status: 404 });
+  }
   if (url.startsWith("https://cdn.syndication.twimg.com/")) {
     return Response.json({
       user: { screen_name: "someone" },
@@ -39,6 +47,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => 
     });
   }
   if (url.startsWith("https://video.twimg.com/")) {
+    cdnCalls++;
     if (cdnDown) return new Response("", { status: 403 });
     if (cdnBreak) {
       const when = cdnBreak;
@@ -104,6 +113,71 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
   check("a tampered link is refused", tampered.status === 403);
 }
 
+// The bug: a guest with no downloads left still made the server look the
+// post up on X, and lookups that failed were never counted at all.
+{
+  setUsageStore(memoryUsageStore());
+  const ip = "203.0.113.10";
+  for (let i = 0; i < 5; i++) await getLink(ip);
+  const before = lookups;
+  const over = await getLink(ip);
+  check("used up: refused without asking X", over.status === 429 && over.body.reason === "quota" && lookups === before, `${over.status} ${lookups - before}`);
+
+  setUsageStore(memoryUsageStore());
+  postMissing = true;
+  const statuses: number[] = [];
+  const reasons: unknown[] = [];
+  let afterLimit = 0;
+  for (let i = 0; i < 25; i++) {
+    if (i === 20) afterLimit = lookups;
+    const got = await getLink("203.0.113.11");
+    statuses.push(got.status);
+    reasons.push(got.body.reason);
+  }
+  postMissing = false;
+  check("failing links: 20 lookups a minute, then 429",
+    statuses.slice(0, 20).every((s) => s === 422) && statuses.slice(20).every((s) => s === 429), statuses.join(","));
+  // The page took every 429 for the day's quota and disabled Download for good.
+  check("failing links: that 429 says burst, not quota", reasons.slice(20).every((r) => r === "burst"), reasons.slice(20).join(","));
+  check("failing links: X isn't asked after that", lookups === afterLimit, `${lookups - afterLimit} more calls`);
+}
+
+// The bug: one grant could be asked for its file without end for 30
+// minutes, each request a fresh fetch from the CDN, and nothing counted.
+{
+  const store = memoryUsageStore();
+  setUsageStore(store);
+  const ip = "203.0.113.12";
+  const got = await getLink(ip);
+  const head = () => file.HEAD(new Request(`http://localhost${got.body.href}`, { method: "HEAD", headers: { "x-forwarded-for": ip } }));
+  const statuses: number[] = [];
+  const first = await getFile(got.body.href, ip);
+  statuses.push(first.status);
+  await first.arrayBuffer();
+  for (let i = 1; i < REQUESTS_PER_GRANT; i++) {
+    const r = i % 2 ? await head() : await getFile(got.body.href, ip, { range: "bytes=0-" });
+    statuses.push(r.status);
+    await r.body?.cancel();
+  }
+  const before = cdnCalls;
+  const over = [await getFile(got.body.href, ip), await head(), await getFile(got.body.href, ip, { range: "bytes=0-0" })];
+  for (const r of over) await r.body?.cancel();
+  check(`one grant: ${REQUESTS_PER_GRANT} requests of any kind are answered`, statuses.every((s) => s === 200 || s === 206), statuses.join(","));
+  check("one grant: after that it has expired, without asking the CDN",
+    over.every((r) => r.status === 403) && cdnCalls === before, `${over.map((r) => r.status)} ${cdnCalls - before} CDN calls`);
+
+  // Many grants: each request counts for whoever they were counted against, per minute.
+  const subject = usageSubject(new Request("http://l", { headers: guest(ip) }), null);
+  for (let i = 0; i < MEDIA_FILE_PER_MINUTE; i++) await store.consume(subject, "media-file", MEDIA_FILE_PER_MINUTE, "minute");
+  const next = await getLink(ip);
+  const atLimit = cdnCalls;
+  const busy = await getFile(next.body.href, "198.51.100.77");
+  const body = await busy.json().catch(() => ({}));
+  check("file requests: a minute's limit, from any address, before the CDN is asked",
+    busy.status === 429 && busy.headers.get("retry-after") === "60" && typeof body.error === "string" && cdnCalls === atLimit,
+    `${busy.status} ${JSON.stringify(body)} ${cdnCalls - atLimit} CDN calls`);
+}
+
 // File links are encrypted, not just signed.
 {
   const { openToken, sealToken } = await import("../lib/media-server.ts");
@@ -160,6 +234,26 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
   const both = await round(true);
   check("but not once another request on the grant sent the whole file",
     both.broke && both.bytes === SIZE && both.used === 1, JSON.stringify(both));
+
+  // A request past the grant's REQUESTS_PER_GRANT sends nothing, so it must
+  // not count as a second send and cost the visitor their broken download.
+  const store = memoryUsageStore();
+  setUsageStore(store);
+  const got = await getLink(ip);
+  let breakOff = () => {};
+  cdnBreak = new Promise<void>((r) => (breakOff = r));
+  const first = (await getFile(got.body.href, ip)).body!.getReader();
+  await first.read();
+  const head = () => file.HEAD(new Request(`http://localhost${got.body.href}`, { method: "HEAD", headers: { "x-forwarded-for": ip } }));
+  for (let i = 1; i < REQUESTS_PER_GRANT; i++) await (await head()).body?.cancel();
+  const before = cdnCalls;
+  const over = await getFile(got.body.href, ip);
+  await over.body?.cancel();
+  breakOff();
+  const broke = await first.read().then(() => first.read()).then(() => false, () => true);
+  const used = await store.count(subject, MEDIA_BUCKET, "day");
+  check("a request past the grant's limit isn't a send: the broken first send is still given back",
+    over.status === 403 && cdnCalls === before && broke && used === 0, JSON.stringify({ status: over.status, cdn: cdnCalls - before, broke, used }));
 }
 
 // Refund and served markers used to live in the daily window, so at 00:00

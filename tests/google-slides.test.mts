@@ -1,7 +1,8 @@
 /**
  * Google Slides import: link parsing, the redirect allowlist (SSRF), private
  * deck detection, content-type checks, filenames, and the route handler's
- * quota rules. Uses a fake network.
+ * quota rules (spent before Google is asked, a per-minute limit on tries).
+ * Uses a fake network.
  */
 import {
   parseSlidesUrl, isPublishedSlidesUrl, slidesLinkProblem, exportUrl, isAllowedSlidesHost,
@@ -9,6 +10,7 @@ import {
   handleSlidesExport, SLIDES_MIME, SLIDES_FAILURE_MESSAGE,
 } from "../lib/google-slides.ts";
 import { LIMITS } from "../lib/limits.ts";
+import { claimSlidesFetch, consumeDaily, memoryUsageStore, refundDaily, SLIDES_FETCHES_PER_MINUTE, type UsageStore } from "../lib/usage.ts";
 
 const results: boolean[] = [];
 const check = (name: string, ok: boolean, extra = "") => {
@@ -89,7 +91,8 @@ function fakeFetch(route: (url: string) => Reply) {
   const f = async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     const r = route(url);
-    if (r === "throw") throw new Error("network down");
+    // What Node's fetch throws when nothing answers.
+    if (r === "throw") throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
     const body = r.body === undefined ? null : r.body;
     const stream = body === null ? null : new Response(body).body!;
     const tracked = stream && new ReadableStream<Uint8Array>({
@@ -146,14 +149,14 @@ for (const target of [
 ]) {
   const { f, calls } = fakeFetch((u) => (u === exportUrl(ID, "pdf") ? redirect(target) : pdfOk()));
   const k = await kind(fetchSlidesExport(ID, "pdf", f));
-  check(`SSRF: redirect to ${target} not followed`, k === "unreachable" && calls.length === 1, `${k}, ${calls.length} calls`);
+  check(`SSRF: redirect to ${target} not followed`, k === "bad-answer" && calls.length === 1, `${k}, ${calls.length} calls`);
 }
 
 // Redirect loop capped at 5 hops.
 {
   const { f, calls } = fakeFetch((u) => redirect(`${u.split("?")[0]}?n=${Math.random()}`));
   const k = await kind(fetchSlidesExport(ID, "pdf", f));
-  check("redirect loop capped", k === "unreachable" && calls.length === 6, `${k} after ${calls.length} requests`);
+  check("redirect loop capped", k === "bad-answer" && calls.length === 6, `${k} after ${calls.length} requests`);
 }
 {
   let n = 0;
@@ -195,23 +198,50 @@ for (const s of [401, 403]) {
   const { f } = fakeFetch(() => ({ status: 500 }));
   check("500 → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
 }
+// Google answered, so these say something about the link (and count).
+for (const s of [400, 405, 414]) {
+  const { f } = fakeFetch(() => ({ status: s }));
+  check(`${s} → bad-answer`, (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
+}
 {
   const { f } = fakeFetch(() => "throw");
   check("network error → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
 }
+// Only no answer is "unreachable". The bug: fetch also throws on an answer it
+// can't read (headers over 16 KB, which a long deck title makes), and that
+// was given back too.
+const failed = (cause?: unknown) => new TypeError("fetch failed", { cause });
+const coded = (code: string) => Object.assign(new Error(code), { code });
+for (const [name, err, want] of [
+  ["ECONNRESET", failed(coded("ECONNRESET")), "unreachable"],
+  ["ENOTFOUND", failed(coded("ENOTFOUND")), "unreachable"],
+  ["connect timeout", failed(coded("UND_ERR_CONNECT_TIMEOUT")), "unreachable"],
+  ["headers timeout", failed(coded("UND_ERR_HEADERS_TIMEOUT")), "unreachable"],
+  ["socket closed", failed(coded("UND_ERR_SOCKET")), "unreachable"],
+  ["every address refused", failed(Object.assign(new AggregateError([coded("ECONNREFUSED"), coded("ECONNREFUSED")]), { code: "ECONNREFUSED" })), "unreachable"],
+  ["headers overflow", failed(coded("UND_ERR_HEADERS_OVERFLOW")), "bad-answer"],
+  ["parser error", failed(coded("HPE_INVALID_HEADER_TOKEN")), "bad-answer"],
+  ["length mismatch", failed(coded("UND_ERR_RES_CONTENT_LENGTH_MISMATCH")), "bad-answer"],
+  ["no cause", failed(), "bad-answer"],
+  ["plain error", new Error("boom"), "bad-answer"],
+  ["aborted", new DOMException("aborted", "AbortError"), "bad-answer"],
+] as const) {
+  const k = await kind(fetchSlidesExport(ID, "pdf", async () => { throw err; }));
+  check(`fetch threw (${name}) → ${want}`, k === want, k);
+}
 {
   const { f } = fakeFetch(() => ({ status: 302 }));
-  check("redirect without location → unreachable", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
+  check("redirect without location → bad-answer", (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
 }
 
 // Content types.
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": "application/pdf" }, body: PDF_BYTES }));
-  check("pptx request refuses a PDF", (await kind(fetchSlidesExport(ID, "pptx", f))) === "unreachable");
+  check("pptx request refuses a PDF", (await kind(fetchSlidesExport(ID, "pptx", f))) === "bad-answer");
 }
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": "application/octet-stream" }, body: PDF_BYTES }));
-  check("octet-stream refused", (await kind(fetchSlidesExport(ID, "pdf", f))) === "unreachable");
+  check("octet-stream refused", (await kind(fetchSlidesExport(ID, "pdf", f))) === "bad-answer");
 }
 {
   const { f } = fakeFetch(() => ({ status: 200, headers: { "content-type": `${SLIDES_MIME.pptx}; charset=binary` }, body: PDF_BYTES }));
@@ -243,15 +273,31 @@ check("filename: long capped", slidesFilename(`attachment; filename="${"x".repea
 }
 
 // ---- route handler ----
-function deps(fetcher: ReturnType<typeof fakeFetch>["f"], opts: { tier?: "guest" | "free" | "pro"; user?: string; left?: number } = {}) {
+function deps(
+  fetcher: ReturnType<typeof fakeFetch>["f"],
+  opts: { tier?: "guest" | "free" | "pro"; user?: string; left?: number; store?: UsageStore } = {}
+) {
   const consumed: { key: string; limit: number }[] = [];
+  const refunded: string[] = [];
   let left = opts.left ?? 10;
+  // Tries a minute go through the real counter.
+  const store = opts.store ?? memoryUsageStore();
   return {
     consumed,
+    refunded,
+    left: () => left,
     d: {
       fetcher,
       resolveTier: async () => ({ user: opts.user ? { id: opts.user } : null, tier: opts.tier ?? "guest" }),
-      consumeDaily: async (subject: string, bucket: string, limit: number) => { consumed.push({ key: `${bucket}:${subject}`, limit }); return left-- > 0 ? left : -1; },
+      consumeDaily: async (subject: string, bucket: string, limit: number) => {
+        // Refunds given back today go through the real counter.
+        if (bucket !== "slides") return store.consume(subject, bucket, limit, "day");
+        if (left <= 0) return -1;
+        consumed.push({ key: `${bucket}:${subject}`, limit });
+        return --left;
+      },
+      refundDaily: async (subject: string, bucket: string) => { refunded.push(`${bucket}:${subject}`); left++; },
+      claimFetch: (subject: string) => claimSlidesFetch(subject, store),
       usageSubject: (_r: Request, user: { id: string } | null) => (user ? `u:${user.id}` : "ip:203.0.113.9"),
     },
   };
@@ -278,21 +324,33 @@ const link = encodeURIComponent(good[1]);
   await (await handleSlidesExport(req(`url=${link}&format=pdf`), d)).arrayBuffer();
   check("route: quota keyed per user with plan limit", consumed[0]?.key === "slides:u:u1" && consumed[0].limit === 500);
 }
-const failures: [string, Reply, number, string][] = [
-  ["private", redirect("https://accounts.google.com/v3/signin"), 403, SLIDES_FAILURE_MESSAGE.private],
-  ["html", { status: 200, headers: { "content-type": "text/html" }, body: "<html>" }, 403, SLIDES_FAILURE_MESSAGE.private],
-  ["not found", { status: 404 }, 404, SLIDES_FAILURE_MESSAGE["not-found"]],
-  ["google 429", { status: 429 }, 429, SLIDES_FAILURE_MESSAGE["rate-limited"]],
-  ["unreachable", { status: 503 }, 502, SLIDES_FAILURE_MESSAGE.unreachable],
-  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE.unreachable],
+// A wrong or private link is the visitor's and counts; Google failing is given back.
+const failures: [string, Reply, number, string, boolean][] = [
+  ["private", redirect("https://accounts.google.com/v3/signin"), 403, SLIDES_FAILURE_MESSAGE.private, false],
+  ["html", { status: 200, headers: { "content-type": "text/html" }, body: "<html>" }, 403, SLIDES_FAILURE_MESSAGE.private, false],
+  ["not found", { status: 404 }, 404, SLIDES_FAILURE_MESSAGE["not-found"], false],
+  ["google 429", { status: 429 }, 429, SLIDES_FAILURE_MESSAGE["rate-limited"], true],
+  ["unreachable", { status: 503 }, 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
+  ["network error", "throw", 502, SLIDES_FAILURE_MESSAGE.unreachable, true],
+  // The bug: any other answer was taken for Google failing and given back,
+  // so made-up links Google answered that way were never counted.
+  // These counted but still said to try again in a minute, which spent another.
+  ["ssrf", redirect("https://169.254.169.254/"), 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["400", { status: 400 }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["redirect off Google", redirect("https://drive.google.com/file/d/x/view"), 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["redirect without location", { status: 302 }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
+  ["wrong type", { status: 200, headers: { "content-type": "application/json" }, body: "{}" }, 502, SLIDES_FAILURE_MESSAGE["bad-answer"], false],
 ];
-for (const [name, reply, status, message] of failures) {
+check("bad-answer message doesn't say to try again", !/try again/i.test(SLIDES_FAILURE_MESSAGE["bad-answer"])
+  && SLIDES_FAILURE_MESSAGE["bad-answer"] !== SLIDES_FAILURE_MESSAGE.unreachable);
+for (const [name, reply, status, message, given] of failures) {
   const { f } = fakeFetch(() => reply);
-  const { d, consumed } = deps(f);
+  const { d, consumed, refunded } = deps(f);
   const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
   const body = await res.json().catch(() => ({}));
-  check(`route ${name}: ${status}, no quota spent`, res.status === status && body.error === message && consumed.length === 0,
-    `${res.status} ${JSON.stringify(body)} consumed=${consumed.length}`);
+  check(`route ${name}: ${status}, import ${given ? "given back" : "spent"}`,
+    res.status === status && body.error === message && consumed.length === 1 && refunded.length === (given ? 1 : 0),
+    `${res.status} ${JSON.stringify(body)} consumed=${consumed.length} refunded=${refunded.length}`);
 }
 for (const [name, q, message] of [
   ["bad link", `url=${encodeURIComponent("https://example.com/x")}&format=pdf`, SLIDES_FAILURE_MESSAGE.invalid],
@@ -307,12 +365,182 @@ for (const [name, q, message] of [
   check(`route ${name}: 400 without network`, res.status === 400 && body.error === message && calls.length === 0 && consumed.length === 0, JSON.stringify(body));
 }
 {
-  const { f, cancelled } = fakeFetch(() => pdfOk());
+  const { f, calls } = fakeFetch(() => pdfOk());
   const { d } = deps(f, { left: 0, tier: "free" });
   const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
   const body = await res.json().catch(() => ({}));
   check("route: quota spent → 429 with upgrade", res.status === 429 && body.upgrade === true && body.reason === "quota", JSON.stringify(body));
-  check("route: quota spent → upstream released", cancelled() === 1);
+  // The bug: Google was asked for the whole deck first, then it was thrown away.
+  check("route: quota spent → Google never asked", calls.length === 0, `${calls.length} fetches`);
+}
+// The bug: a made-up id made the server ask Google every time, and nothing was counted.
+{
+  let now = Date.UTC(2026, 10, 11, 12, 0);
+  const { f, calls } = fakeFetch(() => ({ status: 404 }));
+  const { d } = deps(f, { left: LIMITS.guest.linkImportsPerDay, store: memoryUsageStore(() => now) });
+  const statuses: number[] = [];
+  for (let i = 0; i < LIMITS.guest.linkImportsPerDay + 5; i++) {
+    now += 61_000; // past the per-minute limit, so only the daily allowance stops it
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    statuses.push(res.status);
+    await res.body?.cancel();
+  }
+  check("route: made-up links spend imports, then Google isn't asked",
+    calls.length === LIMITS.guest.linkImportsPerDay && statuses.slice(-5).every((s) => s === 429),
+    `${calls.length} fetches, ${statuses.join(",")}`);
+}
+// Failures on Google's side are given back, so tries are capped per minute.
+for (const [name, reply] of [["not found", { status: 404 }], ["unreachable", { status: 503 }]] as const) {
+  const { f, calls } = fakeFetch(() => reply);
+  const { d, left } = deps(f, { left: 1000 });
+  const refused: Response[] = [];
+  for (let i = 0; i < SLIDES_FETCHES_PER_MINUTE + 5; i++) {
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    if (res.status === 429) refused.push(res);
+    else await res.body?.cancel();
+  }
+  const bodies = await Promise.all(refused.map((r) => r.json()));
+  check(`route ${name}: ${SLIDES_FETCHES_PER_MINUTE} tries a minute, then 429 without asking Google`,
+    calls.length === SLIDES_FETCHES_PER_MINUTE && refused.length === 5
+      && refused.every((r) => r.headers.get("retry-after") === "60") && bodies.every((b) => b.reason === "burst"),
+    `${calls.length} fetches, ${refused.length} refused`);
+  // A refused try doesn't cost an import.
+  check(`route ${name}: refused tries don't spend imports`, left() === 1000 - (reply.status === 404 ? SLIDES_FETCHES_PER_MINUTE : 0), String(left()));
+}
+// The bug: a deck Google kept failing on was given back every time, so it
+// could be tried at the per-minute limit all day.
+{
+  let now = Date.UTC(2026, 10, 11, 12, 0);
+  const store = memoryUsageStore(() => now);
+  const { f, calls } = fakeFetch(() => ({ status: 503 }));
+  const { d, consumed, refunded } = deps(f, { left: LIMITS.guest.linkImportsPerDay, store });
+  const bodies: { reason?: string }[] = [];
+  for (let i = 0; i < 2 * LIMITS.guest.linkImportsPerDay + 3; i++) {
+    now += 61_000;
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    bodies.push(await res.json().catch(() => ({})));
+  }
+  check("route: Google failing is given back a day's allowance of times, then counts",
+    refunded.length === LIMITS.guest.linkImportsPerDay && calls.length === 2 * LIMITS.guest.linkImportsPerDay
+      && consumed.length === 2 * LIMITS.guest.linkImportsPerDay && bodies.slice(-3).every((b) => b.reason === "quota"),
+    `${refunded.length} given back, ${calls.length} fetches, ${bodies.slice(-3).map((b) => b.reason).join(",")}`);
+}
+// Through Node's real fetch and a loopback "Google". The bug: headers over
+// Node's 16 KB limit (a deck's owner sets the title in Content-Disposition)
+// made fetch throw, which was taken for no answer and given back, so one
+// deck could be exported at 10 a minute all day without spending an import.
+{
+  const http = await import("node:http");
+  const titleBytes = 17_000;
+  const server = http.createServer({ maxHeaderSize: 1 << 20 }, (_q, rs) => {
+    rs.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-length": String(PDF_BYTES.length),
+      "content-disposition": `attachment; filename="deck.pdf"; filename*=UTF-8''${"%F0%9F%93%8A".repeat(Math.ceil(titleBytes / 12))}.pdf`,
+    });
+    rs.end(PDF_BYTES);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as { port: number }).port;
+  let asked = 0;
+  const loopback = (u: string, init?: RequestInit) => { asked++; return fetch(`http://127.0.0.1:${port}${new URL(u).pathname}`, init); };
+  // The handler stamps spentAt with Date.now, so it runs on the same clock.
+  const realNow = Date.now;
+  let now = Date.UTC(2026, 10, 11, 12, 0);
+  Date.now = () => now;
+  try {
+    const store = memoryUsageStore(() => now);
+    const s = "ip:203.0.113.9";
+    const limit = LIMITS.guest.linkImportsPerDay;
+    const d = {
+      fetcher: loopback,
+      resolveTier: async () => ({ user: null, tier: "guest" as const }),
+      consumeDaily: (subject: string, bucket: string, lim: number) => consumeDaily(subject, bucket, lim, store),
+      refundDaily: (subject: string, bucket: string, spentAt: number) => refundDaily(subject, bucket, spentAt, store),
+      claimFetch: (subject: string) => claimSlidesFetch(subject, store),
+      usageSubject: () => s,
+    };
+    const first = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    const firstBody = await first.json().catch(() => ({}));
+    check("loopback: oversized headers → 502 bad-answer, import spent",
+      first.status === 502 && firstBody.error === SLIDES_FAILURE_MESSAGE["bad-answer"] && (await store.count(s, "slides", "day")) === 1,
+      `${first.status} ${JSON.stringify(firstBody)} used=${await store.count(s, "slides", "day")}`);
+    const statuses: number[] = [];
+    const reasons: (string | undefined)[] = [];
+    for (let i = 0; i < 2 * limit; i++) {
+      now += 61_000;
+      const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+      statuses.push(res.status);
+      reasons.push((await res.json().catch(() => ({}))).reason);
+    }
+    check("loopback: a day's allowance of tries, then refused with reason quota",
+      asked === limit && (await store.count(s, "slides", "day")) === limit
+        && statuses.slice(limit - 1).every((x) => x === 429) && reasons.slice(limit - 1).every((r) => r === "quota"),
+      `${asked} asked, used=${await store.count(s, "slides", "day")}, ${statuses.join(",")}`);
+  } finally {
+    Date.now = realNow;
+    server.close();
+  }
+  // The same real fetch to a port nothing listens on: no answer, given back.
+  {
+    const { createServer } = await import("node:net");
+    const probe = createServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+    const closed = (probe.address() as { port: number }).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+    const refusing = (u: string, init?: RequestInit) => fetch(`http://127.0.0.1:${closed}${new URL(u).pathname}`, init);
+    const { d, consumed, refunded } = deps(refusing);
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    const body = await res.json().catch(() => ({}));
+    check("loopback: connection refused → 502 unreachable, given back",
+      res.status === 502 && body.error === SLIDES_FAILURE_MESSAGE.unreachable && consumed.length === 1 && refunded.length === 1,
+      `${res.status} ${JSON.stringify(body)} ${consumed.length}/${refunded.length}`);
+  }
+}
+// The bug: an import spent just before midnight and failed after it was
+// given back from the next day's count.
+{
+  const realNow = Date.now;
+  let now = Date.UTC(2026, 10, 11, 23, 59, 50);
+  Date.now = () => now;
+  try {
+    const store = memoryUsageStore(() => now);
+    const s = "ip:203.0.113.9";
+    // While Google takes its time, midnight passes and an import is made on the new day.
+    const { f } = fakeFetch(() => {
+      now = Date.UTC(2026, 10, 12, 0, 0, 10);
+      void consumeDaily(s, "slides", 20, store);
+      return { status: 503 };
+    });
+    const d = {
+      fetcher: f,
+      resolveTier: async () => ({ user: null, tier: "guest" as const }),
+      consumeDaily: (subject: string, bucket: string, limit: number) => consumeDaily(subject, bucket, limit, store),
+      refundDaily: (subject: string, bucket: string, spentAt: number) => refundDaily(subject, bucket, spentAt, store),
+      claimFetch: (subject: string) => claimSlidesFetch(subject, store),
+      usageSubject: () => s,
+    };
+    const res = await handleSlidesExport(req(`url=${link}&format=pdf`), d);
+    check("route: a try failed after midnight isn't given back from the new day",
+      res.status === 502 && (await store.count(s, "slides", "day")) === 1, `${res.status} ${await store.count(s, "slides", "day")}`);
+    now = Date.UTC(2026, 10, 12, 0, 5);
+    const spentAt = now;
+    check("refundDaily: the same day, it is given back",
+      (await refundDaily(s, "slides", spentAt, store, now + 60_000)) && (await store.count(s, "slides", "day")) === 0);
+    await consumeDaily(s, "slides", 20, store);
+    check("refundDaily: not on another day", !(await refundDaily(s, "slides", spentAt, store, Date.UTC(2026, 10, 13, 0, 1))));
+  } finally {
+    Date.now = realNow;
+  }
+}
+// A visitor who cancels doesn't get the import back.
+{
+  const { f } = fakeFetch(() => "throw");
+  const { d, refunded } = deps(f);
+  const ctl = new AbortController();
+  ctl.abort();
+  const res = await handleSlidesExport(new Request(`http://localhost/api/slides/export?url=${link}&format=pdf`, { signal: ctl.signal }), d);
+  check("route: cancelled → not given back", res.status === 502 && refunded.length === 0, `${res.status} ${refunded.length}`);
 }
 {
   const { f } = fakeFetch(() => pdfOk());

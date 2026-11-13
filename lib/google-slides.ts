@@ -17,7 +17,13 @@ export const SLIDES_MIME: Record<SlidesFormat, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
-export type SlidesFailure = "invalid" | "published" | "private" | "not-found" | "rate-limited" | "unreachable";
+/**
+ * "unreachable": Google failed (5xx, or no answer). "bad-answer": Google
+ * answered, but not with the file (another 4xx, a redirect off its hosts or
+ * too many, the wrong type, headers too big to read), which says something
+ * about the link.
+ */
+export type SlidesFailure = "invalid" | "published" | "private" | "not-found" | "rate-limited" | "unreachable" | "bad-answer";
 
 export const SLIDES_FAILURE_MESSAGE: Record<SlidesFailure, string> = {
   invalid: "Paste a Google Slides link.",
@@ -26,6 +32,8 @@ export const SLIDES_FAILURE_MESSAGE: Record<SlidesFailure, string> = {
   "not-found": "That deck doesn't exist, or the link is wrong.",
   "rate-limited": "Google is busy. Try again in a few minutes.",
   unreachable: "Google Slides isn't responding. Try again in a minute.",
+  // Not "try again": the same link fails the same way, and each try counts.
+  "bad-answer": "Google didn't send this deck as a file. Check the link, or open it in Slides and use its Share link.",
 };
 
 export const SLIDES_FAILURE_STATUS: Record<SlidesFailure, number> = {
@@ -35,6 +43,7 @@ export const SLIDES_FAILURE_STATUS: Record<SlidesFailure, number> = {
   "not-found": 404,
   "rate-limited": 429,
   unreachable: 502,
+  "bad-answer": 502,
 };
 
 export class SlidesError extends Error {
@@ -130,6 +139,23 @@ function isSignInUrl(u: URL): boolean {
 
 const MAX_HOPS = 5;
 
+/** Failures to reach Google at all, before any of its answer was read. */
+const NO_ANSWER_CODES = new Set([
+  "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+]);
+
+/**
+ * Why fetch threw. Only no answer is "unreachable" (and given back): fetch
+ * also throws on an answer it can't read, such as headers over Node's 16 KB
+ * limit, and a deck's owner can make those with a long title.
+ */
+function fetchFailure(err: unknown): SlidesFailure {
+  const cause = (err as { cause?: { code?: unknown; errors?: { code?: unknown }[] } } | null)?.cause;
+  const codes = [cause?.code, ...(Array.isArray(cause?.errors) ? cause.errors.map((e) => e?.code) : [])];
+  return codes.some((c) => typeof c === "string" && NO_ANSWER_CODES.has(c)) ? "unreachable" : "bad-answer";
+}
+
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface SlidesFile {
@@ -171,23 +197,23 @@ export async function fetchSlidesExport(
           "Accept-Encoding": "identity",
         },
       });
-    } catch {
-      throw new SlidesError("unreachable");
+    } catch (err) {
+      throw new SlidesError(fetchFailure(err));
     }
 
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
       await discard(res);
-      if (!location) throw new SlidesError("unreachable");
+      if (!location) throw new SlidesError("bad-answer");
       let next: URL;
       try {
         next = new URL(location, url);
       } catch {
-        throw new SlidesError("unreachable");
+        throw new SlidesError("bad-answer");
       }
       if (isSignInUrl(next)) throw new SlidesError("private");
       if (isBotCheckUrl(next)) throw new SlidesError("rate-limited");
-      if (!isAllowedSlidesHost(next.href) || hop + 1 > MAX_HOPS) throw new SlidesError("unreachable");
+      if (!isAllowedSlidesHost(next.href) || hop + 1 > MAX_HOPS) throw new SlidesError("bad-answer");
       url = next.href;
       continue;
     }
@@ -197,16 +223,16 @@ export async function fetchSlidesExport(
       if (res.status === 401 || res.status === 403) throw new SlidesError("private");
       if (res.status === 404 || res.status === 410) throw new SlidesError("not-found");
       if (res.status === 429) throw new SlidesError("rate-limited");
-      throw new SlidesError("unreachable");
+      throw new SlidesError(res.status >= 500 ? "unreachable" : "bad-answer");
     }
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (type !== SLIDES_MIME[format]) {
       await discard(res);
       // Google answers a private deck with its sign-in page.
-      throw new SlidesError(type === "text/html" ? "private" : "unreachable");
+      throw new SlidesError(type === "text/html" ? "private" : "bad-answer");
     }
-    if (!res.body) throw new SlidesError("unreachable");
+    if (!res.body) throw new SlidesError("bad-answer");
 
     const encoding = (res.headers.get("content-encoding") ?? "identity").toLowerCase();
     const length = Number(res.headers.get("content-length"));
@@ -277,19 +303,38 @@ export interface SlidesExportDeps {
   resolveTier: () => Promise<{ user: { id: string } | null; tier: Tier }>;
   /** Spends one of today's allowance; uses left, or -1 when spent (lib/usage.ts). */
   consumeDaily: (subject: string, bucket: string, limit: number) => Promise<number> | number;
+  /** Gives back one of the allowance spent at `spentAt`, on that UTC day only (lib/usage.ts). */
+  refundDaily: (subject: string, bucket: string, spentAt: number) => Promise<unknown> | unknown;
+  /** Counts one try at Google this minute; false when they're used up (lib/usage.ts claimSlidesFetch). */
+  claimFetch: (subject: string) => Promise<boolean> | boolean;
   /** Who the request counts against (lib/usage.ts usageSubject). */
   usageSubject: (request: Request, user: { id: string } | null) => string;
 }
 
 const noStore = { "Cache-Control": "private, no-store" };
 
+export const SLIDES_BURST_MESSAGE = "Too many links at once. Try again in a minute.";
+
+/**
+ * Failures on Google's side, given back: busy, 5xx or no answer. Anything
+ * else Google says is about the link, and counts, as a wrong or private one does.
+ */
+const REFUNDED: readonly SlidesFailure[] = ["rate-limited", "unreachable"];
+
+/** Day bucket of imports given back; at most a day's allowance of them. */
+const REFUND_BUCKET = "slides-refund";
+
 function fail(kind: SlidesFailure) {
   return Response.json({ error: SLIDES_FAILURE_MESSAGE[kind] }, { status: SLIDES_FAILURE_STATUS[kind], headers: noStore });
 }
 
 /**
- * GET /api/slides/export?url=<share link>&format=pdf|pptx. The daily import
- * allowance is only spent once Google has actually sent the file.
+ * GET /api/slides/export?url=<share link>&format=pdf|pptx. One of today's
+ * imports is spent before Google is asked, so a visitor who has used them up
+ * (or keeps trying made-up links) can't make the server fetch anything. It is
+ * given back when Google was busy or didn't answer, up to a day's allowance
+ * of times; every try still counts against a per-minute limit, so those
+ * can't be repeated without end.
  */
 export async function handleSlidesExport(request: Request, deps: SlidesExportDeps): Promise<Response> {
   const params = new URL(request.url).searchParams;
@@ -306,27 +351,47 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
   const format = parsed.data.format;
 
   const { user, tier } = await deps.resolveTier();
+  const subject = deps.usageSubject(request, user);
+
+  // Taken just before it is spent: a refund after midnight would come off the next day's.
+  const spentAt = Date.now();
+  const limit = limitsFor(tier).linkImportsPerDay;
+  const remaining = await deps.consumeDaily(subject, "slides", limit);
+  if (remaining < 0) {
+    return Response.json(
+      { error: "You've used today's imports.", upgrade: tier !== "pro" && tier !== "team", reason: "quota" },
+      { status: 429, headers: noStore }
+    );
+  }
+  const giveBack = () => Promise.resolve(deps.refundDaily(subject, "slides", spentAt)).catch(() => {});
+  let claimed: boolean;
+  try {
+    claimed = await deps.claimFetch(subject);
+  } catch (err) {
+    await giveBack();
+    throw err;
+  }
+  if (!claimed) {
+    await giveBack();
+    return Response.json(
+      { error: SLIDES_BURST_MESSAGE, reason: "burst" },
+      { status: 429, headers: { ...noStore, "Retry-After": "60" } }
+    );
+  }
 
   let file: SlidesFile;
   try {
     file = await fetchSlidesExport(id, format, deps.fetcher ?? fetch, request.signal);
   } catch (err) {
-    return fail(err instanceof SlidesError ? err.kind : "unreachable");
-  }
-
-  let remaining: number;
-  try {
-    remaining = await deps.consumeDaily(deps.usageSubject(request, user), "slides", limitsFor(tier).linkImportsPerDay);
-  } catch (err) {
-    await file.cancel();
-    throw err;
-  }
-  if (remaining < 0) {
-    await file.cancel();
-    return Response.json(
-      { error: "You've used today's imports.", upgrade: tier !== "pro" && tier !== "team", reason: "quota" },
-      { status: 429, headers: noStore }
-    );
+    const kind = err instanceof SlidesError ? err.kind : "bad-answer";
+    // A visitor who cancelled gets nothing back: that was their doing. A deck
+    // Google keeps failing on is given back a day's allowance of times, not
+    // at 10 a minute all day.
+    if (REFUNDED.includes(kind) && !request.signal.aborted) {
+      const refundsLeft = await Promise.resolve(deps.consumeDaily(subject, REFUND_BUCKET, limit)).catch(() => -1);
+      if (refundsLeft >= 0) await giveBack();
+    }
+    return fail(kind);
   }
 
   const headers = new Headers({
