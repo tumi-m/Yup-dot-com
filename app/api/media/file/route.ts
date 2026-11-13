@@ -1,7 +1,7 @@
 import { UrlSource } from "mediabunny";
 import { audioOnlyMp4, NoAudioError } from "@/lib/audio-only";
 import { openToken, signingSecret } from "@/lib/media-server";
-import { grantRef, refundGrant, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
+import { grantRef, refundBrokenFirstServe, refundUnserved, startServing, wasRefunded } from "@/lib/media-refund";
 import { usageStore } from "@/lib/usage";
 import { FETCH_UA, grantHeaders, isAllowedMediaUrl, isDirectPlatform, type DirectPlatform } from "@/lib/social/direct";
 
@@ -19,9 +19,10 @@ export const maxDuration = 300;
  * encrypted, so the visitor can't skip this route and its bookkeeping.
  *
  * When X refuses the file or the stream breaks before the grant ever sent a
- * file, the download is given back to the visitor's daily allowance (once
- * per grant), and the grant is dead. Once a grant has sent a file, later
- * failures are not refunded, and a failed Range request never is.
+ * file (by this request or another), the download is given back to the
+ * visitor's daily allowance (once per grant), and the grant is dead. Once a
+ * grant has sent a file, later failures are not refunded, and a failed Range
+ * request never is.
  *
  * An audio-only grant (an MP3 from a video above the visitor's plan) gets
  * the sound alone, as an M4A made here; the video never leaves this route.
@@ -77,13 +78,14 @@ async function handle(request: Request, method: "GET" | "HEAD") {
   let firstServe = false;
   /**
    * Gives the download back if this grant never sent its file, or (with
-   * `streamBroke`) if X broke off the first send of it. Never for a Range
-   * request: the visitor picks the range (one past the end makes the CDN
-   * answer 416), so its failure says nothing about the file.
+   * `streamBroke`) if X broke off the first send of it and no other request
+   * on the grant started sending it meanwhile. Never for a Range request: the
+   * visitor picks the range (one past the end makes the CDN answer 416), so
+   * its failure says nothing about the file.
    */
   const giveBack = async (streamBroke = false): Promise<boolean> => {
     if (!ref || method !== "GET" || range) return false;
-    if (streamBroke) return firstServe ? refundGrant(store, ref).catch(() => false) : false;
+    if (streamBroke) return firstServe ? refundBrokenFirstServe(store, ref).catch(() => false) : false;
     return refundUnserved(store, ref).catch(() => false);
   };
 

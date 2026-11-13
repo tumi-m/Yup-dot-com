@@ -9,6 +9,7 @@ import {
   grantRef,
   newGrantRef,
   REFUNDABLE,
+  refundBrokenFirstServe,
   refundGrant,
   refundUnserved,
   startServing,
@@ -124,6 +125,37 @@ const check = (name: string, ok: boolean, extra = "") => {
   } };
   const refunded = await refundUnserved(racing, raced);
   check("racing refund loses to a send in flight", refunded === false && (await used()) === before);
+
+  // A broken first send is refunded only if no other request on the grant
+  // started sending the file too.
+  const broken = { s: subject, c: newGrantRef(), t: now() };
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  await startServing(store, broken);
+  const usedBefore = await used();
+  check("a broken first send, alone, is refunded", (await refundBrokenFirstServe(store, broken)) === true && (await used()) === usedBefore - 1);
+  const shared = { s: subject, c: newGrantRef(), t: now() };
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  check("first send of a shared grant", (await startServing(store, shared)).first);
+  check("a later send on it is not", (await startServing(store, shared)).first === false);
+  check("so its broken first send is not refunded", (await refundBrokenFirstServe(store, shared)) === false && (await used()) === usedBefore);
+  check("and the grant is still alive", !(await wasRefunded(store, shared)));
+
+  // Race: the other send marks itself right after the refund's first look.
+  const racedBreak = { s: subject, c: newGrantRef(), t: now() };
+  await consumeDaily(subject, MEDIA_BUCKET, 5, store);
+  await startServing(store, racedBreak);
+  const beforeRace = await used();
+  let looked = false;
+  const racingBreak = { ...store, async count(...a: Parameters<typeof store.count>) {
+    const n = await store.count(...a);
+    if (a[1].startsWith("media-served:") && !looked) {
+      looked = true;
+      await startServing(store, racedBreak);
+    }
+    return n;
+  } };
+  check("racing broken-send refund loses to a send in flight",
+    (await refundBrokenFirstServe(racingBreak, racedBreak)) === false && (await used()) === beforeRace);
 }
 
 // X file links and media worker grants use different keys, so one can't be

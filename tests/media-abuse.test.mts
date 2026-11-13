@@ -18,10 +18,12 @@ const check = (name: string, ok: boolean, extra = "") => {
 };
 
 // A tweet with one video, and a CDN that serves a 5000-byte file, answering
-// 416 to a Range past its end. `cdnDown` makes it refuse the file outright.
+// 416 to a Range past its end. `cdnDown` makes it refuse the file outright;
+// `cdnBreak` makes its next answer send 1000 bytes, then break off when told.
 const SIZE = 5000;
 const CDN_URL = "https://video.twimg.com/ext_tw_video/1/pu/vid/avc1/640x360/a.mp4";
 let cdnDown = false;
+let cdnBreak: Promise<void> | null = null;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = String(input instanceof Request ? input.url : input);
@@ -38,6 +40,19 @@ globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => 
   }
   if (url.startsWith("https://video.twimg.com/")) {
     if (cdnDown) return new Response("", { status: 403 });
+    if (cdnBreak) {
+      const when = cdnBreak;
+      cdnBreak = null;
+      let sent = false;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          if (!sent) return (sent = true), c.enqueue(new Uint8Array(1000));
+          await when;
+          c.error(new TypeError("terminated"));
+        },
+      }, { highWaterMark: 0 });
+      return new Response(body, { headers: { "content-length": String(SIZE) } });
+    }
     const start = Number(/bytes=(\d+)-/.exec(new Headers(init.headers).get("range") ?? "")?.[1] ?? 0);
     if (start >= SIZE) return new Response("", { status: 416, headers: { "content-range": `bytes */${SIZE}` } });
     return new Response(new Uint8Array(SIZE - start), { status: start ? 206 : 200, headers: { "content-length": String(SIZE - start) } });
@@ -111,6 +126,40 @@ const getFile = (href: string, ip: string, extra: Record<string, string> = {}) =
   cdnDown = false;
   const after = await store.count(subject, MEDIA_BUCKET, "day");
   check("a CDN refusal is still refunded", r.status === 502 && before === 1 && after === 0, `${r.status} ${before} → ${after}`);
+}
+
+// X breaking off a grant's first send gave the download back even when
+// another request on the same grant had meanwhile sent the whole file: one
+// free file per round, without limit.
+{
+  const ip = "203.0.113.10";
+  const subject = usageSubject(new Request("http://l", { headers: guest(ip) }), null);
+  const round = async (second: boolean) => {
+    const store = memoryUsageStore();
+    setUsageStore(store);
+    const got = await getLink(ip);
+    let breakOff = () => {};
+    cdnBreak = new Promise<void>((r) => (breakOff = r));
+    const first = (await getFile(got.body.href, ip)).body!.getReader();
+    await first.read();
+    let bytes = 0;
+    if (second) bytes = (await (await getFile(got.body.href, ip)).arrayBuffer()).byteLength;
+    breakOff();
+    const broke = await (async () => {
+      try {
+        while (!(await first.read()).done);
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    return { broke, bytes, used: await store.count(subject, MEDIA_BUCKET, "day") };
+  };
+  const alone = await round(false);
+  check("X breaking off a grant's only send gives the download back", alone.broke && alone.used === 0, JSON.stringify(alone));
+  const both = await round(true);
+  check("but not once another request on the grant sent the whole file",
+    both.broke && both.bytes === SIZE && both.used === 1, JSON.stringify(both));
 }
 
 // Refund and served markers used to live in the daily window, so at 00:00
