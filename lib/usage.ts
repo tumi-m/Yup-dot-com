@@ -276,6 +276,8 @@ export interface AiPolicy {
   burst: number;
   /** Answers per day across the whole site. */
   global: number;
+  /** Unanswered questions a day that are given back; past that they cost an answer. */
+  unanswered: number;
 }
 
 const AI_MONTH_DEFAULT: Record<Tier, number | null> = { guest: null, free: null, pro: 600, team: null };
@@ -289,7 +291,8 @@ function envInt(env: NodeJS.ProcessEnv, name: string): number | undefined {
 
 /**
  * AI allowances. Every number can be overridden: AI_LIMIT_<TIER>_DAY,
- * AI_LIMIT_<TIER>_MONTH (0 = no monthly cap), AI_BURST_PER_MINUTE,
+ * AI_LIMIT_<TIER>_MONTH (0 = no monthly cap), AI_LIMIT_<TIER>_UNANSWERED
+ * (defaults to the day allowance), AI_BURST_PER_MINUTE,
  * AI_GLOBAL_DAILY_LIMIT. AI_GUEST_DAILY_LIMIT (older name) still sets the
  * guest allowance; 0 requires an account.
  */
@@ -306,6 +309,7 @@ export function aiPolicy(tier: Tier, env: NodeJS.ProcessEnv = process.env): AiPo
     month,
     burst: Math.max(1, envInt(env, "AI_BURST_PER_MINUTE") ?? 6),
     global: envInt(env, "AI_GLOBAL_DAILY_LIMIT") ?? 3000,
+    unanswered: envInt(env, `AI_LIMIT_${T}_UNANSWERED`) ?? day,
   };
 }
 
@@ -314,14 +318,21 @@ export const AI_BURST_MESSAGE = "Too many questions at once. Try again in a minu
 const GLOBAL_SUBJECT = "site";
 
 export type AiClaim =
-  | { ok: true; remaining: number; refund: () => Promise<void> }
+  | { ok: true; remaining: number; refund: (opts?: { unsent?: boolean }) => Promise<void> }
   | { ok: false; status: number; error: string; upgrade?: boolean; reason?: string };
 
 /**
  * Claims one AI answer: the caller's day (and month), then the per-minute
  * burst, then the site-wide day. A refused claim leaves every count as it
- * was (the burst counts only answers that passed the daily check); `refund`
- * gives the answer back when none was delivered.
+ * was (the burst counts only answers that passed the daily check).
+ *
+ * `refund` is for an answer that was never delivered. It gives back the
+ * caller's day (and month), but only for the first `unanswered` a day; past
+ * that a stopped or empty answer costs one. The site-wide count stays,
+ * because the model still ran, unless `unsent` says the request never
+ * reached it. The burst always stays. So one caller adds at most day +
+ * unanswered a day to the site-wide count, which is the cap everyone shares:
+ * a guest IP 6 of the default 3000.
  */
 export async function claimAiAnswer(subject: string, tier: Tier, opts: { env?: NodeJS.ProcessEnv; store?: UsageStore } = {}): Promise<AiClaim> {
   const s = opts.store ?? usageStore();
@@ -366,11 +377,12 @@ export async function claimAiAnswer(subject: string, tier: Tier, opts: { env?: N
   return {
     ok: true,
     remaining: month === null ? day : Math.min(day, month),
-    refund: async () => {
+    refund: async ({ unsent = false } = {}) => {
       if (refunded) return;
       refunded = true;
-      await giveBack();
-      await s.refund(GLOBAL_SUBJECT, "ai", "day");
+      if (unsent) await s.refund(GLOBAL_SUBJECT, "ai", "day");
+      else if ((await s.consume(subject, "ai-unanswered", policy.unanswered, "day")) < 0) return;
+      for (const w of taken) if (w !== "minute") await s.refund(subject, "ai", w);
     },
   };
 }

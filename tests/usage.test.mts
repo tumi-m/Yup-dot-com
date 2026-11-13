@@ -211,6 +211,8 @@ check("period: minute start", periodStart("minute", T0 + 59_999) === T0 && perio
   check("ai policy: burst 6/min, site-wide 3000/day", p("free").burst === 6 && p("free").global === 3000);
   const env = { AI_LIMIT_PRO_DAY: "50", AI_LIMIT_PRO_MONTH: "0", AI_BURST_PER_MINUTE: "2", AI_GLOBAL_DAILY_LIMIT: "10", AI_GUEST_DAILY_LIMIT: "1" } as unknown as NodeJS.ProcessEnv;
   check("ai policy: env overrides", p("pro", env).day === 50 && p("pro", env).month === null && p("pro", env).burst === 2 && p("pro", env).global === 10 && p("guest", env).day === 1);
+  check("ai policy: unanswered given back defaults to the day allowance", p("guest").unanswered === 3 && p("pro").unanswered === 40 && p("pro", env).unanswered === 50);
+  check("ai policy: unanswered override", p("guest", { AI_LIMIT_GUEST_UNANSWERED: "0" } as unknown as NodeJS.ProcessEnv).unanswered === 0);
   check("ai policy: bad env values ignored", p("free", { AI_LIMIT_FREE_DAY: "lots" } as unknown as NodeJS.ProcessEnv).day === 10);
   check("ai policy: per-tier documents budgets kept", LIMITS.guest.aiDocumentChars < LIMITS.free.aiDocumentChars && LIMITS.free.aiDocumentChars < LIMITS.pro.aiDocumentChars);
 }
@@ -294,9 +296,58 @@ const claims = async (n: number, subject: string, tier: Tier, store: UsageStore,
   if (a.ok) {
     await a.refund();
     await a.refund();
-    check("refund: gives back the user's and the site's answer, once", (await store.count("u:a", "ai", "day")) === 0 && (await store.count("site", "ai", "day")) === 1);
+    check("refund: gives back the user's answer, once", (await store.count("u:a", "ai", "day")) === 0);
+    check("refund: the site's count stays (the model still ran)", (await store.count("site", "ai", "day")) === 2);
   }
-  check("global: after a refund, one more fits", (await claimAiAnswer("u:c", "pro", { store, env })).ok);
+  check("global: a refund doesn't make room for one more", !(await claimAiAnswer("u:c", "pro", { store, env })).ok);
+}
+{
+  // Refund: the burst count stays too, so unanswered questions can't loop past it.
+  const c = clock();
+  const store = memoryUsageStore(c.now);
+  const env = { AI_BURST_PER_MINUTE: "2", AI_LIMIT_PRO_MONTH: "5" } as unknown as NodeJS.ProcessEnv;
+  for (let i = 0; i < 2; i++) {
+    const r = await claimAiAnswer("u:r", "pro", { store, env });
+    if (r.ok) await r.refund();
+  }
+  const third = await claimAiAnswer("u:r", "pro", { store, env });
+  check("refund: burst still counts refunded answers", !third.ok && third.status === 429 && third.reason === "burst", third);
+  check("refund: day and month given back", (await store.count("u:r", "ai", "day")) === 0 && (await store.count("u:r", "ai", "month")) === 0);
+  check("refund: minute count kept", (await store.count("u:r", "ai", "minute")) === 2);
+}
+{
+  // One guest stops every question, all day, a minute at a time: only the
+  // first 3 unanswered are given back, so it adds day + 3 to the site count.
+  const c = clock(Date.UTC(2026, 9, 5, 0, 0, 30));
+  const store = memoryUsageStore(c.now);
+  let reached = 0;
+  let last = null as Awaited<ReturnType<typeof claimAiAnswer>> | null;
+  for (let m = 0; m < 1440; m++) {
+    if (m) c.advance(MIN);
+    for (let i = 0; i < 10; i++) {
+      last = await claimAiAnswer("ip:loop", "guest", { store, env: noEnv });
+      if (last.ok) (reached++, await last.refund());
+    }
+  }
+  check("refund loop: one guest reaches the model 6 times a day", reached === 6, String(reached));
+  check("refund loop: site count stays at 6", (await store.count("site", "ai", "day")) === 6);
+  check("refund loop: then the day is spent", !!last && !last.ok && last.reason === "ai");
+  check("refund loop: another visitor still gets an answer", (await claimAiAnswer("ip:other", "guest", { store, env: noEnv })).ok);
+}
+{
+  // Never reached the model (host down): the site count comes back too, the
+  // burst doesn't, and it doesn't use up the unanswered allowance.
+  const c = clock();
+  const store = memoryUsageStore(c.now);
+  const env = { AI_GLOBAL_DAILY_LIMIT: "1", AI_LIMIT_GUEST_UNANSWERED: "0" } as unknown as NodeJS.ProcessEnv;
+  const a = await claimAiAnswer("ip:u", "guest", { store, env });
+  if (a.ok) await a.refund({ unsent: true });
+  check("unsent: day and site given back, minute kept",
+    a.ok && (await store.count("ip:u", "ai", "day")) === 0 && (await store.count("site", "ai", "day")) === 0 && (await store.count("ip:u", "ai", "minute")) === 1);
+  const b = await claimAiAnswer("ip:u", "guest", { store, env });
+  check("unsent: the site has room for the next one", b.ok);
+  if (b.ok) await b.refund();
+  check("unanswered 0: a stopped answer costs one", (await store.count("ip:u", "ai", "day")) === 1 && (await store.count("site", "ai", "day")) === 1);
 }
 
 // ---------- daily allowances ----------

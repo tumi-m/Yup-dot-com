@@ -57,6 +57,8 @@ export type OllamaErrorKind =
 
 /** `message` is for server logs only; show users `userMessage()` instead. */
 export class OllamaError extends Error {
+  /** The request never reached the model: no connection, or refused before it ran. */
+  unsent = false;
   constructor(
     readonly kind: OllamaErrorKind,
     message: string,
@@ -346,6 +348,10 @@ export async function* streamChat(
       upstream.signal.addEventListener("abort", () => (clearTimeout(timer), reject(state.reason)), { once: true });
     });
   const canRetry = () => deadline - Date.now() > retryDelayMs + 10_000;
+  // Statuses Ollama answers before any model work: bad key or plan, unknown
+  // model, server not taking requests. Anything else may have run the model.
+  const beforeModel = new Set([401, 403, 404, 503]);
+  let sent = false;
 
   try {
     let response: Response | undefined;
@@ -360,17 +366,21 @@ export async function* streamChat(
           await pause(retryDelayMs);
           continue;
         }
-        throw new OllamaError("unavailable", `Couldn't reach Ollama at ${config.host}: ${(error as Error).message}`);
+        const unreachable = new OllamaError("unavailable", `Couldn't reach Ollama at ${config.host}: ${(error as Error).message}`);
+        unreachable.unsent = !sent;
+        throw unreachable;
       }
       if (res.ok && res.body) {
         response = res;
         break;
       }
       const error = httpError(res.status, await errorDetail(res), config);
+      if (!beforeModel.has(res.status)) sent = true;
       if (error.kind === "unavailable" && attempt === 0 && canRetry()) {
         await pause(retryDelayMs);
         continue;
       }
+      error.unsent = !sent;
       throw error;
     }
 

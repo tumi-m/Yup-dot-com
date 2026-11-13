@@ -99,9 +99,14 @@ one Vercel's edge reports (`x-real-ip`), never the first entry of
 `TRUSTED_PROXY_HOPS`; without it every guest shares one allowance. Without
 `SUPABASE_SERVICE_ROLE_KEY` they are counted in server memory instead (fine for
 local dev, not for Vercel). AI also has a burst limit (6 a minute) and a
-site-wide daily cap; an answer that never arrives is given back. An edit is
-one distinct document saved or downloaded per UTC day; the same unchanged
-document again is free.
+site-wide daily cap. An answer that never arrives is given back to the
+daily allowance, up to as many a day as that allowance, but still counts
+toward those two, since the model ran; one that never reached the model
+leaves the site-wide cap alone. So one visitor adds at most twice its daily
+allowance to the site-wide cap (6 for a guest IP). That cap is shared by
+every plan: when it is reached, everyone sees "busy" until UTC midnight. An
+edit is one distinct document saved or downloaded per UTC day; the same
+unchanged document again is free.
 
 ## Video & Audio downloads
 
@@ -692,6 +697,7 @@ Variables** and redeploy:
 | `TRUSTED_PROXY_HOPS` | Only when hosted outside Vercel: how many proxies in front of the app append to `X-Forwarded-For` (`1` for one nginx or load balancer). The visitor's address is that many entries from the right; anything further left is ignored. Unset: forwarding headers aren't trusted and every guest shares one allowance. Ignored on Vercel |
 | `AI_GUEST_DAILY_LIMIT` | Optional. Guest AI answers per day (default 3; `0` requires an account) |
 | `AI_LIMIT_<TIER>_DAY`, `AI_LIMIT_<TIER>_MONTH` | Optional. AI answers per day / month for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 3/10/40/40 a day; Pro 600 a month; month `0` = no cap) |
+| `AI_LIMIT_<TIER>_UNANSWERED` | Optional. Unanswered AI questions a day that are given back (default: the tier's daily allowance; `0` = none) |
 | `AI_BURST_PER_MINUTE` | Optional. AI requests per minute per user or guest (default 6) |
 | `AI_GLOBAL_DAILY_LIMIT` | Optional. AI answers per day across the whole site (default 3000) |
 | `NEXT_PUBLIC_LEGAL_NAME` | Legal pages: the person or company responsible (POPIA "responsible party", shown as the Information Officer) |
