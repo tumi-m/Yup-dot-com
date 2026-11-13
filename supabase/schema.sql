@@ -227,6 +227,23 @@ alter table public.billing_events enable row level security;
 revoke all on public.billing_events from anon, authenticated;
 -- No policies: only the service role reads or writes it.
 
+-- ---------- Subscription starts ----------
+
+-- A hash of the card authorization of each account's latest signed first
+-- subscription charge: only a subscription.create paid with that card takes
+-- up a subscription code. The authorization code itself is never stored:
+-- with the secret key it can charge the card again.
+create table if not exists public.subscription_starts (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  authorization_hash text not null check (authorization_hash ~ '^[0-9a-f]{64}$'),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.subscription_starts enable row level security;
+revoke all on public.subscription_starts from public, anon, authenticated;
+grant select, insert, update, delete on public.subscription_starts to service_role;
+-- No policies: only the server (service role) reads or writes it.
+
 -- ---------- Team seats ----------
 
 create table if not exists public.team_members (

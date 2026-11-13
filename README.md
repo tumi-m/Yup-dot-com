@@ -523,7 +523,7 @@ someone leaves or a key changes.
       shared sender.
 6. Supabase → SQL editor: run each file in `supabase/migrations/` you
    haven't run yet, once, in date order (the newest is
-   `20261107000000_sample_cache.sql`). Then run
+   `20261113000000_subscription_starts.sql`). Then run
    [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
    it again whenever you change anything by hand (a table, a bucket, a
    function, a policy). Security Advisor should show no "RLS disabled" table.
@@ -790,7 +790,13 @@ Only payments started by this site's checkout change a plan: checkout signs
 its metadata with a key derived from the secret key (see
 [SECURITY.md](SECURITY.md#payments)). A `subscription.create` that arrives
 before its first charge, or a cancel or invoice event that arrives before
-its `subscription.create`, gets a 503, so Paystack sends it again.
+its `subscription.create`, gets a 503, so Paystack sends it again. A
+subscription's code is only stored from a `subscription.create` paid with
+the same card as its signed first charge: on a project set up before this,
+run
+[`supabase/migrations/20261113000000_subscription_starts.sql`](supabase/migrations/20261113000000_subscription_starts.sql)
+before deploying (without it a new subscription's first charge isn't applied
+and Paystack keeps sending it).
 
 ## Tester access (free Pro or Team for testers)
 

@@ -7,7 +7,8 @@
 // swapped (their renewals then "unknown customer"). Only a charge carrying
 // our checkout's signature now starts or changes a plan; anything else can
 // only renew the subscription a row already holds, and a subscription code
-// is only taken up by the subscription our checkout started.
+// is only taken up by the subscription our checkout started: one paid with
+// the same card as its signed first charge.
 import { readFileSync } from "node:fs";
 import {
   checkoutMetadata, handlePaystackEvent, ownPlan, resolveAccess,
@@ -26,6 +27,9 @@ const A = "0f8e7d6c-5b4a-4321-8fed-cba987654321"; // someone paying with the vic
 const clock = new Date("2026-10-04T08:00:00Z");
 const YEAR_ON = "2027-10-04T08:00:00.000Z";
 const CODES: Record<string, "pro" | "team"> = { PLN_pro: "pro", PLN_team: "team" };
+// The card each one pays with: Paystack gives each card its own authorization.
+const VICTIM_CARD = { authorization_code: "AUTH_v", signature: "SIG_v" };
+const OTHER_CARD = { authorization_code: "AUTH_att", signature: "SIG_att" };
 
 function row(id: string, email: string, extra: Partial<BillingRow> = {}): BillingRow {
   return {
@@ -236,14 +240,15 @@ const teamSub = {
   const first = await t.deliver("charge.success", {
     status: "success", reference: "pw_s1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
     plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
-    metadata: checkoutMetadata("pw_s1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+    authorization: VICTIM_CARD, metadata: checkoutMetadata("pw_s1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
   });
   const otherPlan = await t.deliver("subscription.create", {
     subscription_code: "SUB_x", status: "active", plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_v" },
+    authorization: VICTIM_CARD,
   });
   const create = await t.deliver("subscription.create", {
     subscription_code: "SUB_1", status: "active", email_token: "tok_1", next_payment_date: "2026-11-04T08:00:00.000Z",
-    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" }, authorization: VICTIM_CARD,
   });
   const renew = await t.deliver("charge.success", {
     status: "success", reference: "T_r1", amount: 4900, currency: "ZAR", paid_at: "2026-11-04T08:30:00.000Z",
@@ -275,14 +280,14 @@ for (const [label, start, other] of [
   const first = await s.deliver("charge.success", {
     status: "success", reference: "pw_w1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
     plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
-    metadata: checkoutMetadata("pw_w1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+    authorization: VICTIM_CARD, metadata: checkoutMetadata("pw_w1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
   });
   const early = await s.deliver("subscription.disable", other);
   check(`${label}: its disable in the window waits and writes nothing`, first.status === "applied" && early.status === "retry" &&
     s.get(V).paystack_subscription_code === null && s.get(V).subscription_status === "active", { early, row: s.get(V) });
   const create = await s.deliver("subscription.create", {
     subscription_code: "SUB_new", status: "active", email_token: "tok_new", next_payment_date: "2026-11-04T08:00:00.000Z",
-    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" }, authorization: VICTIM_CARD,
   });
   const late = await s.deliver("subscription.disable", other);
   const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_new", status: "non-renewing", customer: { customer_code: "CUS_v" } });
@@ -290,6 +295,59 @@ for (const [label, start, other] of [
     create.status === "applied" && late.status === "ignored" && cancel.status === "applied" &&
       s.get(V).paystack_subscription_code === "SUB_new" && s.get(V).paystack_email_token === "tok_new" &&
       s.get(V).subscription_status === "non-renewing", { create, late, cancel, row: s.get(V) });
+}
+
+// Someone starts a subscription on the victim's customer before the victim has ever paid. Its
+// create gets a 503 and Paystack keeps sending it; once the victim's own first charge is waiting,
+// a resent create on the same plan must not take the victim's code: it was paid with another card.
+{
+  const s = setup([row(V, "v@x.co")]);
+  const theirs = {
+    subscription_code: "SUB_att", status: "active", email_token: "tok_att", next_payment_date: "2026-11-01T08:00:00.000Z",
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v", email: "v@x.co" }, authorization: OTHER_CARD,
+  };
+  const mine = {
+    subscription_code: "SUB_v", status: "active", email_token: "tok_v", next_payment_date: "2026-11-04T08:00:00.000Z",
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v", email: "v@x.co" }, authorization: VICTIM_CARD,
+  };
+  const before = await s.deliver("subscription.create", theirs);
+  const ownEarly = await s.deliver("subscription.create", mine);
+  const first = await s.deliver("charge.success", {
+    status: "success", reference: "pw_v1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v", email: "v@x.co" }, authorization: VICTIM_CARD,
+    metadata: checkoutMetadata("pw_v1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+  });
+  const resent = await s.deliver("subscription.create", theirs);
+  const noCard = await s.deliver("subscription.create", { ...theirs, subscription_code: "SUB_att2", authorization: undefined });
+  check("their create, sent again while the victim's first charge waits: ignored, writes nothing",
+    before.status === "retry" && ownEarly.status === "retry" && first.status === "applied" &&
+      resent.status === "ignored" && noCard.status === "ignored" && s.get(V).paystack_subscription_code === null,
+    { before, ownEarly, first, resent, noCard, row: s.get(V) });
+  const own = await s.deliver("subscription.create", mine);
+  const theirsLater = await s.deliver("subscription.create", theirs);
+  const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_v", status: "non-renewing", customer: { customer_code: "CUS_v" } });
+  const theirDisable = await s.deliver("subscription.disable", { subscription_code: "SUB_att", status: "cancelled", customer: { customer_code: "CUS_v" } });
+  check("the victim's own create takes the code; their cancel applies, the other's disable is stale",
+    own.status === "applied" && theirsLater.status === "ignored" && cancel.status === "applied" && theirDisable.status === "ignored" &&
+      s.get(V).paystack_subscription_code === "SUB_v" && s.get(V).paystack_email_token === "tok_v" &&
+      s.get(V).subscription_status === "non-renewing", { own, theirsLater, cancel, theirDisable, row: s.get(V) });
+  check("the card is kept hashed, never as the authorization code", typeof s.get(V).start_authorization === "string" &&
+    /^[0-9a-f]{64}$/.test(s.get(V).start_authorization!) && !JSON.stringify(s.get(V)).includes("AUTH_v"), s.get(V));
+}
+
+// A first charge with no card on it: no create can show it is the one, so none takes the row.
+{
+  const s = setup([row(V, "v@x.co", { paystack_customer_code: "CUS_v" })]);
+  await s.deliver("charge.success", {
+    status: "success", reference: "pw_n1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+    metadata: checkoutMetadata("pw_n1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+  });
+  const r = await s.deliver("subscription.create", {
+    subscription_code: "SUB_att", status: "active", plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+  });
+  check("first charge without a card: a create without one doesn't match it", r.status === "ignored" &&
+    s.get(V).paystack_subscription_code === null, { r, row: s.get(V) });
 }
 
 // The routes: checkout signs what it sells; the webhook and the return check it; "retry" isn't a 200.
@@ -303,6 +361,9 @@ for (const [label, start, other] of [
   check("return from checkout checks it too", /checkoutSecret: paystack\.secretKey/.test(verify));
   const store = readFileSync(new URL("../lib/billing-store.ts", import.meta.url), "utf8");
   check("the store finds no customer by email", !/"email", by\.email/.test(store));
+  check("the store keeps the card in a table browsers can't read", /from\("subscription_starts"\)/.test(store) &&
+    /revoke all on public\.subscription_starts from public, anon, authenticated/.test(
+      readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8")));
 }
 
 if (failed) {

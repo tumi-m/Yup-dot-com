@@ -176,6 +176,7 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const firstCharge = {
     status: "success", reference: "pw_s1", amount: 4900, currency: "ZAR", paid_at: "2026-10-04T08:00:00.000Z",
     customer: { customer_code: "CUS_u", email: "u@x.co" }, plan: { plan_code: "PLN_pro", name: "Pro" },
+    authorization: { authorization_code: "AUTH_u" },
     metadata: checkoutMetadata("pw_s1", { user_id: USER, plan: "pro", mode: "subscription" }, SECRET),
   };
   const a = await deliver(store, "charge.success", firstCharge);
@@ -187,6 +188,7 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const create = await deliver(store, "subscription.create", {
     subscription_code: "SUB_1", email_token: "tok_1", status: "active", next_payment_date: "2026-11-04T08:00:00.000Z",
     plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_u", email: "u@x.co" },
+    authorization: { authorization_code: "AUTH_u" },
   });
   u = store.db.get(USER)!;
   check("subscription.create stores code, email token, next payment date",
@@ -272,13 +274,14 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   const created = {
     subscription_code: "SUB_9", email_token: "t9", status: "active", next_payment_date: "2026-11-04T08:00:00.000Z",
     plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_9", email: "U@X.co" },
+    authorization: { authorization_code: "AUTH_9" },
   };
   const early = await deliver(store, "subscription.create", created);
   check("subscription.create before charge.success: retried later, nothing changed", early.status === "retry" &&
     store.db.get(USER)!.subscription_plan === null && store.events.size === 0, JSON.stringify(early));
   await deliver(store, "charge.success", {
     status: "success", reference: "pw_s9", amount: 19900, currency: "ZAR", paid_at: clock.toISOString(),
-    customer: { customer_code: "CUS_9" }, plan: { plan_code: "PLN_team" },
+    customer: { customer_code: "CUS_9" }, plan: { plan_code: "PLN_team" }, authorization: { authorization_code: "AUTH_9" },
     metadata: checkoutMetadata("pw_s9", { user_id: USER, plan: "team", mode: "subscription" }, SECRET),
   });
   const r = await deliver(store, "subscription.create", created);

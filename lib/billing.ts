@@ -49,6 +49,12 @@ export interface BillingRow {
   paystack_customer_code: string | null;
   paystack_subscription_code: string | null;
   paystack_email_token: string | null;
+  /**
+   * From public.subscription_starts (not a profile column): a hash of the
+   * card authorization the latest signed first charge was paid with. Its
+   * subscription.create must carry the same one.
+   */
+  start_authorization?: string | null;
   /** From public.tester_access (not a profile column), when the user has a row there. */
   tester?: TesterAccess | null;
 }
@@ -400,8 +406,8 @@ export interface CheckoutMetadata {
  * the account it names. Checkout signs what it sold (who, which plan, which
  * term) together with the payment's reference, under a key derived from the
  * Paystack secret, and only a charge carrying that signature starts or
- * changes a plan. Any other
- * charge can only renew a subscription the customer's row already holds.
+ * changes a plan. Any other charge can only renew a subscription the
+ * customer's row already holds.
  */
 const checkoutKey = (secret: string) => createHmac("sha256", secret).update("pdf-wizard/checkout/v1").digest();
 
@@ -507,7 +513,11 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
       const paidAt = tx.paid_at ? new Date(tx.paid_at) : now;
       const end = iso(addMonths(Number.isNaN(paidAt.getTime()) ? now : paidAt, 1));
       const firstCharge = sold !== null;
-      if (firstCharge) patch.subscription_plan = kind.plan;
+      if (firstCharge) {
+        patch.subscription_plan = kind.plan;
+        // Only a subscription.create paid with this card takes up the code.
+        patch.start_authorization = cardOf(tx);
+      }
       // A new subscription renews a month after its first charge, whatever
       // an older, ended one ran to.
       patch.current_period_end = firstCharge ? end : later(row.current_period_end, end);
@@ -563,6 +573,15 @@ export async function confirmCharge(
 }
 
 const sha256 = (s: string | Uint8Array) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * The card authorization a charge or subscription was paid with, hashed: the
+ * code itself can charge the card again with the secret key, so it isn't kept.
+ */
+function cardOf(tx: Json): string | null {
+  const code = tx?.authorization?.authorization_code;
+  return typeof code === "string" && code ? sha256(code) : null;
+}
 
 /**
  * Applies one verified webhook delivery. Paystack retries until it gets a
@@ -650,7 +669,8 @@ export async function handlePaystackEvent(
     if (!row) throw new Error(`No profile for ${userId}`);
     const known = row.paystack_subscription_code;
     if (known !== code) {
-      const refused = unboundSubscription(create, row, plan ?? null, deps.now?.() ?? new Date());
+      const card = create ? cardOf(data) : null;
+      const refused = unboundSubscription(create, row, plan ?? null, card, deps.now?.() ?? new Date());
       if (refused) {
         await deps.store.releaseEvent(key);
         return refused;
@@ -681,10 +701,19 @@ function statusOf(s: unknown): SubscriptionStatus | null {
  * so anyone paying with this customer's email gets events that look like
  * theirs. Only the subscription our checkout started is taken up: the row's
  * signed first charge set its plan and left it waiting for a code, and only
- * a create for that plan brings the code. Events for an older, replaced
- * subscription don't touch the current one.
+ * a create for that plan, paid with the same card, brings the code. The plan
+ * and customer alone don't say whose it is: anyone can start one on this
+ * customer, before or after our checkout, and Paystack keeps sending a create
+ * answered 503. Events for an older, replaced subscription don't touch the
+ * current one.
  */
-function unboundSubscription(create: boolean, row: BillingRow, plan: PaidPlanId | null, now: Date): EventResult | null {
+function unboundSubscription(
+  create: boolean,
+  row: BillingRow,
+  plan: PaidPlanId | null,
+  card: string | null,
+  now: Date
+): EventResult | null {
   const waiting = !row.paystack_subscription_code && isPaidPlan(row.subscription_plan) &&
     (row.subscription_status === "active" || row.subscription_status === "attention");
   if (!create) {
@@ -695,7 +724,7 @@ function unboundSubscription(create: boolean, row: BillingRow, plan: PaidPlanId 
     if (waiting) return { status: "retry", reason: "waiting for its subscription.create" };
     return { status: "ignored", reason: row.paystack_subscription_code ? "stale subscription" : "no subscription waiting" };
   }
-  if (waiting && plan === row.subscription_plan) return null;
+  if (waiting && plan === row.subscription_plan && card !== null && card === row.start_authorization) return null;
   if (waiting || hasLiveSubscription(row, now)) return { status: "ignored", reason: "not this account's subscription" };
   // No first charge here is waiting for a code: it may still be on its way.
   return { status: "retry", reason: "no first charge waiting for it" };

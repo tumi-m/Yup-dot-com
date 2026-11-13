@@ -109,13 +109,14 @@ function view(r: BillingRow, at = now) {
     return handlePaystackEvent(JSON.parse(raw), raw, deps);
   };
   const customer = { customer_code: "CUS_u", email: "u@x.co" };
+  const authorization = { authorization_code: "AUTH_u" };
   await applyCharge({
     status: "success", reference: "pw_first", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer, metadata: checkoutMetadata("pw_first", { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test"),
+    plan: "PLN_pro", customer, authorization, metadata: checkoutMetadata("pw_first", { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test"),
   }, deps);
   await deliver("subscription.create", {
     subscription_code: "SUB_A", email_token: "tok", status: "active", next_payment_date: "2026-10-01T08:00:00.000Z",
-    plan: { plan_code: "PLN_pro" }, customer,
+    plan: { plan_code: "PLN_pro" }, customer, authorization,
   });
   clock = new Date("2026-10-01T09:00:00Z");
   await deliver("invoice.payment_failed", { subscription: { subscription_code: "SUB_A", status: "attention" }, customer });

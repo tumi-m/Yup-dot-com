@@ -50,7 +50,8 @@ function setup(extra: Partial<BillingRow> = {}) {
   };
   const firstCharge = (ref: string) => applyCharge({
     status: "success", reference: ref, amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
-    plan: "PLN_pro", customer, metadata: JSON.stringify(checkoutMetadata(ref, { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test")),
+    plan: "PLN_pro", customer, authorization: { authorization_code: "AUTH_u" },
+    metadata: JSON.stringify(checkoutMetadata(ref, { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test")),
   }, deps);
   const lines = () => {
     const r = db.get(USER)!;
@@ -61,7 +62,7 @@ function setup(extra: Partial<BillingRow> = {}) {
 
 const create = (code: string) => ({
   subscription_code: code, status: "active", email_token: `tok_${code}`, next_payment_date: "2026-11-18T08:00:00.000Z",
-  plan: { plan_code: "PLN_pro" }, customer,
+  plan: { plan_code: "PLN_pro" }, customer, authorization: { authorization_code: "AUTH_u" },
 });
 
 // The reported order: first charge on return, the create delivery failed (500) and waits for

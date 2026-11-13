@@ -29,6 +29,9 @@ function fail(what: string, error: { message?: string; code?: string } | null) {
   if (error) throw new StoreError(`${what}: ${error.message ?? "database error"}`, error.code);
 }
 
+// Postgres' and PostgREST's codes for a table that isn't there.
+const MISSING_TABLE = new Set<string | undefined>(["42P01", "PGRST205"]);
+
 export function supabaseBillingStore(admin: Admin = createAdminClient()): BillingStore {
   return {
     async claimEvent(key, type) {
@@ -42,9 +45,17 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       await admin.from("billing_events").delete().eq("id", key);
     },
     async getRow(userId) {
-      const { data, error } = await admin.from("profiles").select(COLUMNS).eq("id", userId).maybeSingle();
+      const [{ data, error }, start] = await Promise.all([
+        admin.from("profiles").select(COLUMNS).eq("id", userId).maybeSingle(),
+        admin.from("subscription_starts").select("authorization_hash").eq("user_id", userId).maybeSingle(),
+      ]);
       fail("read profile", error);
-      return (data as BillingRow) ?? null;
+      // Without the table (migration not run yet) no first charge is waiting:
+      // renewals and cancels go on, and a new subscription's first charge
+      // fails (so Paystack sends it again) until it is run.
+      if (!MISSING_TABLE.has(start.error?.code)) fail("read subscription start", start.error);
+      if (!data) return null;
+      return { ...(data as BillingRow), start_authorization: start.data?.authorization_hash ?? null };
     },
     async findUserId(by) {
       const [column, value] = by.subscriptionCode
@@ -56,7 +67,16 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       return (data?.[0]?.id as string) ?? null;
     },
     async updateRow(userId, patch: BillingPatch) {
-      const { error } = await admin.from("profiles").update(patch).eq("id", userId);
+      const { start_authorization: card, ...profile } = patch;
+      // The card first: a row the profile shows waiting always has it.
+      if (card !== undefined) {
+        const starts = admin.from("subscription_starts");
+        const { error } = card
+          ? await starts.upsert({ user_id: userId, authorization_hash: card, updated_at: new Date().toISOString() })
+          : await starts.delete().eq("user_id", userId);
+        fail("record subscription start", error);
+      }
+      const { error } = await admin.from("profiles").update(profile).eq("id", userId);
       fail("update billing", error);
     },
   };
