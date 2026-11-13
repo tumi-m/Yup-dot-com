@@ -350,6 +350,42 @@ for (const [label, start, other] of [
     s.get(V).paystack_subscription_code === null, { r, row: s.get(V) });
 }
 
+// If the account's own create ever came without its card, it isn't taken up, but its renewals
+// (paid with the first charge's card) still keep the paid access; a charge with another card
+// doesn't, and the code is never set from a charge.
+{
+  const s = setup([row(V, "v@x.co", { paystack_customer_code: "CUS_v" })]);
+  const first = await s.deliver("charge.success", {
+    status: "success", reference: "pw_c1", amount: 4900, currency: "ZAR", paid_at: clock.toISOString(),
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" }, authorization: VICTIM_CARD,
+    metadata: checkoutMetadata("pw_c1", { user_id: V, plan: "pro", mode: "subscription" }, SECRET),
+  });
+  const create = await s.deliver("subscription.create", {
+    subscription_code: "SUB_v", status: "active", email_token: "tok_v", next_payment_date: "2026-11-04T08:00:00.000Z",
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
+  });
+  const renewal = (reference: string, authorization?: unknown) => s.deliver("charge.success", {
+    status: "success", reference, amount: 4900, currency: "ZAR", paid_at: "2026-11-04T08:30:00.000Z",
+    plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" }, metadata: "", authorization,
+  });
+  const other = await renewal("T_o1", OTHER_CARD);
+  const none = await renewal("T_o2");
+  const team = await s.deliver("charge.success", {
+    status: "success", reference: "T_o3", amount: 19900, currency: "ZAR", paid_at: "2026-11-04T08:30:00.000Z",
+    plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_v" }, metadata: "", authorization: VICTIM_CARD,
+  });
+  check("create without its card: ignored under its own reason; other cards, no card or another plan don't renew",
+    first.status === "applied" && create.status === "ignored" && create.reason === "not paid with its first charge's card" &&
+      other.status === "ignored" && none.status === "ignored" && team.status === "ignored" &&
+      s.get(V).current_period_end === "2026-11-04T08:00:00.000Z" && s.get(V).subscription_plan === "pro",
+    { first, create, other, none, team, row: s.get(V) });
+  const own = await renewal("T_r1", VICTIM_CARD);
+  check("a renewal paid with the first charge's card keeps access, without setting a code",
+    own.status === "applied" && s.get(V).current_period_end === "2026-12-04T08:30:00.000Z" &&
+      s.get(V).paystack_subscription_code === null && ownPlan(s.get(V), new Date("2026-11-10T00:00:00Z")) === "pro",
+    { own, row: s.get(V) });
+}
+
 // The routes: checkout signs what it sells; the webhook and the return check it; "retry" isn't a 200.
 {
   const checkout = readFileSync(new URL("../app/api/billing/checkout/route.ts", import.meta.url), "utf8");

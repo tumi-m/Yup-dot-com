@@ -62,7 +62,8 @@ with a key derived from `PAYSTACK_SECRET_KEY`, bound to the payment's
 reference, and only a charge carrying that signature starts a subscription,
 buys prepaid time or records a customer code (`applyCharge` in
 `lib/billing.ts`). Any other charge can only renew the subscription the
-customer's row already holds, on the same plan. A subscription code is only
+customer's row already holds, or is waiting on when paid with the same card
+as its signed first charge, on the same plan. A subscription code is only
 taken up from a `subscription.create` for the plan that the row's signed
 first charge is waiting on, paid with the same card (its Paystack
 authorization, kept hashed in `subscription_starts`, which browsers can't

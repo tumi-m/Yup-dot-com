@@ -798,6 +798,16 @@ run
 before deploying (without it a new subscription's first charge isn't applied
 and Paystack keeps sending it).
 
+A checkout started before this was deployed, or before a change of
+`PAYSTACK_SECRET_KEY`, isn't signed with the key in use when it is paid, so
+its payment isn't applied on its own. Deploy and change keys when few people
+are paying, then look in the logs from around then for `paystack event
+ignored charge.success`, find each payment in Paystack and apply it by hand.
+Renewals still apply while a subscription waits for its create, if paid with
+the card of its first charge. A create logged as `not paid with its first
+charge's card` whose card (last four digits in Paystack) is the one the
+account's first payment used is the account's own: store its code by hand.
+
 ## Tester access (free Pro or Team for testers)
 
 Give chosen testers Pro or Team for free, for a limited time, with a code or

@@ -484,8 +484,13 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     if (!row) throw new Error(`No profile for ${userId}`);
     // A renewal is for the subscription the row already holds, on its plan.
     // It only moves the period on: someone paying with this customer's email
-    // for another plan changes nothing here.
-    if (!sold && (row.subscription_plan !== kind.plan || !row.paystack_subscription_code)) {
+    // for another plan changes nothing here. A row still waiting for its
+    // subscription.create also renews from a charge paid with its first
+    // charge's card, so a create that came without that card never ends
+    // access that is still being paid for.
+    const card = cardOf(tx);
+    const renews = !!row.paystack_subscription_code || (waitingForCode(row) && card !== null && card === row.start_authorization);
+    if (!sold && (row.subscription_plan !== kind.plan || !renews)) {
       await deps.store.releaseEvent(key);
       return { status: "ignored", reason: "no subscription to renew" };
     }
@@ -516,7 +521,7 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
       if (firstCharge) {
         patch.subscription_plan = kind.plan;
         // Only a subscription.create paid with this card takes up the code.
-        patch.start_authorization = cardOf(tx);
+        patch.start_authorization = card;
       }
       // A new subscription renews a month after its first charge, whatever
       // an older, ended one ran to.
@@ -714,8 +719,7 @@ function unboundSubscription(
   card: string | null,
   now: Date
 ): EventResult | null {
-  const waiting = !row.paystack_subscription_code && isPaidPlan(row.subscription_plan) &&
-    (row.subscription_status === "active" || row.subscription_status === "attention");
+  const waiting = waitingForCode(row);
   if (!create) {
     // A cancel or invoice carries no plan to check, and may be for an older
     // or someone else's subscription. While a create is awaited it is sent
@@ -724,10 +728,22 @@ function unboundSubscription(
     if (waiting) return { status: "retry", reason: "waiting for its subscription.create" };
     return { status: "ignored", reason: row.paystack_subscription_code ? "stale subscription" : "no subscription waiting" };
   }
-  if (waiting && plan === row.subscription_plan && card !== null && card === row.start_authorization) return null;
+  if (waiting && plan === row.subscription_plan) {
+    if (card !== null && card === row.start_authorization) return null;
+    // Paystack's create carries the card it charges (data.authorization). A
+    // distinct reason, so the account's own create, if it ever came without
+    // it, can be found in the logs and its code stored by hand.
+    return { status: "ignored", reason: "not paid with its first charge's card" };
+  }
   if (waiting || hasLiveSubscription(row, now)) return { status: "ignored", reason: "not this account's subscription" };
   // No first charge here is waiting for a code: it may still be on its way.
   return { status: "retry", reason: "no first charge waiting for it" };
+}
+
+/** A signed first charge set the row's plan and it has no subscription code yet. */
+function waitingForCode(row: BillingRow): boolean {
+  return !row.paystack_subscription_code && isPaidPlan(row.subscription_plan) &&
+    (row.subscription_status === "active" || row.subscription_status === "attention");
 }
 
 /** By subscription code, then customer code. Never by email: anyone can pay with someone's email. */
