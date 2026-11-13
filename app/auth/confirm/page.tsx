@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { PENDING_LINK_COOKIE, readPendingLink } from "@/lib/auth-callback";
+import { LINK_FIELD, PENDING_LINK_COOKIE, linkDigest, readPendingLink } from "@/lib/auth-callback";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -27,7 +27,8 @@ const COPY: Record<EmailOtpType, { title: string; text: string }> = {
 /**
  * Where an email link with a token hash waits (lib/auth-callback.ts). The
  * token stays in an HttpOnly cookie, out of the address bar and analytics;
- * Continue posts it back to /auth/callback from this site.
+ * Continue posts it back to /auth/callback from this site, naming the link
+ * this page showed.
  */
 export default async function ConfirmLinkPage() {
   const link = readPendingLink((await cookies()).get(PENDING_LINK_COOKIE)?.value);
@@ -53,6 +54,7 @@ export default async function ConfirmLinkPage() {
           </p>
         )}
         <form method="post" action="/auth/callback" className="mt-6">
+          <input type="hidden" name={LINK_FIELD} value={linkDigest(link)} />
           <Button type="submit" className="h-11 w-full">
             Continue
           </Button>

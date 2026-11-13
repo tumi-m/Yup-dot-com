@@ -412,9 +412,10 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   site can't use up a guest's free edit, AI answers or downloads. An email
   link with a token hash works in any browser, so `/auth/callback` only
   keeps it (an HttpOnly cookie) and signs in when Continue on
-  `/auth/confirm` posts from this site (`lib/auth-callback.ts`): another
-  site can't open an attacker's link in your browser and sign you in to
-  the attacker's account.
+  `/auth/confirm` posts from this site, for the link that page showed
+  (`lib/auth-callback.ts`): another site can't open an attacker's link in
+  your browser and sign you in to the attacker's account, nor swap it in
+  while your own link waits.
 - **Limits per address** (guests' allowances, tester code tries) count the
   address Vercel's edge saw, or the one a declared proxy appended
   (`TRUSTED_PROXY_HOPS`), never one the visitor wrote into

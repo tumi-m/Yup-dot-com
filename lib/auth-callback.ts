@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { linkSignIn, safeRedirect } from "@/components/auth-redirect";
@@ -13,13 +14,17 @@ import { refuseCrossSite } from "@/lib/cross-site";
  * without noticing (saving files and payment details into it). That link
  * only waits on CONFIRM_PATH, in a cookie, and signs in when Continue there
  * posts back from this site. Scanners that open links in emails don't use it
- * up either.
+ * up either. The form names the link it was shown for (LINK_FIELD), so
+ * another site opening its own link before you press Continue gets refused
+ * instead of swapping in.
  */
 
 /** The Continue page for an email link. */
 export const CONFIRM_PATH = "/auth/confirm";
 /** The email link waiting there. */
 export const PENDING_LINK_COOKIE = "pw-email-link";
+/** The Continue form's field: linkDigest of the link the page showed. */
+export const LINK_FIELD = "link";
 
 const PENDING_COOKIE = {
   httpOnly: true,
@@ -55,6 +60,11 @@ export function readPendingLink(value: string | null | undefined): PendingLink |
   const link = linkSignIn(new URLSearchParams({ token_hash: str(v.token_hash), type: str(v.type) }));
   if (!link || !("token_hash" in link)) return null;
   return { ...link, next: safeRedirect(str(v.next), "") };
+}
+
+/** Names a waiting link on the Continue page without putting its token there. */
+export function linkDigest(link: PendingLink): string {
+  return createHash("sha256").update(link.token_hash).digest("hex").slice(0, 16);
 }
 
 /** A cookie from a Cookie header. */
@@ -116,11 +126,16 @@ export async function handleCallbackPost(request: Request, deps: CallbackDeps): 
   if (refused) return refused;
   const { origin } = new URL(request.url);
   const pending = readPendingLink(cookieValue(request.headers.get("cookie"), PENDING_LINK_COOKIE));
+  // The cookie holds the last link opened in this browser, and another site
+  // can open one after the page showed yours: sign in only with the link the
+  // page showed.
+  const shown = new URLSearchParams(await request.text().catch(() => "")).get(LINK_FIELD);
+  const link = pending && shown === linkDigest(pending) ? pending : null;
 
-  let res = toLoginError(origin, pending?.next ?? "", 303);
-  if (pending && deps.configured) {
-    const { error } = await (await deps.auth()).verifyOtp({ type: pending.type, token_hash: pending.token_hash });
-    if (!error) res = NextResponse.redirect(`${origin}${pending.next || "/dashboard"}`, 303);
+  let res = toLoginError(origin, link?.next ?? "", 303);
+  if (link && deps.configured) {
+    const { error } = await (await deps.auth()).verifyOtp({ type: link.type, token_hash: link.token_hash });
+    if (!error) res = NextResponse.redirect(`${origin}${link.next || "/dashboard"}`, 303);
   }
   // A link works once, whatever happened.
   res.cookies.set(PENDING_LINK_COOKIE, "", { ...PENDING_COOKIE, maxAge: 0 });
