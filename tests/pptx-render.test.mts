@@ -212,6 +212,97 @@ const render = (deck: Deck, i = 0) =>
   check("solid theme style: no gradient", themeGradient(path(parseXml('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'), "a:solidFill"), "#000000", { scheme: {}, map: {} }) === undefined);
 }
 
+/* ---------------- file colours never become an external paint url ---------------- */
+{
+  // url(...) as SVG paint loads a paint server from any host, so opening a
+  // deck would ping a server of the file author's choosing.
+  const U = "url(https://x.test/p.svg#a)";
+  const shape = (id: number, spPr: string) => `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="S${id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${id * 1300000}" y="0"/><a:ext cx="1270000" cy="1270000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${spPr}</p:spPr></p:sp>`;
+  const deck = await parsePptx(
+    await buildPptx([
+      slideXml(
+        shape(4, `<a:solidFill><a:srgbClr val="${U}"/></a:solidFill>`) +
+          shape(5, `<a:pattFill prst="pct50"><a:fgClr><a:srgbClr val="${U}"/></a:fgClr><a:bgClr><a:srgbClr val="${U}"/></a:bgClr></a:pattFill>`) +
+          shape(6, `<a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>`) +
+          shape(7, `<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="25400"><a:solidFill><a:srgbClr val="${U}"/></a:solidFill></a:ln>`)
+      ),
+    ])
+  );
+  const external = (html: string) => Array.from(html.matchAll(/(?:fill|stroke|stop-color)="(url\((?!#)[^"]*)"/g), (m) => m[1]);
+  const html = render(deck);
+  check("file colours never become an external paint url", external(html).length === 0, JSON.stringify(external(html)));
+  check("a plain hex fill still renders", /fill="#FF0000"/i.test(html) && /fill="#00FF00"/i.test(html));
+  check("a pattern fill falls back to its default colours", /<pattern[^>]*><rect[^>]*fill="#FFFFFF"[^>]*><\/rect><rect[^>]*fill="#000000"/.test(html));
+
+  // SlideView checks again where it draws, for a deck model from anywhere.
+  const base = { left: 0, top: 0, width: 50, height: 50, borderWidth: 2, borderType: "solid", content: "", shapType: "rect", order: 0 };
+  const slide = {
+    number: 1, hidden: false, note: "", part: "ppt/slides/slide1.xml", layoutElements: [],
+    fill: { type: "color", value: U },
+    elements: [
+      { ...base, type: "shape", id: "1", fill: { type: "color", value: U }, borderColor: U },
+      { ...base, type: "shape", id: "2", fill: { type: "pattern", value: { type: "pct50", foregroundColor: U, backgroundColor: U } }, borderColor: "" },
+      { ...base, type: "shape", id: "3", fill: { type: "color", value: "#0000FF" }, borderColor: "#123456" },
+      {
+        type: "chart", id: "4", left: 0, top: 0, width: 200, height: 100, order: 0, chartType: "barChart", barDir: "col",
+        colors: [U], data: [{ key: "S", values: [{ x: "a", y: 1 }], xlabels: { 0: "a" } }],
+      },
+    ],
+  } as unknown as Deck["slides"][number];
+  const raw = renderToStaticMarkup(createElement(SlideView, { slide, deckWidth: 400, deckHeight: 300, scale: 1, themeColors: Array(6).fill(U) }));
+  check("SlideView drops url() colours in a deck model", external(raw).length === 0 && !raw.includes("x.test"), JSON.stringify(external(raw)));
+  check("SlideView keeps plain colours in a deck model", /fill="#0000FF"/.test(raw) && /stroke="#123456"/.test(raw) && /<rect[^>]*fill="#4472C4"/.test(raw));
+
+  // Real chart parts through parsePptx: the colour cleaning must leave chart
+  // series values alone (they live in `data` like table cells do).
+  const NS = 'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const frame = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Chart 4"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="508000" y="508000"/><a:ext cx="5080000" cy="3048000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame>`;
+  const rels = `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>`;
+  const pts = (vals: (string | number)[]) => `<c:ptCount val="${vals.length}"/>` + vals.map((v, i) => `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`).join("");
+  const fill = (clr: string) => `<c:spPr><a:solidFill><a:srgbClr val="${clr}"/></a:solidFill></c:spPr>`;
+  const ser = (i: number, clr: string, vals: number[]) =>
+    `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:strRef><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>S${i}</c:v></c:pt></c:strCache></c:strRef></c:tx>${fill(clr)}` +
+    `<c:cat><c:strRef><c:strCache>${pts(["Q1", "Q2", "Q3"])}</c:strCache></c:strRef></c:cat><c:val><c:numRef><c:numCache>${pts(vals)}</c:numCache></c:numRef></c:val></c:ser>`;
+  const xy = (i: number, ys: number[]) =>
+    `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>${fill("4472C4")}<c:xVal><c:numRef><c:numCache>${pts([1, 2, 3])}</c:numCache></c:numRef></c:xVal><c:yVal><c:numRef><c:numCache>${pts(ys)}</c:numCache></c:numRef></c:yVal></c:ser>`;
+  const plot = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace ${NS}><c:chart><c:plotArea><c:layout/>${body}</c:plotArea></c:chart></c:chartSpace>`;
+  const chartDeck = async (chartXml: string) => {
+    const zip = await JSZip.loadAsync(await buildPptx([{ xml: slideXml(frame), rels }]));
+    zip.file("ppt/charts/chart1.xml", chartXml);
+    return parsePptx(await zip.generateAsync({ type: "uint8array" }));
+  };
+  const chartOf = (d: Deck) => d.slides[0].elements.find((e) => e.type === "chart") as unknown as { data: unknown; colors: string[] };
+  const opens = async (xml: string) => chartDeck(xml).then((d) => d, (err: Error) => err);
+
+  for (const [kind, body] of [
+    ["bar", `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>${ser(0, "4472C4", [3, 5, 4])}${ser(1, U, [2, 2, 3])}</c:barChart>`],
+    ["line", `<c:lineChart><c:grouping val="standard"/>${ser(0, "4472C4", [3, 5, 4])}</c:lineChart>`],
+    ["pie", `<c:pieChart>${ser(0, "4472C4", [3, 5, 4])}</c:pieChart>`],
+  ] as const) {
+    const d = await opens(plot(body));
+    check(`a deck with a ${kind} chart opens`, !(d instanceof Error), d instanceof Error ? d.message : "");
+    if (d instanceof Error) continue;
+    const el = chartOf(d);
+    const first = (el.data as { values: { y: number }[] }[])[0];
+    check(`${kind} chart series values survive parsing`, JSON.stringify(first?.values.map((v) => v.y)) === "[3,5,4]", JSON.stringify(el.data));
+    if (kind === "bar") {
+      check("bar chart: url() series colour dropped, plain one kept", JSON.stringify(el.colors) === '["#4472C4",""]', JSON.stringify(el.colors));
+      const html = render(d);
+      check("bar chart draws its bars in the series colour", /<rect[^>]*fill="#4472C4"/.test(html) && !html.includes("x.test"));
+    }
+  }
+  const sc = await opens(plot(`<c:scatterChart><c:scatterStyle val="lineMarker"/>${xy(0, [4, 5, 6])}${xy(1, [7, 8, 9])}</c:scatterChart>`));
+  check("scatter chart numbers survive parsing unchanged", !(sc instanceof Error) && JSON.stringify(chartOf(sc).data) === "[[1,2,3],[4,5,6],[7,8,9]]", sc instanceof Error ? sc.message : JSON.stringify(chartOf(sc).data));
+
+  // Table cells are still cleaned.
+  const cell = (pr: string) => `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>x</a:t></a:r></a:p></a:txBody><a:tcPr>${pr}</a:tcPr></a:tc>`;
+  const tbl = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Table 5"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="2540000" cy="508000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/><a:tblGrid><a:gridCol w="1270000"/><a:gridCol w="1270000"/></a:tblGrid>` +
+    `<a:tr h="508000">${cell(`<a:lnL w="12700"><a:solidFill><a:srgbClr val="${U}"/></a:solidFill></a:lnL><a:solidFill><a:srgbClr val="${U}"/></a:solidFill>`)}${cell('<a:solidFill><a:srgbClr val="FFE080"/></a:solidFill>')}</a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+  const td = await parsePptx(await buildPptx([slideXml(tbl)]));
+  const tHtml = render(td);
+  check("table cell url() colours never reach the page", !tHtml.includes("x.test") && /#FFE080/i.test(tHtml));
+}
+
 const passed = results.filter(Boolean).length;
 console.log(`\n${passed}/${results.length} passed`);
 if (passed !== results.length) process.exit(1);
