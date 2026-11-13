@@ -167,16 +167,17 @@ function cleanColors(el: DeckElement) {
     shadow?: { color: string };
     colors?: string[];
     borders?: Borders;
-    data?: PTableCell[][];
+    data?: unknown; // table cells or chart series, depending on type
     elements?: DeckElement[];
   };
   if (e.fill) e.fill = cleanFill(e.fill);
   if (typeof e.borderColor === "string") e.borderColor = color(e.borderColor);
   if (e.shadow) e.shadow = { ...e.shadow, color: color(e.shadow.color) };
-  if (Array.isArray(e.colors)) e.colors = e.colors.map(color);
-  if (e.borders) e.borders = cleanBorders(e.borders);
-  if (Array.isArray(e.data)) {
-    e.data = e.data.map((row) =>
+  // Charts also have `data` (series values, not cells), so go by type.
+  if (e.type === "chart" && Array.isArray(e.colors)) e.colors = e.colors.map(color);
+  if (e.type === "table" && e.borders) e.borders = cleanBorders(e.borders);
+  if (e.type === "table" && Array.isArray(e.data)) {
+    e.data = (e.data as PTableCell[][]).map((row) =>
       row.map((cell) => ({
         ...cell,
         fillColor: optColor(cell.fillColor),
