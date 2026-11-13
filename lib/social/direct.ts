@@ -33,6 +33,8 @@ export function failureMessage(platform: DirectPlatform, kind: DirectFailure): s
     case "login-required":
       return `That ${what} is private or needs a ${name} login, so it can't be downloaded.`;
     case "blocked":
+      // Instagram refuses logged-out requests from servers at times, whatever the post.
+      if (platform === "instagram") return "Instagram is limiting downloads from servers right now. Try again in a few minutes.";
       return `${name} is limiting downloads right now. Try again in a few minutes.`;
     default:
       return `${name} isn't responding right now. Try again in a minute.`;

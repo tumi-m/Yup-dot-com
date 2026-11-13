@@ -1,14 +1,15 @@
 /**
  * TikTok and Instagram downloads: link parsing, the page/API shapes the
  * resolvers read (modelled on yt-dlp's extractors), TikTok's proof-of-work
- * page, Instagram's three fallbacks, host allowlists and grant headers.
+ * page, Instagram's post page / embed / GraphQL steps and how each failure
+ * is named, host allowlists and grant headers.
  * Uses fake networks; no real requests.
  */
 import { createHash } from "node:crypto";
 import { parseMediaUrl } from "../lib/media.ts";
 import { resolveTikTok, resolveTikTokMusic, solveChallenge, isAllowedTikTokUrl, tiktokMusic, universalData } from "../lib/social/tiktok.ts";
 import { tiktokMusicSlug } from "../lib/samples/parse.ts";
-import { resolveInstagram, shortcodeToPk, isAllowedInstagramUrl, lsdToken } from "../lib/social/instagram.ts";
+import { resolveInstagram, shortcodeToPk, isAllowedInstagramUrl, lsdToken, embedMedia, pageMedia } from "../lib/social/instagram.ts";
 import { DirectResolveError, directFilename, failureMessage, grantHeaders, isAllowedMediaUrl } from "../lib/social/direct.ts";
 
 const results: boolean[] = [];
@@ -155,64 +156,163 @@ check("tiktok allowlist", isAllowedTikTokUrl("https://v16-webapp-prime.tiktok.co
   !isAllowedTikTokUrl("https://www.tiktok.com/v.mp4") && !isAllowedTikTokUrl("http://v16.tiktokcdn.com/v.mp4") && !isAllowedTikTokUrl("https://tiktokcdn.com.evil.com/v.mp4") && !isAllowedTikTokUrl("https://vm.tiktok.com/x"));
 
 // ---------- Instagram ----------
+// Fixtures are cut down from what instagram.com sent a cloud server in
+// November 2026 (same nesting and encoding, few fields, placeholder URLs).
 check("shortcode → media id (same as yt-dlp)", shortcodeToPk("CnLyXxRuCiK") === "3011722311611459722" && shortcodeToPk("C4Hm4z2oEVp") === "3316790680317085033" && shortcodeToPk("BlOFzmNAk6E") === "1823420435077942916");
 check("lsd token from __eqmc or LSD config", lsdToken('<script type="application/json" id="__eqmc">{"l":"AVq1"}</script>') === "AVq1" && lsdToken('x["LSD",[],{"token":"AVz9"},1]') === "AVz9");
-const CDN = "https://scontent-jnb2-1.cdninstagram.com/o1/v/t16/f2/m86/video.mp4?efg=1";
+const CODE = "C4Hm4z2oEVp";
+const PK = "3316790680317085033";
+const CDN = "https://scontent-jnb2-1.cdninstagram.com/o1/v/t2/f2/m86/video.mp4?efg=1";
+const eqmc = '<script type="application/json" id="__eqmc">{"u":"\\/ajax\\/qm\\/","s":"XPolarisPostController","l":"LSD123"}</script>';
+const sjs = (data: unknown) =>
+  `<script type="application/json" data-content-len="1" data-sjs>${JSON.stringify({ require: [["ScheduledServerJS", "handle", null, [{ __bbox: { require: [["RelayPrefetchedStreamCache", "next", [], ["adp_PolarisLoggedOutDesktopWWWPostRootQueryRelayPreloader", { __bbox: { complete: true, result: { data } } }]]] } }]]] })}</script>`;
+// The post page: video_versions without sizes, the size on the media, the length in the DASH manifest.
 const product = {
-  pk: "3316790680317085033",
+  __typename: "XIGPolarisVideoMedia",
+  pk: PK,
+  code: CODE,
+  media_type: 2,
+  product_type: "clips",
   user: { username: "natgeo" },
   caption: { text: "Ocean at dawn" },
-  video_duration: 12.5,
+  original_width: 720,
+  original_height: 1280,
   has_audio: true,
-  image_versions2: { candidates: [{ url: "https://scontent.cdninstagram.com/thumb.jpg" }] },
+  image_versions2: { candidates: [{ url: "https://scontent.cdninstagram.com/thumb.jpg", width: 1080, height: 1920 }] },
+  video_dash_manifest: '<MPD mediaPresentationDuration="PT0H0M12.5S"><Representation width="720" height="1280"/></MPD>',
   video_versions: [
-    { url: CDN, width: 720, height: 1280, type: 101 },
-    { url: "https://instagram.fjnb1-1.fna.fbcdn.net/v/t50/low.mp4", width: 480, height: 854, type: 102 },
-    { url: "https://evil.example.com/x.mp4", width: 1080, height: 1920 },
+    { type: 101, url: CDN },
+    { type: 102, url: CDN },
+    { type: 103, url: "https://evil.example.com/x.mp4" },
   ],
 };
-const home = '<html><script type="application/json" id="__eqmc">{"l":"LSD123"}</script></html>';
-{
-  const { f, calls } = fakeFetch((u, init) => {
-    if (u === "https://www.instagram.com/") return { body: home, headers: [["set-cookie", "csrftoken=tok42; Path=/"]] };
-    if (u === "https://www.instagram.com/api/graphql" && init?.method === "POST") return { body: JSON.stringify({ data: { xig_polaris_media: { if_not_gated_logged_out: product } } }) };
+const postPage = (prod: unknown = product) => `<html>${eqmc}${sjs({ xig_polaris_media: { __typename: "XIGPolarisVideoMedia", pk: PK, code: CODE, if_not_gated_logged_out: prod, gating_ruling: null } })}</html>`;
+// What Instagram renders, with HTTP 200, for a client it refuses (and for a gone post).
+const errorPage = `<html><title>Instagram</title>${eqmc}${sjs(null).replace('"data":null', '"data":null,"route":{"canonicalRouteName":"comet.igweb.PolarisErrorRoute","hostableView":{"props":{"page_logging":{"name":"httpErrorPage","params":{}},"failure_reason":null,"restricted_age":null,"page_type":"MEDIA"}}}')}</html>`;
+// The embed page: the media as escaped JSON inside the contextJSON string, slashes escaped too.
+const embedPage = (media: unknown, ctx: Record<string, unknown> = {}) => {
+  const inner = JSON.stringify({ context: { type: "GraphVideo", shortcode: CODE, copyright_blocked: false, ...ctx }, gql_data: { shortcode_media: media } }).replace(/\//g, "\\/");
+  return `<html><script>requireLazy(["PolarisEmbedSimple"],function(){});</script><script>{"require":[["PolarisEmbedSimple","init",[],[{"isRichEmbed":true,"isSidecar":false,"contextJSON":${JSON.stringify(inner)}}]]]}</script><div class="EmbeddedMediaImage"></div></html>`;
+};
+const embedVideo = { __typename: "GraphVideo", shortcode: CODE, is_video: true, owner: { username: "natgeo" }, dimensions: { height: 1920, width: 1080 }, video_duration: 4.9, display_url: "https://scontent.cdninstagram.com/d.jpg", video_url: "https://scontent.cdninstagram.com/o1/v/embed.mp4?x=1" };
+const brokenEmbed = '<html><script>{"require":[["PolarisEmbedSimple","init",[],[{"isSidecar":false,"contextJSON":null}]]]}</script><div class="_aa4c"><div class="EmbedBrokenMedia"></div></div></html>';
+const rulingOk = { body: '{"title":"","description":"","session_id":"","blocks_logging_data":"","status":"ok"}', headers: [["content-type", "application/json"], ["set-cookie", "csrftoken=tok42; Path=/; Secure"]] as [string, string][] };
+const gqlBody = (prod: unknown) => ({ body: JSON.stringify({ data: { xig_polaris_media: { if_not_gated_logged_out: prod } } }) });
+const igPath = (u: string) => new URL(u).pathname;
+/** Answers by path; `page`, `embed`, `ruling`, `graphql` default to a refusal-free "nothing here". */
+function ig(r: { page?: Reply; embed?: Reply; ruling?: Reply; graphql?: Reply }) {
+  return fakeFetch((u) => {
+    const p = igPath(u);
+    if (p === `/p/${CODE}/`) return r.page ?? { body: errorPage };
+    if (p === `/p/${CODE}/embed/captioned/`) return r.embed ?? { body: embedPage({ ...embedVideo, video_url: undefined }, { copyright_blocked: true }) };
+    if (p === "/api/v1/web/get_ruling_for_content/") return r.ruling ?? rulingOk;
+    if (p === "/api/graphql") return r.graphql ?? { status: 429 };
     return "throw";
   });
-  const v = await resolveInstagram("C4Hm4z2oEVp", f);
-  const post = calls.find((c) => c.init?.method === "POST");
-  const form = new URLSearchParams(String(post?.init?.body));
-  const h = (post?.init?.headers ?? {}) as Record<string, string>;
-  check("instagram: GraphQL path → variants, foreign host dropped", v.variants.length === 2 && v.variants[0].url === CDN && v.variants[0].height === 1280);
-  check("instagram: query sends media id, lsd, doc_id, app id, csrf", JSON.parse(form.get("variables") ?? "{}").media_id === "3316790680317085033" && form.get("lsd") === "LSD123" && form.get("doc_id") === "27130156389949648" && h["X-IG-App-ID"] === "936619743392459" && h["X-CSRFToken"] === "tok42");
-  check("instagram: metadata", v.author === "natgeo" && v.title === "Ocean at dawn" && v.duration === 12.5 && v.thumbnail?.endsWith("thumb.jpg") === true);
+}
+// Captures the one log line a failed resolve writes.
+async function logged(p: Promise<unknown>) {
+  const lines: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => void lines.push(a.join(" "));
+  const k = await kind(p);
+  console.warn = warn;
+  return { k, lines };
+}
+
+{
+  const { f, calls } = ig({ page: { body: postPage() } });
+  const v = await resolveInstagram(CODE, f);
+  const h = (calls[0].init?.headers ?? {}) as Record<string, string>;
+  check("instagram: post page JSON → video, in one request", calls.length === 1 && igPath(calls[0].url) === `/p/${CODE}/` && v.variants.length === 1 && v.variants[0].url === CDN);
+  check("instagram: page request looks like a browser opening it (Sec-Fetch)", h["Sec-Fetch-Mode"] === "navigate" && h["Sec-Fetch-Dest"] === "document" && h["Sec-Fetch-Site"] === "none" && h["User-Agent"].includes("Chrome"));
+  check("instagram: size from the media, length from the DASH manifest", v.variants[0].width === 720 && v.variants[0].height === 1280 && v.duration === 12.5);
+  check("instagram: foreign-host video URL dropped", !v.variants.some((x) => x.url.includes("evil")));
+  check("instagram: metadata", v.author === "natgeo" && v.title === "Ocean at dawn" && v.hasAudio && v.thumbnail?.endsWith("thumb.jpg") === true);
   check("instagram: CDN gets the Instagram Referer", v.fetchHeaders?.Referer === "https://www.instagram.com/");
+  check("instagram: redirects never followed", calls.every((c) => c.init?.redirect === "manual"));
 }
 {
-  const sjs = `<script type="application/json" data-content-len="1" data-sjs>${JSON.stringify({ require: [["X", "y", null, [{ __bbox: { require: [["RelayPrefetchedStreamCache", "next", [], ["k", { __bbox: { result: { data: { xig_polaris_media: { if_not_gated_logged_out: product } } } } }]]] } }]]] })}</script>`;
-  const { f } = fakeFetch((u) => (u === "https://www.instagram.com/" ? { body: "<html>no token</html>" } : u === "https://www.instagram.com/p/C4Hm4z2oEVp/" ? { body: `<html>${sjs}</html>` } : "throw"));
-  const v = await resolveInstagram("C4Hm4z2oEVp", f);
-  check("instagram: no token → post page JSON fallback", v.variants[0].url === CDN);
+  const { f, calls } = ig({ embed: { body: embedPage(embedVideo) } });
+  const v = await resolveInstagram(CODE, f);
+  check("instagram: refused page → embed's escaped contextJSON", v.variants[0].url === "https://scontent.cdninstagram.com/o1/v/embed.mp4?x=1" && v.variants[0].height === 1920 && v.author === "natgeo" && v.duration === 4.9);
+  check("instagram: embed found it, so no API calls", calls.length === 2);
 }
 {
-  const embed = `<html><script>window.__additionalDataLoaded('extra',{"shortcode_media":{"owner":{"username":"natgeo"},"video_url":"https:\\/\\/scontent.cdninstagram.com\\/v\\/embed.mp4?x=1"}});</script></html>`;
-  const { f } = fakeFetch((u) => (u.endsWith("/embed/captioned/") ? { body: embed } : u === "https://www.instagram.com/" ? { status: 429 } : u.includes("/p/") ? { status: 302, headers: [["location", "https://www.instagram.com/accounts/login/"]] } : "throw"));
-  const v = await resolveInstagram("C4Hm4z2oEVp", f);
-  check("instagram: login wall → embed page fallback", v.variants[0].url === "https://scontent.cdninstagram.com/v/embed.mp4?x=1" && v.author === "natgeo");
+  const embed = `<html><script>window.__additionalDataLoaded('extra',{"shortcode_media":{"owner":{"username":"natgeo"},"is_video":true,"video_url":"https:\\/\\/scontent.cdninstagram.com\\/v\\/old.mp4?x=1"}});</script></html>`;
+  const v = await resolveInstagram(CODE, ig({ page: { status: 302, headers: [["location", "https://www.instagram.com/accounts/login/"]] }, embed: { body: embed } }).f);
+  check("instagram: older embed shape (__additionalDataLoaded)", v.variants[0].url === "https://scontent.cdninstagram.com/v/old.mp4?x=1");
 }
 {
-  const carousel = { user: { username: "a" }, carousel_media: [{ image_versions2: { candidates: [{ url: "https://scontent.cdninstagram.com/1.jpg" }] } }, { video_versions: [{ url: "https://scontent.cdninstagram.com/2.mp4", width: 720, height: 720 }] }, { video_versions: [{ url: "https://scontent.cdninstagram.com/3.mp4", width: 720, height: 720 }] }] };
-  const gql = (prod: unknown) => fakeFetch((u, init) => (u === "https://www.instagram.com/" ? { body: home } : init?.method === "POST" ? { body: JSON.stringify({ data: { xig_polaris_media: { if_not_gated_logged_out: prod } } }) } : "throw")).f;
-  const v3 = await resolveInstagram("C4Hm4z2oEVp", gql(carousel), 3);
-  const vDefault = await resolveInstagram("C4Hm4z2oEVp", gql(carousel));
-  check("instagram: carousel picks ?img_index slide, else first video", v3.variants[0].url.endsWith("3.mp4") && vDefault.variants[0].url.endsWith("2.mp4") && v3.index === 2);
-  check("instagram: photo-only post → no-video", (await kind(resolveInstagram("C4Hm4z2oEVp", gql({ image_versions2: { candidates: [] } })))) === "no-video");
+  const node = (n: number, video: boolean) => ({ __typename: video ? "GraphVideo" : "GraphImage", is_video: video, display_url: `https://scontent.cdninstagram.com/${n}.jpg`, dimensions: { width: 720, height: 720 }, ...(video ? { video_url: `https://scontent.cdninstagram.com/${n}.mp4` } : {}) });
+  const sidecar = { __typename: "GraphSidecar", is_video: false, owner: { username: "a" }, edge_sidecar_to_children: { edges: [{ node: node(1, false) }, { node: node(2, true) }, { node: node(3, true) }] } };
+  const route = ig({ embed: { body: embedPage(sidecar, { type: "GraphSidecar" }) } }).f;
+  const v3 = await resolveInstagram(CODE, route, 3);
+  const vDefault = await resolveInstagram(CODE, route);
+  check("instagram: embed carousel picks ?img_index slide, else first video", v3.variants[0].url.endsWith("3.mp4") && vDefault.variants[0].url.endsWith("2.mp4") && v3.index === 2);
+  const evil = await kind(resolveInstagram(CODE, ig({ embed: { body: embedPage({ ...embedVideo, video_url: "https://evil.example.com/v.mp4" }) } }).f));
+  check("instagram: embed video on a foreign host → refused (unavailable)", evil === "unavailable");
 }
 {
-  const wall = fakeFetch((u) => (u.endsWith("/embed/captioned/") ? { status: 404 } : u === "https://www.instagram.com/" ? { body: home } : { status: 302, headers: [["location", "https://www.instagram.com/accounts/login/?next=x"]] }));
-  check("instagram: every path walled → blocked", (await kind(resolveInstagram("C4Hm4z2oEVp", wall.f))) === "blocked");
-  check("instagram: network down → unreachable", (await kind(resolveInstagram("C4Hm4z2oEVp", fakeFetch(() => "throw").f))) === "unreachable");
+  const carousel = { user: { username: "a" }, carousel_media: [{ image_versions2: { candidates: [{ url: "https://scontent.cdninstagram.com/1.jpg" }] } }, { original_width: 640, original_height: 640, video_versions: [{ url: "https://scontent.cdninstagram.com/2.mp4" }] }, { video_versions: [{ url: "https://scontent.cdninstagram.com/3.mp4", width: 720, height: 720 }] }] };
+  const v = await resolveInstagram(CODE, ig({ page: { body: postPage(carousel) } }).f, 2);
+  check("instagram: page carousel slide sizes from each slide", v.variants[0].url.endsWith("2.mp4") && v.variants[0].height === 640 && v.index === 1);
+}
+{
+  // Page refused, embed leaves the file out (music): ruling, then GraphQL.
+  const { f, calls } = ig({ graphql: gqlBody({ ...product, video_versions: [{ url: CDN, width: 720, height: 1280 }] }) });
+  const v = await resolveInstagram(CODE, f);
+  const ruling = calls.find((c) => igPath(c.url) === "/api/v1/web/get_ruling_for_content/");
+  const post = calls.find((c) => c.init?.method === "POST");
+  const rh = (ruling?.init?.headers ?? {}) as Record<string, string>;
+  const h = (post?.init?.headers ?? {}) as Record<string, string>;
+  const form = new URLSearchParams(String(post?.init?.body));
+  check("instagram: ruling asked first, for this media id", !!ruling && calls.indexOf(ruling) < calls.indexOf(post!) && new URL(ruling.url).searchParams.get("target_id") === PK && new URL(ruling.url).searchParams.get("content_type") === "MEDIA");
+  check("instagram: API calls carry same-origin Sec-Fetch headers", rh["Sec-Fetch-Site"] === "same-origin" && rh["Sec-Fetch-Mode"] === "cors" && h["Sec-Fetch-Site"] === "same-origin" && rh["X-IG-App-ID"] === "936619743392459");
+  check("instagram: GraphQL sends the ruling's csrf token, page's lsd, doc_id", h["X-CSRFToken"] === "tok42" && form.get("lsd") === "LSD123" && h["X-FB-LSD"] === "LSD123" && form.get("doc_id") === "27130156389949648" && JSON.parse(form.get("variables") ?? "{}").media_id === PK);
+  check("instagram: GraphQL answer → video", v.variants[0].url === CDN);
+  check("instagram: only www.instagram.com asked while resolving", calls.every((c) => new URL(c.url).hostname === "www.instagram.com"));
+}
+{
+  const { f, calls } = ig({ ruling: { body: '{"title":"","description":"","status":"fail"}', headers: [["set-cookie", "csrftoken=tok42; Path=/"]] }, graphql: gqlBody(product) });
+  await resolveInstagram(CODE, f);
+  const h = (calls.find((c) => c.init?.method === "POST")?.init?.headers ?? {}) as Record<string, string>;
+  check("instagram: ruling not ok → no csrf token sent (as yt-dlp)", !("X-CSRFToken" in h));
+}
+{
+  // Failures say what really happened.
+  const all = await logged(resolveInstagram(CODE, ig({}).f));
+  check("instagram: error page everywhere + GraphQL 429 → blocked (not unreachable)", all.k === "blocked", all.k);
+  const line = all.lines.join("\n");
+  check("instagram: one log line with each step, status and reason", all.lines.length === 1 && line.includes("page 200 error page") && line.includes("embed 200 no video in embed") && line.includes("ruling 200 ok") && line.includes("graphql 429 rate limited"), line);
+  check("instagram: log line has no tokens, cookies or URLs", !/LSD123|tok42|https?:|\?|=/.test(line), line);
+  const ok = await logged(resolveInstagram(CODE, ig({ page: { body: postPage() } }).f));
+  check("instagram: nothing logged when it resolves", ok.k === "ok" && ok.lines.length === 0);
+
+  const login = { status: 302, headers: [["location", "https://www.instagram.com/accounts/login/?next=x"]] as [string, string][] };
+  const walled = ig({ page: login, embed: login });
+  check("instagram: login wall, no lsd → blocked, GraphQL not asked", (await kind(resolveInstagram(CODE, walled.f))) === "blocked" && !walled.calls.some((c) => igPath(c.url).startsWith("/api/")));
+  const limited = ig({ ruling: { status: 429 } });
+  check("instagram: ruling 429 → blocked, GraphQL skipped", (await kind(resolveInstagram(CODE, limited.f))) === "blocked" && !limited.calls.some((c) => igPath(c.url) === "/api/graphql"));
+  check("instagram: 403 → blocked", (await kind(resolveInstagram(CODE, ig({ page: { status: 403 }, embed: { status: 403 } }).f))) === "blocked");
+  check("instagram: \"please wait a few minutes\" JSON → blocked", (await kind(resolveInstagram(CODE, ig({ graphql: { body: '{"message":"Please wait a few minutes before you try again.","require_login":true,"status":"fail"}' } }).f))) === "blocked");
+
+  const gone = ig({ embed: { body: brokenEmbed } });
+  check("instagram: deleted post (error page + broken embed) → not-found, no API calls", (await kind(resolveInstagram(CODE, gone.f))) === "not-found" && gone.calls.length === 2);
+  check("instagram: page 404 → not-found", (await kind(resolveInstagram(CODE, ig({ page: { status: 404 } }).f))) === "not-found");
+  check("instagram: photo-only post (page) → no-video", (await kind(resolveInstagram(CODE, ig({ page: { body: postPage({ media_type: 1, image_versions2: { candidates: [] } }) } }).f))) === "no-video");
+  check("instagram: photo-only post (embed) → no-video", (await kind(resolveInstagram(CODE, ig({ embed: { body: embedPage({ __typename: "GraphImage", is_video: false, display_url: "https://scontent.cdninstagram.com/p.jpg" }, { type: "GraphImage" }) } }).f))) === "no-video");
+  check("instagram: ruling \"Restricted Video\" → login-required", (await kind(resolveInstagram(CODE, ig({ ruling: { body: '{"title":"Restricted Video","description":"You must be 18 years old or over to see this video.","status":"ok"}' } }).f))) === "login-required");
+  check("instagram: withheld logged out (empty product) → login-required", (await kind(resolveInstagram(CODE, ig({ page: { body: postPage(null) }, embed: { status: 500 }, graphql: gqlBody(null) }).f))) === "login-required");
+
+  check("instagram: network down → unreachable", (await kind(resolveInstagram(CODE, fakeFetch(() => "throw").f))) === "unreachable");
+  check("instagram: 5xx everywhere → unreachable", (await kind(resolveInstagram(CODE, fakeFetch(() => ({ status: 503 })).f))) === "unreachable");
+  const timeout = (async () => { throw new DOMException("timed out", "TimeoutError"); }) as never;
+  const slow = await logged(resolveInstagram(CODE, timeout));
+  check("instagram: timeouts → unreachable, logged as timeout", slow.k === "unreachable" && slow.lines[0]?.includes("page timeout"), slow.lines[0]);
   check("instagram: bad shortcode → not-found, no request", (await kind(resolveInstagram("bad/../code", fakeFetch(() => "throw").f))) === "not-found");
 }
+check("instagram: embed shapes read directly", embedMedia(embedPage(embedVideo))?.video_url === embedVideo.video_url && embedMedia(brokenEmbed) === null && pageMedia(postPage())?.code === CODE && pageMedia(errorPage) === null);
 check("instagram allowlist", isAllowedInstagramUrl(CDN) && isAllowedInstagramUrl("https://instagram.fjnb1-1.fna.fbcdn.net/v.mp4") && !isAllowedInstagramUrl("https://cdninstagram.com.evil.com/v.mp4") && !isAllowedInstagramUrl("http://scontent.cdninstagram.com/v.mp4") && !isAllowedInstagramUrl("https://www.instagram.com/v.mp4"));
 
 // ---------- shared ----------
