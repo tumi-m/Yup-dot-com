@@ -7,6 +7,7 @@ import {
   File as FileIcon,
   X,
   Download,
+  Loader2,
   Sparkles,
   GripVertical,
   Eye,
@@ -36,16 +37,25 @@ import {
   SUCCESS,
 } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
-import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import {
+  resultFloor,
+  scrollBehavior,
+  SETTLE_TOP,
+  settleSlot,
+  useFocusNext,
+  useHeightLock,
+} from "@/components/motion/focus";
 import { PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
+import { percentSmaller, sortPick } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { trackToolUsed } from "@/lib/analytics";
+import { getTool } from "@/lib/tools";
 
 /** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
 const NEXT_STEPS: Record<string, string[]> = {
@@ -113,6 +123,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   /** Read out when a file is moved with the arrow keys. */
   const [moveNote, setMoveNote] = useState("");
+  /** The zip for "Download all" is being built. */
+  const [zipping, setZipping] = useState(false);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
 
@@ -123,6 +135,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** The running job; aborted on Cancel, on new files and when the page goes away. */
   const job = useRef<AbortController | null>(null);
   useEffect(() => () => job.current?.abort(), []);
+  /** Files were just added: scroll them into view once they render. */
+  const bringUp = useRef(false);
 
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
@@ -155,13 +169,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.
-    if (accepted.some((f) => f.size > limits.maxFileBytes)) {
-      setUpsell("file-size");
-      fail(`Files up to ${formatLimitBytes(limits.maxFileBytes)} on your plan.`);
+    const { keep, tooBig, message } = sortPick(accepted, list.length - accepted.length, {
+      maxFileBytes: limits.maxFileBytes,
+      multiple: proc.multiple,
+      toolName: getTool(slug)?.name,
+    });
+    if (tooBig) setUpsell("file-size");
+    if (!keep.length) {
+      fail(message);
       return;
     }
     stopJob();
-    const incoming = accepted.map((file) => ({ id: `f${++entrySeq}`, file }));
+    const incoming = keep.map((file) => ({ id: `f${++entrySeq}`, file }));
     // Decide from the current list, not inside the state updater: React may
     // run updaters later, so a flag set there is still false when read here.
     const next = proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1);
@@ -169,8 +188,27 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setEntries(next.slice(0, limits.maxBatchFiles));
     setStatus("idle");
     setResults([]);
-    const skipped = list.length - accepted.length;
-    fail(skipped ? `Skipped ${skipped} unsupported file${skipped === 1 ? "" : "s"}.` : null);
+    fail(message);
+    bringUp.current = true;
+  }
+
+  // On a phone (or after a handoff) new files and Cast spell can land below
+  // the fold: once they have rendered, bring the list up under the header.
+  useEffect(() => {
+    if (!bringUp.current) return;
+    bringUp.current = false;
+    requestAnimationFrame(() => {
+      const root = flow.ref.current;
+      const cast = root?.querySelector<HTMLElement>("[data-cast]");
+      const list = root?.querySelector<HTMLElement>("[data-files]");
+      if (!cast || !list || cast.getBoundingClientRect().bottom <= window.innerHeight) return;
+      window.scrollTo({ top: window.scrollY + list.getBoundingClientRect().top - SETTLE_TOP, behavior: scrollBehavior() });
+    });
+  }, [entries, flow.ref]);
+
+  /** Changing the list stops a running job, so no result shows for files that are gone. */
+  function editList() {
+    if (job.current) stopJob();
   }
 
   /** Moves a file up or down the list from the keyboard, and says where it went. */
@@ -178,6 +216,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     const from = entries.findIndex((x) => x.id === id);
     const to = from + delta;
     if (from < 0 || to < 0 || to >= entries.length) return;
+    editList();
     const next = [...entries];
     [next[from], next[to]] = [next[to], next[from]];
     setEntries(next);
@@ -185,6 +224,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }
 
   function removeEntry(id: string) {
+    editList();
     // The row leaves with the focused button: hand focus to the next row's
     // Remove (or the one before), or back to Choose when no file is left.
     if (document.activeElement?.closest("[data-remove]")) {
@@ -283,11 +323,20 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     if (proc.zipName) {
-      const JSZip = (await import("jszip")).default;
-      const { zipEntryOptionsFor } = await import("@/lib/zip");
-      const zip = new JSZip();
-      for (const r of results) zip.file(r.filename, r.blob, await zipEntryOptionsFor(r.filename, r.blob));
-      downloadBlob(await zip.generateAsync({ type: "blob" }), proc.zipName);
+      // A second click while the zip builds would save it twice.
+      if (zipping) return;
+      setZipping(true);
+      try {
+        const JSZip = (await import("jszip")).default;
+        const { zipEntryOptionsFor } = await import("@/lib/zip");
+        const zip = new JSZip();
+        for (const r of results) zip.file(r.filename, r.blob, await zipEntryOptionsFor(r.filename, r.blob));
+        // Named after the input, so two splits don't both save as the same name.
+        const base = files[0]?.name.replace(/\.pdf$/i, "");
+        downloadBlob(await zip.generateAsync({ type: "blob" }), base ? `${base}-${proc.zipName}` : proc.zipName);
+      } finally {
+        setZipping(false);
+      }
     } else {
       results.forEach((r) => downloadBlob(r.blob, r.filename));
     }
@@ -306,7 +355,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   useEffect(() => {
     if (params.get("handoff") !== "1") return;
     takeHandoff()
-      .then((handed) => handed.length && addFiles(handed.map(handoffToFile)))
+      .then((handed) => {
+        if (!handed.length) return;
+        // The visitor chose this file a page ago: Cast spell is the next step.
+        focusNext.current = "run";
+        addFiles(handed.map(handoffToFile));
+      })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -352,7 +406,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               {sizeDelta !== null && sizeDelta > 0.01 && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 font-medium text-emerald-700">
                   <TrendingDown className="h-3 w-3" />
-                  <CountUp to={Math.round(sizeDelta * 100)} suffix="% smaller" duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  <CountUp to={percentSmaller(sizeDelta)} suffix="% smaller" duration={SUCCESS.count} delay={SUCCESS.stats} />
                 </span>
               )}
               {sizeDelta !== null && sizeDelta < -0.01 && (
@@ -378,8 +432,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           }))}
           actions={
             <>
-              <Button onClick={downloadAll} size="lg" className="min-w-44 shadow-lg shadow-primary/25">
-                <Download />
+              <Button
+                onClick={downloadAll}
+                size="lg"
+                disabled={zipping}
+                aria-busy={zipping || undefined}
+                className="min-w-44 shadow-lg shadow-primary/25"
+              >
+                {zipping ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
                 {results.length > 1 && proc.zipName ? "Download all (.zip)" : "Download"}
               </Button>
               <Button onClick={reset} variant="outline" size="lg">
@@ -431,7 +491,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             <Button ref={focusRef("choose")} className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
               Choose {proc.multiple ? "files" : "file"}
             </Button>
-            <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>
+            <p className="mt-4 text-xs text-muted-foreground">
+              Up to {formatLimitBytes(limits.maxFileBytes)} · Stays on your device.
+            </p>
           </ToolDropzone>
 
           {/* File list (drag to reorder when multiple) */}
@@ -439,7 +501,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             <Reorder.Group
               axis="y"
               values={entries}
-              onReorder={setEntries}
+              onReorder={(next) => {
+                editList();
+                setEntries(next);
+              }}
+              data-files
               className="space-y-2"
             >
               <AnimatePresence initial={false}>
@@ -477,7 +543,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base sm:text-sm"
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
                       >
                         {field.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -491,6 +557,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        className="pointer-coarse:h-11"
                       />
                     )}
                     {field.type === "password" && (
@@ -501,12 +568,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           autoComplete="new-password"
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="pr-10"
+                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11"
                         />
                         <button
                           type="button"
                           onClick={() => setRevealed((r) => ({ ...r, [field.key]: !r[field.key] }))}
-                          className="absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+                          className="absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
                           aria-label={revealed[field.key] ? "Hide password" : "Show password"}
                         >
                           {revealed[field.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -519,7 +586,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         type="color"
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1"
+                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11"
                       />
                     )}
                     {field.type === "range" && (

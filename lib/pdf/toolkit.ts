@@ -52,6 +52,44 @@ async function buf(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
 }
 
+const RANGE = /^(\d+)\s*[-–]\s*(\d*)$/;
+
+/**
+ * "1-3, 5; 8 9" → ["1-3", "5", "8", "9"]. Commas, semicolons and spaces all
+ * separate parts, except spaces next to a dash ("1 - 3" stays one range).
+ */
+function rangeParts(input: string): string[] {
+  return input
+    .split(/[,;]|(?<![\s\-–])\s+(?![\s\-–])/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Why `input` can't be split as typed, or null when every part is fine.
+ * parseRanges quietly drops what it can't use; this says so instead.
+ */
+export function rangeProblem(input: string, pageCount: number): string | null {
+  const notIn = (n: number) => `Page ${n} isn't in this PDF (${pageCount} page${pageCount === 1 ? "" : "s"}).`;
+  for (const part of rangeParts(input)) {
+    const m = part.match(RANGE);
+    if (m) {
+      const a = parseInt(m[1], 10);
+      // An open range ("4-") starts at its number; a closed one at its lower end.
+      const lo = m[2] ? Math.min(a, parseInt(m[2], 10)) : a;
+      const hi = m[2] ? Math.max(a, parseInt(m[2], 10)) : a;
+      // A range that starts inside the document is cut at its end ("2-10" → 2-5).
+      if (lo > pageCount || hi < 1) return notIn(lo);
+    } else if (/^\d+$/.test(part)) {
+      const n = parseInt(part, 10);
+      if (n < 1 || n > pageCount) return notIn(n);
+    } else {
+      return "Use commas between ranges, like 1-3, 5.";
+    }
+  }
+  return null;
+}
+
 /**
  * Parse "1-3, 5, 8-10" into a list of 0-indexed page arrays (one per range).
  * Reversed ranges ("5-3") are read as 3-5, open ones ("4-") run to the end,
@@ -59,10 +97,8 @@ async function buf(file: File): Promise<Uint8Array> {
  */
 export function parseRanges(input: string, pageCount: number): number[][] {
   const ranges: number[][] = [];
-  for (const part of input.split(",")) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const m = trimmed.match(/^(\d+)\s*[-–]\s*(\d*)$/);
+  for (const trimmed of rangeParts(input)) {
+    const m = trimmed.match(RANGE);
     if (m) {
       const a = parseInt(m[1], 10);
       const b = m[2] ? parseInt(m[2], 10) : pageCount;
@@ -118,6 +154,8 @@ export async function splitTool(
   if (opts.mode === "every") {
     groups = Array.from({ length: count }, (_, i) => [i]);
   } else {
+    const problem = rangeProblem(opts.ranges ?? "", count);
+    if (problem) throw new Error(problem);
     groups = parseRanges(opts.ranges ?? "", count);
     // Never hand back the whole document as if it were the requested split.
     if (!groups.length) {
@@ -502,7 +540,15 @@ export async function unlockTool(
   if (!(await isEncrypted(bytes))) {
     throw new Error("This PDF isn't password-protected — there's nothing to unlock.");
   }
-  const out = await unlockPdf(bytes, opts.password);
+  let out: Uint8Array;
+  try {
+    out = await unlockPdf(bytes, opts.password);
+  } catch (err) {
+    // An owner-only file opens with an empty password, so only blame the
+    // empty field once it has been tried.
+    if (!opts.password) throw new Error("Enter the PDF's password.");
+    throw err;
+  }
   const base = files[0].name.replace(/\.pdf$/i, "");
   return { blob: pdfBlob(out), filename: `${base}-unlocked.pdf` };
 }

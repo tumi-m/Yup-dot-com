@@ -233,9 +233,10 @@ export function UpsellCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...ENTER_T, delay: SUCCESS.upsell }}
-      className="relative mx-auto mt-6 flex max-w-md items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left"
+      className="relative mx-auto mt-6 flex max-w-md items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 pr-12 text-left"
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+      {/* No icon on phones, so the text keeps the width. */}
+      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground sm:flex">
         {guest ? <Cloud className="h-5 w-5" /> : <Crown className="h-5 w-5" />}
       </div>
       <div className="min-w-0 flex-1 text-sm">
@@ -243,14 +244,24 @@ export function UpsellCard({
         <p className="text-muted-foreground">
           {guest ? (
             <>
-              <Link href={signupHref(returnTo)} onClick={leave} className="font-medium text-primary hover:underline">
+              <Link
+                href={signupHref(returnTo)}
+                onClick={leave}
+                className="-my-3 inline-flex min-h-11 items-center py-3 font-medium text-primary hover:underline"
+              >
                 Free account
               </Link>{" "}
               · cloud library · more AI
             </>
           ) : (
             <>
-              <Link href="/pricing" onClick={leave} className="font-medium text-primary hover:underline">Pro</Link> · {formatLimitBytes(LIMITS.pro.maxFileBytes)} files · unlimited library
+              <Link
+                href="/pricing"
+                onClick={leave}
+                className="-my-3 inline-flex min-h-11 items-center py-3 font-medium text-primary hover:underline"
+              >
+                Pro
+              </Link> · {formatLimitBytes(LIMITS.pro.maxFileBytes)} files · unlimited library
             </>
           )}
         </p>
@@ -259,7 +270,7 @@ export function UpsellCard({
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" />
       </button>

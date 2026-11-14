@@ -10,7 +10,7 @@ import { historyReducer, type HistoryAction, type HistoryState } from "../lib/ed
 import type { Annotation } from "../lib/editor/types.ts";
 import { extractTables, parseDocument } from "../lib/pdf/parse.ts";
 import { jpegOrientation, sniffImage } from "../lib/pdf/images.ts";
-import { imagesToPdfTool, mergeTool, pageNumbersTool, pdfToChunksTool, pdfToMarkdownTool, pdfToTextTool, rotateTool, parseRanges, splitTool, watermarkTool, type ToolFile } from "../lib/pdf/toolkit.ts";
+import { imagesToPdfTool, mergeTool, pageNumbersTool, pdfToChunksTool, pdfToMarkdownTool, pdfToTextTool, rotateTool, parseRanges, rangeProblem, splitTool, watermarkTool, type ToolFile } from "../lib/pdf/toolkit.ts";
 
 let pass = 0;
 let total = 0;
@@ -64,9 +64,25 @@ check("other errors pass through", friendlyPdfError(new Error("Use at least 4 ch
 check("ranges: reversed", JSON.stringify(parseRanges("3-1", 5)) === "[[0,1,2]]");
 check("ranges: open-ended", JSON.stringify(parseRanges("4-", 5)) === "[[3,4]]");
 check("ranges: clipped", JSON.stringify(parseRanges("4-9, 7", 5)) === "[[3,4]]");
+check("ranges: spaces separate pages", JSON.stringify(parseRanges("1 3", 5)) === "[[0],[2]]");
+check("ranges: spaces round a dash keep the range", JSON.stringify(parseRanges("1 - 3; 5", 5)) === "[[0,1,2],[4]]");
+check("range problem: none for pages that exist", rangeProblem("1 3", 5) === null && rangeProblem("1-3, 5", 5) === null);
+check("range problem: a range starting inside is cut, not refused", rangeProblem("2-10", 5) === null && JSON.stringify(parseRanges("2-10", 5)) === "[[1,2,3,4]]");
+check("range problem: names the missing page", rangeProblem("1, 9", 5) === "Page 9 isn't in this PDF (5 pages).", rangeProblem("1, 9", 5));
+check("range problem: a range past the end", rangeProblem("7-9", 5) === "Page 7 isn't in this PDF (5 pages).", rangeProblem("7-9", 5));
+check("range problem: a part that doesn't parse", rangeProblem("1-3, x", 5) === "Use commas between ranges, like 1-3, 5.", rangeProblem("1-3, x", 5));
+check("range problem: one page", rangeProblem("2", 1) === "Page 2 isn't in this PDF (1 page).", rangeProblem("2", 1));
 const five = await makePdf([[595, 842], [595, 842], [595, 842], [595, 842], [595, 842]]);
 const outOfRange = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "9" }));
-check("split: out-of-range pages is an error, not the whole file", outOfRange === "Pick pages between 1 and 5.", outOfRange);
+check("split: out-of-range pages is an error, not the whole file", outOfRange === "Page 9 isn't in this PDF (5 pages).", outOfRange);
+const dropped = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "1, 9" }));
+check("split: a missing page isn't silently dropped", dropped === "Page 9 isn't in this PDF (5 pages).", dropped);
+const typo = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "1-3, x" }));
+check("split: a part that doesn't parse is an error", typo === "Use commas between ranges, like 1-3, 5.", typo);
+const spaced = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "1 3" })) as ToolFile[];
+check("split: '1 3' makes two files", spaced.length === 2, spaced.length);
+const empty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "" }));
+check("split: no pages picked is still an error", empty === "Pick pages between 1 and 5.", empty);
 const parts = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "2-3, 5, 5" })) as ToolFile[];
 check(
   "split: files named after source and pages, no collisions",
