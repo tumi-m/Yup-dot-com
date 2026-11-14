@@ -21,13 +21,53 @@ export function parsePill(value: string | null | undefined): ToolPill {
   return TOOL_PILLS.includes(value as ToolPill) ? (value as ToolPill) : "all";
 }
 
+/** Words a search can leave out: "merge pdf online free" means "merge pdf". */
+const FILLER = new Set(["to", "a", "the", "and", "online", "free"]);
+
+/** Lowercase words, one trailing "s" off, so "pdfs" finds "PDF" and "covers" "cover". */
+function words(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w));
+}
+
+/** Every query word starts some word of the text, in any order. */
+function matchesAll(query: string[], text: string[]): boolean {
+  return query.every((q) => text.some((w) => w.startsWith(q)));
+}
+
+/** Same, with the query words found in the text's order ("ppt to pdf" is PPTX to PDF, not PDF to PPTX). */
+function matchesInOrder(query: string[], text: string[]): boolean {
+  let from = 0;
+  for (const q of query) {
+    const at = text.findIndex((w, i) => i >= from && w.startsWith(q));
+    if (at < 0) return false;
+    from = at + 1;
+  }
+  return true;
+}
+
+/**
+ * Tools in a category whose words cover the search. Tools named by the search
+ * come first (in its word order before any order), then the rest as listed.
+ */
 export function filterTools(tools: ToolMeta[], pill: ToolPill, query: string): ToolMeta[] {
-  const q = query.trim().toLowerCase();
-  return tools.filter(
-    (t) =>
-      (pill === "all" || groupOf(t.category) === pill) &&
-      (!q || `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]} ${t.keywords ?? ""}`.toLowerCase().includes(q))
-  );
+  const q = words(query).filter((w) => !FILLER.has(w));
+  const inPill = tools.filter((t) => pill === "all" || groupOf(t.category) === pill);
+  if (!q.length) return inPill;
+  const ranked: { tool: ToolMeta; rank: number }[] = [];
+  for (const t of inPill) {
+    const text = words(
+      `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]} ${CATEGORY_LABELS[groupOf(t.category)]} ${t.keywords ?? ""}`
+    );
+    if (!matchesAll(q, text)) continue;
+    const name = words(t.name);
+    ranked.push({ tool: t, rank: matchesInOrder(q, name) ? 0 : matchesAll(q, name) ? 1 : 2 });
+  }
+  // Array sort is stable, so each rank keeps the catalogue's order.
+  return ranked.sort((a, b) => a.rank - b.rank).map((r) => r.tool);
 }
 
 /** Roving focus in a radio group: arrows wrap, Home and End jump. */
