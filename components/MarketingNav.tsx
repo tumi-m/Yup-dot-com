@@ -72,6 +72,22 @@ export function NavShell({
     };
   }, [open]);
 
+  // The page behind the open sheet stays put. The sheet closes on navigation,
+  // and when the window grows past md, where it is hidden, so the lock goes with it.
+  useEffect(() => {
+    if (!open) return;
+    const el = document.documentElement;
+    const prev = el.style.overflow;
+    el.style.overflow = "hidden";
+    const wide = window.matchMedia("(min-width: 768px)");
+    const onWide = () => wide.matches && setOpen(false);
+    wide.addEventListener("change", onWide);
+    return () => {
+      el.style.overflow = prev;
+      wide.removeEventListener("change", onWide);
+    };
+  }, [open]);
+
   return (
     <>
       <header
@@ -169,6 +185,11 @@ export function NavShell({
               animate={{ opacity: 1, y: 0, transition: { duration: DUR.fast, ease: EASE_OUT } }}
               exit={{ opacity: 0, y: -8, transition: { duration: DUR.fast, ease: EASE_IN, delay: DUR.tap } }}
               className="relative border-b border-border bg-background shadow-xl shadow-primary/5"
+              // Any link closes the sheet, also one to the page already open
+              // (no navigation then), including those passed in from outside.
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest("a")) setOpen(false);
+              }}
             >
               <div className="container flex flex-col gap-1 py-4">
                 {mobileTop}
