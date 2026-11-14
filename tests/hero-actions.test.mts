@@ -1,7 +1,8 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL } from "../components/landing/hero-actions.ts";
+import { addFiles, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, tooBigFor } from "../components/landing/hero-actions.ts";
+import { LIMITS } from "../lib/limits.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
 
@@ -43,6 +44,28 @@ check("every tool handed all files takes several", TAKES_ALL.every((s) => PROCES
 const slugs = new Set(TOOLS.map((t) => t.slug));
 const unknown = [...PDF_ACTIONS, ...MULTI_ACTIONS, ...IMAGE_ACTIONS, ...PPTX_ACTIONS].filter((s) => !slugs.has(s));
 check("every offered tool exists", unknown.length === 0, unknown);
+
+// One PDF, then another: the second joins the first, so Merge PDF is offered.
+// It used to replace it, and one file never reaches Merge.
+const file = (name: string, size = 100, lastModified = 1) => ({ name, size, lastModified, type: "application/pdf" });
+const a = file("a.pdf");
+const b = file("b.pdf");
+const joined = addFiles([a], [b]);
+check("a second PDF joins the first", joined.length === 2 && joined[0] === a && joined[1] === b, joined.map((f) => f.name));
+check("two PDFs, one at a time: Merge PDF", heroActions("pdf", joined) === MULTI_ACTIONS);
+check("the same file again counts once", addFiles([a, b], [file("b.pdf")]).length === 2);
+check("the same file twice in one pick counts once", addFiles([], [a, file("a.pdf")]).length === 1);
+check("nothing new keeps the list as it is", addFiles([a], [file("a.pdf")]).length === 1 && addFiles([a], [file("a.pdf")])[0] === a);
+check("same name, other size or date: another file", addFiles([a], [file("a.pdf", 200), file("a.pdf", 100, 2)]).length === 3);
+
+// A file over the plan's limit gets no tools: the tool would turn it away
+// and drop it.
+const MB = 1024 * 1024;
+const big = file("big.pdf", 60 * MB);
+check("guest: 60 MB is over the limit", tooBigFor("guest", [a, big]).length === 1 && tooBigFor("guest", [a, big])[0] === big);
+check("free: 60 MB is over the limit", tooBigFor("free", [big]).length === 1);
+check("pro: 60 MB is fine", tooBigFor("pro", [big]).length === 0 && tooBigFor("team", [big]).length === 0);
+check("exactly the limit is fine", tooBigFor("guest", [file("edge.pdf", LIMITS.guest.maxFileBytes)]).length === 0);
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

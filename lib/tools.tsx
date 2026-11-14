@@ -94,6 +94,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Combine,
     category: "organize",
     tint: "bg-violet-100 text-violet-700",
+    keywords: "join combine organise",
   },
   {
     slug: "split-pdf",
@@ -103,6 +104,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Scissors,
     category: "organize",
     tint: "bg-fuchsia-100 text-fuchsia-700",
+    keywords: "extract separate organise",
   },
   {
     slug: "rotate-pdf",
@@ -112,6 +114,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: RotateCw,
     category: "organize",
     tint: "bg-indigo-100 text-indigo-700",
+    keywords: "organise",
   },
   {
     slug: "compress-pdf",
@@ -121,6 +124,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Minimize2,
     category: "optimize",
     tint: "bg-emerald-100 text-emerald-700",
+    keywords: "shrink reduce size smaller organise",
   },
   {
     slug: "pdf-to-jpg",
@@ -130,6 +134,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: ImageIcon,
     category: "convert",
     tint: "bg-amber-100 text-amber-700",
+    keywords: "png jpeg image photo picture",
   },
   {
     slug: "jpg-to-pdf",
@@ -139,6 +144,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: FileImage,
     category: "convert",
     tint: "bg-orange-100 text-orange-700",
+    keywords: "png jpeg image photo picture",
   },
   {
     slug: "pdf-to-text",
@@ -212,6 +218,7 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "slides",
     tint: "bg-orange-100 text-orange-700",
     custom: "pptx-to-pdf",
+    keywords: "ppt powerpoint",
   },
   {
     slug: "edit-pptx",
@@ -273,6 +280,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Lock,
     category: "security",
     tint: "bg-red-100 text-red-700",
+    keywords: "encrypt lock",
   },
   {
     slug: "unlock-pdf",
@@ -282,6 +290,7 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: LockOpen,
     category: "security",
     tint: "bg-yellow-100 text-yellow-800",
+    keywords: "decrypt remove password",
   },
   {
     slug: "page-numbers",
@@ -320,6 +329,7 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "edit",
     tint: "bg-cyan-100 text-cyan-700",
     editor: true,
+    keywords: "esign signature",
   },
   {
     slug: "youtube-to-mp4",

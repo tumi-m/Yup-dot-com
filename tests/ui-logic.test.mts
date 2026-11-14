@@ -106,6 +106,44 @@ check("no match is empty", filterTools(TOOLS, "all", "zzzz").length === 0);
 check("search keywords find the Sample Finder", ["sample", "interpolation", "covers", "remix"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "sample-finder")));
 check("no tool is found by a closed sample database's name", filterTools(TOOLS, "all", "whosampled").length === 0);
 check("the Sample Finder is under Video & Audio, and stays while YouTube is paused", filterTools(TOOLS, "media", "").some((t) => t.slug === "sample-finder"));
+
+// Search: every word counts, in any order, plurals and filler words don't
+// matter. Each of these used to find nothing (the whole query had to appear
+// as one piece of text).
+const found = (q: string) => filterTools(TOOLS, "all", q).map((t) => t.slug);
+const finds: [string, string][] = [
+  ["merge pdfs", "merge-pdf"],
+  ["png", "jpg-to-pdf"],
+  ["png to pdf", "jpg-to-pdf"],
+  ["image to pdf", "jpg-to-pdf"],
+  ["jpeg", "pdf-to-jpg"],
+  ["pdf word", "pdf-to-word"],
+  ["shrink", "compress-pdf"],
+  ["reduce size", "compress-pdf"],
+  ["esign", "sign-pdf"],
+  ["join", "merge-pdf"],
+  ["remove password", "unlock-pdf"],
+  ["encrypt", "protect-pdf"],
+  ["split pages", "split-pdf"],
+  ["organise", "merge-pdf"],
+  ["ppt to pdf", "pptx-to-pdf"],
+  ["twitter video", "x-to-mp4"],
+  ["pdf-to-jpg", "pdf-to-jpg"],
+  ["fill & sign", "sign-pdf"],
+  ["merge pdf online free", "merge-pdf"],
+];
+for (const [q, slug] of finds) check(`search "${q}" finds ${slug}`, found(q).includes(slug), found(q));
+check("search: 'word' doesn't find the password tools", found("word").join() === "pdf-to-word", found("word"));
+check("search: 'remove password' is only Unlock PDF", found("remove password").join() === "unlock-pdf", found("remove password"));
+// The tool a search names comes first; the others keep catalogue order.
+check("search: 'sign' lists Fill & Sign first", found("sign")[0] === "sign-pdf", found("sign"));
+check("search: 'edit' lists the Edit tools first", found("edit").slice(0, 2).join() === "edit-pptx,edit-pdf", found("edit"));
+check("search: 'ppt to pdf' lists PPTX to PDF before PDF to PPTX", found("ppt to pdf").join() === "pptx-to-pdf,pdf-to-pptx", found("ppt to pdf"));
+check("search: 'pdf-to-jpg' lists PDF to JPG first", found("pdf-to-jpg")[0] === "pdf-to-jpg", found("pdf-to-jpg"));
+check("search: the rest keep catalogue order", found("password").join() === "protect-pdf,unlock-pdf" && found("compress").join() === "compress-pdf,compress-video", [found("password"), found("compress")]);
+check("search: only filler words means no filter", found("to").length === TOOLS.length && found(" the  ").length === TOOLS.length);
+check("search: words start a word, not the middle of one", found("ompress").length === 0);
+check("search: Compress PDF answers to its pill's name", found("organize").includes("compress-pdf"));
 check("labels", pillLabel("all") === "All" && pillLabel("media") === "Video & Audio");
 
 // ?c= deep links

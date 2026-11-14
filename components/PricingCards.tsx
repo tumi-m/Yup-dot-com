@@ -79,13 +79,15 @@ export function PricingCards({
           return (
             // Transform only, so the prices paint at once. A page can hold the
             // cards back (--enter-after) until its heading has started rising.
-            <div key={plan.id} className="motion-safe:animate-rise-soft" style={{ animationDelay: `calc(var(--enter-after, 0s) + ${staggerDelay(i, STAGGER_HERO)}s)` }}>
+            // The recommended card stands taller: a stretched grid item grows by
+            // its negative margins (the card's own would only squeeze it).
+            <div key={plan.id} className={cn("motion-safe:animate-rise-soft", plan.highlighted && "lg:-my-3")} style={{ animationDelay: `calc(var(--enter-after, 0s) + ${staggerDelay(i, STAGGER_HERO)}s)` }}>
               <div
                 ref={plan.highlighted ? ring : undefined}
                 className={cn(
                   "relative flex h-full flex-col rounded-3xl border bg-card p-8 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:duration-150 motion-reduce:transform-none",
                   plan.highlighted
-                    ? "border-transparent shadow-2xl shadow-primary/20 lg:-my-3 lg:py-11"
+                    ? "border-transparent shadow-2xl shadow-primary/20 lg:py-11"
                     : "border-border hover:shadow-lg"
                 )}
               >
@@ -126,7 +128,7 @@ export function PricingCards({
                   </p>
                 ) : (
                   <Button
-                    className="mt-8 h-11"
+                    className="mt-8 h-11 shrink-0"
                     variant={plan.highlighted ? "default" : "outline"}
                     disabled={isCurrent || offer?.main === "included" || loading !== null}
                     onClick={() => choose(plan.id)}
@@ -141,11 +143,14 @@ export function PricingCards({
                           : `Upgrade to ${plan.name}`}
                   </Button>
                 )}
-                {/* Kept in every card (empty on Free) so the buttons line up. */}
-                <div className="mt-2 flex min-h-11 flex-wrap items-center justify-center gap-x-1 text-xs text-muted-foreground">
+                {/* Kept in every card (empty on Free) so the buttons line up.
+                    Where a card is too narrow for one line (phones, and the
+                    three columns) the label takes a line and the two options
+                    share the next, half each, rather than "1 year" wrapping alone. */}
+                <div className="mt-2 grid min-h-11 grid-cols-2 items-center gap-x-1 text-xs text-muted-foreground sm:flex sm:flex-wrap sm:justify-center lg:grid lg:min-h-[3.75rem]">
                   {offer?.payOnce && (
                     <>
-                      <span className="whitespace-nowrap">Pay once:</span>
+                      <span className="col-span-2 whitespace-nowrap text-center">Pay once:</span>
                       {([1, 12] as const).map((months) => {
                         const req: CheckoutRequest = { plan: plan.id as "pro" | "team", mode: "once", months };
                         return (
@@ -155,7 +160,7 @@ export function PricingCards({
                             disabled={loading !== null}
                             onClick={() => choose(plan.id, req)}
                             title={display && !display.local ? `Billed as ${formatPrice(prepaidPrice(req.plan, months))}` : undefined}
-                            className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg px-2 font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                            className="inline-flex min-h-11 flex-wrap items-center justify-center gap-1 whitespace-nowrap rounded-lg px-1 font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:px-2"
                           >
                             {loading === loadingKey(req) && <Loader2 className="h-3 w-3 motion-safe:animate-spin" />}
                             {months === 1 ? "1 month" : "1 year"} {displayPrice(display, prepaidPrice(req.plan, months))}
@@ -167,7 +172,7 @@ export function PricingCards({
                           </button>
                         );
                       })}
-                      {offer.payOnceNote && <span className="w-full text-center">{offer.payOnceNote}</span>}
+                      {offer.payOnceNote && <span className="col-span-2 w-full text-center">{offer.payOnceNote}</span>}
                     </>
                   )}
                 </div>

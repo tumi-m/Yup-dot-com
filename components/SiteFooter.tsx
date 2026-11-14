@@ -34,15 +34,19 @@ export function SiteFooter() {
             </Link>
           </div>
 
-          <ul className="grid grid-cols-2 gap-x-4 text-sm text-muted-foreground md:hidden">
-            {TOOL_GROUPS.map((g) => (
-              <li key={g}>
-                <Link href={`/tools?c=${g}`} className={`flex h-11 items-center ${LINK}`}>
-                  {CATEGORY_LABELS[g]}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {/* "tools" in each name, so "Security" here isn't the Security page below. */}
+          <nav aria-label="Tool categories" className="md:hidden">
+            <p className="mb-1 text-sm font-semibold text-foreground">Tools</p>
+            <ul className="grid grid-cols-2 gap-x-4 text-sm text-muted-foreground">
+              {TOOL_GROUPS.map((g) => (
+                <li key={g}>
+                  <Link href={`/tools?c=${g}`} aria-label={`${CATEGORY_LABELS[g]} tools`} className={`flex h-11 items-center ${LINK}`}>
+                    {CATEGORY_LABELS[g]}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
           {TOOL_GROUPS.map((g) => (
             <div key={g} className="hidden md:block">

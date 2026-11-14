@@ -9,6 +9,7 @@ import { TOOLS } from "@/lib/tools";
 import { Reveal, RESIZE_T, STAGGER_HERO, WordReveal } from "@/components/motion/primitives";
 import { Aurora, HeroScene, Starfield } from "./HeroScene";
 import { HeroJourney } from "./HeroJourney";
+import type { Tier } from "@/lib/limits";
 import { RotatingWord } from "./RotatingWord";
 
 // Symmetric stops, so the one-off sweep never shows a seam and the resting
@@ -39,7 +40,7 @@ export function AfterHero({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Hero({ isAuthed }: { isAuthed: boolean }) {
+export function Hero({ isAuthed, tier = "guest" }: { isAuthed: boolean; tier?: Tier }) {
   return (
     <section className="relative overflow-hidden">
       <LayoutGroup>
@@ -75,7 +76,7 @@ export function Hero({ isAuthed }: { isAuthed: boolean }) {
           </p>
 
           <div className="mt-9 short:mt-5">
-            <HeroJourney />
+            <HeroJourney tier={tier} />
           </div>
 
           {/* The links under the journey glide with it as it resizes. */}

@@ -49,6 +49,8 @@ import { linkIn, parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLE
 import { pasteBlockedMessage } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
+import { addFiles } from "./hero-actions";
+import type { Tier } from "@/lib/limits";
 
 const CHOICES: Record<JourneyChoice, { label: string; icon: LucideIcon; tint: string }> = {
   pdf: { label: "PDF", icon: FileText, tint: "bg-violet-100 text-violet-700" },
@@ -87,7 +89,7 @@ function setHash(choice: JourneyChoice | null) {
  * The homepage's first step: ask what the visitor is working on, then morph
  * into that branch. `#pdf`, `#pptx`, `#slides` and `#media` skip the question.
  */
-export function HeroJourney() {
+export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
   const reduce = useReducedMotion();
   const [choice, setChoice] = useState<JourneyChoice | null>(null);
   // True once the visitor picks something, so branches take focus; a deep
@@ -141,7 +143,10 @@ export function HeroJourney() {
     }
     setDropError(null);
     if (target === "pdf") {
-      setPdfFiles(files.filter((f) => ["pdf", "image"].includes(fileKind(f))));
+      const picked = files.filter((f) => ["pdf", "image"].includes(fileKind(f)));
+      // More files on the PDF branch join the ones there (a second PDF opens
+      // Merge); coming from anywhere else starts afresh.
+      setPdfFiles((prev) => (choice === "pdf" ? addFiles(prev, picked) : picked));
     } else {
       const pptx = files.find((f) => fileKind(f) === "pptx");
       setPptxFile(pptx ?? null);
@@ -245,12 +250,14 @@ export function HeroJourney() {
                         transition={{ ...ENTER_T, delay: staggerDelay(i) }}
                         whileHover={{ y: -2, transition: SPRING }}
                         whileTap={{ scale: 0.97, transition: SPRING }}
-                        className="group flex min-h-[6.5rem] flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="group flex min-h-[6.5rem] flex-col items-center justify-start gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", tint)}>
                           <Icon className="h-5 w-5 transition-transform duration-200 ease-out group-hover:scale-110 group-hover:duration-150 motion-reduce:transform-none" />
                         </span>
-                        {label}
+                        {/* Icons at the top, not centred: when only some labels wrap
+                            the icons still line up across the row. */}
+                        <span className="text-balance">{label}</span>
                       </motion.button>
                     );
                   })}
@@ -296,6 +303,7 @@ export function HeroJourney() {
                 {choice === "pdf" && (
                   <HeroDropzone
                     mode="pdf"
+                    tier={tier}
                     files={pdfFiles}
                     onFiles={receive}
                     onClear={() => setPdfFiles([])}
@@ -307,6 +315,7 @@ export function HeroJourney() {
                 {choice === "pptx" && (
                   <HeroDropzone
                     mode="pptx"
+                    tier={tier}
                     files={pptxFile ? [pptxFile] : []}
                     onFiles={receive}
                     onClear={() => setPptxFile(null)}

@@ -1,6 +1,7 @@
 /** The tools the homepage offers for the files dropped on it. */
 
 import { fileKind } from "@/lib/journey";
+import { limitsFor, type Tier } from "@/lib/limits";
 
 export const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -50,4 +51,22 @@ export function handoffType(file: { name: string; type: string }): string {
   const kind = fileKind(file);
   if (kind === "image") return /\.png$/i.test(file.name) ? "image/png" : "image/jpeg";
   return kind === "pptx" ? PPTX_TYPE : "application/pdf";
+}
+
+type Picked = { name: string; size: number; lastModified: number };
+
+/**
+ * Files picked or dropped again join the ones already chosen, so one PDF and
+ * then another reach Merge PDF. The same file twice counts once.
+ */
+export function addFiles<T extends Picked>(current: T[], incoming: T[]): T[] {
+  const same = (a: Picked, b: Picked) => a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+  const fresh = incoming.filter((f, i) => !current.some((c) => same(c, f)) && incoming.findIndex((g) => same(g, f)) === i);
+  return fresh.length ? [...current, ...fresh] : current;
+}
+
+/** Files over the plan's size limit: a tool would turn them away on arrival. */
+export function tooBigFor<T extends { size: number }>(tier: Tier, files: T[]): T[] {
+  const max = limitsFor(tier).maxFileBytes;
+  return files.filter((f) => f.size > max);
 }
