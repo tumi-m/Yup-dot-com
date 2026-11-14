@@ -49,6 +49,8 @@ import { linkIn, parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLE
 import { pasteBlockedMessage } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
+import { addFiles } from "./hero-actions";
+import type { Tier } from "@/lib/limits";
 
 const CHOICES: Record<JourneyChoice, { label: string; icon: LucideIcon; tint: string }> = {
   pdf: { label: "PDF", icon: FileText, tint: "bg-violet-100 text-violet-700" },
@@ -87,7 +89,7 @@ function setHash(choice: JourneyChoice | null) {
  * The homepage's first step: ask what the visitor is working on, then morph
  * into that branch. `#pdf`, `#pptx`, `#slides` and `#media` skip the question.
  */
-export function HeroJourney() {
+export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
   const reduce = useReducedMotion();
   const [choice, setChoice] = useState<JourneyChoice | null>(null);
   // True once the visitor picks something, so branches take focus; a deep
@@ -141,7 +143,10 @@ export function HeroJourney() {
     }
     setDropError(null);
     if (target === "pdf") {
-      setPdfFiles(files.filter((f) => ["pdf", "image"].includes(fileKind(f))));
+      const picked = files.filter((f) => ["pdf", "image"].includes(fileKind(f)));
+      // More files on the PDF branch join the ones there (a second PDF opens
+      // Merge); coming from anywhere else starts afresh.
+      setPdfFiles((prev) => (choice === "pdf" ? addFiles(prev, picked) : picked));
     } else {
       const pptx = files.find((f) => fileKind(f) === "pptx");
       setPptxFile(pptx ?? null);
@@ -298,6 +303,7 @@ export function HeroJourney() {
                 {choice === "pdf" && (
                   <HeroDropzone
                     mode="pdf"
+                    tier={tier}
                     files={pdfFiles}
                     onFiles={receive}
                     onClear={() => setPdfFiles([])}
@@ -309,6 +315,7 @@ export function HeroJourney() {
                 {choice === "pptx" && (
                   <HeroDropzone
                     mode="pptx"
+                    tier={tier}
                     files={pptxFile ? [pptxFile] : []}
                     onFiles={receive}
                     onClear={() => setPptxFile(null)}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, FileText, Presentation, X } from "lucide-react";
+import { ArrowRight, FileText, Plus, Presentation, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropTile } from "@/components/ui/dropzone";
 import { fileToHandoff, tryHandoff } from "@/lib/local-store";
@@ -12,7 +12,8 @@ import { getTool } from "@/lib/tools";
 import { ENTER_T, EXIT, InlineError, RESIZE_T, staggerDelay } from "@/components/motion/primitives";
 import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
-import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL } from "./hero-actions";
+import { formatLimitBytes, LIMITS, limitsFor, type Tier } from "@/lib/limits";
+import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL, tooBigFor } from "./hero-actions";
 
 const ACCEPT = {
   pdf: "application/pdf,image/png,image/jpeg",
@@ -40,6 +41,7 @@ const RESERVE = {
  */
 export function HeroDropzone({
   mode,
+  tier = "guest",
   files,
   onFiles,
   onClear,
@@ -49,6 +51,8 @@ export function HeroDropzone({
   autoFocus,
 }: {
   mode: "pdf" | "pptx";
+  /** The visitor's plan, for its file size limit. */
+  tier?: Tier;
   files: File[];
   onFiles: (list: FileList | null) => void;
   onClear: () => void;
@@ -60,6 +64,7 @@ export function HeroDropzone({
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const moreRef = useRef<HTMLInputElement>(null);
   const chooseRef = useRef<HTMLButtonElement>(null);
   const [going, setGoing] = useState<string | null>(null);
   /** The tool the files couldn't be passed to. */
@@ -86,8 +91,12 @@ export function HeroDropzone({
   }, [hasFiles, focusNext]);
 
   const actions = heroActions(mode, files);
+  // A tool would turn these away and drop them, so no tool is offered.
+  const tooBig = tooBigFor(tier, files);
+  const maxBytes = limitsFor(tier).maxFileBytes;
 
   async function go(slug: string) {
+    if (tooBig.length) return;
     // The buttons are disabled while the files are stored, which drops focus.
     const hadFocus = !!boxRef.current?.contains(document.activeElement);
     setGoing(slug);
@@ -150,7 +159,7 @@ export function HeroDropzone({
               )}
             />
             <p className={cn("text-center text-lg font-semibold", mode === "pptx" && "sm:flex-1 sm:text-left")}>
-              {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop a PDF"}
+              {dragging ? "Release" : mode === "pptx" ? "Drop a PPTX" : "Drop PDFs"}
             </p>
             <Button
               ref={(el) => {
@@ -164,7 +173,7 @@ export function HeroDropzone({
                 inputRef.current?.click();
               }}
             >
-              Choose file
+              {mode === "pptx" ? "Choose file" : "Choose files"}
             </Button>
           </div>
 
@@ -198,9 +207,38 @@ export function HeroDropzone({
                 {formatBytes(files.reduce((n, f) => n + f.size, 0))}
               </span>
             </p>
+            {mode === "pdf" && !tooBig.length && (
+              <>
+                <input
+                  ref={moreRef}
+                  type="file"
+                  multiple
+                  accept={ACCEPT.pdf}
+                  className="hidden"
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    onFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                {/* One PDF, then another: the tools change to Merge PDF. */}
+                <button
+                  type="button"
+                  onClick={() => moreRef.current?.click()}
+                  aria-label="Add more files"
+                  className="flex h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-sm font-medium text-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-1.5 sm:px-2.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  {/* "Add" on phones leaves the file name room. */}
+                  <span>
+                    Add<span className="max-sm:hidden"> more</span>
+                  </span>
+                </button>
+              </>
+            )}
             <button
               // With no tool to offer, focus waits here.
-              ref={actions === MIXED_ACTIONS ? focusRef("tools") : undefined}
+              ref={actions === MIXED_ACTIONS || tooBig.length ? focusRef("tools") : undefined}
               onClick={onClear}
               aria-label="Choose different files"
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -213,11 +251,11 @@ export function HeroDropzone({
             aria-label="Choose a tool"
             className={cn(
               "mt-3 grid gap-2",
-              actions.length === 0 && "hidden",
+              (actions.length === 0 || tooBig.length > 0) && "hidden",
               actions.length === 2 ? "grid-cols-2" : actions.length === 1 ? "grid-cols-1 sm:grid-cols-2" : actions.length % 3 === 0 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
             )}
           >
-            {actions.map((slug, i) => {
+            {!tooBig.length && actions.map((slug, i) => {
               const t = getTool(slug);
               if (!t) return null;
               return (
@@ -244,10 +282,24 @@ export function HeroDropzone({
               );
             })}
           </div>
-          {actions === MULTI_ACTIONS && (
+          {tooBig.length > 0 && (
+            <p role="status" className="mt-3 text-center text-sm text-muted-foreground">
+              {tooBig.length === 1 ? `${tooBig[0].name} is` : `${tooBig.length} files are`} over {formatLimitBytes(maxBytes)}, the
+              limit on your plan.
+              {LIMITS.pro.maxFileBytes > maxBytes && (
+                <>
+                  {" "}
+                  <Link href="/pricing" className="tap whitespace-nowrap font-semibold text-primary underline underline-offset-2">
+                    Pro takes {formatLimitBytes(LIMITS.pro.maxFileBytes)}
+                  </Link>
+                </>
+              )}
+            </p>
+          )}
+          {!tooBig.length && actions === MULTI_ACTIONS && (
             <p className="mt-3 text-center text-xs text-muted-foreground">Other tools take one PDF at a time.</p>
           )}
-          {actions === MIXED_ACTIONS && (
+          {!tooBig.length && actions === MIXED_ACTIONS && (
             <p role="status" className="mt-3 text-center text-sm text-muted-foreground">
               PDFs and images go to different tools. Pick one kind.
             </p>

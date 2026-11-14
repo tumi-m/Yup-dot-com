@@ -4,18 +4,23 @@ import { ToolGrid } from "@/components/ToolGrid";
 import { Reveal } from "@/components/motion/primitives";
 import { AfterHero, FinalCta, Hero, HeroFlow } from "@/components/landing/Sections";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/profile";
+import type { Tier } from "@/lib/limits";
 
 export const metadata = { alternates: { canonical: "/" } };
 
 export default async function HomePage() {
   const user = await getCurrentUser();
+  // The home page offers tools for a dropped file, so it needs the plan's size limit.
+  const profile = user ? await getProfile().catch(() => null) : null;
+  const tier: Tier = profile?.plan ?? "guest";
 
   return (
     <div className="flex min-h-screen flex-col">
       <MarketingNav isAuthed={!!user} />
       <main id="main" className="flex-1">
         <HeroFlow>
-        <Hero isAuthed={!!user} />
+        <Hero isAuthed={!!user} tier={tier} />
 
         <AfterHero>
         <section className="border-t border-border py-16 sm:py-24">
