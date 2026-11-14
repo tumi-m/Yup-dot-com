@@ -7,6 +7,7 @@ import {
   File as FileIcon,
   X,
   Download,
+  Loader2,
   Sparkles,
   GripVertical,
   Eye,
@@ -122,6 +123,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   /** Read out when a file is moved with the arrow keys. */
   const [moveNote, setMoveNote] = useState("");
+  /** The zip for "Download all" is being built. */
+  const [zipping, setZipping] = useState(false);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
 
@@ -320,11 +323,20 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     if (proc.zipName) {
-      const JSZip = (await import("jszip")).default;
-      const { zipEntryOptionsFor } = await import("@/lib/zip");
-      const zip = new JSZip();
-      for (const r of results) zip.file(r.filename, r.blob, await zipEntryOptionsFor(r.filename, r.blob));
-      downloadBlob(await zip.generateAsync({ type: "blob" }), proc.zipName);
+      // A second click while the zip builds would save it twice.
+      if (zipping) return;
+      setZipping(true);
+      try {
+        const JSZip = (await import("jszip")).default;
+        const { zipEntryOptionsFor } = await import("@/lib/zip");
+        const zip = new JSZip();
+        for (const r of results) zip.file(r.filename, r.blob, await zipEntryOptionsFor(r.filename, r.blob));
+        // Named after the input, so two splits don't both save as the same name.
+        const base = files[0]?.name.replace(/\.pdf$/i, "");
+        downloadBlob(await zip.generateAsync({ type: "blob" }), base ? `${base}-${proc.zipName}` : proc.zipName);
+      } finally {
+        setZipping(false);
+      }
     } else {
       results.forEach((r) => downloadBlob(r.blob, r.filename));
     }
@@ -420,8 +432,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           }))}
           actions={
             <>
-              <Button onClick={downloadAll} size="lg" className="min-w-44 shadow-lg shadow-primary/25">
-                <Download />
+              <Button
+                onClick={downloadAll}
+                size="lg"
+                disabled={zipping}
+                aria-busy={zipping || undefined}
+                className="min-w-44 shadow-lg shadow-primary/25"
+              >
+                {zipping ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
                 {results.length > 1 && proc.zipName ? "Download all (.zip)" : "Download"}
               </Button>
               <Button onClick={reset} variant="outline" size="lg">
