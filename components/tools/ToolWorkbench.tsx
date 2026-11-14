@@ -491,7 +491,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             <Button ref={focusRef("choose")} className="mt-3 h-11" onClick={() => inputRef.current?.click()}>
               Choose {proc.multiple ? "files" : "file"}
             </Button>
-            <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>
+            <p className="mt-4 text-xs text-muted-foreground">
+              Up to {formatLimitBytes(limits.maxFileBytes)} · Stays on your device.
+            </p>
           </ToolDropzone>
 
           {/* File list (drag to reorder when multiple) */}
@@ -541,7 +543,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base sm:text-sm"
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
                       >
                         {field.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -555,6 +557,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        className="pointer-coarse:h-11"
                       />
                     )}
                     {field.type === "password" && (
@@ -565,12 +568,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           autoComplete="new-password"
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="pr-10"
+                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11"
                         />
                         <button
                           type="button"
                           onClick={() => setRevealed((r) => ({ ...r, [field.key]: !r[field.key] }))}
-                          className="absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+                          className="absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 pointer-coarse:h-11 pointer-coarse:w-11 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
                           aria-label={revealed[field.key] ? "Hide password" : "Show password"}
                         >
                           {revealed[field.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -583,7 +586,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         type="color"
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1"
+                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11"
                       />
                     )}
                     {field.type === "range" && (
