@@ -192,19 +192,22 @@ const DEMOS = [
 
 function DemoRow({ demo, className = "" }: { demo: (typeof DEMOS)[number]; className?: string }) {
   return (
-    <div aria-hidden={className.includes("invisible") || undefined} className={`flex items-center gap-3 ${className}`}>
-      <div className="min-w-0 flex-1 rounded-xl bg-secondary px-3 py-2 text-left">
-        <p className="text-xs font-semibold [overflow-wrap:anywhere]">{demo.from}</p>
+    <div aria-hidden={className.includes("invisible") || undefined} className={`flex items-center gap-2 sm:gap-3 ${className}`}>
+      <div className="min-w-0 flex-1 rounded-xl bg-secondary px-2.5 py-2 text-left sm:px-3">
+        <p className="truncate text-xs font-semibold">{demo.from}</p>
         <p className="text-[11px] text-muted-foreground">{demo.fromMeta}</p>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-0.5">
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground motion-safe:animate-pop [animation-delay:0.1s]">
           <Sparkles className="h-3.5 w-3.5" />
         </div>
-        <span className="text-[9px] font-semibold uppercase tracking-wide text-primary">{demo.spell}</span>
+        {/* Two short lines on phones ("PDF →" / "Excel"), so the files keep the room. */}
+        <span className="max-w-[4rem] text-center text-[10px] font-semibold uppercase leading-tight tracking-wide text-primary sm:max-w-none sm:text-[11px]">
+          {demo.spell}
+        </span>
       </div>
-      <div className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-3 py-2 text-left ring-1 ring-emerald-200 motion-safe:animate-fade [animation-delay:0.2s]">
-        <p className="text-xs font-semibold text-emerald-800 [overflow-wrap:anywhere]">{demo.to}</p>
+      <div className="min-w-0 flex-1 rounded-xl bg-emerald-50 px-2.5 py-2 text-left ring-1 ring-emerald-200 motion-safe:animate-fade [animation-delay:0.2s] sm:px-3">
+        <p className="truncate text-xs font-semibold text-emerald-800">{demo.to}</p>
         <p className="text-[11px] text-emerald-700">{demo.toMeta}</p>
       </div>
     </div>
@@ -242,8 +245,9 @@ function SpellDemo() {
       onBlur={() => setHeld(false)}
     >
       {/* Every example sits in one grid cell, so the card is always as tall as
-          the tallest and nothing below it moves as they change. */}
-      <div className="grid">
+          the tallest and nothing below it moves as they change. The column is
+          the card's width, so the file names truncate rather than widen it. */}
+      <div className="grid grid-cols-[minmax(0,1fr)]">
         {DEMOS.map((d) => (
           <DemoRow key={d.spell} demo={d} className="invisible col-start-1 row-start-1 [&_*]:!animate-none" />
         ))}
@@ -256,7 +260,7 @@ function SpellDemo() {
             transition={{ duration: DUR.base, ease: EASE_OUT }}
             className="col-start-1 row-start-1 flex"
           >
-            <DemoRow demo={demo} className="flex-1" />
+            <DemoRow demo={demo} className="min-w-0 flex-1" />
           </motion.div>
         </AnimatePresence>
       </div>
