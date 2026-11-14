@@ -154,6 +154,8 @@ export async function splitTool(
   if (opts.mode === "every") {
     groups = Array.from({ length: count }, (_, i) => [i]);
   } else {
+    const problem = rangeProblem(opts.ranges ?? "", count);
+    if (problem) throw new Error(problem);
     groups = parseRanges(opts.ranges ?? "", count);
     // Never hand back the whole document as if it were the requested split.
     if (!groups.length) {
@@ -538,7 +540,15 @@ export async function unlockTool(
   if (!(await isEncrypted(bytes))) {
     throw new Error("This PDF isn't password-protected — there's nothing to unlock.");
   }
-  const out = await unlockPdf(bytes, opts.password);
+  let out: Uint8Array;
+  try {
+    out = await unlockPdf(bytes, opts.password);
+  } catch (err) {
+    // An owner-only file opens with an empty password, so only blame the
+    // empty field once it has been tried.
+    if (!opts.password) throw new Error("Enter the PDF's password.");
+    throw err;
+  }
   const base = files[0].name.replace(/\.pdf$/i, "");
   return { blob: pdfBlob(out), filename: `${base}-unlocked.pdf` };
 }

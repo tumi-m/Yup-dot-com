@@ -91,5 +91,16 @@ for (const [name, run] of [
   check(`${name}: an open password still asks to unlock first`, typeof result === "string" && result.endsWith(ENCRYPTED_MESSAGE), result);
 }
 
+// Unlock: an empty field still opens an owner-only file, and asks for the
+// password (rather than calling it wrong) when the file needs one.
+const unlockedOwnerOnly = await attempt(() => kit.unlockTool([file(restricted)], { password: "" }));
+check("unlock: owner-only file opens with an empty field", ok(unlockedOwnerOnly), unlockedOwnerOnly);
+const emptyField = await attempt(() => kit.unlockTool([file(locked)], { password: "" }));
+check("unlock: empty field asks for the password", emptyField === "Enter the PDF's password.", emptyField);
+const wrong = await attempt(() => kit.unlockTool([file(locked)], { password: "nope" }));
+check("unlock: a wrong password still says so", wrong === "That password didn't work. Check it and try again.", wrong);
+const right = await attempt(() => kit.unlockTool([file(locked)], { password: "pw" }));
+check("unlock: the right password opens it", ok(right), right);
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);
