@@ -245,12 +245,14 @@ export function HeroJourney() {
                         transition={{ ...ENTER_T, delay: staggerDelay(i) }}
                         whileHover={{ y: -2, transition: SPRING }}
                         whileTap={{ scale: 0.97, transition: SPRING }}
-                        className="group flex min-h-[6.5rem] flex-col items-center justify-center gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="group flex min-h-[6.5rem] flex-col items-center justify-start gap-2.5 rounded-2xl border border-border bg-card/90 px-2 py-4 text-sm font-semibold shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/10 hover:duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", tint)}>
                           <Icon className="h-5 w-5 transition-transform duration-200 ease-out group-hover:scale-110 group-hover:duration-150 motion-reduce:transform-none" />
                         </span>
-                        {label}
+                        {/* Icons at the top, not centred: when only some labels wrap
+                            the icons still line up across the row. */}
+                        <span className="text-balance">{label}</span>
                       </motion.button>
                     );
                   })}
