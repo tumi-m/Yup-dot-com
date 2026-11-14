@@ -94,6 +94,20 @@ export function SuccessCard({
         </motion.div>
       )}
 
+      {/* One result: just its name, since the main Download saves it. */}
+      {files?.length === 1 && (
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...NOTICE_T, delay: SUCCESS.list }}
+          title={files[0].name}
+          className="relative mx-auto mt-3 flex w-full max-w-md min-w-0 justify-center text-sm text-muted-foreground"
+        >
+          <span className="truncate">{files[0].name.slice(0, -12)}</span>
+          <span className="shrink-0">{files[0].name.slice(-12)}</span>
+        </motion.p>
+      )}
+
       {files && files.length > 1 && (
         <ul className="relative mx-auto mt-6 max-h-56 w-full max-w-md space-y-1.5 overflow-y-auto text-left">
           {files.map((f, i) => (
