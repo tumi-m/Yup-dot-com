@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Search, X } from "lucide-react";
 import { TOOLS, type ToolMeta } from "@/lib/tools";
@@ -73,26 +74,63 @@ export function ToolGrid({ filterable = false }: { filterable?: boolean }) {
       </div>
     );
   }
-  return <FilterableGrid />;
+  // Reading the URL's search params suspends a statically rendered page.
+  return (
+    <Suspense fallback={<StaticGrid />}>
+      <FilterableGrid />
+    </Suspense>
+  );
+}
+
+function StaticGrid() {
+  return (
+    <div className={GRID}>
+      {TOOLS.map((tool) => (
+        <ToolCard key={tool.slug} tool={tool} />
+      ))}
+    </div>
+  );
 }
 
 function FilterableGrid() {
   const reduce = useReducedMotion();
-  const [query, setQuery] = useState("");
-  const [pill, setPill] = useState<ToolPill>("all");
+  const params = useSearchParams();
+  // `?q=` keeps the search when the visitor comes Back from a tool. Read
+  // once: later changes to the URL are this input's own.
+  const [query, setQuery] = useState(() => params.get("q") ?? "");
+  const [pill, setPill] = useState<ToolPill>(() => parsePill(params.get("c")));
+  const pillNow = useRef(pill);
+  pillNow.current = pill;
   const pillRefs = useRef<(HTMLButtonElement | null)[]>([]);
   /** True once a pill has been chosen here, so the first render doesn't animate. */
   const slid = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // `?c=organize` deep-links a category (the footer uses it on phones).
+  // `?c=organize` deep-links a category (the footer uses it on phones), also
+  // when the footer link is followed from this page.
   useEffect(() => {
-    const read = () => setPill(parsePill(new URLSearchParams(window.location.search).get("c")));
-    read();
-    window.addEventListener("popstate", read);
-    return () => window.removeEventListener("popstate", read);
-  }, []);
+    const next = parsePill(params.get("c"));
+    if (next === pillNow.current) return;
+    holdHeight();
+    slid.current = true;
+    setPill(next);
+  }, [params]);
+
+  // The search goes into the URL once typing pauses, or at once when a tool
+  // is opened, so Back brings it back.
+  function writeQuery(value: string) {
+    const url = new URL(window.location.href);
+    const q = value.trim();
+    if ((url.searchParams.get("q") ?? "") === q) return;
+    if (q) url.searchParams.set("q", q);
+    else url.searchParams.delete("q");
+    window.history.replaceState(window.history.state, "", url);
+  }
+  useEffect(() => {
+    const t = setTimeout(() => writeQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
   // Keep the active pill visible in the phone's scrolling row.
   useEffect(() => {
@@ -250,7 +288,7 @@ function FilterableGrid() {
         </div>
       </div>
 
-      <div ref={grid} className={cn(GRID, "relative content-start")}>
+      <div ref={grid} className={cn(GRID, "relative content-start")} onClickCapture={() => writeQuery(query)}>
         <AnimatePresence mode="popLayout" initial={false} onExitComplete={releaseHeight}>
           {filtered.map((tool, i) => (
             <motion.div
