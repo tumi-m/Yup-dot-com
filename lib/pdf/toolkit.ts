@@ -255,6 +255,27 @@ export async function imagesToPdfTool(
 }
 
 // ---------------------------------------------------------------------------
+// Resize — every page onto one paper size, or 2 or 4 to a sheet; pages stay
+// vector (see lib/pdf/resize). Runs in a worker: long files take a while.
+// ---------------------------------------------------------------------------
+export async function resizeTool(
+  files: File[],
+  opts: Record<string, string>,
+  ctx: ToolContext = {}
+): Promise<ToolFile> {
+  const [{ readOptions }, { resizeFile }] = await Promise.all([import("./resize/geometry"), import("./resize/off-thread")]);
+  // A size that can't be used is said before the file is read.
+  const options = readOptions(opts);
+  try {
+    const bytes = await resizeFile(files[0], options, ctx.progress, ctx.signal);
+    return { blob: pdfBlob(bytes), filename: suffixed(files[0], options.perSheet > 1 ? `${options.perSheet}-up` : "resized") };
+  } catch (err) {
+    if (isAbort(err)) throw err;
+    throw friendlyPdfError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rotate
 // ---------------------------------------------------------------------------
 export async function rotateTool(
