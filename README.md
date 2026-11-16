@@ -19,6 +19,9 @@ work with or without an account.
 | ---- | ------------ |
 | **Merge PDF** | Combine multiple PDFs into one (drag to reorder). |
 | **Split PDF** | Extract page ranges, or split every page into its own file. |
+| **Organize PDF** | Reorder pages by dragging or with the keyboard, turn single pages, delete them, add blank pages or another PDF's pages, reverse the order. Undo until you save. |
+| **Delete Pages** | Pick pages, or type ranges like `2-4, 7`, and save the PDF without them. |
+| **Extract Pages** | Pick pages, or type ranges, and save them as one new PDF. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
@@ -317,6 +320,15 @@ per-page rotate/insert/delete, a contextual **properties panel**, keyboard
 shortcuts, and toasts. Structural operations bake current annotations first,
 then transform the bytes and re-render.
 
+**Organize PDF, Delete Pages and Extract Pages** share one page grid
+(`components/tools/PageOrganizer.tsx`). Moves, turns, blank pages and
+deletions only change a list of pages (`lib/pdf/pages/plan.ts`), so they are
+instant and undo is free; the PDF is written once, on save, in a Web Worker
+(`lib/pdf/pages/`). Organize and Delete change the file in place, like the
+editor's page operations; Extract copies the picked pages out, like Split.
+Thumbnails are drawn only near the visible part of the grid, two at a time,
+and let go of their pixels when scrolled away, so a long document stays smooth.
+
 ## Tests
 
 ```bash
@@ -604,6 +616,7 @@ pdf-wizard/
 │   ├── tools/
 │   │   ├── ToolWorkbench.tsx     ← Dropzone + options + run + download
 │   │   ├── EditorLaunch.tsx      ← Uploads a PDF into the editor
+│   │   ├── PageOrganizer.tsx     ← Page grid for Organize PDF, Delete and Extract pages
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -622,6 +635,7 @@ pdf-wizard/
 │   ├── pdf/bake.ts               ← Flatten annotations, links, form fields
 │   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
 │   ├── pdf/operations.ts         ← pdf-lib page ops
+│   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
