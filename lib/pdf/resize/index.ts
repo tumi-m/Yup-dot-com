@@ -379,13 +379,15 @@ export async function resizePdf(
   signal?: AbortSignal
 ): Promise<Uint8Array> {
   let doc: PDFDocument;
+  let pages: PDFPage[];
   try {
     doc = await openPdf(bytes);
+    // A header with no document after it opens, then fails here.
+    pages = doc.getPages();
   } catch (err) {
     throw friendlyPdfError(err);
   }
   stopIfAborted(signal);
-  const pages = doc.getPages();
   if (!pages.length) throw new Error("This PDF has no pages.");
   await flattenForm(doc);
   const sheets = layout(

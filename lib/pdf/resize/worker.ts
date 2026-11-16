@@ -3,6 +3,7 @@
  * documents (see off-thread.ts).
  */
 import type { ProgressReply } from "../../worker-job";
+import { friendlyPdfError } from "../errors";
 import { resizePdf, type ResizeOptions } from "./index";
 
 export type Request = { bytes: Uint8Array; opts: ResizeOptions };
@@ -18,6 +19,7 @@ scope.onmessage = async ({ data }) => {
     const bytes = await resizePdf(data.bytes, data.opts, (fraction, label) => scope.postMessage({ type: "progress", fraction, label }));
     scope.postMessage({ type: "done", bytes }, [bytes.buffer as ArrayBuffer]);
   } catch (err) {
-    scope.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    // Only a message crosses over, so it is made one for people here.
+    scope.postMessage({ type: "error", message: friendlyPdfError(err).message });
   }
 };

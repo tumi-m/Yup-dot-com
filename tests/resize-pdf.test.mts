@@ -369,6 +369,16 @@ async function withLinks(rotate = 0) {
   check("password to open: says unlock first", (await fails(locked)) === "This PDF is password-protected. Unlock it first.");
   check("not a PDF: plain words", (await fails(new TextEncoder().encode("hello, not a pdf"))) === "This file isn't a readable PDF.");
   check("empty file: plain words", (await fails(new Uint8Array())) === "This file isn't a readable PDF.");
+  // A header and nothing after it: pdf-lib opens it, then fails on the first page.
+  const headerOnly = await (async () => {
+    try {
+      await resizePdf(new TextEncoder().encode("%PDF-1.7\nthis is not really a pdf\n"), opts({}));
+      return "";
+    } catch (err) {
+      return (err as Error).message;
+    }
+  })();
+  check("header but no document: already plain words (they cross from the worker as text)", headerOnly === "This file isn't a readable PDF.", headerOnly);
   const cut = plain.slice(0, Math.floor(plain.length / 3));
   const cutMsg = await fails(cut);
   check("cut-off file: plain words or still readable", cutMsg === "" || cutMsg === "This file isn't a readable PDF.", cutMsg);
