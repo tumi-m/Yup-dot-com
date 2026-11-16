@@ -181,26 +181,9 @@ export async function compressTool(
 
 /** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
 async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolContext): Promise<Uint8Array> {
-  const { canvasToJpeg } = await import("../image-codec");
-  const loaded = await loadForRender(bytes);
-  const out = await PDFDocument.create();
-  const scale = 1.5; // ~108 DPI
-  try {
-    for (let i = 1; i <= loaded.numPages; i++) {
-      stopIfAborted(ctx.signal);
-      ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
-      const vp = await loaded.getPageViewport(i, scale);
-      const canvas = document.createElement("canvas");
-      await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
-      const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
-      canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
-      const page = out.addPage([vp.baseWidth, vp.baseHeight]);
-      page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
-    }
-  } finally {
-    loaded.destroy();
-  }
-  return out.save();
+  const { pagesAsImages } = await import("./raster");
+  // ~108 DPI
+  return pagesAsImages(bytes, { scale: 1.5, quality, progress: ctx.progress, signal: ctx.signal });
 }
 
 // ---------------------------------------------------------------------------

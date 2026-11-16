@@ -143,7 +143,7 @@ function encodable(font: PDFFont, text: string) {
  * Invisible-text operators for one page, in displayed coordinates (points
  * from the bottom-left of the page as the reader sees it).
  */
-function textLayer(
+export function textLayer(
   font: PDFFont,
   fontKey: string | PDFName,
   src: OcrText,
