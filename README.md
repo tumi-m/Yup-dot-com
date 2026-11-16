@@ -50,6 +50,7 @@ work with or without an account.
 | **Sample Finder** | Paste a YouTube or TikTok link, or type a song: what it samples, where it was sampled, covers and remixes. Reads only the video's title, so it works while YouTube downloads are paused. Data from MusicBrainz and a hand-checked list. [More below](#sample-finder). |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
+| **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable. The editor can flatten fields when it saves. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
 | **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
@@ -338,7 +339,8 @@ npm test
 The suites in `tests/` run the real pipeline against generated files. For PDFs:
 structure extraction, multi-column reading order, table-vs-gutter
 disambiguation, baking every annotation type, the form detect/fill/flatten
-round-trip, protect/unlock (verified by pdf.js as an independent reader), the
+round-trip, Flatten PDF (each result rendered by pdf.js and compared with
+the original, pixel by pixel), protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
 openpyxl), and compression (images sized by placement, lossless graphics,
 text and forms kept). Others cover PPTX parsing, editing and rendering,

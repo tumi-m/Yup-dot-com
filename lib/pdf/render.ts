@@ -58,6 +58,8 @@ export interface LoadedPdf {
   ownText: (pageNumber: number) => Promise<OwnText[]>;
   /** True when the page shows a picture big enough to hold words. */
   showsPictures: (pageNumber: number) => Promise<boolean>;
+  /** Drops what pdf.js keeps of a page once it is done with (decoded pictures, fonts). */
+  release: (pageNumber: number) => Promise<void>;
   destroy: () => void;
 }
 
@@ -130,6 +132,9 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
         // Drop the decoded pictures now; pages to read are rendered afresh.
         page.cleanup();
       }
+    },
+    async release(pageNumber) {
+      (await doc.getPage(pageNumber)).cleanup();
     },
     destroy() {
       doc.destroy();

@@ -38,6 +38,7 @@ import {
   LayoutGrid,
   FileMinus,
   FileOutput,
+  Layers,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -351,6 +352,16 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Stamp,
     category: "edit",
     tint: "bg-purple-100 text-purple-700",
+  },
+  {
+    slug: "flatten-pdf",
+    name: "Flatten PDF",
+    title: "Flatten PDF: lock form fields and comments into the page",
+    description: "Make fields and comments part of the page.",
+    icon: Layers,
+    category: "edit",
+    tint: "bg-sky-100 text-sky-800",
+    keywords: "flatten flattened form fields fillable annotations comments lock non-editable read-only print acroform",
   },
   {
     slug: "edit-pdf",

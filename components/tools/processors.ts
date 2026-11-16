@@ -4,14 +4,20 @@ import type { ToolContext, ToolFile } from "@/lib/pdf/toolkit";
 /** pdf-lib and pdf.js load when a spell is cast, not with the page. */
 const kit = () => import("@/lib/pdf/toolkit");
 
-export type FieldType = "select" | "text" | "password" | "range" | "color";
+export type FieldType = "select" | "text" | "password" | "range" | "color" | "checkbox";
 
 export interface ToolField {
   key: string;
   label: string;
   type: FieldType;
+  /** A checkbox is "true" when ticked, "" when not. */
   default: string;
-  options?: { value: string; label: string }[];
+  /** `hint`: one plain sentence under the select while that option is picked. */
+  options?: { value: string; label: string; hint?: string }[];
+  /** One plain sentence under the field. */
+  hint?: string;
+  /** Takes the whole row. */
+  wide?: boolean;
   min?: number;
   max?: number;
   step?: number;
@@ -348,6 +354,61 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     minFiles: 1,
     fields: [{ key: "password", label: "Current password", type: "password", default: "" }],
     run: async (files, o) => (await kit()).unlockTool(files, { password: o.password }),
+  },
+  "flatten-pdf": {
+    cancellable: true,
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "mode",
+        label: "What to flatten",
+        type: "select",
+        default: "annotations",
+        wide: true,
+        options: [
+          {
+            value: "forms",
+            label: "Form fields only",
+            hint: "Filled-in fields become part of the page; comments stay editable.",
+          },
+          {
+            value: "annotations",
+            label: "Form fields and comments",
+            hint: "Fields, comments and stamps become part of the page; text stays selectable and links still work.",
+          },
+          {
+            value: "images",
+            label: "Everything, as images",
+            hint: "Most secure: each page becomes a picture, so nothing on it can be edited, but the file is bigger and text can't be selected.",
+          },
+        ],
+      },
+      {
+        key: "dpi",
+        label: "Resolution",
+        type: "select",
+        default: "150",
+        showIf: { key: "mode", value: "images" },
+        options: [
+          { value: "100", label: "100 DPI (smaller file)" },
+          { value: "150", label: "150 DPI" },
+          { value: "200", label: "200 DPI" },
+          { value: "300", label: "300 DPI (for print)" },
+        ],
+      },
+      {
+        key: "text",
+        label: "Keep the text searchable",
+        type: "checkbox",
+        default: "",
+        showIf: { key: "mode", value: "images" },
+        hint: "Adds the page's text invisibly, so search and copy still work.",
+      },
+    ],
+    note: "Keep your original: flattened fields can't be edited again.",
+    run: async (files, o, ctx) => (await kit()).flattenTool(files, { mode: o.mode, dpi: o.dpi, text: o.text }, ctx),
   },
   "page-numbers": {
     accept: "application/pdf",

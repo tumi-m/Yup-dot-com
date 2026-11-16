@@ -20,6 +20,8 @@ import type { OcrProgress } from "./ocr";
 export interface ToolFile {
   blob: Blob;
   filename: string;
+  /** A short line for the result, e.g. what was left as it was. */
+  note?: string;
 }
 
 function hexToRgb(hex: string) {
@@ -219,26 +221,57 @@ export async function compressTool(
 
 /** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
 async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolContext): Promise<Uint8Array> {
-  const { canvasToJpeg } = await import("../image-codec");
-  const loaded = await loadForRender(bytes);
-  const out = await PDFDocument.create();
-  const scale = 1.5; // ~108 DPI
-  try {
-    for (let i = 1; i <= loaded.numPages; i++) {
-      stopIfAborted(ctx.signal);
-      ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
-      const vp = await loaded.getPageViewport(i, scale);
-      const canvas = document.createElement("canvas");
-      await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
-      const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
-      canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
-      const page = out.addPage([vp.baseWidth, vp.baseHeight]);
-      page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
+  const { pagesAsImages } = await import("./raster");
+  // ~108 DPI
+  return pagesAsImages(bytes, { scale: 1.5, quality, progress: ctx.progress, signal: ctx.signal });
+}
+
+// ---------------------------------------------------------------------------
+// Flatten — fields and annotations become part of the page (lib/pdf/flatten),
+// or every page becomes a picture (lib/pdf/raster.ts).
+// ---------------------------------------------------------------------------
+export const FLATTEN_DPI = [100, 150, 200, 300];
+
+export async function flattenTool(
+  files: File[],
+  opts: { mode: string; dpi: string; text: string },
+  ctx: ToolContext = {}
+): Promise<ToolFile> {
+  const file = files[0];
+  const [{ NothingToFlattenError, flattenNote }, { flattenFile }] = await Promise.all([
+    import("./flatten"),
+    import("./flatten/off-thread"),
+  ]);
+  if (opts.mode === "images") {
+    const keepText = opts.text === "true";
+    const dpi = FLATTEN_DPI.includes(Number(opts.dpi)) ? Number(opts.dpi) : 150;
+    let bytes = await buf(file);
+    if (keepText) {
+      // Filled-in values become page text first, so search finds them too.
+      ctx.progress?.(0, "Reading the file…");
+      try {
+        bytes = (await flattenFile(file, "annotations", undefined, ctx.signal)).bytes;
+      } catch (err) {
+        if (isAbort(err)) throw err;
+        // Nothing to flatten, or a file only pdf.js reads: the pictures show it all the same.
+      }
     }
-  } finally {
-    loaded.destroy();
+    const { pagesAsImages } = await import("./raster");
+    try {
+      const out = await pagesAsImages(bytes, { scale: dpi / 72, quality: 0.85, keepText, progress: ctx.progress, signal: ctx.signal });
+      return { blob: pdfBlob(out), filename: suffixed(file, "flattened") };
+    } catch (err) {
+      if (isAbort(err)) throw err;
+      throw friendlyPdfError(err);
+    }
   }
-  return out.save();
+  try {
+    const { bytes, report } = await flattenFile(file, opts.mode === "forms" ? "forms" : "annotations", ctx.progress, ctx.signal);
+    return { blob: pdfBlob(bytes), filename: suffixed(file, "flattened"), note: flattenNote(report) };
+  } catch (err) {
+    if (isAbort(err) || err instanceof NothingToFlattenError) throw err;
+    throw friendlyPdfError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -115,6 +115,8 @@ export function PdfEditor({
 
   const [formFields, setFormFields] = useState<DetectedField[]>([]);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  /** Saves and downloads with the form flattened: filled in for good. */
+  const [flattenOnSave, setFlattenOnSave] = useState(false);
 
   const [placementImage, setPlacementImage] = useState<string | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
@@ -361,7 +363,10 @@ export function PdfEditor({
   }
 
   // ---- export ----
-  const pristine = !!bytes && bytes === savedRef.current.bytes && !annotations.length && !Object.keys(formValues).length;
+  const hasFields = formFields.length > 0 || annotations.some((a) => a.type === "field");
+  const flatten = flattenOnSave && hasFields;
+  /** Nothing to build: the document as it was opened or last saved. */
+  const pristine = !!bytes && bytes === savedRef.current.bytes && !annotations.length && !Object.keys(formValues).length && !flatten;
   /** Page operations change the bytes, so they count as unsaved too. */
   const dirty = !!bytes && !pristine;
 
@@ -372,9 +377,13 @@ export function PdfEditor({
       if (Object.keys(formValues).length) {
         out = await fillFormFields(out, formValues);
       }
+      if (flatten) {
+        const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
+        out = await flattenFormsIfAny(out);
+      }
       return out;
     },
-    [bytes, annotations, formValues]
+    [bytes, annotations, formValues, flatten]
   );
 
   /**
@@ -386,7 +395,7 @@ export function PdfEditor({
    */
   const buildAuthorized = useCallback(async () => {
     if (!bytes) return null;
-    const key = await documentFingerprint(bytes, JSON.stringify(annotations), JSON.stringify(formValues));
+    const key = await documentFingerprint(bytes, JSON.stringify(annotations), JSON.stringify(formValues), String(flatten));
     let built = builtRef.current?.key === key ? builtRef.current : null;
     if (!built) {
       const watermark = limitsFor(tier).watermark;
@@ -409,7 +418,7 @@ export function PdfEditor({
     }
     builtRef.current = built;
     return built;
-  }, [bytes, pristine, annotations, formValues, buildOutput, tier, toast]);
+  }, [bytes, pristine, annotations, formValues, flatten, buildOutput, tier, toast]);
 
   async function handleDownload() {
     if (busyRef.current) return;
@@ -718,6 +727,24 @@ export function PdfEditor({
             writeShortcutsOn(on);
           }}
         />
+      )}
+
+      {!loadError && hasFields && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-background px-3 text-sm">
+          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 sm:min-h-10">
+            <input
+              type="checkbox"
+              checked={flattenOnSave}
+              onChange={(e) => setFlattenOnSave(e.target.checked)}
+              aria-describedby="flatten-on-save-hint"
+              className="h-4 w-4 shrink-0 cursor-pointer accent-[hsl(var(--primary))]"
+            />
+            Flatten form fields when saving
+          </label>
+          <span id="flatten-on-save-hint" className="hidden text-xs text-muted-foreground sm:inline">
+            They become part of the page and can&apos;t be changed again.
+          </span>
+        </div>
       )}
 
       <div className="relative flex min-h-0 flex-1">
