@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, Reorder, useDragControls, useReducedMotion } from "motion/react";
 import {
@@ -58,6 +58,9 @@ import { friendlyPdfError } from "@/lib/pdf/errors";
 import { trackToolUsed } from "@/lib/analytics";
 import { getTool } from "@/lib/tools";
 
+/** Resize PDF's preview loads with that tool only. */
+const ResizePreview = lazy(() => import("./ResizePreview").then((m) => ({ default: m.ResizePreview })));
+
 /** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
 const NEXT_STEPS: Record<string, string[]> = {
   default: ["compress-pdf", "edit-pdf", "sign-pdf", "protect-pdf"],
@@ -66,6 +69,7 @@ const NEXT_STEPS: Record<string, string[]> = {
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
+  "resize-pdf": ["compress-pdf", "page-numbers", "merge-pdf", "protect-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
   "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
   // An encrypted result can't be opened by the other tools.
@@ -589,6 +593,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "text" && (
                       <Input
                         id={`opt-${field.key}`}
+                        inputMode={field.inputMode}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
                         className="pointer-coarse:h-11"
@@ -651,6 +656,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               </motion.div>
             )}
           </AnimatePresence>
+
+          {proc.preview === "resize" && entries.length > 0 && (
+            <Suspense fallback={null}>
+              <ResizePreview file={entries[0].file} options={options} />
+            </Suspense>
+          )}
 
           <AnimatePresence>
             {error && <InlineError key="error" message={error} shakeKey={errorKey} />}

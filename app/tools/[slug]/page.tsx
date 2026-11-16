@@ -16,6 +16,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { Starfield } from "@/components/landing/HeroScene";
 import { SampleFinderAbout } from "@/components/tools/SampleFinderAbout";
 import { PagesAbout } from "@/components/tools/PagesAbout";
+import { ResizeAbout } from "@/components/tools/ResizeAbout";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -76,6 +77,7 @@ export default async function ToolPage({
 
           {tool.slug === "sample-finder" && <SampleFinderAbout />}
           {tool.pages && <PagesAbout mode={tool.pages.mode} />}
+          {tool.slug === "resize-pdf" && <ResizeAbout />}
 
           <RelatedTools slug={tool.slug} />
         </div>

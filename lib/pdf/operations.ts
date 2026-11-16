@@ -102,7 +102,7 @@ function treeEntries(doc: PDFDocument, node: PDFObject | undefined, kind: "Names
 }
 
 /** The document's named destinations: the /Names /Dests tree, and the older /Dests dictionary. */
-function namedDests(doc: PDFDocument): Map<string, PDFObject> {
+export function namedDests(doc: PDFDocument): Map<string, PDFObject> {
   const out = new Map<string, PDFObject>();
   const names = doc.catalog.lookup(Names);
   if (names instanceof PDFDict) {
@@ -118,7 +118,7 @@ function namedDests(doc: PDFDocument): Map<string, PDFObject> {
 }
 
 /** The dictionary and key holding a link's or bookmark's destination: its /Dest, or its GoTo action's /D. */
-function destinationEntry(holder: PDFDict): [PDFDict, PDFName] | undefined {
+export function destinationEntry(holder: PDFDict): [PDFDict, PDFName] | undefined {
   if (holder.has(Dest)) return [holder, Dest];
   const action = holder.lookup(A);
   if (action instanceof PDFDict && action.lookup(PDFName.of("S")) === GoTo) return [action, D];
@@ -220,7 +220,7 @@ function checkOrder(pages: PDFPage[], order: number[]) {
 const unmoved = (pages: PDFPage[], order: number[]) => order.length === pages.length && order.every((p, i) => p === i);
 
 /** Keeps the given (0-indexed) pages, in that order, and drops the rest. */
-function arrangePages(doc: PDFDocument, order: number[]) {
+export function arrangePages(doc: PDFDocument, order: number[]) {
   const pages = doc.getPages();
   checkOrder(pages, order);
   const kept = new Set(order);
