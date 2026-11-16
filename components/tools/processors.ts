@@ -15,6 +15,8 @@ export interface ToolField {
   min?: number;
   max?: number;
   step?: number;
+  /** The phone keyboard a text field brings up. */
+  inputMode?: "decimal";
   /** Only show this field when another field has a given value. */
   showIf?: { key: string; value: string };
 }
@@ -35,6 +37,8 @@ export interface ToolProcessor {
   reportsSizeChange?: boolean;
   /** A long job that stops on ctx.signal: offer Cancel while it runs. */
   cancellable?: boolean;
+  /** Shows the result for the chosen options before the spell is cast. */
+  preview?: "resize";
   run: (
     files: File[],
     options: Record<string, string>,
@@ -95,6 +99,91 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
+  },
+  "resize-pdf": {
+    cancellable: true,
+    preview: "resize",
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "size",
+        label: "Page size",
+        type: "select",
+        default: "a4",
+        options: [
+          { value: "a4", label: "A4 (210 × 297 mm)" },
+          { value: "a3", label: "A3 (297 × 420 mm)" },
+          { value: "a5", label: "A5 (148 × 210 mm)" },
+          { value: "letter", label: "Letter (8.5 × 11 in)" },
+          { value: "legal", label: "Legal (8.5 × 14 in)" },
+          { value: "tabloid", label: "Tabloid (11 × 17 in)" },
+          { value: "custom", label: "Custom size" },
+        ],
+      },
+      { key: "width", label: "Width", type: "text", default: "210", inputMode: "decimal", showIf: { key: "size", value: "custom" } },
+      { key: "height", label: "Height", type: "text", default: "297", inputMode: "decimal", showIf: { key: "size", value: "custom" } },
+      {
+        key: "unit",
+        label: "Unit",
+        type: "select",
+        default: "mm",
+        options: [
+          { value: "mm", label: "Millimetres (mm)" },
+          { value: "in", label: "Inches (in)" },
+          { value: "pt", label: "Points (pt)" },
+        ],
+        showIf: { key: "size", value: "custom" },
+      },
+      {
+        key: "orientation",
+        label: "Orientation",
+        type: "select",
+        default: "auto",
+        options: [
+          { value: "auto", label: "Keep each page's own" },
+          { value: "portrait", label: "Portrait" },
+          { value: "landscape", label: "Landscape" },
+        ],
+      },
+      {
+        key: "fit",
+        label: "Fit",
+        type: "select",
+        default: "fit",
+        options: [
+          { value: "fit", label: "Fit inside, keep proportions" },
+          { value: "fill", label: "Fill the page, crop the edges" },
+          { value: "none", label: "Don't scale, centre it" },
+        ],
+      },
+      {
+        key: "margin",
+        label: "Margin",
+        type: "select",
+        default: "0",
+        options: [
+          { value: "0", label: "None" },
+          { value: "5", label: "Small (5 mm)" },
+          { value: "10", label: "Medium (10 mm)" },
+          { value: "20", label: "Large (20 mm)" },
+        ],
+      },
+      {
+        key: "perSheet",
+        label: "Pages per sheet",
+        type: "select",
+        default: "1",
+        options: [
+          { value: "1", label: "1 page" },
+          { value: "2", label: "2 pages, side by side" },
+          { value: "4", label: "4 pages, in a grid" },
+        ],
+      },
+    ],
+    note: "Pages stay sharp and text stays selectable. Form fields are flattened first.",
+    run: async (files, o, ctx) => (await kit()).resizeTool(files, o, ctx),
   },
   "compress-pdf": {
     cancellable: true,

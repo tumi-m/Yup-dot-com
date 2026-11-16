@@ -35,6 +35,7 @@ import {
   FileSliders,
   Shrink,
   Disc3,
+  Scaling,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -112,6 +113,17 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: RotateCw,
     category: "organize",
     tint: "bg-indigo-100 text-indigo-700",
+  },
+  {
+    slug: "resize-pdf",
+    name: "Resize PDF",
+    title: "Resize PDF: change the page size to A4, Letter and more",
+    description: "Make every page one size, or put 2 or 4 on a sheet.",
+    icon: Scaling,
+    category: "organize",
+    tint: "bg-cyan-100 text-cyan-800",
+    badge: "New",
+    keywords: "page size paper size change size scale fit a4 a3 a5 letter legal tabloid margins n-up 2-up 4-up pages per sheet",
   },
   {
     slug: "compress-pdf",
