@@ -148,8 +148,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const inputBytes = files.reduce((n, f) => n + f.size, 0);
   const outputBytes = results.reduce((n, r) => n + r.blob.size, 0);
 
-  function addFiles(list: FileList | File[] | null) {
-    if (!list?.length) return;
+  /** Adds the files that fit; false when none could be added. */
+  function addFiles(list: FileList | File[] | null): boolean {
+    if (!list?.length) return false;
     const accepted = Array.from(list).filter((f) =>
       proc.accept.split(",").some((type) => {
         const t = type.trim();
@@ -166,7 +167,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     );
     if (!accepted.length) {
       fail(`That file type isn't supported here.`);
-      return;
+      return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
     const { keep, tooBig, message } = sortPick(accepted, list.length - accepted.length, {
@@ -177,7 +178,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     if (tooBig) setUpsell("file-size");
     if (!keep.length) {
       fail(message);
-      return;
+      return false;
     }
     stopJob();
     const incoming = keep.map((file) => ({ id: `f${++entrySeq}`, file }));
@@ -190,6 +191,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setResults([]);
     fail(message);
     bringUp.current = true;
+    return true;
   }
 
   // On a phone (or after a handoff) new files and Cast spell can land below
@@ -358,8 +360,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       .then((handed) => {
         if (!handed.length) return;
         // The visitor chose this file a page ago: Cast spell is the next step.
-        focusNext.current = "run";
-        addFiles(handed.map(handoffToFile));
+        // Set after adding, so a handoff that is turned away leaves no focus
+        // waiting for the next pick.
+        if (addFiles(handed.map(handoffToFile))) focusNext.current = "run";
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
