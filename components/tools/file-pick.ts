@@ -34,6 +34,21 @@ export function sortPick(
 }
 
 /**
+ * A file name split before its last `keep` characters, so a long start can be
+ * truncated while the end ("-page-12.pdf") that tells files apart stays
+ * whole. Characters as people see them: an emoji or an accent is never cut
+ * in two.
+ */
+export function splitNameEnd(name: string, keep = 12): [string, string] {
+  const chars =
+    typeof Intl !== "undefined" && "Segmenter" in Intl
+      ? Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(name), (s) => s.segment)
+      : Array.from(name);
+  if (chars.length <= keep) return ["", name];
+  return [chars.slice(0, -keep).join(""), chars.slice(-keep).join("")];
+}
+
+/**
  * The "% smaller" a compressed result shows. Rounded down and kept under
  * 100, so a big saving never reads as an empty file.
  */

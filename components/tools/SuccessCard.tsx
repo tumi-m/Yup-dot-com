@@ -15,6 +15,7 @@ import {
 } from "@/components/motion/primitives";
 import { getTool, type ToolMeta } from "@/lib/tools";
 import { cn, formatBytes } from "@/lib/utils";
+import { splitNameEnd } from "./file-pick";
 
 /** A result row in a multi-file success card. */
 export interface SuccessFile {
@@ -24,6 +25,17 @@ export interface SuccessFile {
 }
 
 const at = (delay: number) => ({ ...ENTER_T, delay });
+
+/** A name truncated in the middle: the start gives way, the end stays. */
+function NameEnd({ name }: { name: string }) {
+  const [start, end] = splitNameEnd(name);
+  return (
+    <>
+      <span className="truncate">{start}</span>
+      <span className="shrink-0">{end}</span>
+    </>
+  );
+}
 
 /**
  * The finished-task card shared by every file tool. One choreography, timed
@@ -103,8 +115,7 @@ export function SuccessCard({
           title={files[0].name}
           className="relative mx-auto mt-3 flex w-full max-w-md min-w-0 justify-center text-sm text-muted-foreground"
         >
-          <span className="truncate">{files[0].name.slice(0, -12)}</span>
-          <span className="shrink-0">{files[0].name.slice(-12)}</span>
+          <NameEnd name={files[0].name} />
         </motion.p>
       )}
 
@@ -121,8 +132,7 @@ export function SuccessCard({
               <FileIcon className="h-4 w-4 shrink-0 text-primary" />
               {/* Truncate in the middle: the end ("…-page-12.jpg") tells files apart. */}
               <span className="flex min-w-0 flex-1" title={f.name}>
-                <span className="truncate">{f.name.slice(0, -12)}</span>
-                <span className="shrink-0">{f.name.slice(-12)}</span>
+                <NameEnd name={f.name} />
               </span>
               <span className="text-xs text-muted-foreground">{formatBytes(f.size)}</span>
               <button

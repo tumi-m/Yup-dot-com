@@ -70,3 +70,20 @@ export function tooBigFor<T extends { size: number }>(tier: Tier, files: T[]): T
   const max = limitsFor(tier).maxFileBytes;
   return files.filter((f) => f.size > max);
 }
+
+/**
+ * One pick or drop on the PDF branch. Files over the limit are turned away
+ * as they arrive, as on a tool page, so the ones that fit (and those already
+ * chosen) keep their tools. `join` adds to the files there instead of
+ * starting afresh.
+ */
+export function takePdfs<T extends Picked>(
+  tier: Tier,
+  current: T[],
+  incoming: T[],
+  join: boolean
+): { files: T[]; tooBig: T[] } {
+  const tooBig = tooBigFor(tier, incoming);
+  const fits = incoming.filter((f) => !tooBig.includes(f));
+  return { files: join ? addFiles(current, fits) : fits, tooBig };
+}

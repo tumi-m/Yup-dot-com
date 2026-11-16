@@ -49,7 +49,7 @@ import { linkIn, parseMediaUrl, parsePlaylistUrl, PLATFORM_LABEL, YOUTUBE_ENABLE
 import { pasteBlockedMessage } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
-import { addFiles } from "./hero-actions";
+import { takePdfs } from "./hero-actions";
 import type { Tier } from "@/lib/limits";
 
 const CHOICES: Record<JourneyChoice, { label: string; icon: LucideIcon; tint: string }> = {
@@ -97,6 +97,8 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
   const [interacted, setInteracted] = useState(false);
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [pptxFile, setPptxFile] = useState<File | null>(null);
+  /** PDFs the last pick turned away for size. */
+  const [pdfTooBig, setPdfTooBig] = useState<File[]>([]);
   const [pptxError, setPptxError] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -127,6 +129,7 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
   function back() {
     returnTo.current = choice;
     setDropError(null);
+    setPdfTooBig([]);
     setChoice(null);
     setHash(null);
   }
@@ -146,7 +149,9 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
       const picked = files.filter((f) => ["pdf", "image"].includes(fileKind(f)));
       // More files on the PDF branch join the ones there (a second PDF opens
       // Merge); coming from anywhere else starts afresh.
-      setPdfFiles((prev) => (choice === "pdf" ? addFiles(prev, picked) : picked));
+      const next = takePdfs(tier, pdfFiles, picked, choice === "pdf");
+      setPdfFiles(next.files);
+      setPdfTooBig(next.tooBig);
     } else {
       const pptx = files.find((f) => fileKind(f) === "pptx");
       setPptxFile(pptx ?? null);
@@ -305,8 +310,12 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
                     mode="pdf"
                     tier={tier}
                     files={pdfFiles}
+                    turnedAway={pdfTooBig}
                     onFiles={receive}
-                    onClear={() => setPdfFiles([])}
+                    onClear={() => {
+                      setPdfFiles([]);
+                      setPdfTooBig([]);
+                    }}
                     dragging={dragging}
                     drops={drops}
                     autoFocus={interacted}

@@ -2,7 +2,7 @@
 // used to throw away every file picked with it, without saying which one; a
 // one-file tool kept the first of several dropped files without a word; and
 // a big saving read "100% smaller".
-import { percentSmaller, sortPick } from "../components/tools/file-pick.ts";
+import { percentSmaller, sortPick, splitNameEnd } from "../components/tools/file-pick.ts";
 
 let pass = 0;
 let total = 0;
@@ -51,6 +51,19 @@ check("skipped alone", sortPick([pdf("a.pdf", 1000)], 1, merge).message === "Ski
 check("percent: rounds down", percentSmaller(0.426) === 42);
 check("percent: never 100", percentSmaller(0.997) === 99 && percentSmaller(1) === 99);
 check("percent: small savings", percentSmaller(0.05) === 5);
+
+// The success card truncates a name in the middle. Cutting it by UTF-16 units
+// split the last emoji of "Résumé 📄📄📄📄📄📄📄-page-2.pdf" across the two halves.
+const lone = (s: string) => /[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/.test(s);
+const emoji = splitNameEnd("Résumé 📄📄📄📄📄📄📄-page-2.pdf");
+check("emoji name: no half emoji either side", !lone(emoji[0]) && !lone(emoji[1]), emoji);
+check("emoji name: the end is the last 12 characters", emoji[1] === "📄-page-2.pdf" && emoji.join("") === "Résumé 📄📄📄📄📄📄📄-page-2.pdf", emoji);
+const family = splitNameEnd("x".repeat(20) + "👨‍👩‍👧-page-2.pdf");
+check("joined emoji stays whole", family[1] === "👨‍👩‍👧-page-2.pdf", family);
+const accent = splitNameEnd("cafe\u0301-page-1.pdf");
+check("accent stays on its letter", accent[0] === "caf" && accent[1] === "e\u0301-page-1.pdf", accent);
+check("short name: all in the end", JSON.stringify(splitNameEnd("a.pdf")) === JSON.stringify(["", "a.pdf"]));
+check("plain name: as before", JSON.stringify(splitNameEnd("report-final-page-12.jpg")) === JSON.stringify(["report-final", "-page-12.jpg"]));
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

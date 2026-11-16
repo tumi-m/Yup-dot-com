@@ -1,7 +1,7 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { addFiles, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, tooBigFor } from "../components/landing/hero-actions.ts";
+import { addFiles, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
 import { LIMITS } from "../lib/limits.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
@@ -58,14 +58,26 @@ check("the same file twice in one pick counts once", addFiles([], [a, file("a.pd
 check("nothing new keeps the list as it is", addFiles([a], [file("a.pdf")]).length === 1 && addFiles([a], [file("a.pdf")])[0] === a);
 check("same name, other size or date: another file", addFiles([a], [file("a.pdf", 200), file("a.pdf", 100, 2)]).length === 3);
 
-// A file over the plan's limit gets no tools: the tool would turn it away
-// and drop it.
+// A file over the plan's limit is turned away on the homepage: a tool would
+// drop it.
 const MB = 1024 * 1024;
 const big = file("big.pdf", 60 * MB);
 check("guest: 60 MB is over the limit", tooBigFor("guest", [a, big]).length === 1 && tooBigFor("guest", [a, big])[0] === big);
 check("free: 60 MB is over the limit", tooBigFor("free", [big]).length === 1);
 check("pro: 60 MB is fine", tooBigFor("pro", [big]).length === 0 && tooBigFor("team", [big]).length === 0);
 check("exactly the limit is fine", tooBigFor("guest", [file("edge.pdf", LIMITS.guest.maxFileBytes)]).length === 0);
+
+// A file over the limit used to hide every tool, also for the files that fit
+// and the ones chosen before; the only way out was to clear them all.
+const joinBig = takePdfs("guest", [a], [b, big], true);
+check("one too big joining: the others stay", joinBig.files.length === 2 && joinBig.files[0] === a && joinBig.files[1] === b, joinBig.files.map((f) => f.name));
+check("one too big joining: named", joinBig.tooBig.length === 1 && joinBig.tooBig[0] === big);
+check("two that fit then one too big: Merge PDF stays", heroActions("pdf", joinBig.files) === MULTI_ACTIONS);
+const onlyBig = takePdfs("guest", [a, b], [big], true);
+check("only a big one: the files there are kept as they are", onlyBig.files.length === 2 && onlyBig.tooBig[0] === big);
+const fresh = takePdfs("guest", [a], [big, b], false);
+check("starting afresh: only the ones that fit", fresh.files.length === 1 && fresh.files[0] === b && fresh.tooBig[0] === big);
+check("pro: nothing turned away", takePdfs("pro", [], [a, big], false).tooBig.length === 0);
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

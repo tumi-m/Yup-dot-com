@@ -187,8 +187,13 @@ export function NavShell({
               className="relative border-b border-border bg-background shadow-xl shadow-primary/5"
               // Any link closes the sheet, also one to the page already open
               // (no navigation then), including those passed in from outside.
+              // That link goes with the sheet, so focus returns to the button.
               onClick={(e) => {
-                if ((e.target as HTMLElement).closest("a")) setOpen(false);
+                const a = (e.target as HTMLElement).closest("a");
+                if (!a) return;
+                setOpen(false);
+                const to = new URL(a.href, window.location.href);
+                if (to.pathname === window.location.pathname && to.search === window.location.search) menuButton.current?.focus();
               }}
             >
               <div className="container flex flex-col gap-1 py-4">
