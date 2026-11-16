@@ -10,6 +10,8 @@ import { PDFDocument, PDFName, PDFString, StandardFonts, degrees, type PDFPage, 
 import { PDFDocument as SecurePDFDocument } from "@cantoo/pdf-lib";
 import {
   appendSource,
+  dropIndex,
+  gridStep,
   idsBetween,
   insertBlank,
   moveItems,
@@ -56,6 +58,11 @@ const set = (...list: string[]) => new Set(list);
   check("move past the end stops at the end", ids(moveItems(plan, set("0:1"), 99)) === "0:0 0:2 0:3 0:4 0:1");
   check("move picked pages together, in their order", ids(moveItems(plan, set("0:4", "0:1"), 0)) === "0:1 0:4 0:0 0:2 0:3");
   check("a move that changes nothing keeps the same list", moveItems(plan, set("0:2"), 2) === plan);
+  const drop = (moving: string[], target: string) => ids(moveItems(plan, set(...moving), dropIndex(plan, set(...moving), target)));
+  check("drop a page on a later page: it goes after it", drop(["0:0"], "0:2") === "0:1 0:2 0:0 0:3 0:4");
+  check("drop a page on an earlier page: it goes before it", drop(["0:4"], "0:1") === "0:0 0:4 0:1 0:2 0:3");
+  check("drop picked pages on a later page", drop(["0:0", "0:1"], "0:3") === "0:2 0:3 0:0 0:1 0:4");
+  check("drop picked pages on one of them: they gather there", drop(["0:0", "0:3"], "0:3") === "0:1 0:2 0:0 0:3 0:4", drop(["0:0", "0:3"], "0:3"));
   const turned = rotateItems(rotateItems(plan, set("0:1"), 90), set("0:1", "0:2"), -90);
   check("rotate adds up and turns left too", turned[1].rotate === 0 && turned[2].rotate === 270 && !unchanged(turned, 5), turned.map((p) => p.rotate));
   check("remove pages", ids(removeItems(plan, set("0:0", "0:4"))) === "0:1 0:2 0:3");
@@ -66,6 +73,8 @@ const set = (...list: string[]) => new Set(list);
   check("reverse only the picked pages", ids(reverseItems(plan, set("0:0", "0:2", "0:3"))) === "0:3 0:1 0:2 0:0 0:4");
   check("one picked page reverses the whole document", ids(reverseItems(plan, set("0:2"))) === "0:4 0:3 0:2 0:1 0:0");
   check("shift-click range either way round", idsBetween(plan, "0:3", "0:1").join() === "0:1,0:2,0:3");
+  check("arrows step through the grid", gridStep(5, "ArrowRight", 10, 4) === 6 && gridStep(5, "ArrowUp", 10, 4) === 1 && gridStep(1, "ArrowUp", 10, 4) === 0 && gridStep(8, "ArrowDown", 10, 4) === 9);
+  check("Home, End and other keys", gridStep(5, "Home", 10, 4) === 0 && gridStep(5, "End", 10, 4) === 9 && gridStep(5, "a", 10, 4) === null);
   check("another file's pages go at the end", ids(appendSource(planFor(0, 2), 1, 2)) === "0:0 0:1 1:0 1:1");
 
   const p = (text: string, n = 12) => parsePageList(text, n);

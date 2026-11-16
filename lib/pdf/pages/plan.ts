@@ -56,6 +56,21 @@ export function moveItems(plan: PlanItem[], ids: ReadonlySet<string>, to: number
   return next.every((p, i) => p === plan[i]) ? plan : next;
 }
 
+/**
+ * Where moveItems puts pages dropped on `target`: before it when they came
+ * from further on, after it when they came from before it.
+ */
+export function dropIndex(plan: PlanItem[], ids: ReadonlySet<string>, target: string): number {
+  const first = plan.findIndex((p) => ids.has(p.id));
+  const at = plan.findIndex((p) => p.id === target);
+  if (first < 0 || at < 0) return first;
+  const rest = plan.filter((p) => !ids.has(p.id));
+  const slot = rest.findIndex((p) => p.id === target);
+  // Dropped on one of the pages being moved: they stay together around it.
+  if (slot < 0) return plan.slice(0, at).filter((p) => !ids.has(p.id)).length;
+  return at > first ? slot + 1 : slot;
+}
+
 /** Turns the `ids` pages by `delta` degrees (a multiple of 90; negative turns left). */
 export function rotateItems(plan: PlanItem[], ids: ReadonlySet<string>, delta: number): PlanItem[] {
   if (!plan.some((p) => ids.has(p.id))) return plan;
@@ -94,6 +109,19 @@ export function idsBetween(plan: PlanItem[], from: string, to: string): string[]
   const b = plan.findIndex((p) => p.id === to);
   if (a < 0 || b < 0) return b < 0 ? [] : [to];
   return plan.slice(Math.min(a, b), Math.max(a, b) + 1).map((p) => p.id);
+}
+
+/**
+ * Where an arrow key goes from `index` in a grid of `count` pages laid out
+ * `columns` wide: Left/Right step one page, Up/Down one row, Home/End to
+ * the first and last page. Null for any other key.
+ */
+export function gridStep(index: number, key: string, count: number, columns: number): number | null {
+  const step: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns };
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  if (!(key in step)) return null;
+  return Math.max(0, Math.min(count - 1, index + step[key]));
 }
 
 /** Whether the plan writes the first file back as it was. */
