@@ -152,6 +152,16 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     setFocusId((id) => (id && live.has(id) ? id : (plan[0]?.id ?? null)));
   }, [plan]);
 
+  // The last undo disables its button, which would drop keyboard focus: hand it to the pages.
+  const undoPressed = useRef(false);
+  useEffect(() => {
+    if (undoPressed.current && !history.canUndo) {
+      focusPage(focusId && plan.some((p) => p.id === focusId) ? focusId : plan[0]?.id);
+    }
+    undoPressed.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
+
   function fail(message: string | null) {
     setError(message);
     if (message) setErrorKey((k) => k + 1);
@@ -502,6 +512,13 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     requestAnimationFrame(() => focusPage(focusId ?? plan[0]?.id));
   }
 
+  function saveResult() {
+    if (!result) return;
+    nudge.downloaded();
+    setDownloaded(true);
+    downloadBlob(result.blob, result.name);
+  }
+
   async function continueWith(nextSlug: string) {
     nudge.cancel();
     if (!result) return;
@@ -568,6 +585,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
               key="done"
               className="flex-1"
               titleRef={focusRef("done")}
+              files={[{ name: result.name, size: result.blob.size, onDownload: saveResult }]}
               stats={
                 <>
                   <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-muted-foreground">
@@ -581,11 +599,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
               actions={
                 <>
                   <Button
-                    onClick={() => {
-                      nudge.downloaded();
-                      setDownloaded(true);
-                      downloadBlob(result.blob, result.name);
-                    }}
+                    onClick={saveResult}
                     size="lg"
                     className="min-w-44 shadow-lg shadow-primary/25"
                     data-testid="download"
@@ -661,7 +675,9 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                     {status === "reading" ? <Loader2 className="motion-safe:animate-spin" /> : null}
                     {status === "reading" ? "Reading pages…" : "Choose file"}
                   </Button>
-                  <p className="mt-4 text-xs text-muted-foreground">Stays on your device.</p>
+                  <p className="mt-4 text-xs text-muted-foreground">
+                    Up to {formatLimitBytes(limits.maxFileBytes)} · Stays on your device.
+                  </p>
                 </ToolDropzone>
               ) : (
                 <motion.div
@@ -706,7 +722,16 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                           <Button size="sm" variant="outline" onClick={reverse} disabled={count < 2}>
                             <ArrowDownUp /> Reverse
                           </Button>
-                          <Button size="sm" variant="outline" onClick={undo} disabled={!history.canUndo} aria-keyshortcuts="Control+Z">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              undoPressed.current = true;
+                              undo();
+                            }}
+                            disabled={!history.canUndo}
+                            aria-keyshortcuts="Control+Z"
+                          >
                             <Undo2 /> Undo
                           </Button>
                         </div>
@@ -758,6 +783,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                           autoComplete="off"
                           aria-invalid={!!rangeProblem}
                           aria-describedby="page-list-note"
+                          className="pointer-coarse:h-11"
                         />
                         <div className="flex items-center justify-between gap-2">
                           <p
