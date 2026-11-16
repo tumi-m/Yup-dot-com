@@ -20,6 +20,7 @@ work with or without an account.
 | **Merge PDF** | Combine multiple PDFs into one (drag to reorder). |
 | **Split PDF** | Extract page ranges, or split every page into its own file. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
+| **Resize PDF** | Every page onto A4, A3, A5, Letter, Legal, Tabloid or a custom size (mm, in or pt): keep each page's orientation or force one, fit inside, fill and crop, or don't scale, with optional margins, or 2 or 4 pages to a sheet. Pages stay vector; links, bookmarks and comments move with them; form fields are flattened first. Shows the first sheet before you start. Runs in a worker. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
@@ -328,8 +329,9 @@ structure extraction, multi-column reading order, table-vs-gutter
 disambiguation, baking every annotation type, the form detect/fill/flatten
 round-trip, protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
-openpyxl), and compression (images sized by placement, lossless graphics,
-text and forms kept). Others cover PPTX parsing, editing and rendering,
+openpyxl), compression (images sized by placement, lossless graphics,
+text and forms kept), and resizing (page sizes, where text, links,
+bookmarks and notes land, turned pages, 2 and 4 to a sheet). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
