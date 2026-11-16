@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Timer,
   TrendingDown,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +57,7 @@ const NEXT_STEPS: Record<string, string[]> = {
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
+  "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
   // An encrypted result can't be opened by the other tools.
   "protect-pdf": [],
 };
@@ -69,6 +71,11 @@ function nextSteps(slug: string, filename: string): string[] {
   }
   if (name.endsWith(".pptx")) return NEXT_STEPS["pdf-to-pptx"];
   return [];
+}
+
+/** The sentence under a field: its own, or the picked option's. */
+function fieldHint(field: ToolField, value: string): string | undefined {
+  return field.options?.find((o) => o.value === value)?.hint ?? field.hint;
 }
 
 /** Video files some systems hand over without a type. */
@@ -365,6 +372,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   Already optimized
                 </span>
               )}
+              {results.length === 1 && results[0].note && (
+                <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-left font-medium text-amber-800">
+                  <Info className="mt-0.5 h-3 w-3 shrink-0" /> {results[0].note}
+                </span>
+              )}
             </>
           }
           files={results.map((r) => ({
@@ -467,16 +479,35 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 exit={EXIT}
                 className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2"
               >
-                {visibleFields().map((field) => (
-                  <div key={field.key}>
-                    <label htmlFor={`opt-${field.key}`} className="mb-1.5 block text-sm font-medium">
-                      {field.label}
-                    </label>
+                {visibleFields().map((field) => {
+                  const hint = fieldHint(field, options[field.key]);
+                  const hintId = hint ? `opt-${field.key}-hint` : undefined;
+                  return (
+                  <div key={field.key} className={field.wide ? "sm:col-span-2" : undefined}>
+                    {field.type === "checkbox" ? (
+                      // The box sits level with the selects beside it.
+                      <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium sm:mt-7 sm:min-h-10">
+                        <input
+                          id={`opt-${field.key}`}
+                          type="checkbox"
+                          checked={options[field.key] === "true"}
+                          onChange={(e) => setOption(field.key, e.target.checked ? "true" : "")}
+                          aria-describedby={hintId}
+                          className="h-5 w-5 shrink-0 cursor-pointer rounded border-input accent-[hsl(var(--primary))]"
+                        />
+                        {field.label}
+                      </label>
+                    ) : (
+                      <label htmlFor={`opt-${field.key}`} className="mb-1.5 block text-sm font-medium">
+                        {field.label}
+                      </label>
+                    )}
                     {field.type === "select" && (
                       <select
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        aria-describedby={hintId}
                         className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base sm:text-sm"
                       >
                         {field.options!.map((o) => (
@@ -539,8 +570,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         </span>
                       </div>
                     )}
+                    {hint && (
+                      <p id={hintId} className={`mt-1.5 text-xs text-muted-foreground ${field.type === "checkbox" ? "pl-[30px]" : ""}`}>
+                        {hint}
+                      </p>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </motion.div>
             )}
           </AnimatePresence>
