@@ -665,6 +665,51 @@ export async function mergeDocuments(first: PDFDocument, others: PDFDocument[]):
   return first.save();
 }
 
+/** One page of a composed document: a page of one of the documents, or a blank one. */
+export type ComposedPage = ({ source: number; page: number } | { blank: { width: number; height: number } }) & {
+  /** Turned this far clockwise on top of the page's own rotation. */
+  rotate?: number;
+};
+
+/**
+ * Rebuilds `docs[0]` with the pages `plan` lists, in that order: its own,
+ * pages of the other `docs` (with their links, form fields and layers, as
+ * Merge brings them) and blank ones. Like reorderPages and deletePages it
+ * works in the document itself, so its form, bookmarks, title and
+ * attachments stay; what only the pages left out use goes with them.
+ */
+export async function composePages(docs: PDFDocument[], plan: ComposedPage[]): Promise<Uint8Array> {
+  const [first] = docs;
+  if (!first || !plan.length) throw new Error("Keep at least one page.");
+  // Where each document's pages start in `first` once copied in.
+  const starts = new Map<number, number>([[0, 0]]);
+  for (const item of plan) {
+    if (!("source" in item) || starts.has(item.source)) continue;
+    const src = docs[item.source];
+    if (!src) throw new Error("Invalid page order.");
+    starts.set(item.source, first.getPageCount());
+    const { pages, copier } = copyAllPages(first, src);
+    pages.forEach((p) => first.addPage(p));
+    adoptFields(first, src, pages, copier);
+    adoptLayers(first, src, copier);
+  }
+  const order = plan.map((item) => {
+    if ("blank" in item) {
+      first.addPage([item.blank.width, item.blank.height]);
+      return first.getPageCount() - 1;
+    }
+    const count = docs[item.source].getPageCount();
+    if (!Number.isInteger(item.page) || item.page < 0 || item.page >= count) throw new Error("Invalid page order.");
+    return starts.get(item.source)! + item.page;
+  });
+  arrangePages(first, order);
+  first.getPages().forEach((page, i) => {
+    const turn = plan[i].rotate ?? 0;
+    if (turn % 360) page.setRotation(degrees((((page.getRotation().angle + turn) % 360) + 360) % 360));
+  });
+  return first.save();
+}
+
 /** Merge multiple PDFs (as byte arrays) into a single document. */
 export async function mergePdfs(parts: (ArrayBuffer | Uint8Array)[]): Promise<Uint8Array> {
   if (!parts.length) return (await PDFDocument.create()).save();

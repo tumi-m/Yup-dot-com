@@ -14,6 +14,7 @@ export const PDF_ACTIONS = [
   "chat-with-pdf",
   "ocr-pdf",
   "split-pdf",
+  "organize-pdf",
   "protect-pdf",
 ];
 /**

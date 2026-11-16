@@ -35,9 +35,13 @@ import {
   FileSliders,
   Shrink,
   Disc3,
+  LayoutGrid,
+  FileMinus,
+  FileOutput,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
+import type { PagesMode } from "./pdf/pages/plan";
 
 export type ToolCategory =
   | "organize"
@@ -63,7 +67,9 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages";
+  /** Page grid settings: what the picked pages are for. */
+  pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
   slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
@@ -105,6 +111,42 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "organize",
     tint: "bg-fuchsia-100 text-fuchsia-700",
     keywords: "extract separate organise",
+  },
+  {
+    slug: "organize-pdf",
+    name: "Organize PDF",
+    title: "Organize PDF: reorder, rotate and delete pages",
+    description: "Move, turn, add and delete pages.",
+    icon: LayoutGrid,
+    category: "organize",
+    tint: "bg-purple-100 text-purple-700",
+    custom: "pages",
+    pages: { mode: "organize" },
+    keywords: "rearrange reorder sort move order reverse insert blank page pages",
+  },
+  {
+    slug: "delete-pages",
+    name: "Delete Pages",
+    title: "Delete pages from a PDF",
+    description: "Remove the pages you don't need.",
+    icon: FileMinus,
+    category: "organize",
+    tint: "bg-rose-100 text-rose-700",
+    custom: "pages",
+    pages: { mode: "delete" },
+    keywords: "remove pages delete page cut",
+  },
+  {
+    slug: "extract-pages",
+    name: "Extract Pages",
+    title: "Extract pages from a PDF into a new PDF",
+    description: "Save the pages you pick as one PDF.",
+    icon: FileOutput,
+    category: "organize",
+    tint: "bg-sky-100 text-sky-700",
+    custom: "pages",
+    pages: { mode: "extract" },
+    keywords: "select pages pick pages save pages copy pages pull out",
   },
   {
     slug: "rotate-pdf",

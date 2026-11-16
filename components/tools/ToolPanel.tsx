@@ -13,6 +13,7 @@ const PptxToPdf = lazy(() => import("./PptxToPdf").then((m) => ({ default: m.Ppt
 const PptxEditor = lazy(() => import("./PptxEditor").then((m) => ({ default: m.PptxEditor })));
 const SampleFinder = lazy(() => import("./SampleFinder").then((m) => ({ default: m.SampleFinder })));
 const SlidesImporter = lazy(() => import("./SlidesImporter").then((m) => ({ default: m.SlidesImporter })));
+const PageOrganizer = lazy(() => import("./PageOrganizer").then((m) => ({ default: m.PageOrganizer })));
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
@@ -37,6 +38,8 @@ function panel(spec: PanelSpec, tier: Tier): ReactNode {
       return <SlidesImporter tier={tier} format={spec.format} />;
     case "samples":
       return <SampleFinder tier={tier} />;
+    case "pages":
+      return <PageOrganizer mode={spec.mode} slug={spec.slug} tier={tier} />;
     case "workbench":
       return <ToolWorkbench slug={spec.slug} tier={tier} />;
   }
