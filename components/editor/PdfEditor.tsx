@@ -12,6 +12,7 @@ import {
   PanelLeft,
   Redo2,
   Save,
+  Trash2,
   Undo2,
   ZoomIn,
   ZoomOut,
@@ -25,13 +26,14 @@ import { documentFingerprint, EditCheckError, requestEdit } from "@/lib/edit-usa
 import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
 import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake";
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
-import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
-import { useHistory } from "@/lib/editor/history";
+import { detectFormFields, fillableCount, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
+import { changedKeys, continuesRun, useHistory, type EditRun } from "@/lib/editor/history";
+import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap, type PageMap } from "@/lib/editor/page-map";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
 import { PICTURE_MESSAGE, pictureDataUrl } from "@/lib/editor/picture";
 import { scrollBehavior } from "@/components/motion/focus";
-import { readShortcutsOn, toolShortcut, writeShortcutsOn } from "@/lib/editor/keyboard";
+import { pageKey, readShortcutsOn, toolShortcut, typedPage, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
   annotationLabel,
   DEFAULT_SETTINGS,
@@ -44,6 +46,7 @@ import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToasts, ToastStack } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { Toolbar } from "./Toolbar";
@@ -65,6 +68,12 @@ export type EditorSource =
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
 
+/** The page and zoom buttons: finger-sized on touch screens, as in the toolbar. */
+const pillButton = "pointer-coarse:h-11 pointer-coarse:w-11";
+
+/** A result message, with what flattening left as it was. */
+const withNote = (message: string, note?: string) => (note ? `${message} ${note}` : message);
+
 /** Phone-width layout, where side panels become overlays. */
 const narrow = () => window.matchMedia("(max-width: 767px)").matches;
 
@@ -82,12 +91,13 @@ export function PdfEditor({
   /** The bytes last loaded or saved. */
   const savedRef = useRef<{ bytes: Uint8Array | null }>({ bytes: null });
   /** The file last built, for which edits, and the fingerprint it was claimed under. */
-  const builtRef = useRef<{ key: string; out: Uint8Array; fp: string; watermark: boolean } | null>(null);
+  const builtRef = useRef<{ key: string; out: Uint8Array; note?: string; fp: string; watermark: boolean } | null>(null);
   const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const canvasArea = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
+  const fieldsAnnounced = useRef(false);
   const showSidebarRef = useRef(true);
 
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -99,6 +109,12 @@ export function PdfEditor({
   const [busy, setBusy] = useState(false);
   /** Set while a page operation, save or download runs; Ctrl+S must not start another. */
   const busyRef = useRef(false);
+  /** What the busy state is for, to say so on the buttons. */
+  const [working, setWorking] = useState<"save" | "download" | null>(null);
+  /** Read out by screen readers: the page after a page change, or what is being done. */
+  const [live, setLive] = useState("");
+  /** The page number as typed in the page box, until it is used. */
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
@@ -200,11 +216,11 @@ export function PdfEditor({
         const fields = await detectFormFields(bytes);
         if (active) {
           setFormFields(fields);
-          if (fields.length) {
-            toast(
-              `${fields.length} fillable field${fields.length === 1 ? "" : "s"} detected`,
-              "info"
-            );
+          // Once per document: not again after a save or a page operation.
+          if (!fieldsAnnounced.current) {
+            fieldsAnnounced.current = true;
+            const n = fillableCount(fields);
+            if (n) toast(`${n} fillable field${n === 1 ? "" : "s"} detected`, "info");
           }
         }
       } catch {
@@ -244,12 +260,26 @@ export function PdfEditor({
     [history]
   );
 
-  /** Property-panel edits are discrete, so they record their own history entry. */
+  /** The last properties-panel change, and the annotation it left. */
+  const panelRun = useRef<(EditRun & { ann: Annotation }) | null>(null);
+  /**
+   * A properties-panel change is its own undo step, except that a run of
+   * changes to one setting (a slider drag, typing a URL) is one step: the
+   * first records the state before it, the rest update it.
+   */
   const commitAnnotation = useCallback(
-    (next: Annotation) => {
-      history.commit((prev) => prev.map((a) => (a.id === next.id ? next : a)));
+    (next: Annotation, continuous = false) => {
+      const prev = annotations.find((a) => a.id === next.id);
+      const run = { id: next.id, keys: prev ? changedKeys(prev, next).join() : "", at: Date.now() };
+      const last = panelRun.current;
+      // Only while nothing else has changed it since (an undo, a drag).
+      const carryOn = continuous && !!prev && last?.ann === prev && continuesRun(last, run);
+      const update = (list: Annotation[]) => list.map((a) => (a.id === next.id ? next : a));
+      if (carryOn) history.live(update);
+      else history.commit(update);
+      panelRun.current = continuous ? { ...run, ann: next } : null;
     },
-    [history]
+    [annotations, history]
   );
 
   const deleteAnnotation = useCallback(
@@ -288,23 +318,32 @@ export function PdfEditor({
   }, [annotations]);
 
   // ---- structural page operations ----
+  /**
+   * Runs a page operation on the document. Edits stay edits: they move with
+   * their pages (`map`), in every undo step too, and form values stay, as
+   * the fields keep their names. Only `bakePage`'s edits are drawn into the
+   * page first: rotation turns the page under them.
+   */
   const runStructural = useCallback(
     async (
       transform: (input: Uint8Array) => Promise<Uint8Array>,
-      message: string
+      message: string,
+      { map, bakePage }: { map: PageMap; bakePage?: number }
     ): Promise<boolean> => {
       if (!bytes || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
       try {
-        // Bake pending edits — including typed form values — first, or the
-        // page operation would silently throw them away.
-        let baked = annotations.length ? await bakeAnnotations(bytes, annotations) : bytes;
-        if (Object.keys(formValues).length) baked = await fillFormFields(baked, formValues);
-        const result = await transform(new Uint8Array(baked));
-        history.reset([]);
-        setSelectedId(null);
-        setFormValues({});
+        const own = bakePage === undefined ? [] : annotations.filter((a) => a.page === bakePage);
+        const input = own.length ? await bakeAnnotations(bytes, own) : bytes;
+        const result = await transform(new Uint8Array(input));
+        const keep = (anns: Annotation[]) => {
+          const left = bakePage === undefined ? anns : anns.filter((a) => a.page !== bakePage);
+          return remapAnnotations(left.length === anns.length ? anns : left, map);
+        };
+        history.remap(keep);
+        const kept = new Set(keep(annotations).map((a) => a.id));
+        setSelectedId((id) => (id && kept.has(id) ? id : null));
         setBytes(new Uint8Array(result));
         toast(message, "success");
         return true;
@@ -316,32 +355,58 @@ export function PdfEditor({
         setBusy(false);
       }
     },
-    [bytes, annotations, formValues, history, toast]
+    [bytes, annotations, history, toast]
   );
 
   const handleReorder = (from: number, to: number) => {
     const order = Array.from({ length: numPages }, (_, i) => i);
     const [moved] = order.splice(from, 1);
     order.splice(to, 0, moved);
-    runStructural((b) => reorderPages(b, order), "Pages reordered.").then(() =>
-      setPage(to)
+    runStructural((b) => reorderPages(b, order), "Pages reordered.", { map: orderMap(order) }).then(
+      (ok) => ok && setPage(to)
     );
   };
+
+  /** Asks before a page is deleted; resolves once the dialog has gone. */
+  const [pendingDelete, setPendingDelete] = useState<{ page: number; edits: boolean; open: boolean } | null>(null);
+  // Kept while the dialog closes, so its text doesn't change as it fades.
+  const closeDelete = () => setPendingDelete((d) => d && { ...d, open: false });
+  const deleteAnswer = useRef<{ yes: boolean; resolve: (yes: boolean) => void } | null>(null);
 
   const handleDeletePage = async (target: number) => {
     if (numPages <= 1) {
       toast("A document must keep at least one page.", "error");
       return false;
     }
-    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.");
-    setPage((p) => Math.max(0, Math.min(p, numPages - 2)));
+    const yes = await new Promise<boolean>((resolve) => {
+      deleteAnswer.current = { yes: false, resolve };
+      setPendingDelete({ page: target, edits: annotations.some((a) => a.page === target), open: true });
+    });
+    if (!yes) return false;
+    const map = deleteMap(target);
+    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.", { map });
+    if (ok) setPage((p) => pageAfter(p, map, numPages - 1));
+    return ok;
+  };
+
+  const handleRotate = (target: number) =>
+    runStructural(
+      (b) => rotatePagesBy(b, [target], 90),
+      annotations.some((a) => a.page === target) ? "Page rotated. Its edits are now part of the page." : "Page rotated.",
+      { map: sameMap, bakePage: target }
+    );
+
+  const handleInsertAfter = async (target: number) => {
+    const map = insertAfterMap(target);
+    const ok = await runStructural((b) => insertBlankPage(b, target), "Blank page inserted.", { map });
+    if (ok) setPage((p) => pageAfter(p, map, numPages + 1));
     return ok;
   };
 
   async function handleMerge(files: FileList | null) {
     if (!files?.length) return;
     const extra = new Uint8Array(await files[0].arrayBuffer());
-    await runStructural((b) => mergePdfs([b, extra]), `Merged "${files[0].name}".`);
+    await runStructural((b) => mergePdfs([b, extra]), `Merged "${files[0].name}".`, { map: sameMap });
     if (mergeInput.current) mergeInput.current.value = "";
   }
 
@@ -377,11 +442,11 @@ export function PdfEditor({
       if (Object.keys(formValues).length) {
         out = await fillFormFields(out, formValues);
       }
-      if (flatten) {
-        const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
-        out = await flattenFormsIfAny(out);
-      }
-      return out;
+      if (!flatten) return { out };
+      const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
+      // The note says which fields stayed fillable, if any did.
+      const flat = await flattenFormsIfAny(out);
+      return { out: flat.bytes, note: flat.note };
     },
     [bytes, annotations, formValues, flatten]
   );
@@ -399,8 +464,8 @@ export function PdfEditor({
     let built = builtRef.current?.key === key ? builtRef.current : null;
     if (!built) {
       const watermark = limitsFor(tier).watermark;
-      const out = await buildOutput(watermark);
-      built = { key, out, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
+      const { out, note } = await buildOutput(watermark);
+      built = { key, out, note, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
     }
     let grant;
     try {
@@ -414,16 +479,18 @@ export function PdfEditor({
       return null;
     }
     if (grant.watermark !== built.watermark) {
-      built = { ...built, watermark: grant.watermark, out: await buildOutput(grant.watermark) };
+      built = { ...built, watermark: grant.watermark, ...(await buildOutput(grant.watermark)) };
     }
     builtRef.current = built;
     return built;
   }, [bytes, pristine, annotations, formValues, flatten, buildOutput, tier, toast]);
 
   async function handleDownload() {
-    if (busyRef.current) return;
+    if (!bytes || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    setLive("Preparing download…");
+    setWorking("download");
     try {
       const built = await buildAuthorized();
       if (!built) return;
@@ -432,12 +499,14 @@ export function PdfEditor({
         `${docName}.pdf`
       );
       trackToolUsed();
-      toast("Downloaded.", "success");
+      toast(withNote("Downloaded.", built.note), "success");
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
       busyRef.current = false;
       setBusy(false);
+      setWorking(null);
+      setLive("");
     }
   }
 
@@ -449,6 +518,8 @@ export function PdfEditor({
     }
     busyRef.current = true;
     setBusy(true);
+    setLive("Saving…");
+    setWorking("save");
     try {
       const built = await buildAuthorized();
       if (!built) return;
@@ -492,20 +563,22 @@ export function PdfEditor({
       setBytes(saved);
       trackToolUsed();
       if (source.kind === "local") {
-        toast("Saved on this device.", "success");
+        toast(withNote("Saved on this device.", built.note), "success");
         // Offer the cloud once, after the user has saved something they value.
         if (tier === "guest" && !upsellShown.current) {
           upsellShown.current = true;
           setTimeout(() => setUpsellOpen(true), 700);
         }
       } else {
-        toast("Saved to your library.", "success");
+        toast(withNote("Saved to your library.", built.note), "success");
       }
     } catch (err) {
       toast(friendlyPdfError(err).message || "Save failed.", "error");
     } finally {
       busyRef.current = false;
       setBusy(false);
+      setWorking(null);
+      setLive("");
     }
   }, [bytes, pristine, buildAuthorized, supabase, source, docName, numPages, history, toast, tier]);
 
@@ -562,6 +635,34 @@ export function PdfEditor({
     if (delta) main.scrollBy({ top: delta, behavior: scrollBehavior() });
   }, [selectedId, sheetCover]);
 
+  /** Shows another page and says so, for page changes the visitor makes. */
+  const showPage = (next: number) => {
+    if (next === page) return;
+    setPage(next);
+    setLive(`Page ${next + 1} of ${numPages}`);
+  };
+
+  // Opened from Fill & Sign: show where Signature is (off the side of a
+  // phone's toolbar) and what to do. Nothing opens by itself.
+  const signHinted = useRef(false);
+  useEffect(() => {
+    if (!loaded || signHinted.current) return;
+    signHinted.current = true;
+    if (new URLSearchParams(window.location.search).get("sign") !== "1") return;
+    document
+      .querySelector<HTMLElement>('[data-tool="signature"]')
+      ?.scrollIntoView({ inline: "center", block: "nearest", behavior: scrollBehavior() });
+    toast("Fill in the fields, then choose Signature to sign.", "info");
+  }, [loaded, toast]);
+
+  /** Goes to the page typed in the page box; anything else puts the box back. */
+  const goToTyped = () => {
+    if (pageDraft === null) return;
+    const to = typedPage(pageDraft, numPages);
+    setPageDraft(null);
+    if (to !== null) showPage(to);
+  };
+
   // ---- keyboard shortcuts ----
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -601,6 +702,13 @@ export function PdfEditor({
         setSelectedId(null);
         return;
       }
+      // Page keys page through the document, unless a list or an annotation uses them.
+      const paged = mod || e.altKey || e.shiftKey || e.defaultPrevented ? null : pageKey(e.key, page, numPages);
+      if (paged !== null && !target?.closest("[data-ann-id], [role=dialog], aside[aria-label=Pages]")) {
+        e.preventDefault();
+        showPage(paged);
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         e.preventDefault();
         deleteAnnotation(selectedId);
@@ -615,7 +723,7 @@ export function PdfEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts]);
+  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts, page, numPages]);
 
   // Don't let a stray tab close, link or Back throw away unsaved edits.
   useUnsavedGuard(dirty);
@@ -694,8 +802,8 @@ export function PdfEditor({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => mergeInput.current?.click()}
-            disabled={busy}
+            onClick={() => !busy && mergeInput.current?.click()}
+            aria-disabled={busy}
             title="Merge another PDF"
             aria-label="Merge another PDF"
           >
@@ -703,17 +811,22 @@ export function PdfEditor({
             <span className="hidden lg:inline">Merge</span>
           </Button>
           <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
-          <Button variant="outline" onClick={handleDownload} disabled={busy || !bytes} aria-label="Download">
-            <Download />
+          {/* aria-disabled while busy, as Undo: focus stays on the button. Both return early then. */}
+          <Button variant="outline" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
+            {working === "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
             <span className="hidden sm:inline">Download</span>
           </Button>
-          <Button onClick={handleSave} disabled={busy || !bytes} aria-label="Save">
-            {busy ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
-            <span className="hidden sm:inline">Save</span>
+          <Button onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
+            {busy && working !== "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
+            <span className="hidden sm:inline">{working === "save" ? "Saving…" : "Save"}</span>
           </Button>
         </div>
         )}
       </header>
+      {/* The page shown after a page change, and what Save or Download is doing. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {live}
+      </span>
 
       {!loadError && (
         <Toolbar
@@ -730,20 +843,21 @@ export function PdfEditor({
       )}
 
       {!loadError && hasFields && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-background px-3 text-sm">
-          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 sm:min-h-10">
+        <div className="shrink-0 border-b border-border bg-background px-3 pb-2 pt-0.5 text-sm">
+          <label className="flex cursor-pointer items-start gap-2.5 py-1.5 pointer-coarse:py-2.5">
             <input
               type="checkbox"
               checked={flattenOnSave}
               onChange={(e) => setFlattenOnSave(e.target.checked)}
               aria-describedby="flatten-on-save-hint"
-              className="h-4 w-4 shrink-0 cursor-pointer accent-[hsl(var(--primary))]"
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[hsl(var(--primary))]"
             />
-            Flatten form fields when saving
+            Flatten form fields when saving or downloading
           </label>
-          <span id="flatten-on-save-hint" className="hidden text-xs text-muted-foreground sm:inline">
+          {/* Under the checkbox's text, on phones too: the warning matters most there. */}
+          <p id="flatten-on-save-hint" className="-mt-1 pl-[1.625rem] text-xs text-muted-foreground pointer-coarse:-mt-2">
             They become part of the page and can&apos;t be changed again.
-          </span>
+          </p>
         </div>
       )}
 
@@ -755,15 +869,13 @@ export function PdfEditor({
             currentPage={page}
             busy={busy}
             onGoTo={(i) => {
-              setPage(i);
+              showPage(i);
               if (narrow()) setShowSidebar(false);
             }}
             onReorder={handleReorder}
-            onRotate={(i) => runStructural((b) => rotatePagesBy(b, [i], 90), "Page rotated.")}
+            onRotate={handleRotate}
             onDelete={handleDeletePage}
-            onInsertAfter={(i) =>
-              runStructural((b) => insertBlankPage(b, i), "Blank page inserted.")
-            }
+            onInsertAfter={handleInsertAfter}
           />
         )}
 
@@ -815,51 +927,78 @@ export function PdfEditor({
           {loaded && (
             // left-0 keeps the controls in view while a zoomed page scrolls sideways.
             <div className="pointer-events-none sticky bottom-4 left-0 flex justify-center">
-              <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur">
+              <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-background/95 px-1.5 py-1.5 shadow-lg backdrop-blur sm:gap-1 sm:px-2">
+                {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
+                  className={pillButton}
+                  onClick={() => showPage(Math.max(0, page - 1))}
+                  aria-disabled={page === 0}
                   aria-label="Previous page"
                 >
                   <ChevronLeft />
                 </Button>
-                <span className="px-2 text-sm tabular-nums">
-                  {page + 1} / {numPages}
+                <span className="flex items-center gap-1 px-1 text-sm tabular-nums">
+                  <input
+                    inputMode="numeric"
+                    aria-label="Page number"
+                    value={pageDraft ?? String(page + 1)}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setPageDraft(e.target.value.replace(/\D/g, ""))}
+                    onBlur={() => goToTyped()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        goToTyped();
+                      } else if (e.key === "Escape") {
+                        // Back to the page shown, keeping focus here.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setPageDraft(null);
+                      }
+                    }}
+                    style={{ width: `${String(numPages).length + 2}ch` }}
+                    className="h-8 rounded-md border border-input bg-background text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <span className="whitespace-nowrap">/ {numPages}</span>
                 </span>
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setPage((p) => Math.min(numPages - 1, p + 1))}
-                  disabled={page >= numPages - 1}
+                  className={pillButton}
+                  onClick={() => showPage(Math.min(numPages - 1, page + 1))}
+                  aria-disabled={page >= numPages - 1}
                   aria-label="Next page"
                 >
                   <ChevronRight />
                 </Button>
-                <div className="mx-1 h-5 w-px bg-border" />
+                <div className="mx-1 hidden h-5 w-px bg-border min-[400px]:block" />
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setScale((s) => Math.max(MIN_ZOOM, +(s - 0.2).toFixed(2)))}
-                  disabled={scale <= MIN_ZOOM}
+                  aria-disabled={scale <= MIN_ZOOM}
                   aria-label="Zoom out"
                 >
                   <ZoomOut />
                 </Button>
-                <span className="w-12 text-center text-sm tabular-nums">
+                {/* The smallest phones keep the buttons and leave out the number. */}
+                <span className="hidden w-12 text-center text-sm tabular-nums min-[400px]:inline">
                   {Math.round(scale * 100)}%
                 </span>
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setScale((s) => Math.min(MAX_ZOOM, +(s + 0.2).toFixed(2)))}
-                  disabled={scale >= MAX_ZOOM}
+                  aria-disabled={scale >= MAX_ZOOM}
                   aria-label="Zoom in"
                 >
                   <ZoomIn />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={fitWidth} aria-label="Fit width">
+                <Button variant="ghost" size="icon" className={pillButton} onClick={fitWidth} aria-label="Fit width">
                   <Maximize />
                 </Button>
               </div>
@@ -867,6 +1006,16 @@ export function PdfEditor({
           )}
         </main>
 
+        {/* Wider screens keep the properties column whether or not something is
+            selected, so the page doesn't jump sideways under the pointer. */}
+        {!selected && !loadError && (
+          <aside
+            aria-label="Properties"
+            className="hidden w-64 shrink-0 border-l border-border bg-background p-4 md:block"
+          >
+            <p className="text-sm text-muted-foreground">Select an item to change it.</p>
+          </aside>
+        )}
         {selected && (
           <PropertiesPanel
             annotation={selected}
@@ -919,6 +1068,46 @@ export function PdfEditor({
           setPlaceNow((n) => n + 1);
         }}
       />
+
+      <Dialog
+        open={!!pendingDelete?.open}
+        onOpenChange={(open) => {
+          if (!open) closeDelete();
+        }}
+      >
+        <DialogContent
+          className="max-w-sm"
+          onCloseAutoFocus={(e) => {
+            const answer = deleteAnswer.current;
+            deleteAnswer.current = null;
+            // Deleted: the page panel moves focus once the pages have caught up.
+            if (answer?.yes) e.preventDefault();
+            answer?.resolve(answer.yes);
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="pr-8">Delete page {(pendingDelete?.page ?? 0) + 1}?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete?.edits ? "Its edits go with it. " : ""}This can&apos;t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Button variant="outline" className="h-11" onClick={closeDelete}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="h-11"
+              onClick={() => {
+                if (deleteAnswer.current) deleteAnswer.current.yes = true;
+                closeDelete();
+              }}
+            >
+              <Trash2 /> Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />
 

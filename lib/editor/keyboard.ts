@@ -183,3 +183,34 @@ export function radioStep(key: string): number {
   if (key === "ArrowLeft" || key === "ArrowUp") return -1;
   return 0;
 }
+
+/** The page (0-indexed) typed in the page box, kept within the document; null when it isn't a number. */
+export function typedPage(text: string, numPages: number): number | null {
+  const n = Number.parseInt(text.trim(), 10);
+  if (!Number.isFinite(n) || numPages < 1) return null;
+  return Math.min(Math.max(n, 1), numPages) - 1;
+}
+
+/** PageUp/PageDown go back or on a page, Home/End to the first or last. Null for any other key. */
+export function pageKey(key: string, page: number, numPages: number): number | null {
+  const last = Math.max(0, numPages - 1);
+  if (key === "PageUp") return Math.max(0, page - 1);
+  if (key === "PageDown") return Math.min(last, page + 1);
+  if (key === "Home") return 0;
+  if (key === "End") return last;
+  return null;
+}
+
+/**
+ * The page panel is one tab stop: ↑/↓ move between its pages, Home/End to
+ * the first or last. The row to focus, or null for any other key (Alt+↑/↓
+ * moves the page itself).
+ */
+export function thumbKey(key: { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }, index: number, numPages: number): number | null {
+  if (key.altKey || key.ctrlKey || key.metaKey || key.shiftKey) return null;
+  if (key.key === "ArrowUp") return Math.max(0, index - 1);
+  if (key.key === "ArrowDown") return Math.min(numPages - 1, index + 1);
+  if (key.key === "Home") return 0;
+  if (key.key === "End") return numPages - 1;
+  return null;
+}

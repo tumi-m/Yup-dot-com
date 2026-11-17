@@ -26,7 +26,8 @@ export function PropertiesPanel({
 }: {
   annotation: Annotation;
   pageCount: number;
-  onChange: (next: Annotation) => void;
+  /** `continuous`: a slider, colour or typed value, whose run of changes is one undo step. */
+  onChange: (next: Annotation, continuous?: boolean) => void;
   onDelete: () => void;
   onClose: () => void;
   /** How much of the screen's bottom the sheet covers: 0 as a side panel. */
@@ -87,7 +88,7 @@ export function PropertiesPanel({
               <input
                 type="color"
                 value={annotation.color}
-                onChange={(e) => onChange({ ...annotation, color: e.target.value })}
+                onChange={(e) => onChange({ ...annotation, color: e.target.value }, true)}
                 className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1"
               />
             </Field>
@@ -128,7 +129,7 @@ export function PropertiesPanel({
               <input
                 type="color"
                 value={annotation.stroke}
-                onChange={(e) => onChange({ ...annotation, stroke: e.target.value })}
+                onChange={(e) => onChange({ ...annotation, stroke: e.target.value }, true)}
                 className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1"
               />
             </Field>
@@ -166,7 +167,7 @@ export function PropertiesPanel({
                       type="color"
                       aria-label="Fill colour"
                       value={annotation.fill}
-                      onChange={(e) => onChange({ ...annotation, fill: e.target.value })}
+                      onChange={(e) => onChange({ ...annotation, fill: e.target.value }, true)}
                       className="h-9 flex-1 cursor-pointer rounded-md border border-input bg-background px-1"
                     />
                   )}
@@ -182,7 +183,7 @@ export function PropertiesPanel({
                 value={annotation.opacity}
                 aria-valuetext={`${Math.round(annotation.opacity * 100)}%`}
                 onChange={(e) =>
-                  onChange({ ...annotation, opacity: Number(e.target.value) })
+                  onChange({ ...annotation, opacity: Number(e.target.value) }, true)
                 }
                 className="w-full accent-[hsl(var(--primary))]"
               />
@@ -196,7 +197,7 @@ export function PropertiesPanel({
               <input
                 type="color"
                 value={annotation.color}
-                onChange={(e) => onChange({ ...annotation, color: e.target.value })}
+                onChange={(e) => onChange({ ...annotation, color: e.target.value }, true)}
                 className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1"
               />
             </Field>
@@ -209,7 +210,7 @@ export function PropertiesPanel({
                 value={annotation.opacity}
                 aria-valuetext={`${Math.round(annotation.opacity * 100)}%`}
                 onChange={(e) =>
-                  onChange({ ...annotation, opacity: Number(e.target.value) })
+                  onChange({ ...annotation, opacity: Number(e.target.value) }, true)
                 }
                 className="w-full accent-[hsl(var(--primary))]"
               />
@@ -239,7 +240,7 @@ export function PropertiesPanel({
                 <Input
                   value={annotation.url}
                   placeholder="https://example.com"
-                  onChange={(e) => onChange({ ...annotation, url: e.target.value })}
+                  onChange={(e) => onChange({ ...annotation, url: e.target.value }, true)}
                 />
               </Field>
             ) : (
@@ -267,14 +268,14 @@ export function PropertiesPanel({
             <Field label="Field name">
               <Input
                 value={annotation.name}
-                onChange={(e) => onChange({ ...annotation, name: e.target.value })}
+                onChange={(e) => onChange({ ...annotation, name: e.target.value }, true)}
               />
             </Field>
             {annotation.field === "text" && (
               <Field label="Default value">
                 <Input
                   value={annotation.value}
-                  onChange={(e) => onChange({ ...annotation, value: e.target.value })}
+                  onChange={(e) => onChange({ ...annotation, value: e.target.value }, true)}
                 />
               </Field>
             )}
@@ -296,7 +297,7 @@ export function PropertiesPanel({
                   <Input
                     value={annotation.value}
                     placeholder="e.g. Yes"
-                    onChange={(e) => onChange({ ...annotation, value: e.target.value })}
+                    onChange={(e) => onChange({ ...annotation, value: e.target.value }, true)}
                   />
                 </Field>
                 <p className="text-xs text-muted-foreground">
@@ -308,7 +309,7 @@ export function PropertiesPanel({
               <Field label="Options (one per line)">
                 <OptionsField
                   options={annotation.options}
-                  onChange={(options) => onChange({ ...annotation, options })}
+                  onChange={(options) => onChange({ ...annotation, options }, true)}
                 />
               </Field>
             )}

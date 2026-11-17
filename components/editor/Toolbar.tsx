@@ -154,6 +154,7 @@ export function Toolbar({
               {group.tools.map((t) => (
                 <button
                   key={t.id}
+                  data-tool={t.id}
                   // A click from Enter or Space has no pointer position (detail 0).
                   onClick={(e) => onToolChange(t.id, e.detail === 0)}
                   title={t.key && shortcuts ? `${t.label} (${t.key})` : t.label}

@@ -277,6 +277,15 @@ function alternateName(field: PDFField): string | undefined {
 }
 
 /**
+ * How many fields can be filled in: one per name (a radio group or a field
+ * shown twice has several widgets), leaving out read-only fields and kinds
+ * the editor can't fill.
+ */
+export function fillableCount(fields: DetectedField[]): number {
+  return new Set(fields.filter((f) => !f.readOnly && f.kind !== "unsupported").map((f) => f.name)).size;
+}
+
+/**
  * Finds the fillable fields in a PDF and where their widgets sit on the page,
  * so the editor can overlay real inputs on top of them.
  */

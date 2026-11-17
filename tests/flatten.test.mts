@@ -469,11 +469,15 @@ for (const rotate of [0, 90]) {
   check("tool: nothing to flatten is a message, not a crash", /no form fields/.test(r.error?.message ?? ""), r.error?.message);
 
   const saved = await flattenFormsIfAny(form);
-  check("editor save: the form is flattened", (await PDFDocument.load(saved)).getForm().getFields().length === 0);
+  check("editor save: the form is flattened", (await PDFDocument.load(saved.bytes)).getForm().getFields().length === 0);
+  check("editor save: no note when every field was flattened", saved.note === undefined, saved.note);
+  const kept = await flattenFormsIfAny(await formPdf({ full_name: "Ολυμπία", agree: "true", plan: "Team", size: "Small" }));
+  check("editor save: says which fields stayed fillable", /1 field left fillable/.test(kept.note ?? ""), kept.note);
   const plainDoc = await PDFDocument.create();
   plainDoc.addPage();
   const plain = await plainDoc.save();
-  check("editor save: a file with no form comes back as it was", (await flattenFormsIfAny(plain)) === plain);
+  const same = await flattenFormsIfAny(plain);
+  check("editor save: a file with no form comes back as it was", same.bytes === plain && same.note === undefined);
 }
 
 // ---------------------------------------------------------------------------
