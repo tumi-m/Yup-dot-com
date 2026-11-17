@@ -341,7 +341,24 @@ export async function imagesToPdfTool(
 ): Promise<ToolFile> {
   // Decoding, resizing and encoding phone photos takes seconds each: it runs in a worker.
   const { imagesToPdfFile } = await import("./images-to-pdf/off-thread");
-  return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename: "images.pdf" };
+  // One picture keeps its name; several are named for the set.
+  const filename = files.length === 1 ? `${files[0].name.replace(/\.[^.]+$/, "") || "image"}.pdf` : "images.pdf";
+  return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename };
+}
+
+// ---------------------------------------------------------------------------
+// Text and Markdown -> PDF, laid out in an embedded font (lib/pdf/text-to-pdf).
+// Runs in a worker: a long file takes a while.
+// ---------------------------------------------------------------------------
+export async function textToPdfTool(
+  files: File[],
+  opts: Record<string, string>,
+  ctx: ToolContext = {},
+  markdown = false
+): Promise<ToolFile> {
+  const { textFileToPdf } = await import("./text-to-pdf/off-thread");
+  const out = await textFileToPdf(files[0], markdown, opts, ctx.progress, ctx.signal);
+  return { blob: pdfBlob(out.bytes), filename: `${files[0].name.replace(/\.[^.]+$/, "") || "document"}.pdf`, note: out.note };
 }
 
 // ---------------------------------------------------------------------------

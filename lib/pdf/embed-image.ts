@@ -151,6 +151,36 @@ export async function embedImage(
   return { ref: embedFlate(doc, choice.flate), width: choice.flate.width, height: choice.flate.height };
 }
 
+/**
+ * Embeds decoded pixels (a WebP, GIF, TIFF page or drawn SVG) that will be
+ * drawn `fit` points large: scaled down to 300 DPI there, then JPEG for
+ * photos and lossless for graphics, as a PNG would be. Transparency is kept.
+ */
+export async function embedPixels(
+  doc: PDFDocument,
+  pixels: RawImage,
+  fit?: { widthPt: number; heightPt: number },
+  /** Decoded from a lossy photo format (WebP, AVIF, HEIC): a photo goes straight to JPEG, without a lossless try. */
+  lossy = false
+): Promise<EmbeddedImage> {
+  const target = fit && downsampleTarget(pixels.width, pixels.height, fit.widthPt, fit.heightPt);
+  const shown = target ? resizeRgba(pixels, target.width, target.height) : pixels;
+  let choice: Choice | null = null;
+  if (lossy && looksPhotographic(shown)) {
+    try {
+      choice = { jpeg: await encodeJpeg(shown, { quality: PHOTO_QUALITY, gray: isGray(shown) }) };
+    } catch {
+      // No JPEG encoder here: the usual choice below.
+    }
+  }
+  choice ??= await bestForPixels(shown, null);
+  if ("jpeg" in choice) {
+    const img = await doc.embedJpg(choice.jpeg);
+    return { ref: img.ref, width: img.width, height: img.height };
+  }
+  return { ref: embedFlate(doc, choice.flate), width: choice.flate.width, height: choice.flate.height };
+}
+
 /** Renders at least this flat (text, shapes, charts) are worth a lossless try. */
 const FLAT = 0.6;
 

@@ -3,9 +3,9 @@
  * are decoded, resized and encoded (see off-thread.ts).
  */
 import type { ProgressReply } from "../../worker-job";
-import { imagesToPdf, type ImagesToPdfOptions } from "./index";
+import { imagesToPdf, type ImageInput, type ImagesToPdfOptions } from "./index";
 
-export type Request = { files: File[]; opts: ImagesToPdfOptions };
+export type Request = { files: ImageInput[]; opts: ImagesToPdfOptions };
 export type Reply = ProgressReply | { type: "done"; bytes: Uint8Array } | { type: "error"; message: string };
 
 const scope = globalThis as unknown as {
