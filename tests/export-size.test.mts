@@ -292,18 +292,35 @@ const fit = new Uint8Array(
 );
 const fitDoc = await PDFDocument.load(fit);
 const [fitted] = await pdfImages(fit);
-// The default page size: 1 pt per pixel, but the picture is sized for A4 paper (long side 3508 px).
-check("jpg-to-pdf (fit): a big photo is sized for A4 paper at 300 DPI", fitted.width === 3508 && fitted.height === 1754 && fitted.length < sideways.length * 0.85, { ...fitted, contents: undefined });
+// The default page size: 1 pt per pixel, but the picture is sized to fill A4 paper (short side 2480 px).
+check("jpg-to-pdf (fit): a big photo is sized for A4 paper at 300 DPI", fitted.width === 4961 && fitted.height === 2480 && fitted.length < sideways.length * 0.85, { ...fitted, contents: undefined });
 check("jpg-to-pdf (fit): the page stays 1 pt per pixel, portrait for EXIF 6", fitDoc.getPage(0).getWidth() === 3000 && fitDoc.getPage(0).getHeight() === 6000);
 check("jpg-to-pdf: progress counts the images", progress.join() === "Image 1 of 2,Image 2 of 2", progress);
 const modest = await encodeJpeg(photo(2000, 1500), { quality: 90 });
 const [untouched] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(modest, "m.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
 check("jpg-to-pdf (fit): a photo that fits A4 at 300 DPI is kept as it is", untouched.width === 2000 && untouched.length === modest.length, { ...untouched, contents: undefined });
+const phone = await encodeJpeg(photo(4032, 3024), { quality: 90 });
+const [phoneOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(phone, "p.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
+// 4032 pt wide printed at about 0.209: 11.7 inches, 3508 px at 300 DPI.
+check("jpg-to-pdf (fit): a phone photo is sized for A4 paper", phoneOut.width === 3508 && phoneOut.height === 2631, { ...phoneOut, contents: undefined });
+// A long screenshot strip: printed at its width over many sheets, so no pixel is lost.
+const strip = await encodeJpeg(image(600, 20000, (x, y) => [(x / 3) | 0, (y / 80) & 255, 128]), { quality: 90 });
+const stripPdf = await PDFDocument.load(new Uint8Array(await (await imagesToPdfTool([file(strip, "strip.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
+const [stripOut] = await pdfImages(await stripPdf.save());
+check("jpg-to-pdf (fit): a long strip keeps its pixels", stripOut.width === 600 && stripOut.height === 20000 && stripOut.length === strip.length, { ...stripOut, contents: undefined });
+check("jpg-to-pdf (fit): on a page within the 200-inch limit", stripPdf.getPage(0).getHeight() === 14400 && Math.round(stripPdf.getPage(0).getWidth()) === 432);
+// A4: a wide picture gets a landscape sheet, and fills its width.
+const landscapePdf = await PDFDocument.load(new Uint8Array(await (await imagesToPdfTool([file(modest, "m.jpg", "image/jpeg")], { pageSize: "a4", margin: "36" })).blob.arrayBuffer()));
+const sheet = landscapePdf.getPage(0);
+check("jpg-to-pdf (A4): a wide photo goes on a landscape sheet", Math.round(sheet.getWidth()) === 842 && Math.round(sheet.getHeight()) === 595, [sheet.getWidth(), sheet.getHeight()]);
+const tall = await encodeJpeg(photo(1000, 1500), { quality: 90 });
+const portraitPdf = await PDFDocument.load(new Uint8Array(await (await imagesToPdfTool([file(tall, "t.jpg", "image/jpeg")], { pageSize: "a4", margin: "0" })).blob.arrayBuffer()));
+check("jpg-to-pdf (A4): a tall photo stays portrait", Math.round(portraitPdf.getPage(0).getWidth()) === 595 && Math.round(portraitPdf.getPage(0).getHeight()) === 842);
 
-// A greyscale scan stays one channel when it is scaled down.
+// A greyscale scan stays one channel when it is scaled down (a landscape A4 sheet: 3508 px across).
 const greyScan = await encodeJpeg(image(4000, 2400, (x, y) => { const v = (x * 7 + y * 3 + noise() * 0.3) & 255; return [v, v, v]; }), { quality: 90, gray: true });
 const [greyOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(greyScan, "scan.jpg", "image/jpeg")], { pageSize: "a4", margin: "0" })).blob.arrayBuffer()));
-check("jpg-to-pdf: a grey JPEG is scaled down as grey", greyOut.width === 2480 && greyOut.colorSpace === "/DeviceGray" && jpegChannels(greyOut.contents) === 1, { ...greyOut, contents: undefined });
+check("jpg-to-pdf: a grey JPEG is scaled down as grey", greyOut.width === 3508 && greyOut.colorSpace === "/DeviceGray" && jpegChannels(greyOut.contents) === 1, { ...greyOut, contents: undefined });
 
 // CMYK can't be decoded here: it goes in as it is, without trying (which logs an error).
 const cmyk = sideways.slice();
