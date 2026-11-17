@@ -19,10 +19,17 @@ export type HistoryAction<T> =
   | { type: "end" }
   | { type: "undo" }
   | { type: "redo" }
-  | { type: "reset"; value: T };
+  | { type: "reset"; value: T }
+  | { type: "remap"; fn: (value: T) => T };
 
 const apply = <T,>(next: T | ((current: T) => T), current: T): T =>
   typeof next === "function" ? (next as (c: T) => T)(current) : next;
+
+/** Two steps that hold the same things (for a list, the same items in the same order). */
+function sameEntry<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true;
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
+}
 
 /**
  * Pure transition function. Every change goes through one state object, so
@@ -67,6 +74,26 @@ export function historyReducer<T>(state: HistoryState<T>, action: HistoryAction<
     }
     case "reset":
       return { past: [], present: action.value, future: [], pending: null };
+    case "remap": {
+      // Every entry, so undo after a page operation brings edits back on the
+      // page they are now on. Steps whose edits all went with a page are
+      // dropped, so no Undo does nothing.
+      const entries: T[] = [];
+      let at = 0;
+      [...state.past, state.present, ...state.future].forEach((entry, i) => {
+        const value = action.fn(entry);
+        if (!entries.length || !sameEntry(entries[entries.length - 1], value)) entries.push(value);
+        if (i === state.past.length) at = entries.length - 1;
+      });
+      const present = entries[at];
+      return {
+        past: entries.slice(0, at),
+        present,
+        future: entries.slice(at + 1),
+        // An unchanged gesture stays unchanged, so `end` records nothing for it.
+        pending: state.pending === null ? null : state.pending === state.present ? present : action.fn(state.pending),
+      };
+    }
   }
 }
 
@@ -93,11 +120,13 @@ export function useHistory<T>(initial: T) {
   const redo = useCallback(() => dispatch({ type: "redo" }), []);
   /** Replace the value and clear history — used after a structural page op. */
   const reset = useCallback((value: T) => dispatch({ type: "reset", value }), []);
+  /** Change every entry the same way, e.g. when pages move; history is kept. */
+  const remap = useCallback((fn: (value: T) => T) => dispatch({ type: "remap", fn }), []);
 
   const canUndo = state.past.length > 0;
   const canRedo = state.future.length > 0;
   return useMemo(
-    () => ({ state: state.present, commit, live, begin, end, undo, redo, reset, canUndo, canRedo }),
-    [state.present, commit, live, begin, end, undo, redo, reset, canUndo, canRedo]
+    () => ({ state: state.present, commit, live, begin, end, undo, redo, reset, remap, canUndo, canRedo }),
+    [state.present, commit, live, begin, end, undo, redo, reset, remap, canUndo, canRedo]
   );
 }

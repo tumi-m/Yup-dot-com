@@ -12,6 +12,7 @@ import {
   PanelLeft,
   Redo2,
   Save,
+  Trash2,
   Undo2,
   ZoomIn,
   ZoomOut,
@@ -27,6 +28,7 @@ import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake"
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
 import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
 import { useHistory } from "@/lib/editor/history";
+import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap, type PageMap } from "@/lib/editor/page-map";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
 import { PICTURE_MESSAGE, pictureDataUrl } from "@/lib/editor/picture";
@@ -44,6 +46,7 @@ import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToasts, ToastStack } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { Toolbar } from "./Toolbar";
@@ -288,23 +291,32 @@ export function PdfEditor({
   }, [annotations]);
 
   // ---- structural page operations ----
+  /**
+   * Runs a page operation on the document. Edits stay edits: they move with
+   * their pages (`map`), in every undo step too, and form values stay, as
+   * the fields keep their names. Only `bakePage`'s edits are drawn into the
+   * page first: rotation turns the page under them.
+   */
   const runStructural = useCallback(
     async (
       transform: (input: Uint8Array) => Promise<Uint8Array>,
-      message: string
+      message: string,
+      { map, bakePage }: { map: PageMap; bakePage?: number }
     ): Promise<boolean> => {
       if (!bytes || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
       try {
-        // Bake pending edits — including typed form values — first, or the
-        // page operation would silently throw them away.
-        let baked = annotations.length ? await bakeAnnotations(bytes, annotations) : bytes;
-        if (Object.keys(formValues).length) baked = await fillFormFields(baked, formValues);
-        const result = await transform(new Uint8Array(baked));
-        history.reset([]);
-        setSelectedId(null);
-        setFormValues({});
+        const own = bakePage === undefined ? [] : annotations.filter((a) => a.page === bakePage);
+        const input = own.length ? await bakeAnnotations(bytes, own) : bytes;
+        const result = await transform(new Uint8Array(input));
+        const keep = (anns: Annotation[]) => {
+          const left = bakePage === undefined ? anns : anns.filter((a) => a.page !== bakePage);
+          return remapAnnotations(left.length === anns.length ? anns : left, map);
+        };
+        history.remap(keep);
+        const kept = new Set(keep(annotations).map((a) => a.id));
+        setSelectedId((id) => (id && kept.has(id) ? id : null));
         setBytes(new Uint8Array(result));
         toast(message, "success");
         return true;
@@ -316,32 +328,58 @@ export function PdfEditor({
         setBusy(false);
       }
     },
-    [bytes, annotations, formValues, history, toast]
+    [bytes, annotations, history, toast]
   );
 
   const handleReorder = (from: number, to: number) => {
     const order = Array.from({ length: numPages }, (_, i) => i);
     const [moved] = order.splice(from, 1);
     order.splice(to, 0, moved);
-    runStructural((b) => reorderPages(b, order), "Pages reordered.").then(() =>
-      setPage(to)
+    runStructural((b) => reorderPages(b, order), "Pages reordered.", { map: orderMap(order) }).then(
+      (ok) => ok && setPage(to)
     );
   };
+
+  /** Asks before a page is deleted; resolves once the dialog has gone. */
+  const [pendingDelete, setPendingDelete] = useState<{ page: number; edits: boolean; open: boolean } | null>(null);
+  // Kept while the dialog closes, so its text doesn't change as it fades.
+  const closeDelete = () => setPendingDelete((d) => d && { ...d, open: false });
+  const deleteAnswer = useRef<{ yes: boolean; resolve: (yes: boolean) => void } | null>(null);
 
   const handleDeletePage = async (target: number) => {
     if (numPages <= 1) {
       toast("A document must keep at least one page.", "error");
       return false;
     }
-    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.");
-    setPage((p) => Math.max(0, Math.min(p, numPages - 2)));
+    const yes = await new Promise<boolean>((resolve) => {
+      deleteAnswer.current = { yes: false, resolve };
+      setPendingDelete({ page: target, edits: annotations.some((a) => a.page === target), open: true });
+    });
+    if (!yes) return false;
+    const map = deleteMap(target);
+    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.", { map });
+    if (ok) setPage((p) => pageAfter(p, map, numPages - 1));
+    return ok;
+  };
+
+  const handleRotate = (target: number) =>
+    runStructural(
+      (b) => rotatePagesBy(b, [target], 90),
+      annotations.some((a) => a.page === target) ? "Page rotated. Its edits are now part of the page." : "Page rotated.",
+      { map: sameMap, bakePage: target }
+    );
+
+  const handleInsertAfter = async (target: number) => {
+    const map = insertAfterMap(target);
+    const ok = await runStructural((b) => insertBlankPage(b, target), "Blank page inserted.", { map });
+    if (ok) setPage((p) => pageAfter(p, map, numPages + 1));
     return ok;
   };
 
   async function handleMerge(files: FileList | null) {
     if (!files?.length) return;
     const extra = new Uint8Array(await files[0].arrayBuffer());
-    await runStructural((b) => mergePdfs([b, extra]), `Merged "${files[0].name}".`);
+    await runStructural((b) => mergePdfs([b, extra]), `Merged "${files[0].name}".`, { map: sameMap });
     if (mergeInput.current) mergeInput.current.value = "";
   }
 
@@ -759,11 +797,9 @@ export function PdfEditor({
               if (narrow()) setShowSidebar(false);
             }}
             onReorder={handleReorder}
-            onRotate={(i) => runStructural((b) => rotatePagesBy(b, [i], 90), "Page rotated.")}
+            onRotate={handleRotate}
             onDelete={handleDeletePage}
-            onInsertAfter={(i) =>
-              runStructural((b) => insertBlankPage(b, i), "Blank page inserted.")
-            }
+            onInsertAfter={handleInsertAfter}
           />
         )}
 
@@ -919,6 +955,46 @@ export function PdfEditor({
           setPlaceNow((n) => n + 1);
         }}
       />
+
+      <Dialog
+        open={!!pendingDelete?.open}
+        onOpenChange={(open) => {
+          if (!open) closeDelete();
+        }}
+      >
+        <DialogContent
+          className="max-w-sm"
+          onCloseAutoFocus={(e) => {
+            const answer = deleteAnswer.current;
+            deleteAnswer.current = null;
+            // Deleted: the page panel moves focus once the pages have caught up.
+            if (answer?.yes) e.preventDefault();
+            answer?.resolve(answer.yes);
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="pr-8">Delete page {(pendingDelete?.page ?? 0) + 1}?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete?.edits ? "Its edits go with it. " : ""}This can&apos;t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Button variant="outline" className="h-11" onClick={closeDelete}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="h-11"
+              onClick={() => {
+                if (deleteAnswer.current) deleteAnswer.current.yes = true;
+                closeDelete();
+              }}
+            >
+              <Trash2 /> Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />
 
