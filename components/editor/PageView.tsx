@@ -67,6 +67,10 @@ export function PageView({
   const focusNew = useRef<string | null>(null);
   const hint = useId();
   const textHint = useId();
+  const pageFields = formFields.filter((f) => f.page === pageIndex);
+  // Fields shown as inputs are left off the canvas. They are found after the
+  // first render, so the page is drawn again once they are.
+  const hasFields = pageFields.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +79,7 @@ export function PageView({
       if (cancelled) return;
       setSize({ w: vp.width, h: vp.height });
       if (canvasRef.current) {
-        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale);
+        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale, { forms: hasFields });
         if (!cancelled) onRendered?.({ width: vp.width, height: vp.height });
       }
     })();
@@ -83,7 +87,7 @@ export function PageView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, pageIndex, scale]);
+  }, [loaded, pageIndex, scale, hasFields]);
 
   function toPoints(e: React.PointerEvent) {
     const rect = layerRef.current!.getBoundingClientRect();
@@ -205,8 +209,6 @@ export function PageView({
   const cursor =
     tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
 
-  const pageFields = formFields.filter((f) => f.page === pageIndex);
-
   return (
     <div className="relative inline-block">
       <canvas ref={canvasRef} className="pdf-page-canvas rounded-sm" />
@@ -293,26 +295,47 @@ function FormFieldOverlay({
   value: string;
   onChange: (value: string) => void;
 }) {
+  // A tiny field still gets a box big enough to see and tap, centred on it.
+  const width = Math.max(8, field.width * scale);
+  const height = Math.max(8, field.height * scale);
   const style: React.CSSProperties = {
     position: "absolute",
-    left: field.x * scale,
-    top: field.y * scale,
-    width: Math.max(8, field.width * scale),
-    height: Math.max(8, field.height * scale),
+    left: field.x * scale - (width - field.width * scale) / 2,
+    top: field.y * scale - (height - field.height * scale) / 2,
+    width,
+    height,
   };
+  // The text size the PDF draws the field at.
+  const fontSize = field.fontSize * scale;
 
   // The PDF's own description of the field, when it has one.
   const label = field.label ?? field.name;
   const shared =
-    "border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
+    "block border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
 
   if (field.readOnly) {
-    return <div style={style} className="pointer-events-none rounded-sm border border-dashed border-muted-foreground/40" />;
+    // The page leaves out the fields shown here as inputs, read-only ticks and
+    // choices too; show their value. Read-only text is still on the page.
+    const shown =
+      field.kind === "checkbox" ? (value === "true" ? "✓" : "")
+      : field.kind === "radio" ? (value && field.exportValue === value ? "●" : "")
+      : field.kind === "dropdown" ? value
+      : "";
+    return (
+      <div
+        style={{ ...style, fontSize: field.kind === "dropdown" ? fontSize : undefined }}
+        className={`pointer-events-none flex items-center overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 leading-none text-slate-600 ${
+          field.kind === "dropdown" ? "px-1" : "justify-center text-sm"
+        }`}
+      >
+        {shown}
+      </div>
+    );
   }
 
   if (field.kind === "checkbox") {
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
         <button
           type="button"
           role="checkbox"
@@ -330,7 +353,7 @@ function FormFieldOverlay({
   if (field.kind === "radio") {
     const on = value && field.exportValue === value;
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
         <button
           type="button"
           role="radio"
@@ -347,14 +370,14 @@ function FormFieldOverlay({
 
   if (field.kind === "dropdown") {
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
         <select
           aria-label={label}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
           data-fit-text
-          style={{ fontSize: Math.max(8, field.height * scale * 0.6) }}
+          style={{ fontSize }}
         >
           <option value="">—</option>
           {field.options.map((o) => (
@@ -369,7 +392,7 @@ function FormFieldOverlay({
 
   if (field.multiline) {
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
         <textarea
           aria-label={label}
           value={value}
@@ -377,14 +400,14 @@ function FormFieldOverlay({
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full resize-none rounded-sm px-1 leading-tight ${shared}`}
           data-fit-text
-          style={{ fontSize: Math.max(8, Math.min(12, field.height * 0.55) * scale) }}
+          style={{ fontSize }}
         />
       </div>
     );
   }
 
   return (
-    <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+    <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
       <input
         aria-label={label}
         value={value}
@@ -392,7 +415,7 @@ function FormFieldOverlay({
         onChange={(e) => onChange(e.target.value)}
         className={`h-full w-full rounded-sm px-1 ${shared}`}
         data-fit-text
-        style={{ fontSize: Math.max(8, field.height * scale * 0.55) }}
+        style={{ fontSize }}
       />
     </div>
   );

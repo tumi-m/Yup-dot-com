@@ -14,6 +14,7 @@ import {
   type PDFFont,
   type PDFForm,
   type PDFField,
+  type PDFWidgetAnnotation,
 } from "pdf-lib";
 import { openPdf } from "./open";
 import { pageFrame, type PageFrame } from "./page-frame";
@@ -85,7 +86,38 @@ export interface DetectedField {
   maxLength?: number;
   /** Text fields that take several lines. */
   multiline?: boolean;
+  /** The text size the field asks for (its /DA), or one that fits its height, in points. */
+  fontSize: number;
   readOnly: boolean;
+}
+
+/** The last `/Font size Tf` in a /DA string; 0 means "fit the box". */
+export function daFontSize(da: string | undefined): number | undefined {
+  const m = da && /\/[^\s/]+\s+(-?\d*\.?\d+)\s+Tf(?![\s\S]*Tf)/.exec(da);
+  if (!m) return undefined;
+  const size = Number(m[1]);
+  return Number.isFinite(size) && size > 0 ? size : 0;
+}
+
+/** A widget's /DA: its own, its field's, a parent's, or the form's. */
+function defaultAppearance(form: PDFForm, field: PDFField, widget: PDFWidgetAnnotation): string | undefined {
+  try {
+    const own = form.acroForm.dict.lookup(PDFName.of("DA"));
+    return (
+      widget.getDefaultAppearance() ??
+      field.acroField.getDefaultAppearance() ??
+      field.acroField.getParent()?.getDefaultAppearance() ??
+      (own instanceof PDFString || own instanceof PDFHexString ? own.decodeText() : undefined)
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** The size to show a field's text at: what its /DA asks for, or what fits its height. */
+export function fieldFontSize(da: string | undefined, height: number): number {
+  const size = daFontSize(da);
+  return size ? size : Math.max(1, Math.min(height * 0.6, 12));
 }
 
 function kindOf(field: unknown): DetectedFieldKind {
@@ -146,6 +178,7 @@ export async function detectFormFields(
   });
 
   const detected: DetectedField[] = [];
+  const form = doc.getForm();
 
   for (const field of fields) {
     const kind = kindOf(field);
@@ -203,6 +236,7 @@ export async function detectFormFields(
       // A radio widget's own on-state is its export value.
       let exportValue: string | undefined;
       if (kind === "radio") exportValue = options[i];
+      const shown = displayRect(frame, rect);
 
       detected.push({
         id: `${name}::${i}`,
@@ -210,12 +244,14 @@ export async function detectFormFields(
         label,
         kind,
         page: pageIndex,
-        ...displayRect(frame, rect),
+        ...shown,
         value,
         options,
         exportValue,
         maxLength,
         multiline,
+        // The field's own height: on a turned page that is the displayed width.
+        fontSize: fieldFontSize(defaultAppearance(form, field, widget), rect.height),
         readOnly,
       });
     });

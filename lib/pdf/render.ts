@@ -47,12 +47,14 @@ export interface LoadedPdf {
    * output; exports pass `pixelRatio: 1` so the file doesn't depend on the
    * screen it was made on. Very large pages are scaled down to stay within
    * the browser's canvas limits (beyond them the canvas silently stays blank).
+   * `forms`: leave out the fields the editor shows as live inputs, so their
+   * values aren't drawn twice (read-only fields and buttons stay on the page).
    */
   renderPage: (
     pageNumber: number,
     canvas: HTMLCanvasElement,
     scale: number,
-    opts?: { pixelRatio?: number }
+    opts?: { pixelRatio?: number; forms?: boolean }
   ) => Promise<void>;
   /** The page's own text pieces and where they sit, in displayed points from the top-left. */
   ownText: (pageNumber: number) => Promise<OwnText[]>;
@@ -106,7 +108,11 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const task = page.render({ canvasContext: ctx, viewport });
+        const task = page.render({
+          canvasContext: ctx,
+          viewport,
+          annotationMode: opts?.forms ? pdfjsLib.AnnotationMode.ENABLE_FORMS : pdfjsLib.AnnotationMode.ENABLE,
+        });
         slot.task = task;
         try {
           await task.promise;
