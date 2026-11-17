@@ -29,6 +29,8 @@ export interface ParsedSpan {
   fontSize: number;
   fontName: string;
   bold: boolean;
+  /** A form field's value, drawn by the viewer rather than the page. */
+  field?: boolean;
 }
 
 export interface ParsedLine {
@@ -41,6 +43,8 @@ export interface ParsedLine {
   /** Reads right to left (Arabic, Hebrew): `spans` run from the right. */
   rtl: boolean;
   spans: ParsedSpan[];
+  /** Which part of a two-column page the line is in: full-width rows, or a run of columns. */
+  band?: number;
 }
 
 export type BlockType = "heading" | "paragraph" | "list" | "table";
@@ -156,6 +160,70 @@ function toSpans(items: RawItem[], viewport: { transform: number[]; height: numb
   return spans;
 }
 
+/** What pdf.js tells of a form field's widget. */
+interface WidgetAnnotation {
+  subtype?: string;
+  hidden?: boolean;
+  rect?: number[];
+  fieldType?: string;
+  fieldValue?: string | string[] | null;
+  fieldFlags?: number;
+  checkBox?: boolean;
+  radioButton?: boolean;
+  exportValue?: string;
+  buttonValue?: string;
+  defaultAppearanceData?: { fontSize?: number };
+}
+
+/** A text field that shows dots instead of what was typed. */
+const PASSWORD_FIELD = 1 << 13;
+
+/** What a filled-in field shows, or "" when there is nothing to read. */
+function fieldText(a: WidgetAnnotation): string {
+  const value = a.fieldValue;
+  if (a.fieldType === "Tx") return a.fieldFlags && a.fieldFlags & PASSWORD_FIELD ? "" : typeof value === "string" ? value : "";
+  if (a.fieldType === "Ch") return Array.isArray(value) ? value.join(", ") : value ?? "";
+  if (a.fieldType === "Btn") {
+    if (a.checkBox) return value && value !== "Off" && value === a.exportValue ? "☒" : "";
+    if (a.radioButton) return value != null && a.buttonValue === value ? "◉" : "";
+  }
+  return "";
+}
+
+/**
+ * Filled-in form values as spans where their fields sit, in the same
+ * coordinates as toSpans. Their text is drawn by the viewer, not the page,
+ * so the page's own text has a label ("Name:") but not what was typed.
+ */
+function fieldSpans(annotations: WidgetAnnotation[], viewport: { transform: number[]; height: number }): ParsedSpan[] {
+  const [va, vb, vc, vd, ve, vf] = viewport.transform;
+  const spans: ParsedSpan[] = [];
+  for (const a of annotations) {
+    if (a.subtype !== "Widget" || a.hidden || !a.rect || a.rect.length < 4) continue;
+    const text = fieldText(a).replace(XML_ILLEGAL, "").trim();
+    if (!text) continue;
+    const [x1, y1, x2, y2] = a.rect;
+    const xs = [va * x1 + vc * y1 + ve, va * x2 + vc * y2 + ve];
+    const ys = [viewport.height - (vb * x1 + vd * y1 + vf), viewport.height - (vb * x2 + vd * y2 + vf)];
+    const height = Math.abs(ys[1] - ys[0]);
+    const auto = a.defaultAppearanceData?.fontSize;
+    const fontSize = Math.min(14, auto && auto > 0 ? auto : 0.7 * height) || 10;
+    spans.push({
+      text,
+      x: Math.min(...xs),
+      // Where a one-line field draws its text: centred, on a baseline below the middle.
+      y: Math.min(...ys) + Math.max(0, (height - fontSize * 0.7) / 2),
+      width: Math.abs(xs[1] - xs[0]),
+      height: fontSize,
+      fontSize,
+      fontName: "",
+      bold: false,
+      field: true,
+    });
+  }
+  return spans;
+}
+
 const RTL_LETTERS = /(?=\p{L})[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
 const LTR_LETTERS = /(?=\p{L})[^\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
 
@@ -210,7 +278,8 @@ function joinSpans(spans: ParsedSpan[], rtl: boolean): string {
 // Stage 2 — lines (cluster spans sharing a baseline)
 // ---------------------------------------------------------------------------
 
-function toLines(spans: ParsedSpan[]): ParsedLine[] {
+/** Spans grouped by shared baseline, top to bottom, each row in the order found. */
+function baselineRows(spans: ParsedSpan[]): ParsedSpan[][] {
   if (!spans.length) return [];
   // Top-to-bottom: PDF y grows upward, so sort descending.
   const sorted = [...spans].sort((p, q) => q.y - p.y || p.x - q.x);
@@ -230,6 +299,12 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
     }
   }
   lines.push(current);
+  return lines;
+}
+
+function toLines(spans: ParsedSpan[]): ParsedLine[] {
+  if (!spans.length) return [];
+  const lines = baselineRows(spans);
 
   // Lines of only numbers or signs read in the page's direction.
   const rtlPage = isRtl(spans.map((s) => s.text).join(""));
@@ -238,7 +313,9 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
     const rtl = balance > 0 || (!balance && rtlPage);
     // Right-to-left lines (Arabic, Hebrew) read from the right.
     const ordered = [...group].sort((p, q) => (rtl ? q.x - p.x : p.x - q.x));
-    const fontSize = median(ordered.map((s) => s.fontSize));
+    // A field's value is drawn at whatever size its box allows: the label's size is the line's.
+    const printed = ordered.filter((s) => !s.field);
+    const fontSize = median((printed.length ? printed : ordered).map((s) => s.fontSize));
     return {
       text: joinSpans(ordered, rtl).replace(/\s+/g, " ").trim(),
       x: Math.min(...ordered.map((s) => s.x)),
@@ -256,6 +333,11 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
 // Stage 3 — reading order (multi-column detection)
 // ---------------------------------------------------------------------------
 
+/** Spans wider than this share of the page are full-width text, not a column. */
+const FULL_WIDTH = 0.55;
+/** Column text is made of lines at least this share of the page wide; table cells are narrower. */
+const MIN_COLUMN_TEXT = 0.18;
+
 /**
  * Finds the x-coordinate of a vertical gutter separating two text columns.
  *
@@ -265,8 +347,12 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
  *
  * Returns null for single-column pages.
  */
-function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
-  if (spans.length < 6 || pageWidth <= 0) return null;
+function detectGutter(allSpans: ParsedSpan[], pageWidth: number): number | null {
+  if (pageWidth <= 0) return null;
+  // A full-width abstract or paragraph says nothing about the columns below
+  // it, and a few of its lines would otherwise fill the gutter.
+  const spans = allSpans.filter((s) => s.width <= pageWidth * FULL_WIDTH);
+  if (spans.length < 6) return null;
 
   const BIN = 4;
   const binCount = Math.ceil(pageWidth / BIN);
@@ -278,7 +364,7 @@ function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
     for (let i = from; i <= to; i++) occupancy[i]++;
   }
 
-  // Tolerate a few crossing spans (a full-width title over two columns).
+  // Tolerate a few crossing spans (a title over two columns).
   const tolerance = Math.max(1, Math.floor(spans.length * 0.06));
   const lo = Math.floor(binCount * 0.28);
   const hi = Math.ceil(binCount * 0.72);
@@ -303,38 +389,112 @@ function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
   const right = spans.filter((s) => s.x >= gutter);
   // Both sides must carry real content for the split to be meaningful.
   if (left.length < spans.length * 0.2 || right.length < spans.length * 0.2) return null;
-
-  // Text columns are made of wide lines; table columns are made of short
-  // cells. Without this check, the empty space between two columns of a
-  // table reads as a page gutter and the table gets torn apart.
-  const medianWidth = (xs: ParsedSpan[]) => median(xs.map((s) => s.width));
-  const minColumnText = pageWidth * 0.18;
-  if (medianWidth(left) < minColumnText || medianWidth(right) < minColumnText) return null;
-
+  // The space between two columns of a table looks like a gutter too:
+  // linesInReadingOrder only splits runs of rows that are column text.
   return gutter;
 }
 
 /**
- * Orders spans into lines, splitting on a detected column gutter so the left
- * column is read completely before the right.
- *
- * Full-width spans (a title crossing the gutter) are emitted first, which is
- * correct for the common case of a banner heading above the columns.
+ * True when these spans are lines of running text, not table cells: without
+ * this, a table would be torn apart at the space between two of its columns.
+ */
+function columnText(spans: ParsedSpan[], pageWidth: number): boolean {
+  return spans.length > 0 && median(spans.map((s) => s.width)) >= pageWidth * MIN_COLUMN_TEXT;
+}
+
+/** Spans split wherever they stand more than `em` ems apart, left to right. */
+function groupsOf(spans: ParsedSpan[], em: number): { x: number; right: number }[] {
+  const groups: { x: number; right: number }[] = [];
+  let prev: ParsedSpan | undefined;
+  for (const span of [...spans].sort((p, q) => p.x - q.x)) {
+    const last = groups[groups.length - 1];
+    if (last && prev && span.x - last.right <= prev.fontSize * em) last.right = Math.max(last.right, span.x + span.width);
+    else groups.push({ x: span.x, right: span.x + span.width });
+    prev = span;
+  }
+  return groups;
+}
+
+/**
+ * Orders spans into lines, reading the page top to bottom in bands: a run of
+ * rows split by the gutter is read left column first, then right; a row
+ * that runs across it (a title, an abstract, a figure caption, a footer)
+ * is read where it stands. Short runs and table rows are read row by row,
+ * so a table keeps all its columns.
  */
 function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine[] {
   const gutter = detectGutter(spans, pageWidth);
   if (gutter === null) return toLines(spans);
 
-  const full: ParsedSpan[] = [];
-  const left: ParsedSpan[] = [];
-  const right: ParsedSpan[] = [];
-  for (const span of spans) {
-    if (span.x < gutter && span.x + span.width > gutter) full.push(span);
-    else if (span.x + span.width <= gutter) left.push(span);
-    else right.push(span);
-  }
+  const isLeft = (s: ParsedSpan) => s.x + s.width <= gutter;
+  const rowWidth = (row: ParsedSpan[]) => Math.max(...row.map((s) => s.x + s.width)) - Math.min(...row.map((s) => s.x));
+  const across = (row: ParsedSpan[]) => {
+    if (row.some((s) => s.x < gutter && s.x + s.width > gutter)) return true;
+    // Words of one line that happen to break at the gutter stand a word space apart.
+    const leftEdge = Math.max(...row.filter(isLeft).map((s) => s.x + s.width));
+    const rightEdge = Math.min(...row.filter((s) => !isLeft(s)).map((s) => s.x));
+    return rightEdge - leftEdge < Math.max(...row.map((s) => s.fontSize)) * CELL_GAP_EM;
+  };
+  // A table row: cells on both sides, none as wide as a line of column text.
+  const cells = (row: ParsedSpan[]) => {
+    const left = row.filter(isLeft);
+    const right = row.filter((s) => !isLeft(s));
+    return left.length > 0 && right.length > 0 &&
+      [...groupsOf(left, 1), ...groupsOf(right, 1)].every((g) => g.right - g.x < pageWidth * MIN_COLUMN_TEXT);
+  };
 
-  return [...toLines(full), ...toLines(left), ...toLines(right)];
+  const rows = baselineRows(spans);
+  const kind = rows.map((row): "across" | "cells" | "split" => (across(row) ? "across" : cells(row) ? "cells" : "split"));
+  // One such row is two short lines side by side, such as the ends of two paragraphs.
+  kind.forEach((k, i) => {
+    if (k === "cells" && kind[i - 1] !== "cells" && kind[i + 1] !== "cells") kind[i] = "split";
+  });
+
+  const out: ParsedLine[] = [];
+  let bands = 0;
+  const emit = (lines: ParsedLine[]) => {
+    if (!lines.length) return;
+    for (const line of lines) line.band = bands;
+    out.push(...lines);
+    bands++;
+  };
+  let full: ParsedSpan[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (kind[i] !== "split") {
+      full.push(...rows[i++]);
+      continue;
+    }
+    let end = i;
+    while (end < rows.length && kind[end] === "split") end++;
+    let band = rows.slice(i, end);
+    // A heading or a line or two under the shorter column that lead into a
+    // table or full-width text below belong with what follows them.
+    const next = rows[end];
+    if (next && (kind[end] === "cells" || rowWidth(next) >= pageWidth * MIN_COLUMN_TEXT)) {
+      const lastLeft = band.findLastIndex((row) => row.some(isLeft));
+      const lastRight = band.findLastIndex((row) => row.some((s) => !isLeft(s)));
+      const tail = band.length - 1 - Math.min(lastLeft, lastRight);
+      if (tail > 0 && tail <= 3) {
+        end -= tail;
+        band = band.slice(0, -tail);
+      }
+    }
+    const left = band.flat().filter(isLeft);
+    const right = band.flat().filter((s) => !isLeft(s));
+    if (band.length >= 3 && columnText(left, pageWidth) && columnText(right, pageWidth)) {
+      emit(toLines(full));
+      emit([...toLines(left), ...toLines(right)]);
+      full = [];
+    } else {
+      full.push(...band.flat());
+    }
+    i = end;
+    // The tail, if any, joins the rows that follow.
+    while (i < rows.length && kind[i] === "split") full.push(...rows[i++]);
+  }
+  emit(toLines(full));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +522,8 @@ function splitCells(line: ParsedLine): Cell[] {
   const groups: ParsedSpan[][] = [];
   line.spans.forEach((span, i) => {
     const prev = line.spans[i - 1];
-    if (!prev || gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM) groups.push([]);
+    // A form field's value stays with its label ("Name:", a tick box's caption), not a cell of its own.
+    if (!prev || (gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM && !prev.field && !span.field)) groups.push([]);
     groups[groups.length - 1].push(span);
   });
   return groups.map((spans) => ({
@@ -425,8 +586,28 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
 
 const BULLET = /^\s*[•·▪◦‣\-–—*]\s+/;
 const ORDERED = /^\s*(\d{1,2}|[a-z])[.)]\s+/i;
+const SENTENCE_END = /[.!?]["'”’)\]]?$/;
+/** A page's number on its own: "7", "- 7 -", "Page 7 of 12", "vii". */
+const PAGE_NUMBER = /^(?:page\s+)?[-–—]?\s*(?:\d{1,4}|[ivxlc]{1,7})\s*[-–—]?(?:\s*(?:of|\/)\s*\d{1,4})?$/i;
+
+/**
+ * Lines of one paragraph as running text. A word broken at a line end
+ * ("inter-" / "national") is made whole; a hyphen before a capital or a
+ * digit ("Anglo-" / "Saxon", "COVID-" / "19") is part of the word and stays.
+ */
+function joinLines(texts: string[]): string {
+  let out = "";
+  for (const text of texts) {
+    if (!out) out = text;
+    else if (/\p{L}-$/u.test(out) && /^\p{Ll}/u.test(text)) out = out.slice(0, -1) + text;
+    else out += " " + text;
+  }
+  return out.trim();
+}
 
 function classifyHeading(line: ParsedLine, bodySize: number): number | null {
+  // A form field's value is never a heading, however large its box.
+  if (line.spans.every((s) => s.field)) return null;
   const ratio = line.fontSize / bodySize;
   if (ratio >= 1.8) return 1;
   if (ratio >= 1.45) return 2;
@@ -451,13 +632,16 @@ function buildBlocks(
   }
 
   let paragraph: string[] = [];
+  // The widest line of the paragraph so far: its column's width.
+  let widest = 0;
   let listItems: string[] = [];
   let listOrdered = false;
 
   const flushParagraph = () => {
     if (paragraph.length) {
-      blocks.push({ type: "paragraph", text: paragraph.join(" ").trim(), page });
+      blocks.push({ type: "paragraph", text: joinLines(paragraph), page });
       paragraph = [];
+      widest = 0;
     }
   };
   const flushList = () => {
@@ -503,22 +687,29 @@ function buildBlocks(
     if (listItems.length) {
       const prev = lines[i - 1];
       if (prev && Math.abs(line.x - prev.x) < 4 && line.x > lines[0].x + 4) {
-        listItems[listItems.length - 1] += " " + line.text;
+        listItems[listItems.length - 1] = joinLines([listItems[listItems.length - 1], line.text]);
         continue;
       }
       flushList();
     }
 
     paragraph.push(line.text);
+    const width = line.right - line.x;
+    widest = Math.max(widest, width);
 
-    // Break the paragraph when the next line is far below or clearly indented.
+    // Break the paragraph when the next line is far below or clearly
+    // indented, or when this one ends a sentence well short of the column's
+    // width or where full-width text gives way to columns. The width is the
+    // paragraph's own lines and the next one, never the page's: on a
+    // two-column page the columns follow one another.
     const next = lines[i + 1];
     if (!next) {
       flushParagraph();
     } else {
       const gap = line.y - next.y;
-      const endsSentence = /[.!?]["')\]]?$/.test(line.text);
-      if (gap > line.fontSize * 1.8 || (endsSentence && next.x > line.x + 8)) {
+      const endsSentence = SENTENCE_END.test(line.text);
+      const short = width < Math.max(widest, next.right - next.x) * 0.8;
+      if (gap > line.fontSize * 1.8 || (endsSentence && (next.x > line.x + 8 || short || next.band !== line.band))) {
         flushParagraph();
       }
     }
@@ -578,6 +769,12 @@ export async function parseDocument(
       }
     }
 
+    try {
+      // Before the gutter is found, so the values land in reading order.
+      spans.push(...fieldSpans((await page.getAnnotations({ intent: "display" })) as WidgetAnnotation[], viewport));
+    } catch {
+      // Damaged annotations: the page's own text is still there.
+    }
     const lines = linesInReadingOrder(spans, viewport.width);
     perPage.push({ lines, page: p });
 
@@ -593,7 +790,23 @@ export async function parseDocument(
   const bodySize = median(allSizes);
   const blocks: Block[] = [];
   for (const { lines, page } of perPage) {
-    blocks.push(...buildBlocks(lines, bodySize, page));
+    const pageBlocks = buildBlocks(lines, bodySize, page);
+    // A sentence that runs on over the page break is one paragraph, kept on
+    // the page it starts on. Page numbers between the two halves stay where they are.
+    const isNumber = (b: Block | undefined) => b?.type === "paragraph" && PAGE_NUMBER.test(b.text);
+    let last = blocks.length - 1;
+    while (last >= 0 && blocks[last].page === page - 1 && isNumber(blocks[last])) last--;
+    const end = blocks[last];
+    const first = pageBlocks.findIndex((b) => !isNumber(b));
+    const start = pageBlocks[first];
+    if (
+      end?.type === "paragraph" && end.page === page - 1 && !SENTENCE_END.test(end.text) &&
+      start?.type === "paragraph" && /^\p{Ll}/u.test(start.text)
+    ) {
+      end.text = joinLines([end.text, start.text]);
+      pageBlocks.splice(first, 1);
+    }
+    blocks.push(...pageBlocks);
   }
 
   const pageCount = doc.numPages;
@@ -663,8 +876,51 @@ export function toPlainText(doc: ParsedDocument): string {
   return out.join("\n\n") + "\n";
 }
 
+/**
+ * Text repeated at the top or foot of the pages: short paragraphs that appear
+ * on more than one page once their numbers are set aside ("Page 3", a report's title).
+ */
+function runningText(blocks: Block[]): (block: Block) => boolean {
+  const key = (text: string) => text.replace(/\d+/g, "#").trim().toLowerCase();
+  const pages = new Map<string, Set<number>>();
+  for (const b of blocks) {
+    if (b.type !== "paragraph" || b.text.length > 80) continue;
+    const seen = pages.get(key(b.text)) ?? new Set<number>();
+    seen.add(b.page);
+    pages.set(key(b.text), seen);
+  }
+  return (b) =>
+    b.type === "paragraph" && b.text.length <= 80 && (PAGE_NUMBER.test(b.text) || (pages.get(key(b.text))?.size ?? 0) > 1);
+}
+
+/**
+ * The document's tables. One that runs on over a page break is one table:
+ * a table that opens a page continues the one that closed the page before
+ * when they have as many columns, and a header repeated on the new page is
+ * dropped. It keeps the page it starts on.
+ */
 export function extractTables(doc: ParsedDocument): TableBlock[] {
-  return doc.blocks.filter((b): b is TableBlock => b.type === "table");
+  const running = runningText(doc.blocks);
+  const tables: TableBlock[] = [];
+  let prev: Block | undefined;
+  // The page the last table's latest part is on.
+  let reaches = 0;
+  for (const block of doc.blocks) {
+    if (running(block)) continue;
+    if (block.type === "table") {
+      const last = tables[tables.length - 1];
+      const width = (t: TableBlock) => t.rows[0]?.length ?? 0;
+      if (prev?.type === "table" && last && reaches === block.page - 1 && width(last) === width(block)) {
+        const repeated = block.rows[0]?.join("\u0000") === last.rows[0]?.join("\u0000");
+        last.rows.push(...(repeated ? block.rows.slice(1) : block.rows));
+      } else {
+        tables.push({ ...block, rows: [...block.rows] });
+      }
+      reaches = block.page;
+    }
+    prev = block;
+  }
+  return tables;
 }
 
 function csvCell(cell: string): string {

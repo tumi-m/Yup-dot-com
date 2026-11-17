@@ -9,14 +9,14 @@ import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, ENTER_T, InlineError, SUCCESS, staggerDelay } from "@/components/motion/primitives";
 import { scrollBehavior, useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
-import { isLoadError, loadErrorMessage } from "@/lib/load-error";
+import { friendlyPdfError } from "@/lib/pdf/errors";
 import { useSearchParams } from "next/navigation";
-import type { Tier } from "@/lib/limits";
+import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { handoffToFile, takeHandoff } from "@/lib/local-store";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { trackToolUsed } from "@/lib/analytics";
 import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
-import { documentToSend } from "@/lib/ai/document";
+import { documentToSend, fitSentDocument } from "@/lib/ai/document";
 import { parseMarkdown, type MdBlock } from "@/lib/ai/markdown";
 
 interface ChatMessage {
@@ -166,6 +166,11 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       setError({ message: "Please choose a PDF file." });
       return;
     }
+    const limits = limitsFor(tier);
+    if (file.size > limits.maxFileBytes) {
+      setError({ message: `${file.name} is over ${formatLimitBytes(limits.maxFileBytes)}, the limit on your plan.` });
+      return;
+    }
     setError(null);
     setParsing(true);
     // The Choose button steps aside while the file is read; it or the question box gets focus after.
@@ -174,17 +179,21 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       const { parseDocument, toPagedText } = await import("@/lib/pdf/parse");
       const parsed = await parseDocument(new Uint8Array(await file.arrayBuffer()));
       if (parsed.likelyScanned) {
-        setError({ message: "This PDF is a scan. Run OCR PDF first." });
+        setError({ message: "This looks like a scanned PDF. Run OCR PDF on it first." });
         return;
       }
       if (chosen) focusNext.current = "question";
       const sent = documentToSend(toPagedText(parsed), parsed.pageCount);
       setDoc({ name: file.name, size: file.size, pages: parsed.pageCount, text: sent.documentText, totalPages: sent.totalPages });
       setMessages([]);
+      // A long PDF says up front how much of it the plan reads; each answer's
+      // own count (from the server) replaces this.
+      const fitted = fitSentDocument(sent.documentText, limits.aiDocumentChars, sent.totalPages);
+      setPagesRead(fitted.truncated && fitted.lastPage ? `${fitted.lastPage}/${fitted.totalPages}` : null);
     } catch (err) {
-      setError({
-        message: isLoadError(err) ? loadErrorMessage() : "Couldn't read that PDF. It may be damaged or password-protected.",
-      });
+      // Locked, damaged, or the reader's code didn't load; anything else stays plain.
+      const friendly = friendlyPdfError(err);
+      setError({ message: friendly === err ? "Couldn't read that PDF. It may be damaged." : friendly.message });
     } finally {
       setParsing(false);
     }
@@ -331,9 +340,10 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
       animate={ENTER.animate}
       className="overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5"
     >
-      <div className="flex items-center gap-3 border-b border-border bg-secondary/40 px-5 py-3">
+      {/* On a phone the count and New PDF go to a second row, so the name and pages keep the width. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-secondary/40 px-5 py-3">
         <FileText className="h-5 w-5 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-40">
           <p className="truncate text-sm font-semibold">{doc.name}</p>
           <p className="text-xs text-muted-foreground">
             {doc.pages} page{doc.pages === 1 ? "" : "s"} · {formatBytes(doc.size)}
@@ -359,7 +369,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         tabIndex={0}
         role="region"
         aria-label="Conversation"
-        className="h-[460px] space-y-4 overflow-y-auto px-5 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="h-[min(460px,55dvh)] space-y-4 overflow-y-auto px-5 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center text-center">
@@ -375,7 +385,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
                   whileTap={{ scale: 0.97 }}
                   onClick={() => ask(s)}
                   data-swap
-                  className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm transition-colors duration-200 hover:border-primary/50 hover:text-primary hover:duration-100"
+                  className="rounded-full border border-border bg-background px-3.5 py-1.5 text-sm transition-colors pointer-coarse:min-h-11 duration-200 hover:border-primary/50 hover:text-primary hover:duration-100"
                 >
                   {s}
                 </motion.button>

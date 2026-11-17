@@ -49,16 +49,20 @@ export async function imagesToPdf(
       page = out.addPage([w + margin * 2, h + margin * 2]);
       rect = { x: margin, y: margin, width: w, height: h };
       // At 1 pt per pixel a phone photo makes a 42-inch page, which no one
-      // prints or views at that size: size it for A4 paper instead.
-      print = Math.min(1, A4.h / Math.max(w, h));
+      // prints or views at that size: size it for A4 paper instead. A long
+      // screenshot is printed on many sheets at its width, so it keeps its pixels.
+      print = Math.min(1, Math.max(A4.w / Math.min(w, h), A4.h / Math.max(w, h)));
     } else {
-      page = out.addPage([A4.w, A4.h]);
-      const maxW = A4.w - margin * 2;
-      const maxH = A4.h - margin * 2;
+      // A wide picture gets a landscape sheet.
+      const landscape = shown.width > shown.height;
+      const [pw, ph] = landscape ? [A4.h, A4.w] : [A4.w, A4.h];
+      page = out.addPage([pw, ph]);
+      const maxW = pw - margin * 2;
+      const maxH = ph - margin * 2;
       const ratio = Math.min(maxW / shown.width, maxH / shown.height);
       const w = shown.width * ratio;
       const h = shown.height * ratio;
-      rect = { x: (A4.w - w) / 2, y: (A4.h - h) / 2, width: w, height: h };
+      rect = { x: (pw - w) / 2, y: (ph - h) / 2, width: w, height: h };
     }
 
     // Size on the page in the image's stored orientation, for right-sizing.

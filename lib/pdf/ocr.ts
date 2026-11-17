@@ -1,7 +1,7 @@
 "use client";
 
 import { loadForRender } from "./render";
-import { canvasToJpeg } from "../image-codec";
+import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import { looksGarbled, newWords, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 

@@ -13,7 +13,7 @@ import { pageFrame } from "./page-frame";
 import { openPdf } from "./open";
 import { extractorFor, mergeDocuments } from "./operations";
 import { isAbort, stopIfAborted } from "../abort";
-import { canvasToJpeg } from "../image-codec";
+import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import type { OcrProgress } from "./ocr";
 
 /** A processed result ready to hand to the browser for download. */
@@ -241,7 +241,7 @@ export async function compressTool(
 
 /** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
 async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolContext): Promise<Uint8Array> {
-  const { canvasToJpeg } = await import("../image-codec");
+  const { canvasToJpeg } = await import("../jpeg-encode/off-thread");
   const loaded = await loadForRender(bytes);
   const out = await PDFDocument.create();
   const scale = 1.5; // ~108 DPI
