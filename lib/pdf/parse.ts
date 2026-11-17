@@ -41,6 +41,8 @@ export interface ParsedLine {
   /** Reads right to left (Arabic, Hebrew): `spans` run from the right. */
   rtl: boolean;
   spans: ParsedSpan[];
+  /** Which part of a two-column page the line is in: full-width rows, or a run of columns. */
+  band?: number;
 }
 
 export type BlockType = "heading" | "paragraph" | "list" | "table";
@@ -381,6 +383,13 @@ function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine
   });
 
   const out: ParsedLine[] = [];
+  let bands = 0;
+  const emit = (lines: ParsedLine[]) => {
+    if (!lines.length) return;
+    for (const line of lines) line.band = bands;
+    out.push(...lines);
+    bands++;
+  };
   let full: ParsedSpan[] = [];
   let i = 0;
   while (i < rows.length) {
@@ -406,7 +415,8 @@ function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine
     const left = band.flat().filter(isLeft);
     const right = band.flat().filter((s) => !isLeft(s));
     if (band.length >= 3 && columnText(left, pageWidth) && columnText(right, pageWidth)) {
-      out.push(...toLines(full), ...toLines(left), ...toLines(right));
+      emit(toLines(full));
+      emit([...toLines(left), ...toLines(right)]);
       full = [];
     } else {
       full.push(...band.flat());
@@ -415,7 +425,7 @@ function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine
     // The tail, if any, joins the rows that follow.
     while (i < rows.length && kind[i] === "split") full.push(...rows[i++]);
   }
-  out.push(...toLines(full));
+  emit(toLines(full));
   return out;
 }
 
@@ -506,6 +516,24 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
 // ---------------------------------------------------------------------------
 
 const BULLET = /^\s*[•·▪◦‣\-–—*]\s+/;
+const SENTENCE_END = /[.!?]["'”’)\]]?$/;
+/** A page's number on its own: "7", "- 7 -", "Page 7 of 12", "vii". */
+const PAGE_NUMBER = /^(?:page\s+)?[-–—]?\s*(?:\d{1,4}|[ivxlc]{1,7})\s*[-–—]?(?:\s*(?:of|\/)\s*\d{1,4})?$/i;
+
+/**
+ * Lines of one paragraph as running text. A word broken at a line end
+ * ("inter-" / "national") is made whole; a hyphen before a capital or a
+ * digit ("Anglo-" / "Saxon", "COVID-" / "19") is part of the word and stays.
+ */
+function joinLines(texts: string[]): string {
+  let out = "";
+  for (const text of texts) {
+    if (!out) out = text;
+    else if (/\p{L}-$/u.test(out) && /^\p{Ll}/u.test(text)) out = out.slice(0, -1) + text;
+    else out += " " + text;
+  }
+  return out.trim();
+}
 const ORDERED = /^\s*(\d{1,2}|[a-z])[.)]\s+/i;
 
 function classifyHeading(line: ParsedLine, bodySize: number): number | null {
@@ -533,13 +561,16 @@ function buildBlocks(
   }
 
   let paragraph: string[] = [];
+  // The widest line of the paragraph so far: its column's width.
+  let widest = 0;
   let listItems: string[] = [];
   let listOrdered = false;
 
   const flushParagraph = () => {
     if (paragraph.length) {
-      blocks.push({ type: "paragraph", text: paragraph.join(" ").trim(), page });
+      blocks.push({ type: "paragraph", text: joinLines(paragraph), page });
       paragraph = [];
+      widest = 0;
     }
   };
   const flushList = () => {
@@ -585,22 +616,29 @@ function buildBlocks(
     if (listItems.length) {
       const prev = lines[i - 1];
       if (prev && Math.abs(line.x - prev.x) < 4 && line.x > lines[0].x + 4) {
-        listItems[listItems.length - 1] += " " + line.text;
+        listItems[listItems.length - 1] = joinLines([listItems[listItems.length - 1], line.text]);
         continue;
       }
       flushList();
     }
 
     paragraph.push(line.text);
+    const width = line.right - line.x;
+    widest = Math.max(widest, width);
 
-    // Break the paragraph when the next line is far below or clearly indented.
+    // Break the paragraph when the next line is far below or clearly
+    // indented, or when this one ends a sentence well short of the column's
+    // width or where full-width text gives way to columns. The width is the
+    // paragraph's own lines and the next one, never the page's: on a
+    // two-column page the columns follow one another.
     const next = lines[i + 1];
     if (!next) {
       flushParagraph();
     } else {
       const gap = line.y - next.y;
-      const endsSentence = /[.!?]["')\]]?$/.test(line.text);
-      if (gap > line.fontSize * 1.8 || (endsSentence && next.x > line.x + 8)) {
+      const endsSentence = SENTENCE_END.test(line.text);
+      const short = width < Math.max(widest, next.right - next.x) * 0.8;
+      if (gap > line.fontSize * 1.8 || (endsSentence && (next.x > line.x + 8 || short || next.band !== line.band))) {
         flushParagraph();
       }
     }
@@ -675,7 +713,23 @@ export async function parseDocument(
   const bodySize = median(allSizes);
   const blocks: Block[] = [];
   for (const { lines, page } of perPage) {
-    blocks.push(...buildBlocks(lines, bodySize, page));
+    const pageBlocks = buildBlocks(lines, bodySize, page);
+    // A sentence that runs on over the page break is one paragraph, kept on
+    // the page it starts on. Page numbers between the two halves stay where they are.
+    const isNumber = (b: Block | undefined) => b?.type === "paragraph" && PAGE_NUMBER.test(b.text);
+    let last = blocks.length - 1;
+    while (last >= 0 && blocks[last].page === page - 1 && isNumber(blocks[last])) last--;
+    const end = blocks[last];
+    const first = pageBlocks.findIndex((b) => !isNumber(b));
+    const start = pageBlocks[first];
+    if (
+      end?.type === "paragraph" && end.page === page - 1 && !SENTENCE_END.test(end.text) &&
+      start?.type === "paragraph" && /^\p{Ll}/u.test(start.text)
+    ) {
+      end.text = joinLines([end.text, start.text]);
+      pageBlocks.splice(first, 1);
+    }
+    blocks.push(...pageBlocks);
   }
 
   const pageCount = doc.numPages;
