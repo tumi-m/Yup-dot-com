@@ -1,6 +1,9 @@
 // What the editor needs to draw a PDF's own fields as inputs on the page:
-// the text size the field asks for, so a value shows at the size it prints.
-import { PDFDocument, PDFName, PDFString } from "pdf-lib";
+// the text size the field asks for, so a value shows at the size it prints,
+// and which way it is turned. A field on a /Rotate 90 page used to get a
+// font size from its displayed height (the field's length) and showed as a
+// black bar.
+import { PDFDocument, PDFName, PDFString, degrees } from "pdf-lib";
 import { detectFormFields, daFontSize, fieldFontSize } from "../lib/pdf/forms.ts";
 
 let pass = 0;
@@ -40,6 +43,32 @@ check("a field's /DA size is reported", size("sized") === 9, size("sized"));
 const autoField = fields.find((f) => f.name === "auto");
 check("a 0 size fits the field's height", !!autoField && Math.abs(autoField.fontSize - autoField.height * 0.6) < 0.01, autoField);
 check("a widget's own /DA is used", size("own") === 14, size("own"));
+
+check("an upright page's fields are not turned", fields.every((f) => f.rotation === 0), fields.map((f) => f.rotation));
+
+// A turned page: one field turns with it, one is drawn upright (/MK /R).
+const turned = await PDFDocument.create();
+const p2 = turned.addPage([612, 792]);
+p2.setRotation(degrees(90));
+const tf = turned.getForm();
+const along = tf.createTextField("along");
+along.addToPage(p2, { x: 150, y: 400, width: 200, height: 14 });
+along.acroField.dict.set(PDFName.of("DA"), PDFString.of("/Helv 0 Tf 0 g"));
+const upright = tf.createTextField("upright");
+upright.addToPage(p2, { x: 300, y: 100, width: 14, height: 200 });
+upright.acroField.dict.set(PDFName.of("DA"), PDFString.of("/Helv 0 Tf 0 g"));
+upright.acroField.getWidgets()[0].getOrCreateAppearanceCharacteristics().setRotation(90);
+const p3 = turned.addPage([612, 792]);
+p3.setRotation(degrees(180));
+tf.createTextField("flipped").addToPage(p3, { x: 150, y: 400, width: 200, height: 24 });
+const turnedFields = await detectFormFields(await turned.save({ updateFieldAppearances: false }));
+const t = (name: string) => turnedFields.find((f) => f.name === name)!;
+check("a field on a /Rotate 90 page turns a quarter", t("along").rotation === 90, t("along").rotation);
+check("its box is tall on screen", t("along").height > t("along").width, t("along"));
+check("its text size comes from its own height, not its length", Math.abs(t("along").fontSize - t("along").width * 0.6) < 0.01, t("along"));
+check("a field that turns back with /MK /R is upright", t("upright").rotation === 0, t("upright").rotation);
+check("and sized by its height on screen", t("upright").height < t("upright").width && Math.abs(t("upright").fontSize - t("upright").height * 0.6) < 0.01, t("upright"));
+check("a field on an upside-down page turns half", t("flipped").rotation === 180, t("flipped").rotation);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

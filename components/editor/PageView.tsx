@@ -307,6 +307,20 @@ function FormFieldOverlay({
   };
   // The text size the PDF draws the field at.
   const fontSize = field.fontSize * scale;
+  // On a turned page the control keeps the field's own shape and turns with
+  // it, centred on the box the field takes up on screen.
+  const turn = field.rotation;
+  const sideways = turn === 90 || turn === 270;
+  const inner: React.CSSProperties | undefined = turn
+    ? {
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        width: sideways ? height : width,
+        height: sideways ? width : height,
+        transform: `translate(-50%, -50%) rotate(${turn}deg)`,
+      }
+    : undefined;
 
   // The PDF's own description of the field, when it has one.
   const label = field.label ?? field.name;
@@ -322,13 +336,15 @@ function FormFieldOverlay({
       : field.kind === "dropdown" ? value
       : "";
     return (
-      <div
-        style={{ ...style, fontSize: field.kind === "dropdown" ? fontSize : undefined }}
-        className={`pointer-events-none flex items-center overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 leading-none text-slate-600 ${
-          field.kind === "dropdown" ? "px-1" : "justify-center text-sm"
-        }`}
-      >
-        {shown}
+      <div style={style} className="pointer-events-none leading-none">
+        <div
+          style={{ ...inner, fontSize: field.kind === "dropdown" ? fontSize : undefined }}
+          className={`flex h-full w-full items-center overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 text-slate-600 ${
+            field.kind === "dropdown" ? "px-1" : "justify-center text-sm"
+          }`}
+        >
+          {shown}
+        </div>
       </div>
     );
   }
@@ -342,6 +358,7 @@ function FormFieldOverlay({
           aria-checked={value === "true"}
           aria-label={label}
           onClick={() => onChange(value === "true" ? "" : "true")}
+          style={inner}
           className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
         >
           {value === "true" ? "✓" : ""}
@@ -360,6 +377,7 @@ function FormFieldOverlay({
           aria-checked={!!on}
           aria-label={`${label}: ${field.exportValue ?? ""}`}
           onClick={() => onChange(field.exportValue ?? "")}
+          style={inner}
           className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
         >
           {on ? "●" : ""}
@@ -377,7 +395,7 @@ function FormFieldOverlay({
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
           data-fit-text
-          style={{ fontSize }}
+          style={{ ...inner, fontSize }}
         >
           <option value="">—</option>
           {field.options.map((o) => (
@@ -400,7 +418,7 @@ function FormFieldOverlay({
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full resize-none rounded-sm px-1 leading-tight ${shared}`}
           data-fit-text
-          style={{ fontSize }}
+          style={{ ...inner, fontSize }}
         />
       </div>
     );
@@ -415,7 +433,7 @@ function FormFieldOverlay({
         onChange={(e) => onChange(e.target.value)}
         className={`h-full w-full rounded-sm px-1 ${shared}`}
         data-fit-text
-        style={{ fontSize }}
+        style={{ ...inner, fontSize }}
       />
     </div>
   );

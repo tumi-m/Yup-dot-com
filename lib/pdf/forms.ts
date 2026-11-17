@@ -88,6 +88,11 @@ export interface DetectedField {
   multiline?: boolean;
   /** The text size the field asks for (its /DA), or one that fits its height, in points. */
   fontSize: number;
+  /**
+   * How far its contents are turned on screen, clockwise: 0, 90, 180 or 270.
+   * A field on a turned page turns with it, unless the field turns back (/MK /R).
+   */
+  rotation: number;
   readOnly: boolean;
 }
 
@@ -237,6 +242,15 @@ export async function detectFormFields(
       let exportValue: string | undefined;
       if (kind === "radio") exportValue = options[i];
       const shown = displayRect(frame, rect);
+      let own = 0;
+      try {
+        own = widget.getAppearanceCharacteristics()?.getRotation() ?? 0;
+      } catch {
+        // No /MK: the contents are upright in the field.
+      }
+      own = (((Math.round(own / 90) * 90) % 360) + 360) % 360;
+      // Turned a quarter, the field's own height runs across the rectangle.
+      const height = own === 90 || own === 270 ? rect.width : rect.height;
 
       detected.push({
         id: `${name}::${i}`,
@@ -250,8 +264,8 @@ export async function detectFormFields(
         exportValue,
         maxLength,
         multiline,
-        // The field's own height: on a turned page that is the displayed width.
-        fontSize: fieldFontSize(defaultAppearance(form, field, widget), rect.height),
+        fontSize: fieldFontSize(defaultAppearance(form, field, widget), height),
+        rotation: (frame.rotation - own + 360) % 360,
         readOnly,
       });
     });
