@@ -158,3 +158,20 @@ export function pageActionFocus(
   if (action === "insert") return { index: index + 1, pages: numPages + 1 };
   return { index: Math.min(index, numPages - 2), pages: numPages - 1 };
 }
+
+/** The page (0-indexed) typed in the page box, kept within the document; null when it isn't a number. */
+export function typedPage(text: string, numPages: number): number | null {
+  const n = Number.parseInt(text.trim(), 10);
+  if (!Number.isFinite(n) || numPages < 1) return null;
+  return Math.min(Math.max(n, 1), numPages) - 1;
+}
+
+/** PageUp/PageDown go back or on a page, Home/End to the first or last. Null for any other key. */
+export function pageKey(key: string, page: number, numPages: number): number | null {
+  const last = Math.max(0, numPages - 1);
+  if (key === "PageUp") return Math.max(0, page - 1);
+  if (key === "PageDown") return Math.min(last, page + 1);
+  if (key === "Home") return 0;
+  if (key === "End") return last;
+  return null;
+}

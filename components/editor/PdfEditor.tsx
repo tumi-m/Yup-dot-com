@@ -33,7 +33,7 @@ import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
 import { PICTURE_MESSAGE, pictureDataUrl } from "@/lib/editor/picture";
 import { scrollBehavior } from "@/components/motion/focus";
-import { readShortcutsOn, toolShortcut, writeShortcutsOn } from "@/lib/editor/keyboard";
+import { pageKey, readShortcutsOn, toolShortcut, typedPage, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
   annotationLabel,
   DEFAULT_SETTINGS,
@@ -109,6 +109,8 @@ export function PdfEditor({
   const [working, setWorking] = useState<"save" | "download" | null>(null);
   /** Read out by screen readers: the page after a page change, or what is being done. */
   const [live, setLive] = useState("");
+  /** The page number as typed in the page box, until it is used. */
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
@@ -637,6 +639,14 @@ export function PdfEditor({
     toast("Fill in the fields, then choose Signature to sign.", "info");
   }, [loaded, toast]);
 
+  /** Goes to the page typed in the page box; anything else puts the box back. */
+  const goToTyped = () => {
+    if (pageDraft === null) return;
+    const to = typedPage(pageDraft, numPages);
+    setPageDraft(null);
+    if (to !== null) setPage(to);
+  };
+
   // ---- keyboard shortcuts ----
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -676,6 +686,13 @@ export function PdfEditor({
         setSelectedId(null);
         return;
       }
+      // Page keys page through the document, unless a list or an annotation uses them.
+      const paged = mod || e.altKey || e.shiftKey || e.defaultPrevented ? null : pageKey(e.key, page, numPages);
+      if (paged !== null && !target?.closest("[data-ann-id], [role=dialog], aside[aria-label=Pages]")) {
+        e.preventDefault();
+        setPage(paged);
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         e.preventDefault();
         deleteAnnotation(selectedId);
@@ -690,7 +707,7 @@ export function PdfEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts]);
+  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts, page, numPages]);
 
   // Don't let a stray tab close, link or Back throw away unsaved edits.
   useUnsavedGuard(dirty);
@@ -905,8 +922,29 @@ export function PdfEditor({
                 >
                   <ChevronLeft />
                 </Button>
-                <span className="px-2 text-sm tabular-nums">
-                  {page + 1} / {numPages}
+                <span className="flex items-center gap-1 px-1 text-sm tabular-nums">
+                  <input
+                    inputMode="numeric"
+                    aria-label="Page number"
+                    value={pageDraft ?? String(page + 1)}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onChange={(e) => setPageDraft(e.target.value.replace(/\D/g, ""))}
+                    onBlur={() => goToTyped()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        goToTyped();
+                      } else if (e.key === "Escape") {
+                        // Back to the page shown, keeping focus here.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setPageDraft(null);
+                      }
+                    }}
+                    style={{ width: `${String(numPages).length + 2}ch` }}
+                    className="h-8 rounded-md border border-input bg-background text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <span className="whitespace-nowrap">/ {numPages}</span>
                 </span>
                 <Button
                   variant="ghost"

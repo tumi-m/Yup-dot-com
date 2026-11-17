@@ -4,6 +4,7 @@ import { deletePages, mergePdfs, reorderPages } from "../lib/pdf/operations.ts";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { historyReducer, type HistoryState } from "../lib/editor/history.ts";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap } from "../lib/editor/page-map.ts";
+import { pageKey, typedPage } from "../lib/editor/keyboard.ts";
 import type { Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
@@ -104,6 +105,16 @@ check("the deleted page shown: the next one, or the last", pageAfter(1, deleteMa
   check("delete keeps the other pages' fields", (await fields(await deletePages(bytes, [0]))) === "city@0 agree@0");
   check("merge keeps the fields", (await fields(await mergePdfs([bytes, bytes]))).startsWith("name@0 city@1 agree@1"));
 }
+
+// The page box and the page keys
+check("page box: the typed page, 0-indexed", typedPage("12", 300) === 11);
+check("page box: past the end goes to the last page", typedPage("999", 300) === 299);
+check("page box: 0 goes to the first page", typedPage("0", 300) === 0);
+check("page box: nothing typed changes nothing", typedPage("", 300) === null && typedPage("  ", 300) === null);
+check("PageDown goes on a page, not past the end", pageKey("PageDown", 4, 300) === 5 && pageKey("PageDown", 299, 300) === 299);
+check("PageUp goes back a page, not before the start", pageKey("PageUp", 4, 300) === 3 && pageKey("PageUp", 0, 300) === 0);
+check("Home and End go to the first and last page", pageKey("Home", 40, 300) === 0 && pageKey("End", 40, 300) === 299);
+check("other keys are not page keys", pageKey("ArrowDown", 4, 300) === null && pageKey("a", 4, 300) === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);
