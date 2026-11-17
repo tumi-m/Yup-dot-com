@@ -7,6 +7,7 @@ import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
 import { createAnnotation, createCentred, resizeDraft, finishDraft } from "@/lib/editor/factory";
 import { pageTouchAction } from "@/lib/editor/canvas";
+import { radioStep, radioTabStops } from "@/lib/editor/keyboard";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
 
@@ -71,6 +72,7 @@ export function PageView({
   // Fields shown as inputs are left off the canvas. They are found after the
   // first render, so the page is drawn again once they are.
   const hasFields = pageFields.length > 0;
+  const radioStops = radioTabStops(pageFields, formValues);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +238,7 @@ export function PageView({
               scale={scale}
               value={formValues[field.name] ?? field.value}
               placing={tool !== "select"}
+              tabStop={radioStops.has(field.id)}
               onChange={(v) => onFormChange(field.name, v)}
             />
           ))}
@@ -290,6 +293,7 @@ function FormFieldOverlay({
   scale,
   value,
   placing,
+  tabStop,
   onChange,
 }: {
   field: DetectedField;
@@ -297,6 +301,8 @@ function FormFieldOverlay({
   value: string;
   /** A tool other than Select is armed: clicks go through to the page. */
   placing: boolean;
+  /** Radio buttons: whether Tab stops on this one of its group. */
+  tabStop: boolean;
   onChange: (value: string) => void;
 }) {
   // A tiny field still gets a box big enough to see and tap, centred on it.
@@ -333,6 +339,12 @@ function FormFieldOverlay({
 
   // The PDF's own description of the field, when it has one.
   const label = field.label ?? field.name;
+  // A required field is marked in its corner.
+  const mark = field.required && (
+    <span aria-hidden className="pointer-events-none absolute -right-1 -top-2 z-10 text-xs font-bold leading-none text-red-600">
+      *
+    </span>
+  );
   const shared =
     "block border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
 
@@ -367,12 +379,14 @@ function FormFieldOverlay({
           role="checkbox"
           aria-checked={value === "true"}
           aria-label={label}
+          aria-required={field.required || undefined}
           onClick={() => onChange(value === "true" ? "" : "true")}
           style={inner}
           className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
         >
           {value === "true" ? "✓" : ""}
         </button>
+        {mark}
       </div>
     );
   }
@@ -386,12 +400,30 @@ function FormFieldOverlay({
           role="radio"
           aria-checked={!!on}
           aria-label={`${label}: ${field.exportValue ?? ""}`}
+          aria-description={field.required ? "Required." : undefined}
+          // One Tab stop per group; arrow keys choose among its buttons on
+          // this page. They can sit far apart, so the group isn't one element.
+          tabIndex={tabStop ? 0 : -1}
+          data-radio-name={field.name}
+          onKeyDown={(e) => {
+            const step = radioStep(e.key);
+            if (!step) return;
+            e.preventDefault();
+            const layer = e.currentTarget.closest("[data-page-layer]");
+            const group = Array.from(
+              layer?.querySelectorAll<HTMLButtonElement>(`[data-radio-name="${CSS.escape(field.name)}"]`) ?? []
+            );
+            const next = group[(group.indexOf(e.currentTarget) + step + group.length) % group.length];
+            next?.focus();
+            next?.click();
+          }}
           onClick={() => onChange(field.exportValue ?? "")}
           style={inner}
           className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
         >
           {on ? "●" : ""}
         </button>
+        {mark}
       </div>
     );
   }
@@ -404,6 +436,7 @@ function FormFieldOverlay({
       <div {...hold} className="leading-none">
         <select
           aria-label={label}
+          aria-required={field.required || undefined}
           size={field.kind === "listbox" ? rows : undefined}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -418,6 +451,7 @@ function FormFieldOverlay({
             </option>
           ))}
         </select>
+        {mark}
       </div>
     );
   }
@@ -427,6 +461,7 @@ function FormFieldOverlay({
       <div {...hold} className="leading-none">
         <textarea
           aria-label={label}
+          aria-required={field.required || undefined}
           value={value}
           maxLength={field.maxLength}
           onChange={(e) => onChange(e.target.value)}
@@ -434,6 +469,7 @@ function FormFieldOverlay({
           data-fit-text
           style={{ ...inner, fontSize }}
         />
+        {mark}
       </div>
     );
   }
@@ -442,6 +478,7 @@ function FormFieldOverlay({
     <div {...hold} className="leading-none">
       <input
         aria-label={label}
+        aria-required={field.required || undefined}
         type={field.password ? "password" : undefined}
         autoComplete={field.password ? "off" : undefined}
         aria-description={field.password ? "Not saved in the PDF." : undefined}
@@ -452,6 +489,7 @@ function FormFieldOverlay({
         data-fit-text
         style={{ ...inner, fontSize }}
       />
+      {mark}
     </div>
   );
 }

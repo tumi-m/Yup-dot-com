@@ -7,6 +7,7 @@ process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/b
 
 import { PDFDocument, PDFName, PDFRawStream, PDFString, decodePDFRawStream, degrees } from "pdf-lib";
 import { detectFormFields, daFontSize, fieldFontSize, fillFormFields } from "../lib/pdf/forms.ts";
+import { radioStep, radioTabStops } from "../lib/editor/keyboard.ts";
 
 let pass = 0;
 let total = 0;
@@ -128,6 +129,25 @@ const pageText = async (bytes: Uint8Array) => {
   return items.join(" ");
 };
 check("Flatten doesn't print the old choice", !(await pageText(await fillFormFields(await choice.save(), { country: "" }, { flatten: true }))).includes("Kenya"));
+
+// Required fields are reported, and a radio group is one Tab stop.
+const req = await PDFDocument.create();
+const reqPage = req.addPage([400, 400]);
+const must = req.getForm().createTextField("must");
+must.addToPage(reqPage, { x: 40, y: 330, width: 200, height: 24 });
+must.enableRequired();
+req.getForm().createTextField("may").addToPage(reqPage, { x: 40, y: 290, width: 200, height: 24 });
+const sizes = req.getForm().createRadioGroup("size");
+for (const [i, o] of ["S", "M", "L"].entries()) sizes.addOptionToPage(o, reqPage, { x: 40 + i * 30, y: 240, width: 16, height: 16 });
+const reqFields = await detectFormFields(await req.save());
+const by = (n: string) => reqFields.filter((f) => f.name === n);
+check("a required field is marked", by("must")[0]?.required === true && by("may")[0]?.required === false, reqFields.map((f) => [f.name, f.required]));
+const radios = by("size");
+const stops = (values: Record<string, string>) => [...radioTabStops(reqFields, values)];
+check("Tab stops on the first radio when none is chosen", stops({}).join() === radios[0].id, stops({}));
+check("and on the chosen one when one is", stops({ size: "L" }).join() === radios[2].id, stops({ size: "L" }));
+check("each page's part of a group gets its own stop", radioTabStops([...radios, { ...radios[1], id: "size::p2", page: 1 }], {}).size === 2);
+check("arrow keys step through the group", radioStep("ArrowRight") === 1 && radioStep("ArrowDown") === 1 && radioStep("ArrowUp") === -1 && radioStep("ArrowLeft") === -1 && radioStep("Tab") === 0);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

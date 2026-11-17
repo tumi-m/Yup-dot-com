@@ -220,6 +220,8 @@ export interface DetectedField {
    */
   rotation: number;
   readOnly: boolean;
+  /** The form won't accept being sent without it (/Ff bit 2). */
+  required: boolean;
 }
 
 /** The last `/Font size Tf` in a /DA string; 0 means "fit the box". */
@@ -344,13 +346,15 @@ export async function detectFormFields(
       // Unreadable value — present the field empty rather than dropping it.
     }
 
-    const readOnly = (() => {
+    const flag = (read: () => boolean) => {
       try {
-        return field.isReadOnly();
+        return read();
       } catch {
         return false;
       }
-    })();
+    };
+    const readOnly = flag(() => field.isReadOnly());
+    const required = flag(() => field.isRequired());
 
     const widgets = field.acroField.getWidgets();
     widgets.forEach((widget, i) => {
@@ -396,6 +400,7 @@ export async function detectFormFields(
         fontSize: fieldFontSize(defaultAppearance(form, field, widget), height),
         rotation: (frame.rotation - own + 360) % 360,
         readOnly,
+        required,
       });
     });
   }
