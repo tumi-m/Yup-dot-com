@@ -581,8 +581,10 @@ function TextBody({
       aria-label="Text"
       spellCheck={false}
       data-fit-text
-      className="block resize-none overflow-hidden border-none bg-transparent p-0 leading-tight outline-none"
+      className="block resize-none overflow-hidden border-none bg-transparent p-0 outline-none"
       style={{
+        // The saved file's line spacing, so long text ends where it will print.
+        lineHeight: 1.2,
         width: `${100 * k}%`,
         height: `${100 * k}%`,
         transform: k === 1 ? undefined : `scale(${1 / k})`,
