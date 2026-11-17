@@ -16,6 +16,7 @@ import {
   Timer,
   TrendingDown,
   Info,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +81,8 @@ const NEXT_STEPS: Record<string, string[]> = {
   "resize-pdf": ["compress-pdf", "page-numbers", "merge-pdf", "protect-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
   "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
+  // Pages that came back as pictures can be read again with OCR.
+  "repair-pdf": ["compress-pdf", "ocr-pdf", "edit-pdf", "merge-pdf"],
   // An encrypted result can't be opened by the other tools.
   "protect-pdf": [],
 };
@@ -431,6 +434,22 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
                   Already optimized
                 </span>
+              )}
+              {results.length === 1 && results[0].report && (
+                <ul className="w-full max-w-md space-y-1.5 text-left" aria-label="What was done">
+                  {results[0].report.map((line) => (
+                    <li
+                      key={line.text}
+                      className={cn(
+                        "flex items-start gap-1.5 rounded-lg px-2.5 py-1.5",
+                        line.warn ? "bg-amber-100 font-medium text-amber-800" : "bg-secondary text-muted-foreground"
+                      )}
+                    >
+                      {line.warn ? <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /> : <Check className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />}
+                      {line.text}
+                    </li>
+                  ))}
+                </ul>
               )}
               {results.length === 1 && results[0].note && (
                 <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-left font-medium text-amber-800">

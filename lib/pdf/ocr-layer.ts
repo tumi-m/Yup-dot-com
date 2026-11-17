@@ -130,7 +130,7 @@ export function newWords(src: OcrText, own: OwnText[]): OcrWord[] {
  * The standard fonts are WinAnsi-only; skip words they cannot encode. WinAnsi
  * has curly quotes, dashes, € and œ, which Word and PowerPoint text is full of.
  */
-function encodable(font: PDFFont, text: string) {
+export function encodable(font: PDFFont, text: string) {
   try {
     font.encodeText(text);
     return true;

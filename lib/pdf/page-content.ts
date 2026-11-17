@@ -110,3 +110,16 @@ export async function showsPictures(page: PDFPageProxy, OPS: Record<string, numb
   }
   return false;
 }
+
+/** Operators that put something on the page: text, paths, pictures, shadings. */
+const PAINTING = /^(show|nextLineShow|nextLineSetSpacingShow|stroke|closeStroke|fill|eoFill|closeFill|closeEOFill|shadingFill|paint)/;
+
+/**
+ * True when the page draws anything at all, its comments and fields
+ * included: a page whose content is missing or unreadable draws nothing.
+ */
+export async function paints(page: PDFPageProxy, OPS: Record<string, number>): Promise<boolean> {
+  const drawing = new Set(Object.entries(OPS).filter(([name]) => PAINTING.test(name)).map(([, id]) => id));
+  const { fnArray } = await page.getOperatorList();
+  return fnArray.some((fn) => drawing.has(fn));
+}

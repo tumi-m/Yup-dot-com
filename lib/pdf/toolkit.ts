@@ -22,6 +22,8 @@ export interface ToolFile {
   filename: string;
   /** A short line for the result, e.g. what was left as it was. */
   note?: string;
+  /** Short lines on what was done; `warn` marks what was lost or changed. */
+  report?: { text: string; warn?: boolean }[];
 }
 
 function hexToRgb(hex: string) {
@@ -289,6 +291,22 @@ export async function flattenTool(
     return { blob: pdfBlob(bytes), filename: suffixed(file, "flattened"), note: flattenNote(report) };
   } catch (err) {
     if (isAbort(err) || err instanceof NothingToFlattenError) throw err;
+    throw friendlyPdfError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Repair — a damaged file read as far as it goes and written anew; pages that
+// won't copy become pictures (see lib/pdf/repair).
+// ---------------------------------------------------------------------------
+export async function repairTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const { repairPdf, repairLines, NothingRecoveredError, NotAPdfError } = await import("./repair");
+  try {
+    const { bytes, report } = await repairPdf(files[0], { progress: ctx.progress, signal: ctx.signal });
+    return { blob: pdfBlob(bytes), filename: suffixed(files[0], "repaired"), report: repairLines(report) };
+  } catch (err) {
+    // Its own messages already say what happened, plainly.
+    if (isAbort(err) || err instanceof NothingRecoveredError || err instanceof NotAPdfError) throw err;
     throw friendlyPdfError(err);
   }
 }
