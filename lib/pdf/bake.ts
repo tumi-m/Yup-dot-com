@@ -19,6 +19,7 @@ import { drawFields } from "./forms";
 import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
 import { openPdf } from "./open";
 import { pageFrame } from "./page-frame";
+import { renderTextImage } from "./text-image";
 import { stampWatermark } from "./watermark";
 
 function dataUrlBytes(url: string): Uint8Array | null {
@@ -102,57 +103,6 @@ function safeText(text: string, font: PDFFont): string {
     }
   };
   return Array.from(text, (ch) => (/\s/.test(ch) || drawable(ch) ? ch : "?")).join("");
-}
-
-/**
- * Renders wrapped text (any script) to a transparent PNG, sized in points.
- * Browser only; returns null where canvas isn't available.
- */
-async function renderTextImage(
-  text: string,
-  fontSize: number,
-  color: string,
-  bold: boolean,
-  maxWidth: number
-): Promise<{ png: Uint8Array; width: number; height: number } | null> {
-  const k = 4; // pixels per point, for print-quality edges
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const font = `${bold ? "bold " : ""}${fontSize * k}px Helvetica, Arial, "Noto Sans", sans-serif`;
-  ctx.font = font;
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    let line = "";
-    // Split on spaces, or between characters for scripts written without them.
-    for (const word of paragraph.match(/\S+\s*|\s+/g) ?? [""]) {
-      const candidate = line + word;
-      if (!line || ctx.measureText(candidate.trimEnd()).width <= maxWidth * k) line = candidate;
-      else {
-        lines.push(line.trimEnd());
-        line = word;
-      }
-      while (ctx.measureText(line.trimEnd()).width > maxWidth * k && line.length > 1) {
-        let cut = line.length - 1;
-        while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > maxWidth * k) cut--;
-        lines.push(line.slice(0, cut));
-        line = line.slice(cut);
-      }
-    }
-    lines.push(line.trimEnd());
-  }
-  const lineHeight = fontSize * 1.2;
-  const width = Math.max(1, Math.min(maxWidth, Math.max(...lines.map((l) => ctx.measureText(l).width / k))));
-  const height = lines.length * lineHeight;
-  canvas.width = Math.ceil(width * k);
-  canvas.height = Math.ceil(height * k);
-  ctx.font = font;
-  ctx.fillStyle = color;
-  ctx.textBaseline = "alphabetic";
-  lines.forEach((line, i) => ctx.fillText(line, 0, (i * lineHeight + fontSize) * k));
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return null;
-  return { png: new Uint8Array(await blob.arrayBuffer()), width: canvas.width / k, height: canvas.height / k };
 }
 
 function wrapText(
@@ -580,7 +530,7 @@ export async function bakeAnnotations(
     if (transformed) page.pushOperators(popGraphicsState());
   }
 
-  drawFields(form, helvetica);
+  await drawFields(form, helvetica);
 
   if (options.watermark) await stampWatermark(doc, helvetica);
 

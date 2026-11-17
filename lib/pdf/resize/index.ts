@@ -328,7 +328,7 @@ async function flattenForm(doc: PDFDocument) {
       for (const field of form.getFields()) form.markFieldAsDirty(field.ref);
     }
     acroForm.dict.delete(N.NeedAppearances);
-    drawFields(form, await doc.embedFont(StandardFonts.Helvetica));
+    await drawFields(form, await doc.embedFont(StandardFonts.Helvetica));
     if (acroForm.dict.lookup(N.NeedAppearances)) return;
     form.flatten({ updateFieldAppearances: false });
   } catch {
