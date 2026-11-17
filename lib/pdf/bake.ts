@@ -19,6 +19,7 @@ import { drawFields } from "./forms";
 import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
 import { openPdf } from "./open";
 import { pageFrame } from "./page-frame";
+import { renderTextImage } from "./text-image";
 import { stampWatermark } from "./watermark";
 
 function dataUrlBytes(url: string): Uint8Array | null {
@@ -104,57 +105,6 @@ function safeText(text: string, font: PDFFont): string {
   return Array.from(text, (ch) => (/\s/.test(ch) || drawable(ch) ? ch : "?")).join("");
 }
 
-/**
- * Renders wrapped text (any script) to a transparent PNG, sized in points.
- * Browser only; returns null where canvas isn't available.
- */
-async function renderTextImage(
-  text: string,
-  fontSize: number,
-  color: string,
-  bold: boolean,
-  maxWidth: number
-): Promise<{ png: Uint8Array; width: number; height: number } | null> {
-  const k = 4; // pixels per point, for print-quality edges
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const font = `${bold ? "bold " : ""}${fontSize * k}px Helvetica, Arial, "Noto Sans", sans-serif`;
-  ctx.font = font;
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    let line = "";
-    // Split on spaces, or between characters for scripts written without them.
-    for (const word of paragraph.match(/\S+\s*|\s+/g) ?? [""]) {
-      const candidate = line + word;
-      if (!line || ctx.measureText(candidate.trimEnd()).width <= maxWidth * k) line = candidate;
-      else {
-        lines.push(line.trimEnd());
-        line = word;
-      }
-      while (ctx.measureText(line.trimEnd()).width > maxWidth * k && line.length > 1) {
-        let cut = line.length - 1;
-        while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > maxWidth * k) cut--;
-        lines.push(line.slice(0, cut));
-        line = line.slice(cut);
-      }
-    }
-    lines.push(line.trimEnd());
-  }
-  const lineHeight = fontSize * 1.2;
-  const width = Math.max(1, Math.min(maxWidth, Math.max(...lines.map((l) => ctx.measureText(l).width / k))));
-  const height = lines.length * lineHeight;
-  canvas.width = Math.ceil(width * k);
-  canvas.height = Math.ceil(height * k);
-  ctx.font = font;
-  ctx.fillStyle = color;
-  ctx.textBaseline = "alphabetic";
-  lines.forEach((line, i) => ctx.fillText(line, 0, (i * lineHeight + fontSize) * k));
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return null;
-  return { png: new Uint8Array(await blob.arrayBuffer()), width: canvas.width / k, height: canvas.height / k };
-}
-
 function wrapText(
   text: string,
   font: PDFFont,
@@ -162,6 +112,7 @@ function wrapText(
   maxWidth: number
 ): string[] {
   const lines: string[] = [];
+  const fits = (s: string) => font.widthOfTextAtSize(s, size) <= maxWidth;
   for (const paragraph of safeText(text, font).split("\n")) {
     if (!paragraph) {
       lines.push("");
@@ -170,11 +121,21 @@ function wrapText(
     let line = "";
     for (const word of paragraph.split(/\s+/)) {
       const candidate = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth || !line) {
+      if (fits(candidate) || !line) {
         line = candidate;
       } else {
         lines.push(line);
         line = word;
+      }
+      // A word wider than the box (a long link) breaks between letters, as
+      // the editor shows it, instead of running off the page.
+      let chars = Array.from(line);
+      while (chars.length > 1 && !fits(line)) {
+        let cut = chars.length - 1;
+        while (cut > 1 && !fits(chars.slice(0, cut).join(""))) cut--;
+        lines.push(chars.slice(0, cut).join(""));
+        chars = chars.slice(cut);
+        line = chars.join("");
       }
     }
     if (line) lines.push(line);
@@ -365,6 +326,21 @@ export async function bakeAnnotations(
             font: helveticaBold,
             color: rgb(0.15, 0.12, 0.05),
           });
+          // Other scripts as a picture of the text, as for text boxes.
+          if (/[^\x00-\xFF]/.test(ann.text) && typeof document !== "undefined") {
+            const img = await renderTextImage(ann.text, 9, "#1a1a1a", false, ann.width - 10, ann.height - headerHeight - 4);
+            if (img) {
+              const embedded = await doc.embedPng(img.png);
+              // Its first baseline where Helvetica's would be.
+              page.drawImage(embedded, {
+                x: ann.x + 5,
+                y: bottom + ann.height - headerHeight - 3 - img.height,
+                width: img.width,
+                height: img.height,
+              });
+              break;
+            }
+          }
           const lines = wrapText(ann.text, helvetica, 9, ann.width - 10);
           lines.forEach((line, i) => {
             const y = bottom + ann.height - headerHeight - 12 - i * 11;
@@ -580,7 +556,7 @@ export async function bakeAnnotations(
     if (transformed) page.pushOperators(popGraphicsState());
   }
 
-  drawFields(form, helvetica);
+  await drawFields(form, helvetica);
 
   if (options.watermark) await stampWatermark(doc, helvetica);
 

@@ -5,8 +5,9 @@ import { flushSync } from "react-dom";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
-import { createAnnotation, createCentred, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
+import { createAnnotation, createCentred, resizeDraft, finishDraft } from "@/lib/editor/factory";
 import { pageTouchAction } from "@/lib/editor/canvas";
+import { radioStep, radioTabStops } from "@/lib/editor/keyboard";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
 
@@ -67,6 +68,11 @@ export function PageView({
   const focusNew = useRef<string | null>(null);
   const hint = useId();
   const textHint = useId();
+  const pageFields = formFields.filter((f) => f.page === pageIndex);
+  // Fields shown as inputs are left off the canvas. They are found after the
+  // first render, so the page is drawn again once they are.
+  const hasFields = pageFields.length > 0;
+  const radioStops = radioTabStops(pageFields, formValues);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,7 +81,7 @@ export function PageView({
       if (cancelled) return;
       setSize({ w: vp.width, h: vp.height });
       if (canvasRef.current) {
-        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale);
+        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale, { forms: hasFields });
         if (!cancelled) onRendered?.({ width: vp.width, height: vp.height });
       }
     })();
@@ -83,7 +89,7 @@ export function PageView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, pageIndex, scale]);
+  }, [loaded, pageIndex, scale, hasFields]);
 
   function toPoints(e: React.PointerEvent) {
     const rect = layerRef.current!.getBoundingClientRect();
@@ -195,17 +201,15 @@ export function PageView({
     } catch {
       /* already released */
     }
-    const finished = draft;
+    const finished = draft && finishDraft(draft);
     setDraft(null);
     origin.current = null;
-    if (finished && isDraftUsable(finished)) onCreate(finished);
+    if (finished) onCreate(finished);
   }
 
   const editable = tool === "select";
   const cursor =
     tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
-
-  const pageFields = formFields.filter((f) => f.page === pageIndex);
 
   return (
     <div className="relative inline-block">
@@ -233,6 +237,8 @@ export function PageView({
               field={field}
               scale={scale}
               value={formValues[field.name] ?? field.value}
+              placing={tool !== "select"}
+              tabStop={radioStops.has(field.id)}
               onChange={(v) => onFormChange(field.name, v)}
             />
           ))}
@@ -286,43 +292,101 @@ function FormFieldOverlay({
   field,
   scale,
   value,
+  placing,
+  tabStop,
   onChange,
 }: {
   field: DetectedField;
   scale: number;
   value: string;
+  /** A tool other than Select is armed: clicks go through to the page. */
+  placing: boolean;
+  /** Radio buttons: whether Tab stops on this one of its group. */
+  tabStop: boolean;
   onChange: (value: string) => void;
 }) {
+  // A tiny field still gets a box big enough to see and tap, centred on it.
+  const width = Math.max(8, field.width * scale);
+  const height = Math.max(8, field.height * scale);
   const style: React.CSSProperties = {
     position: "absolute",
-    left: field.x * scale,
-    top: field.y * scale,
-    width: Math.max(8, field.width * scale),
-    height: Math.max(8, field.height * scale),
+    left: field.x * scale - (width - field.width * scale) / 2,
+    top: field.y * scale - (height - field.height * scale) / 2,
+    width,
+    height,
   };
+  // Clicks fill the field, or, with a tool armed, place on the page over it
+  // (a signature on a signature line).
+  const hold: React.HTMLAttributes<HTMLDivElement> = placing
+    ? { style: { ...style, pointerEvents: "none" } }
+    : { style, onPointerDown: (e) => e.stopPropagation() };
+  // The text size the PDF draws the field at.
+  const fontSize = field.fontSize * scale;
+  // On a turned page the control keeps the field's own shape and turns with
+  // it, centred on the box the field takes up on screen.
+  const turn = field.rotation;
+  const sideways = turn === 90 || turn === 270;
+  const inner: React.CSSProperties | undefined = turn
+    ? {
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        width: sideways ? height : width,
+        height: sideways ? width : height,
+        transform: `translate(-50%, -50%) rotate(${turn}deg)`,
+      }
+    : undefined;
 
   // The PDF's own description of the field, when it has one.
   const label = field.label ?? field.name;
+  // A required field is marked in its corner.
+  const mark = field.required && (
+    <span aria-hidden className="pointer-events-none absolute -right-1 -top-2 z-10 text-xs font-bold leading-none text-red-600">
+      *
+    </span>
+  );
   const shared =
-    "border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
+    "block border border-emerald-500/70 bg-emerald-400/10 outline-none focus:ring-2 focus:ring-emerald-500";
 
   if (field.readOnly) {
-    return <div style={style} className="pointer-events-none rounded-sm border border-dashed border-muted-foreground/40" />;
+    // The page leaves out the fields shown here as inputs, read-only ticks and
+    // choices too; show their value. Read-only text is still on the page.
+    const shown =
+      field.kind === "checkbox" ? (value === "true" ? "✓" : "")
+      : field.kind === "radio" ? (value && field.exportValue === value ? "●" : "")
+      : field.kind === "dropdown" || field.kind === "listbox" ? value
+      : "";
+    const choice = field.kind === "dropdown" || field.kind === "listbox";
+    return (
+      <div style={style} className="pointer-events-none leading-none">
+        <div
+          style={{ ...inner, fontSize: choice ? fontSize : undefined }}
+          className={`flex h-full w-full overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 text-slate-600 ${
+            choice ? "px-1" : "justify-center text-sm"
+          } ${field.kind === "listbox" ? "items-start pt-0.5" : "items-center"}`}
+        >
+          {shown}
+        </div>
+      </div>
+    );
   }
 
   if (field.kind === "checkbox") {
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <button
           type="button"
           role="checkbox"
           aria-checked={value === "true"}
           aria-label={label}
+          aria-required={field.required || undefined}
           onClick={() => onChange(value === "true" ? "" : "true")}
+          style={inner}
           className={`flex h-full w-full items-center justify-center rounded-sm text-sm ${shared}`}
         >
           {value === "true" ? "✓" : ""}
         </button>
+        {mark}
       </div>
     );
   }
@@ -330,31 +394,55 @@ function FormFieldOverlay({
   if (field.kind === "radio") {
     const on = value && field.exportValue === value;
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <button
           type="button"
           role="radio"
           aria-checked={!!on}
           aria-label={`${label}: ${field.exportValue ?? ""}`}
+          aria-description={field.required ? "Required." : undefined}
+          // One Tab stop per group; arrow keys choose among its buttons on
+          // this page. They can sit far apart, so the group isn't one element.
+          tabIndex={tabStop ? 0 : -1}
+          data-radio-name={field.name}
+          onKeyDown={(e) => {
+            const step = radioStep(e.key);
+            if (!step) return;
+            e.preventDefault();
+            const layer = e.currentTarget.closest("[data-page-layer]");
+            const group = Array.from(
+              layer?.querySelectorAll<HTMLButtonElement>(`[data-radio-name="${CSS.escape(field.name)}"]`) ?? []
+            );
+            const next = group[(group.indexOf(e.currentTarget) + step + group.length) % group.length];
+            next?.focus();
+            next?.click();
+          }}
           onClick={() => onChange(field.exportValue ?? "")}
+          style={inner}
           className={`flex h-full w-full items-center justify-center rounded-full text-sm ${shared}`}
         >
           {on ? "●" : ""}
         </button>
+        {mark}
       </div>
     );
   }
 
-  if (field.kind === "dropdown") {
+  if (field.kind === "dropdown" || field.kind === "listbox") {
+    // A list box shows as many options as its height holds.
+    const ownHeight = sideways ? field.width : field.height;
+    const rows = Math.max(2, Math.min(field.options.length, Math.floor(ownHeight / ((field.fontSize || 10) * 1.2))));
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <select
           aria-label={label}
+          aria-required={field.required || undefined}
+          size={field.kind === "listbox" ? rows : undefined}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
           data-fit-text
-          style={{ fontSize: Math.max(8, field.height * scale * 0.6) }}
+          style={{ ...inner, fontSize }}
         >
           <option value="">—</option>
           {field.options.map((o) => (
@@ -363,37 +451,45 @@ function FormFieldOverlay({
             </option>
           ))}
         </select>
+        {mark}
       </div>
     );
   }
 
   if (field.multiline) {
     return (
-      <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <textarea
           aria-label={label}
+          aria-required={field.required || undefined}
           value={value}
           maxLength={field.maxLength}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full resize-none rounded-sm px-1 leading-tight ${shared}`}
           data-fit-text
-          style={{ fontSize: Math.max(8, Math.min(12, field.height * 0.55) * scale) }}
+          style={{ ...inner, fontSize }}
         />
+        {mark}
       </div>
     );
   }
 
   return (
-    <div style={style} onPointerDown={(e) => e.stopPropagation()}>
+    <div {...hold} className="leading-none">
       <input
         aria-label={label}
+        aria-required={field.required || undefined}
+        type={field.password ? "password" : undefined}
+        autoComplete={field.password ? "off" : undefined}
+        aria-description={field.password ? "Not saved in the PDF." : undefined}
         value={value}
         maxLength={field.maxLength}
         onChange={(e) => onChange(e.target.value)}
         className={`h-full w-full rounded-sm px-1 ${shared}`}
         data-fit-text
-        style={{ fontSize: Math.max(8, field.height * scale * 0.55) }}
+        style={{ ...inner, fontSize }}
       />
+      {mark}
     </div>
   );
 }

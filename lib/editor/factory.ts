@@ -213,10 +213,29 @@ export function resizeDraft(
   };
 }
 
-/** Discards accidental zero-size shapes produced by a stray click. */
-export function isDraftUsable(draft: Annotation): boolean {
-  if (draft.type === "draw") return draft.points.length > 2;
-  return draft.width >= 4 && draft.height >= 4;
+/** How tall a highlight, underline or strikeout is when dragged along a line. */
+const MARK_HEIGHT = 14;
+
+/**
+ * The annotation a creation drag makes, or null for a stray click. A level
+ * or upright line has no height or width, so it counts by its length. A
+ * mark dragged along a line of text gets the usual height, placed so the
+ * mark lands where the drag went: an underline's line is at its bottom.
+ */
+export function finishDraft(draft: Annotation): Annotation | null {
+  if (draft.type === "draw") return draft.points.length > 2 ? draft : null;
+  if (draft.type === "shape" && (draft.shape === "line" || draft.shape === "arrow")) {
+    const { x1 = draft.x, y1 = draft.y, x2 = draft.x + draft.width, y2 = draft.y + draft.height } = draft;
+    return Math.hypot(x2 - x1, y2 - y1) >= 4 ? draft : null;
+  }
+  if (draft.type === "markup") {
+    if (draft.width < 4) return null;
+    if (draft.height >= 4) return draft;
+    const dragY = draft.y + draft.height / 2;
+    const y = draft.markup === "underline" ? dragY - MARK_HEIGHT : dragY - MARK_HEIGHT / 2;
+    return { ...draft, y: Math.max(0, y), height: MARK_HEIGHT };
+  }
+  return draft.width >= 4 && draft.height >= 4 ? draft : null;
 }
 
 /** The box a drag tool gets when it is placed from the keyboard, in points. */
@@ -226,9 +245,9 @@ const KEYBOARD_SIZE: Partial<Record<ToolId, [number, number]>> = {
   whiteout: [120, 40],
   line: [120, 0],
   arrow: [120, 0],
-  highlight: [120, 14],
-  underline: [120, 14],
-  strikeout: [120, 14],
+  highlight: [120, MARK_HEIGHT],
+  underline: [120, MARK_HEIGHT],
+  strikeout: [120, MARK_HEIGHT],
   link: [120, 20],
   "field-text": [160, 24],
   "field-checkbox": [16, 16],

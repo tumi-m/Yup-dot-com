@@ -1,4 +1,5 @@
 import { annotationLabel, type Annotation, type ToolId } from "./types";
+import type { DetectedField } from "@/lib/pdf/forms";
 
 /** Single-key tool shortcuts (V for Select, T for Add text, ...). */
 export const TOOL_SHORTCUTS: Record<string, ToolId> = {
@@ -157,4 +158,28 @@ export function pageActionFocus(
   if (!ok || action === "rotate") return { index, action, pages: numPages };
   if (action === "insert") return { index: index + 1, pages: numPages + 1 };
   return { index: Math.min(index, numPages - 2), pages: numPages - 1 };
+}
+
+/**
+ * The radio buttons Tab stops on, one per group on a page: the checked one,
+ * or the first when none is. Arrow keys move between the rest.
+ */
+export function radioTabStops(fields: DetectedField[], values: Record<string, string>): Set<string> {
+  const first = new Map<string, string>();
+  const checked = new Map<string, string>();
+  for (const f of fields) {
+    if (f.kind !== "radio" || f.readOnly) continue;
+    const group = `${f.page}:${f.name}`;
+    const value = values[f.name] ?? f.value;
+    if (!first.has(group)) first.set(group, f.id);
+    if (value && f.exportValue === value && !checked.has(group)) checked.set(group, f.id);
+  }
+  return new Set([...first].map(([group, id]) => checked.get(group) ?? id));
+}
+
+/** Which way an arrow key moves through a radio group: 1, -1, or 0 for other keys. */
+export function radioStep(key: string): number {
+  if (key === "ArrowRight" || key === "ArrowDown") return 1;
+  if (key === "ArrowLeft" || key === "ArrowUp") return -1;
+  return 0;
 }

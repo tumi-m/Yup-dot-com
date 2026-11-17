@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,15 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { inkBounds } from "@/lib/editor/signature";
+
+/** The pen: set before each stroke, since typing a name shares the context. */
+function pen(ctx: CanvasRenderingContext2D) {
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#0f172a";
+}
 
 /** A modal canvas where the user draws a signature, returned as a PNG data URL. */
 export function SignaturePad({
@@ -25,7 +34,7 @@ export function SignaturePad({
   /** Once the dialog has closed; prevent the default to put focus elsewhere. */
   onCloseAutoFocus?: (event: Event) => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const drawing = useRef(false);
   const hasInk = useRef(false);
@@ -53,21 +62,22 @@ export function SignaturePad({
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
   }
 
+  // Each time it opens, start empty. The canvas itself is new each time
+  // (the dialog mounts its content after this runs), so it is set up below.
   useEffect(() => {
     if (!open) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineWidth = 2.5;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#0f172a";
     hasInk.current = false;
     setEmpty(true);
     setTyped("");
   }, [open]);
+
+  const setCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
+    canvasRef.current = canvas;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    pen(ctx);
+  }, []);
 
   function pos(e: React.PointerEvent<HTMLCanvasElement>) {
     // The canvas is drawn at a fixed resolution but shown at the dialog's
@@ -85,6 +95,7 @@ export function SignaturePad({
     drawing.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
     const ctx = canvasRef.current!.getContext("2d")!;
+    pen(ctx);
     const { x, y } = pos(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -113,8 +124,21 @@ export function SignaturePad({
   }
 
   function save(keyboard: boolean) {
-    if (!hasInk.current) return;
-    onSave(canvasRef.current!.toDataURL("image/png"), keyboard);
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!hasInk.current || !canvas || !ctx) return;
+    // Just the ink, so a small signature fills the box it is placed in.
+    const box = inkBounds(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, 6);
+    if (!box) {
+      hasInk.current = false;
+      setEmpty(true);
+      return;
+    }
+    const out = document.createElement("canvas");
+    out.width = box.width;
+    out.height = box.height;
+    out.getContext("2d")!.drawImage(canvas, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+    onSave(out.toDataURL("image/png"), keyboard);
     onOpenChange(false);
   }
 
@@ -138,7 +162,7 @@ export function SignaturePad({
           </DialogDescription>
         </DialogHeader>
         <canvas
-          ref={canvasRef}
+          ref={setCanvas}
           width={460}
           height={180}
           aria-label="Signature"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
@@ -273,7 +273,11 @@ export function AnnotationView({
               e.stopPropagation();
               onDelete();
             }}
-            className="absolute -right-3 -top-3 z-30 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
+            // Clear of the corner handles: above the middle, or below when the
+            // box is at the top of the page.
+            className={`absolute left-1/2 z-30 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow pointer-coarse:h-8 pointer-coarse:w-8 ${
+              ann.y * scale < 44 ? "-bottom-10 pointer-coarse:-bottom-11" : "-top-10 pointer-coarse:-top-11"
+            }`}
             aria-label="Delete"
           >
             <Trash2 className="h-3 w-3" />
@@ -286,7 +290,8 @@ export function AnnotationView({
               onPointerMove={move}
               onPointerUp={end}
               style={{ cursor: CURSORS[h], ...handlePosition(h, ann) }}
-              className="absolute z-30 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-primary shadow"
+              // A finger gets a bigger target than the dot shows.
+              className="absolute z-30 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-primary shadow pointer-coarse:before:absolute pointer-coarse:before:-inset-[7px] pointer-coarse:before:content-['']"
             />
           ))}
         </>
@@ -350,7 +355,8 @@ function Content({
             points={ann.points.map((p) => `${p.x},${p.y}`).join(" ")}
             fill="none"
             stroke={ann.color}
-            strokeWidth={ann.strokeWidth}
+            // Points on the page, like the saved file; the box itself stretches.
+            strokeWidth={ann.strokeWidth * scale}
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
@@ -403,18 +409,23 @@ function Content({
         );
       }
       if (ann.shape === "line" || ann.shape === "arrow") {
-        const w = Math.max(1, ann.width);
-        const h = Math.max(1, ann.height);
-        const x1 = ((ann.x1 ?? ann.x) - ann.x);
-        const y1 = ((ann.y1 ?? ann.y) - ann.y);
-        const x2 = ((ann.x2 ?? ann.x + w) - ann.x);
-        const y2 = ((ann.y2 ?? ann.y + h) - ann.y);
+        // Drawn in screen pixels, one to one with the box, so a level line
+        // (a box 1px tall) doesn't squash the arrow head.
+        const w = Math.max(1, ann.width * scale);
+        const h = Math.max(1, ann.height * scale);
+        const x1 = ((ann.x1 ?? ann.x) - ann.x) * scale;
+        const y1 = ((ann.y1 ?? ann.y) - ann.y) * scale;
+        const x2 = ((ann.x2 ?? ann.x + ann.width) - ann.x) * scale;
+        const y2 = ((ann.y2 ?? ann.y + ann.height) - ann.y) * scale;
         const id = `arrow-${ann.id}`;
+        // The saved head, in stroke widths: two strokes `head` points long,
+        // 0.18 of a turn off the line, plus the strokes' own thickness.
+        const head = Math.max(8, ann.strokeWidth * 4) / Math.max(0.1, ann.strokeWidth);
         return (
-          <svg className="pointer-events-none h-full w-full overflow-visible" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+          <svg className="pointer-events-none h-full w-full overflow-visible" viewBox={`0 0 ${w} ${h}`}>
             {ann.shape === "arrow" && (
               <defs>
-                <marker id={id} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <marker id={id} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={head * 0.84 + 0.5} markerHeight={head * 1.07 + 1} preserveAspectRatio="none" orient="auto-start-reverse">
                   <path d="M 0 0 L 10 5 L 0 10 z" fill={ann.stroke} />
                 </marker>
               </defs>
@@ -422,10 +433,10 @@ function Content({
             <line
               x1={x1} y1={y1} x2={x2} y2={y2}
               stroke={ann.stroke}
-              strokeWidth={ann.strokeWidth}
+              // Points on the page, like the saved file.
+              strokeWidth={ann.strokeWidth * scale}
               strokeLinecap="round"
               opacity={ann.opacity}
-              vectorEffect="non-scaling-stroke"
               markerEnd={ann.shape === "arrow" ? `url(#${id})` : undefined}
             />
           </svg>
@@ -542,6 +553,15 @@ function TextBody({
     // Only when the box first appears.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A bigger or bolder font (Properties) grows the box to show every line,
+  // as the saved file prints them. A live change, so it undoes with the font.
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const needed = box.scrollHeight / k / scale;
+    if (needed > ann.height + 1) onChange({ ...ann, height: Math.ceil(needed) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ann.fontSize, ann.bold, scale]);
   return (
     <textarea
       ref={ref}
@@ -566,8 +586,10 @@ function TextBody({
       aria-label="Text"
       spellCheck={false}
       data-fit-text
-      className="block resize-none overflow-hidden border-none bg-transparent p-0 leading-tight outline-none"
+      className="block resize-none overflow-hidden border-none bg-transparent p-0 outline-none"
       style={{
+        // The saved file's line spacing, so long text ends where it will print.
+        lineHeight: 1.2,
         width: `${100 * k}%`,
         height: `${100 * k}%`,
         transform: k === 1 ? undefined : `scale(${1 / k})`,
