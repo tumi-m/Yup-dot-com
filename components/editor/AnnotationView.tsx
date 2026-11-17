@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { ExternalLink, Trash2 } from "lucide-react";
 import type { Annotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
@@ -548,6 +548,15 @@ function TextBody({
     // Only when the box first appears.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A bigger or bolder font (Properties) grows the box to show every line,
+  // as the saved file prints them. A live change, so it undoes with the font.
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const needed = box.scrollHeight / k / scale;
+    if (needed > ann.height + 1) onChange({ ...ann, height: Math.ceil(needed) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ann.fontSize, ann.bold, scale]);
   return (
     <textarea
       ref={ref}
