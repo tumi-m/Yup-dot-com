@@ -176,6 +176,12 @@ function annotationsOf(page: PDFPage): PDFDict[] {
   return out;
 }
 
+/** Takes the widgets no page shows out of the form, and fields left with none. */
+export function dropFieldsOffPages(doc: PDFDocument) {
+  const onPages = new Set(doc.getPages().flatMap(annotationsOf));
+  dropFields(doc, (w) => !onPages.has(w.dict));
+}
+
 /** Takes the widgets `gone` picks out of the form, and fields left with none. */
 function dropFields(doc: PDFDocument, gone: (widget: PDFWidgetAnnotation) => boolean) {
   const acroForm = doc.catalog.getAcroForm();
@@ -863,8 +869,7 @@ async function extractPart(
 
   if (kept.size < srcPages.length) {
     dropLinksTo(doc, new Set([gone]));
-    const onPages = new Set(doc.getPages().flatMap(annotationsOf));
-    dropFields(doc, (w) => !onPages.has(w.dict));
+    dropFieldsOffPages(doc);
   }
   copyTags(src, doc, tags, new Set(order.map((i) => srcPages[i].ref)), copy, numbers);
   dropXfa(doc);
