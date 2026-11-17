@@ -203,6 +203,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }, ctx),
   },
   "pdf-to-text": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -210,6 +211,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToTextTool(files, ctx),
   },
   "pdf-to-markdown": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -217,6 +219,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToMarkdownTool(files, ctx),
   },
   "extract-tables": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -225,6 +228,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).extractTablesTool(files, ctx),
   },
   "pdf-to-chunks": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -244,13 +248,16 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).pdfToChunksTool(files, { maxChars: o.maxChars }, ctx),
   },
   "pdf-to-word": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
+    note: "Pictures and links aren't carried over.",
     run: async (files, _o, ctx) => (await kit()).pdfToWordTool(files, ctx),
   },
   "pdf-to-pptx": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -272,6 +279,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     },
   },
   "pdf-to-excel": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
