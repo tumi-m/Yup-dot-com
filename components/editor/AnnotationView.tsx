@@ -273,7 +273,11 @@ export function AnnotationView({
               e.stopPropagation();
               onDelete();
             }}
-            className="absolute -right-3 -top-3 z-30 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"
+            // Clear of the corner handles: above the middle, or below when the
+            // box is at the top of the page.
+            className={`absolute left-1/2 z-30 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow pointer-coarse:h-8 pointer-coarse:w-8 ${
+              ann.y * scale < 44 ? "-bottom-10 pointer-coarse:-bottom-11" : "-top-10 pointer-coarse:-top-11"
+            }`}
             aria-label="Delete"
           >
             <Trash2 className="h-3 w-3" />
@@ -286,7 +290,8 @@ export function AnnotationView({
               onPointerMove={move}
               onPointerUp={end}
               style={{ cursor: CURSORS[h], ...handlePosition(h, ann) }}
-              className="absolute z-30 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-primary shadow"
+              // A finger gets a bigger target than the dot shows.
+              className="absolute z-30 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-primary shadow pointer-coarse:before:absolute pointer-coarse:before:-inset-[7px] pointer-coarse:before:content-['']"
             />
           ))}
         </>
