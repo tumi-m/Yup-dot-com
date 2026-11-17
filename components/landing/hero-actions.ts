@@ -50,9 +50,25 @@ export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: s
 export function handoffType(file: { name: string; type: string }): string {
   if (file.type) return file.type;
   const kind = fileKind(file);
-  if (kind === "image") return /\.png$/i.test(file.name) ? "image/png" : "image/jpeg";
+  if (kind === "image") {
+    const ext = file.name.toLowerCase().match(/\.(\w+)$/)?.[1] ?? "";
+    return IMAGE_TYPE_BY_EXT[ext] ?? "image/jpeg";
+  }
   return kind === "pptx" ? PPTX_TYPE : "application/pdf";
 }
+
+const IMAGE_TYPE_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  avif: "image/avif",
+  heic: "image/heic",
+  heif: "image/heif",
+  svg: "image/svg+xml",
+};
 
 type Picked = { name: string; size: number; lastModified: number };
 

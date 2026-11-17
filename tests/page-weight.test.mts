@@ -68,7 +68,7 @@ check(
 );
 
 // Heavy libraries load when used, not with the panel.
-const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
+const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|marked|utif2|@pdf-lib\/fontkit|@\/lib\/pdf\/text-to-pdf\/.*|@\/lib\/pdf\/images-to-pdf\/(index|off-thread|tiff|decode)|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
 for (const file of [
   "components/tools/ToolWorkbench.tsx",
   "components/tools/processors.ts",
@@ -87,6 +87,13 @@ for (const file of [
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
 }
+// The homepage and the image pages read the picture formats from a file with no imports.
+check("image formats list has no imports", staticImports(src("lib/pdf/images-to-pdf/formats.ts"), /./).length === 0);
+check("HeroDropzone has no heavy top-level imports", staticImports(src("components/landing/HeroDropzone.tsx"), HEAVY).length === 0);
+// The libraries the new converters need come only with them, from inside the worker code.
+check("marked loads on demand", !/^import\s+(?!type\b)[^;]*from\s+"marked"/m.test(src("lib/pdf/text-to-pdf/markdown.ts")) && /await import\("marked"\)/.test(src("lib/pdf/text-to-pdf/markdown.ts")));
+check("UTIF loads on demand", /await import\("utif2"\)/.test(src("lib/pdf/images-to-pdf/tiff.ts")) && staticImports(src("lib/pdf/images-to-pdf/tiff.ts"), /utif2/).length === 0);
+check("the text converter loads with the tool only", /await import\("\.\/text-to-pdf\/off-thread"\)/.test(src("lib/pdf/toolkit.ts")) && staticImports(src("lib/pdf/toolkit.ts"), /text-to-pdf/).length === 0);
 // Resize PDF's preview lays pages out with plain numbers: the layout code never brings pdf-lib.
 check("resize layout has no imports", staticImports(src("lib/pdf/resize/geometry.ts"), /./).length === 0);
 // Crop PDF's box and keys load with the page; they only bring the page-list reader.

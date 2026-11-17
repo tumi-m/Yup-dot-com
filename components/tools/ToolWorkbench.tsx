@@ -49,7 +49,7 @@ import {
 import { PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { percentSmaller, sortPick } from "./file-pick";
+import { percentSmaller, sortPick, takesFile } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
@@ -68,6 +68,14 @@ const NEXT_STEPS: Record<string, string[]> = {
   "merge-pdf": ["compress-pdf", "page-numbers", "edit-pdf", "protect-pdf"],
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "png-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "webp-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "heic-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "tiff-to-pdf": ["ocr-pdf", "compress-pdf", "merge-pdf", "edit-pdf"],
+  "svg-to-pdf": ["merge-pdf", "compress-pdf", "edit-pdf", "protect-pdf"],
+  // Real text already: no OCR.
+  "txt-to-pdf": ["merge-pdf", "protect-pdf", "sign-pdf", "edit-pdf"],
+  "markdown-to-pdf": ["merge-pdf", "protect-pdf", "sign-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
   "resize-pdf": ["compress-pdf", "page-numbers", "merge-pdf", "protect-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
@@ -91,13 +99,6 @@ function nextSteps(slug: string, filename: string): string[] {
 function fieldHint(field: ToolField, value: string): string | undefined {
   return field.options?.find((o) => o.value === value)?.hint ?? field.hint;
 }
-
-/** Video files some systems hand over without a type. */
-const VIDEO_EXT: Record<string, RegExp> = {
-  "video/mp4": /\.(mp4|m4v)$/,
-  "video/quicktime": /\.mov$/,
-  "video/webm": /\.webm$/,
-};
 
 type Status = "idle" | "working" | "done";
 
@@ -162,20 +163,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** Adds the files that fit; false when none could be added. */
   function addFiles(list: FileList | File[] | null): boolean {
     if (!list?.length) return false;
-    const accepted = Array.from(list).filter((f) =>
-      proc.accept.split(",").some((type) => {
-        const t = type.trim();
-        const name = f.name.toLowerCase();
-        // Some browsers and OS share sheets leave `type` empty: fall back to the extension.
-        return (
-          f.type === t ||
-          (t === "application/pdf" && name.endsWith(".pdf")) ||
-          (!f.type && t === "image/jpeg" && /\.jpe?g$/.test(name)) ||
-          (!f.type && t === "image/png" && name.endsWith(".png")) ||
-          ((!f.type || f.type === "application/octet-stream") && VIDEO_EXT[t]?.test(name))
-        );
-      })
-    );
+    const takes = proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept;
+    const accepted = Array.from(list).filter((f) => takesFile(takes, f));
     if (!accepted.length) {
       fail(`That file type isn't supported here.`);
       return false;

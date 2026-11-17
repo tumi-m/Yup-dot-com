@@ -1,5 +1,32 @@
 import { formatLimitBytes } from "@/lib/limits";
 
+/** Types some systems hand over without naming them (an empty type, or "application/octet-stream"). */
+const BY_NAME: Record<string, RegExp> = {
+  "application/pdf": /\.pdf$/,
+  "image/jpeg": /\.jpe?g$/,
+  "image/png": /\.png$/,
+  "video/mp4": /\.(mp4|m4v)$/,
+  "video/quicktime": /\.mov$/,
+  "video/webm": /\.webm$/,
+};
+
+/**
+ * True when a tool's accept list ("image/png,.heic,…") takes the file: by
+ * its type, or by its name where the list names the extension or where the
+ * browser left the type out (share sheets and some OS pickers do).
+ */
+export function takesFile(accept: string, file: { name: string; type: string }): boolean {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  const untyped = !type || type === "application/octet-stream";
+  return accept.split(",").some((entry) => {
+    const t = entry.trim().toLowerCase();
+    if (!t) return false;
+    if (t.startsWith(".")) return name.endsWith(t);
+    return type === t || (t === "application/pdf" && name.endsWith(".pdf")) || (untyped && !!BY_NAME[t]?.test(name));
+  });
+}
+
 /**
  * Sorts the files of one pick or drop (already filtered to types the tool
  * takes) into the ones to add, and says what happened to the rest. A file

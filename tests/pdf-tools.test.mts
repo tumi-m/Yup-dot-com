@@ -187,8 +187,8 @@ const imagesDoc = await PDFDocument.load(await imagesPdf.blob.arrayBuffer());
 const s0 = imagesDoc.getPage(0).getSize();
 check("jpg-to-pdf: EXIF-rotated photo gets a portrait page", s0.width === 8 && s0.height === 16, s0);
 check("jpg-to-pdf: PNG named .jpg still converts", imagesDoc.getPageCount() === 2);
-const notImage = await errorOf(imagesToPdfTool([img("GIF89a....", "anim.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" }));
-check("jpg-to-pdf: non-image explains itself", notImage === "anim.jpg: use a JPG or PNG image.", notImage);
+const notImage = await errorOf(imagesToPdfTool([img("%PDF-1.7 not a picture", "scan.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" }));
+check("jpg-to-pdf: non-image explains itself", notImage === "scan.jpg: use a JPG, PNG, WebP, GIF, BMP, TIFF, AVIF, HEIC or SVG image.", notImage);
 
 // --- Editor annotations land where they were placed on screen ---------------
 {

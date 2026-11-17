@@ -18,6 +18,19 @@ texts ship with each package in `node_modules/<name>/`.
 | JSZip | 3.10.1 | MIT (chosen from MIT or GPL-3.0) | https://github.com/Stuk/jszip |
 | docx | 9.7.2 | MIT | https://github.com/dolanmiu/docx |
 | Motion | 12.43.0 | MIT | https://github.com/motiondivision/motion |
+| marked (Markdown to PDF) | 18.1.2 | MIT | https://github.com/markedjs/marked |
+| fontkit, pdf-lib build (Text and Markdown to PDF) | 1.1.1 | MIT | https://github.com/Hopding/fontkit |
+| UTIF.js, as utif2 (TIFF to PDF) | 4.1.0 | MIT | https://github.com/photopea/UTIF.js |
+| pako (used by fontkit and UTIF.js) | 1.0.11 | MIT and Zlib | https://github.com/nodeca/pako |
+
+## Fonts
+
+Text and Markdown to PDF embed Noto Sans and Noto Sans Mono (Copyright 2022
+The Noto Project Authors, https://github.com/notofonts/latin-greek-cyrillic),
+licensed under the SIL Open Font License 1.1, from the @fontsource packages at
+version 5.3.0. The font files are served from `/vendor/noto-sans/` and
+`/vendor/noto-sans-mono/` with the licence beside them (`LICENSE.txt`), and
+only the letters a document uses are embedded in its PDF.
 
 The source code of the MPL-2.0 and GPL-licensed components is available at the
 links above, for the exact versions listed.
