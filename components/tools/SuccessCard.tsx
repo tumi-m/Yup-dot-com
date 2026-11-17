@@ -51,6 +51,7 @@ export function SuccessCard({
   files,
   actions,
   next,
+  nextNote,
   upsell,
   className,
 }: {
@@ -64,6 +65,8 @@ export function SuccessCard({
   actions: React.ReactNode;
   /** `failed`: the tool the file couldn't be passed to, if a pick failed. */
   next?: { slugs: string[]; onPick: (slug: string) => void; failed?: string | null };
+  /** Shown in place of next steps when the result can't go on, and why. */
+  nextNote?: React.ReactNode;
   upsell?: React.ReactNode;
   className?: string;
 }) {
@@ -130,11 +133,15 @@ export function SuccessCard({
               className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm"
             >
               <FileIcon className="h-4 w-4 shrink-0 text-primary" />
-              {/* Truncate in the middle: the end ("…-page-12.jpg") tells files apart. */}
-              <span className="flex min-w-0 flex-1" title={f.name}>
-                <NameEnd name={f.name} />
+              {/* On a phone the size goes under the name, which needs the room. */}
+              <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-2">
+                {/* Truncate in the middle: the end ("…-page-12.jpg") tells files apart,
+                    and is clipped rather than drawn over the size. */}
+                <span className="flex min-w-0 overflow-hidden" title={f.name}>
+                  <NameEnd name={f.name} />
+                </span>
+                <span className="text-xs text-muted-foreground sm:ml-auto">{formatBytes(f.size)}</span>
               </span>
-              <span className="text-xs text-muted-foreground">{formatBytes(f.size)}</span>
               <button
                 onClick={f.onDownload}
                 className="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-[color,background-color,transform] duration-200 hover:bg-accent hover:text-foreground hover:duration-100 active:scale-[0.97] motion-reduce:active:scale-100"
@@ -197,6 +204,17 @@ export function SuccessCard({
             )}
           </AnimatePresence>
         </motion.div>
+      )}
+
+      {!tools.length && nextNote && (
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={at(SUCCESS.next)}
+          className="relative mx-auto mt-8 max-w-md text-sm text-muted-foreground"
+        >
+          {nextNote}
+        </motion.p>
       )}
 
       {upsell}

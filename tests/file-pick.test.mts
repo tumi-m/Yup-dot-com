@@ -2,7 +2,8 @@
 // used to throw away every file picked with it, without saying which one; a
 // one-file tool kept the first of several dropped files without a word; and
 // a big saving read "100% smaller".
-import { percentSmaller, sortPick, splitNameEnd } from "../components/tools/file-pick.ts";
+import { errorFix, percentSmaller, sortPick, splitNameEnd, takesMessage } from "../components/tools/file-pick.ts";
+import { ENCRYPTED_MESSAGE, SCANNED_MESSAGE, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
 
 let pass = 0;
 let total = 0;
@@ -48,6 +49,31 @@ check("notes are joined, none lost", mixed.message === "big.pdf is over 50 MB, t
 check("too big file never chosen as the one", names(mixed.keep) === "a.pdf");
 check("skipped alone", sortPick([pdf("a.pdf", 1000)], 1, merge).message === "Skipped 1 unsupported file.");
 
+// Past the plan's batch size, files were cut from the list with only a
+// dialog to say so: once it closed, nothing said files 11 and up were gone.
+const twelve = Array.from({ length: 12 }, (_, i) => pdf(`doc${i + 1}.pdf`, 1000));
+const batch = { ...merge, maxBatchFiles: 10 };
+const over = sortPick(twelve, 0, { ...batch, room: 10 });
+check("batch: keeps what fits", over.keep.length === 10 && over.overBatch, over.keep.length);
+check("batch: names what was left out", over.message === "Added 10 of 12. Up to 10 files at once on your plan: doc11.pdf and 1 more weren't added.", over.message);
+const topUp = sortPick(twelve.slice(0, 3), 0, { ...batch, room: 2 });
+check("batch: room left in a list", names(topUp.keep) === "doc1.pdf,doc2.pdf" && topUp.message === "Added 2 of 3. Up to 10 files at once on your plan: doc3.pdf wasn't added.", topUp.message);
+const full = sortPick(twelve.slice(0, 2), 0, { ...batch, room: 0 });
+check("batch: a full list adds none, and says so", full.keep.length === 0 && full.overBatch && full.message === "Up to 10 files at once on your plan: doc1.pdf and 1 more weren't added.", full.message);
+const fitsRoom = sortPick(twelve.slice(0, 3), 0, { ...batch, room: 3 });
+check("batch: within the room, nothing said", fitsRoom.keep.length === 3 && !fitsRoom.overBatch && fitsRoom.message === null, fitsRoom);
+const bigAndMany = sortPick([pdf("big.pdf", 54 * MB), ...twelve.slice(0, 3)], 0, { ...batch, room: 2 });
+check("batch: the size note stays too", bigAndMany.message === "big.pdf is over 50 MB, the limit on your plan. Added 2 of 3. Up to 10 files at once on your plan: doc3.pdf wasn't added.", bigAndMany.message);
+const oneTool = sortPick(twelve.slice(0, 2), 0, { ...compress, maxBatchFiles: 10, room: 1 });
+check("batch: a one-file tool keeps its own note", !oneTool.overBatch && oneTool.message === "Compress PDF takes one file at a time. Using doc1.pdf.", oneTool.message);
+
+// A file the tool can't take: say what it does take.
+check("type: one PDF", takesMessage("Compress PDF", "application/pdf", false) === "Compress PDF takes a PDF.");
+check("type: PDFs", takesMessage("Merge PDF", "application/pdf", true) === "Merge PDF takes PDFs.");
+check("type: images", takesMessage("JPG to PDF", "image/jpeg,image/png", true) === "JPG to PDF takes JPG or PNG images.");
+check("type: videos", takesMessage("Compress Video", "video/mp4,video/quicktime,video/webm,video/x-m4v", false) === "Compress Video takes MP4, MOV or WebM videos.");
+check("type: no name", takesMessage(undefined, "application/pdf", false) === "This tool takes a PDF.");
+
 check("percent: rounds down", percentSmaller(0.426) === 42);
 check("percent: never 100", percentSmaller(0.997) === 99 && percentSmaller(1) === 99);
 check("percent: small savings", percentSmaller(0.05) === 5);
@@ -64,6 +90,20 @@ const accent = splitNameEnd("cafe\u0301-page-1.pdf");
 check("accent stays on its letter", accent[0] === "caf" && accent[1] === "e\u0301-page-1.pdf", accent);
 check("short name: all in the end", JSON.stringify(splitNameEnd("a.pdf")) === JSON.stringify(["", "a.pdf"]));
 check("plain name: as before", JSON.stringify(splitNameEnd("report-final-page-12.jpg")) === JSON.stringify(["report-final", "-page-12.jpg"]));
+
+// An error that another tool fixes offers that tool, with the file it is about.
+const one = [pdf("scan.pdf", 1000)];
+const two = [pdf("a.pdf", 1000), pdf("locked.pdf", 1000)];
+const fixOf = (message: string | null, files: File[], slug: string) => {
+  const fix = errorFix(message, files, slug);
+  return fix ? `${fix.slug}:${fix.label}:${fix.file.name}` : null;
+};
+check("scan: Run OCR PDF", fixOf(SCANNED_MESSAGE, one, "pdf-to-word") === "ocr-pdf:Run OCR PDF:scan.pdf", fixOf(SCANNED_MESSAGE, one, "pdf-to-word"));
+check("password: Open in Unlock PDF", fixOf(ENCRYPTED_MESSAGE, one, "compress-pdf") === "unlock-pdf:Open in Unlock PDF:scan.pdf");
+check("merge: the named file goes, not the first", fixOf(`locked.pdf: ${ENCRYPTED_MESSAGE}`, two, "merge-pdf") === "unlock-pdf:Open in Unlock PDF:locked.pdf");
+check("merge: no name, no guess", fixOf(ENCRYPTED_MESSAGE, two, "merge-pdf") === null);
+check("not offered on the tool itself", fixOf(ENCRYPTED_MESSAGE, one, "unlock-pdf") === null && fixOf(SCANNED_MESSAGE, one, "ocr-pdf") === null);
+check("nothing for other errors", fixOf(UNREADABLE_MESSAGE, one, "compress-pdf") === null && fixOf(null, one, "compress-pdf") === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

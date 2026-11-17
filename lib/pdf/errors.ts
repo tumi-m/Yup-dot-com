@@ -12,6 +12,9 @@ const UNREADABLE =
 export const ENCRYPTED_MESSAGE = "This PDF is password-protected. Unlock it first.";
 export const UNREADABLE_MESSAGE = "This file isn't a readable PDF.";
 export const LETTERS_MESSAGE = "Some of these letters can't be drawn in this PDF.";
+/** A PDF with no text to read: the page workbench offers OCR PDF next to it. */
+export const SCANNED_MESSAGE = "This looks like a scanned PDF. Run OCR PDF on it first.";
+export const NO_TABLES_MESSAGE = "No tables found in this PDF.";
 
 export function friendlyPdfError(err: unknown, fileName?: string): Error {
   const name = (err as { name?: string })?.name ?? "";

@@ -2,7 +2,7 @@
 // "isn't a readable PDF" message, never a raw TypeError.
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
-import { mergeTool, pageNumbersTool, rotateTool, splitTool, watermarkTool } from "../lib/pdf/toolkit.ts";
+import { mergeTool, pageNumbersTool, rotateTool, splitTool, unlockTool, watermarkTool } from "../lib/pdf/toolkit.ts";
 
 let pass = 0;
 let total = 0;
@@ -47,7 +47,27 @@ for (const [label, bytes] of broken) {
   check(`watermark, ${label}: readable message`, mark === UNREADABLE_MESSAGE, mark);
   const merged = await errorOf(mergeTool([file(good, "a.pdf"), f()]));
   check(`merge, ${label}: readable message`, merged.endsWith(UNREADABLE_MESSAGE) && !/Cannot read|undefined/.test(merged), merged);
+  // The damaged one is named, wherever it is in the list.
+  const middle = await errorOf(mergeTool([file(good, "a.pdf"), file(bytes, "Invoice-March.pdf"), file(good, "c.pdf")]));
+  check(`merge, ${label} in the middle: names it`, middle === `Invoice-March.pdf: ${UNREADABLE_MESSAGE}`, middle);
+  const head = await errorOf(mergeTool([file(bytes, "first.pdf"), file(good, "b.pdf")]));
+  check(`merge, ${label} first: names it`, head === `first.pdf: ${UNREADABLE_MESSAGE}`, head);
+  // The encryption check alone passes a damaged file as an unprotected one.
+  for (const password of ["", "x"]) {
+    const unlock = await errorOf(unlockTool([f()], { password }));
+    check(`unlock, ${label}, password "${password}": readable message`, unlock === UNREADABLE_MESSAGE, unlock);
+  }
 }
+
+const cut = await errorOf(unlockTool([file(good.slice(0, 400), "cut.pdf")], { password: "" }));
+check("unlock, cut after 400 bytes: readable message", cut === UNREADABLE_MESSAGE, cut);
+const plain = await errorOf(unlockTool([file(good, "plain.pdf")], { password: "" }));
+check("unlock, a plain PDF: nothing to unlock", /isn't password-protected/.test(plain), plain);
+
+// Merge reports each file as it opens it, so a long merge shows where it is.
+const steps: string[] = [];
+await mergeTool([file(good, "a.pdf"), file(good, "b.pdf"), file(good, "c.pdf")], { progress: (_f, label) => steps.push(label) });
+check("merge: progress by file", steps.join("|") === "File 1 of 3|File 2 of 3|File 3 of 3", steps);
 
 check(
   "a TypeError from the library maps",

@@ -82,6 +82,8 @@ const StructTreeRoot = PDFName.of("StructTreeRoot");
 const ParentTree = PDFName.of("ParentTree");
 const IDTree = PDFName.of("IDTree");
 const PageLabels = PDFName.of("PageLabels");
+const Outlines = PDFName.of("Outlines");
+const SE = PDFName.of("SE");
 const Resources = PDFName.of("Resources");
 
 /** The [key, value] pairs of a name tree (`kind` "Names") or a number tree ("Nums"). */
@@ -649,18 +651,119 @@ function adoptFields(doc: PDFDocument, src: PDFDocument, pages: PDFPage[], copie
 }
 
 /**
- * Adds the pages of `others` after `first`'s, with their links, form fields
- * and layers. `first` stays the document: its title, form, bookmarks and
- * named destinations carry over.
+ * Adds `src`'s bookmarks after `doc`'s, each going to its page among the ones
+ * just copied from `src` with `copier`.
  */
-export async function mergeDocuments(first: PDFDocument, others: PDFDocument[]): Promise<Uint8Array> {
-  if (others.length) dropXfa(first);
-  for (const src of others) {
+function adoptOutline(doc: PDFDocument, src: PDFDocument, copier: PDFObjectCopier) {
+  const from = src.catalog.lookup(Outlines);
+  if (!(from instanceof PDFDict) || !(from.get(First) instanceof PDFRef)) return;
+  // `src`'s names don't come along: each bookmark gets the place its name
+  // gives. Its tags don't either, so a link into them (/SE) would bring them all.
+  const named = once(() => namedDests(src));
+  const seen = new Set<PDFDict>();
+  const settle = (parent: PDFDict) => {
+    for (let ref = parent.get(First); ref instanceof PDFRef; ) {
+      const item = src.context.lookup(ref);
+      if (!(item instanceof PDFDict) || seen.has(item)) break;
+      seen.add(item);
+      item.delete(SE);
+      const entry = destinationEntry(item);
+      const dest = entry && explicitDest(src, entry[0].lookup(entry[1]), named);
+      if (entry && dest) entry[0].set(entry[1], dest);
+      settle(item);
+      ref = item.get(Next);
+    }
+  };
+  settle(from);
+
+  let rootRef = doc.catalog.get(Outlines);
+  const found = doc.context.lookup(rootRef);
+  const outline = found instanceof PDFDict ? found : doc.context.obj({ Type: "Outlines" });
+  if (!(rootRef instanceof PDFRef) || outline !== found) {
+    rootRef = doc.context.register(outline);
+    doc.catalog.set(Outlines, rootRef);
+  }
+  /** The last entry of a chain, found by walking it rather than trusting /Last. */
+  const lastOf = (start: PDFObject | undefined, each?: (item: PDFDict) => void) => {
+    const walked = new Set<PDFDict>();
+    let last: PDFRef | undefined;
+    for (let ref = start; ref instanceof PDFRef; ) {
+      const item = doc.context.lookup(ref);
+      if (!(item instanceof PDFDict) || walked.has(item)) break;
+      walked.add(item);
+      each?.(item);
+      last = ref;
+      ref = item.get(Next);
+    }
+    return last;
+  };
+  const before = lastOf(outline.get(First));
+  // /Parent comes along as a copy of `src`'s outline, which nothing keeps.
+  const first = copier.copy(from.get(First)!) as PDFRef;
+  let shown = 0;
+  const last = lastOf(first, (item) => {
+    item.set(Parent, rootRef);
+    const count = item.lookup(Count);
+    shown += 1 + (count instanceof PDFNumber && count.asNumber() > 0 ? count.asNumber() : 0);
+  });
+  const head = doc.context.lookup(first, PDFDict);
+  if (before) {
+    doc.context.lookup(before, PDFDict).set(Next, first);
+    head.set(Prev, before);
+  } else {
+    outline.set(First, first);
+    head.delete(Prev);
+  }
+  outline.set(Last, last!);
+  const count = outline.lookup(Count);
+  outline.set(Count, PDFNumber.of(Math.abs(count instanceof PDFNumber ? count.asNumber() : 0) + shown));
+}
+
+/** A document's page label ranges, as [first page, label] in page order. */
+function labelRanges(doc: PDFDocument): [number, PDFObject][] {
+  const out: [number, PDFObject][] = [];
+  for (const [key, value] of treeEntries(doc, doc.catalog.get(PageLabels), "Nums")) {
+    if (key instanceof PDFNumber) out.push([key.asNumber(), value]);
+  }
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * Adds the pages of `others` after `first`'s, with their links, form fields,
+ * layers, bookmarks and page labels. `first` stays the document: its title,
+ * form and named destinations carry over. `others` can be opened one at a
+ * time as the merge reaches them, so only one is held at once.
+ */
+export async function mergeDocuments(
+  first: PDFDocument,
+  others: Iterable<PDFDocument> | AsyncIterable<PDFDocument>
+): Promise<Uint8Array> {
+  let merged = false;
+  // Page labels go by position: the first file's would run on over the
+  // others' pages, so each file's own labels start where its pages do.
+  const own = first.getPageCount();
+  const nums: PDFObject[] = [];
+  let labelled = false;
+  const labels = labelRanges(first).filter(([at]) => at < own);
+  if (labels.length) labelled = true;
+  if (!labels.length || labels[0][0] !== 0) nums.push(PDFNumber.of(0), first.context.obj({ S: "D" }));
+  for (const [at, label] of labels) nums.push(PDFNumber.of(at), label);
+  for await (const src of others) {
+    if (!merged) dropXfa(first);
+    merged = true;
+    const offset = first.getPageCount();
     const { pages, copier } = copyAllPages(first, src);
     pages.forEach((p) => first.addPage(p));
     adoptFields(first, src, pages, copier);
     adoptLayers(first, src, copier);
+    adoptOutline(first, src, copier);
+    const theirs = labelRanges(src).filter(([at]) => at < pages.length);
+    if (theirs.length) labelled = true;
+    // Unlabelled pages read 1, 2, 3, as they did on their own.
+    if (!theirs.length || theirs[0][0] !== 0) nums.push(PDFNumber.of(offset), first.context.obj({ S: "D" }));
+    for (const [at, label] of theirs) nums.push(PDFNumber.of(offset + at), copier.copy(label));
   }
+  if (labelled && merged) first.catalog.set(PageLabels, first.context.register(first.context.obj({ Nums: nums })));
   dropUnreachable(first);
   return first.save();
 }

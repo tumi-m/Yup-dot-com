@@ -15,8 +15,24 @@ export interface ToolField {
   min?: number;
   max?: number;
   step?: number;
-  /** Only show this field when another field has a given value. */
-  showIf?: { key: string; value: string };
+  /** Only show this field when another field has a given value (or one of several). */
+  showIf?: { key: string; value: string | string[] };
+  /** Example input, shown in an empty text field. */
+  placeholder?: string;
+  /** A line under the field where the label alone doesn't say what the choice does. */
+  hint?: string | ((options: Record<string, string>) => string | undefined);
+}
+
+/** The field's hint with these options, if any. */
+export function fieldHint(field: ToolField, options: Record<string, string>): string | undefined {
+  return typeof field.hint === "function" ? field.hint(options) : field.hint;
+}
+
+/** Whether `field` shows with these options. */
+export function fieldShown(field: ToolField, options: Record<string, string>): boolean {
+  if (!field.showIf) return true;
+  const { key, value } = field.showIf;
+  return Array.isArray(value) ? value.includes(options[key]) : options[key] === value;
 }
 
 export interface ToolProcessor {
@@ -35,6 +51,8 @@ export interface ToolProcessor {
   reportsSizeChange?: boolean;
   /** A long job that stops on ctx.signal: offer Cancel while it runs. */
   cancellable?: boolean;
+  /** An option that can't work, found before the job starts, so its field can be marked. */
+  check?: (options: Record<string, string>) => { key: string; message: string } | null;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -48,7 +66,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: true,
     minFiles: 2,
     fields: [],
-    run: async (files) => (await kit()).mergeTool(files),
+    run: async (files, _o, ctx) => (await kit()).mergeTool(files, ctx),
   },
   "split-pdf": {
     cancellable: true,
@@ -63,16 +81,19 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "ranges",
         options: [
-          { value: "ranges", label: "By page ranges" },
+          { value: "ranges", label: "A PDF per range" },
+          { value: "one", label: "Chosen pages in one PDF" },
           { value: "every", label: "Every page separately" },
         ],
       },
       {
         key: "ranges",
-        label: "Pages (e.g. 1-3, 5)",
+        label: "Pages",
         type: "text",
-        default: "1-1",
-        showIf: { key: "mode", value: "ranges" },
+        default: "",
+        placeholder: "e.g. 1-3, 5",
+        showIf: { key: "mode", value: ["ranges", "one"] },
+        hint: (o) => (o.mode === "ranges" ? "Each range becomes its own PDF." : undefined),
       },
     ],
     run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
@@ -93,8 +114,26 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "270", label: "90° counter-clockwise" },
         ],
       },
+      {
+        key: "pages",
+        label: "Pages",
+        type: "select",
+        default: "all",
+        options: [
+          { value: "all", label: "All pages" },
+          { value: "some", label: "Only these pages" },
+        ],
+      },
+      {
+        key: "which",
+        label: "Which pages",
+        type: "text",
+        default: "",
+        placeholder: "e.g. 2, 5-6",
+        showIf: { key: "pages", value: "some" },
+      },
     ],
-    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
+    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle, pages: o.pages, which: o.which }),
   },
   "compress-pdf": {
     cancellable: true,
@@ -113,6 +152,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "balanced", label: "Recommended" },
           { value: "high", label: "High quality" },
         ],
+        hint: "Smaller files have softer photos. Text stays sharp.",
       },
     ],
     run: async (files, o, ctx) => (await kit()).compressTool(files, { quality: o.quality }, ctx),
@@ -190,7 +230,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
       {
         key: "margin",
-        label: "Margin (pt)",
+        label: "Margin",
         type: "select",
         default: "0",
         options: [
@@ -203,6 +243,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }, ctx),
   },
   "pdf-to-text": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -210,6 +251,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToTextTool(files, ctx),
   },
   "pdf-to-markdown": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -217,6 +259,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToMarkdownTool(files, ctx),
   },
   "extract-tables": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -225,6 +268,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).extractTablesTool(files, ctx),
   },
   "pdf-to-chunks": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -244,13 +288,16 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).pdfToChunksTool(files, { maxChars: o.maxChars }, ctx),
   },
   "pdf-to-word": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
+    note: "Pictures and links aren't carried over.",
     run: async (files, _o, ctx) => (await kit()).pdfToWordTool(files, ctx),
   },
   "pdf-to-pptx": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -264,6 +311,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "standard", label: "Standard" },
           { value: "high", label: "High" },
         ],
+        hint: "Each page becomes a picture on a slide. High is sharper and bigger.",
       },
     ],
     run: async (files, o, ctx) => {
@@ -272,6 +320,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     },
   },
   "pdf-to-excel": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -321,6 +370,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
       {
         key: "copying",
@@ -331,9 +381,17 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
     ],
     note: "Lost passwords can't be recovered.",
+    // The same rules protectTool keeps, checked first so the field can be marked.
+    check: (o) => {
+      if (!o.password) return { key: "password", message: "Please enter a password." };
+      if (o.password.length < 4) return { key: "password", message: "Use at least 4 characters." };
+      if (o.password !== o.confirm) return { key: "confirm", message: "The passwords don't match." };
+      return null;
+    },
     run: async (files, o) =>
       (await kit()).protectTool(files, {
         password: o.password,
@@ -422,6 +480,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         step: 0.05,
       },
     ],
+    check: (o) => (o.text?.trim() ? null : { key: "text", message: "Type the watermark text." }),
     run: async (files, o) =>
       (await kit()).watermarkTool(files, {
         text: o.text,

@@ -45,10 +45,10 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { PROCESSORS, type ToolField } from "./processors";
+import { fieldHint, fieldShown, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { percentSmaller, sortPick } from "./file-pick";
+import { errorFix, percentSmaller, sortPick, takesMessage } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
@@ -118,6 +118,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
+  /** The option field the error is about, marked invalid until it changes. */
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
+    setFieldError(null);
     setError(message);
     if (message) setErrorKey((k) => k + 1);
   }
@@ -166,27 +169,28 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       })
     );
     if (!accepted.length) {
-      fail(`That file type isn't supported here.`);
+      fail(takesMessage(getTool(slug)?.name, proc.accept, proc.multiple));
       return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
-    const { keep, tooBig, message } = sortPick(accepted, list.length - accepted.length, {
+    const { keep, tooBig, overBatch, message } = sortPick(accepted, list.length - accepted.length, {
       maxFileBytes: limits.maxFileBytes,
       multiple: proc.multiple,
       toolName: getTool(slug)?.name,
+      maxBatchFiles: limits.maxBatchFiles,
+      room: proc.multiple ? limits.maxBatchFiles - entries.length : 1,
     });
     if (tooBig) setUpsell("file-size");
+    if (overBatch) setUpsell("batch");
     if (!keep.length) {
       fail(message);
       return false;
     }
     stopJob();
     const incoming = keep.map((file) => ({ id: `f${++entrySeq}`, file }));
-    // Decide from the current list, not inside the state updater: React may
-    // run updaters later, so a flag set there is still false when read here.
-    const next = proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1);
-    if (next.length > limits.maxBatchFiles) setUpsell("batch");
-    setEntries(next.slice(0, limits.maxBatchFiles));
+    // From the current list, not inside a state updater: the room counted
+    // above is for this list, and React may run updaters later.
+    setEntries(proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1));
     setStatus("idle");
     setResults([]);
     fail(message);
@@ -243,16 +247,37 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }
 
   function setOption(key: string, value: string) {
+    setFieldError(null);
     setOptions((prev) => ({ ...prev, [key]: value }));
   }
 
+  /** Enter in a text field casts the spell, as in a form (the panel isn't one: its buttons would submit it). */
+  function runOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (status !== "working") void run();
+  }
+
+  /** What describes a field: its hint, and the error when it is about this field. */
+  function describedBy(field: ToolField): string | undefined {
+    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, fieldError === field.key && error && "tool-error"];
+    return ids.filter(Boolean).join(" ") || undefined;
+  }
+
   function visibleFields(): ToolField[] {
-    return proc.fields.filter((f) => !f.showIf || options[f.showIf.key] === f.showIf.value);
+    return proc.fields.filter((f) => fieldShown(f, options));
   }
 
   async function run() {
     if (files.length < proc.minFiles) {
       fail(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
+      return;
+    }
+    const problem = proc.check?.(options);
+    if (problem) {
+      fail(problem.message);
+      setFieldError(problem.key);
+      document.getElementById(`opt-${problem.key}`)?.focus();
       return;
     }
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
@@ -349,9 +374,20 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     nudge.cancel();
     setNextFailed(null);
     const r = results[0];
+    // The next tool would turn it away, and this page's result would be gone.
+    if (r.blob.size > limits.maxFileBytes) return;
     if (await tryHandoff([fileToHandoff(r.blob, r.filename)])) router.push(`/tools/${nextSlug}?handoff=1`);
     else setNextFailed(nextSlug);
   }
+
+  /** Takes the file the error is about to the tool that fixes it. */
+  async function fixWith(fix: { slug: string; file: File }) {
+    nudge.cancel();
+    // Without room to hand it over, the tool still opens, ready for the file.
+    const handed = await tryHandoff([fileToHandoff(fix.file, fix.file.name)]);
+    router.push(handed ? `/tools/${fix.slug}?handoff=1` : `/tools/${fix.slug}`);
+  }
+  const fix = errorFix(error, files, slug);
 
   // Files handed over from the homepage dropzone or a previous tool.
   useEffect(() => {
@@ -379,6 +415,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setError(null);
   }
 
+  /** A single result too big for the next tool on this plan: no "keep going". */
+  const overLimit = results.length === 1 && results[0].blob.size > limits.maxFileBytes;
+
   const sizeDelta =
     proc.reportsSizeChange && results.length === 1 && inputBytes > 0
       ? 1 - outputBytes / inputBytes
@@ -392,6 +431,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
         <SuccessCard
           key="done"
           className="flex-1"
+          title={sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 ? "Already as small as it gets" : undefined}
           titleRef={focusRef("done")}
           stats={
             <>
@@ -401,7 +441,10 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-muted-foreground">
                 {results.length} file{results.length === 1 ? "" : "s"} ·{" "}
                 {sizeDelta !== null && sizeDelta > 0.01 ? (
-                  <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  <>
+                    {formatBytes(inputBytes)} →{" "}
+                    <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  </>
                 ) : (
                   formatBytes(outputBytes)
                 )}
@@ -419,7 +462,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               )}
               {sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
-                  Already optimized
+                  Your file is unchanged
                 </span>
               )}
             </>
@@ -451,9 +494,23 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             </>
           }
           next={
-            results.length === 1
+            results.length === 1 && !overLimit
               ? { slugs: nextSteps(slug, results[0].filename), onPick: (next) => void continueWith(next), failed: nextFailed }
               : undefined
+          }
+          nextNote={
+            overLimit && nextSteps(slug, results[0].filename).length > 0 ? (
+              <>
+                Over {formatLimitBytes(limits.maxFileBytes)}, the limit on your plan: download it first.{" "}
+                <button
+                  type="button"
+                  onClick={() => setUpsell("file-size")}
+                  className="tap whitespace-nowrap rounded font-semibold text-foreground underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  See plans
+                </button>
+              </>
+            ) : undefined
           }
           upsell={
             showCard && (
@@ -544,6 +601,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "select" && (
                       <select
                         id={`opt-${field.key}`}
+                        aria-describedby={describedBy(field)}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
                         className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
@@ -558,9 +616,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "text" && (
                       <Input
                         id={`opt-${field.key}`}
+                        aria-invalid={fieldError === field.key || undefined}
+                        aria-describedby={describedBy(field)}
                         value={options[field.key]}
+                        placeholder={field.placeholder}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="pointer-coarse:h-11"
+                        onKeyDown={runOnEnter}
+                        className="pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
                     {field.type === "password" && (
@@ -569,9 +631,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           id={`opt-${field.key}`}
                           type={revealed[field.key] ? "text" : "password"}
                           autoComplete="new-password"
+                          aria-invalid={fieldError === field.key || undefined}
+                          aria-describedby={describedBy(field)}
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11"
+                          onKeyDown={runOnEnter}
+                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11 aria-[invalid=true]:border-destructive"
                         />
                         <button
                           type="button"
@@ -601,13 +666,20 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           max={field.max}
                           step={field.step}
                           value={options[field.key]}
+                          aria-valuetext={`${Math.round(Number(options[field.key]) * 100)}%`}
+                          aria-describedby={describedBy(field)}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           className="h-6 flex-1 accent-[hsl(var(--primary))]"
                         />
-                        <span className="w-12 text-right text-sm tabular-nums text-muted-foreground">
+                        <span aria-hidden className="w-12 text-right text-sm tabular-nums text-muted-foreground">
                           {Math.round(Number(options[field.key]) * 100)}%
                         </span>
                       </div>
+                    )}
+                    {fieldHint(field, options) && (
+                      <p id={`opt-${field.key}-hint`} className="mt-1 text-xs text-muted-foreground">
+                        {fieldHint(field, options)}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -616,7 +688,30 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           </AnimatePresence>
 
           <AnimatePresence>
-            {error && <InlineError key="error" message={error} shakeKey={errorKey} />}
+            {error && (
+              <InlineError
+                key="error"
+                id="tool-error"
+                shakeKey={errorKey}
+                message={
+                  fix ? (
+                    // In the text, so on a phone it wraps under the message instead of squeezing it.
+                    <>
+                      {error}{" "}
+                      <button
+                        type="button"
+                        onClick={() => void fixWith(fix)}
+                        className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {fix.label}
+                      </button>
+                    </>
+                  ) : (
+                    error
+                  )
+                }
+              />
+            )}
           </AnimatePresence>
 
           {/* Action: the Cast button gives way to the progress bar in place. */}
