@@ -1,7 +1,9 @@
 // A file with a PDF header but no document after it must get the plain
 // "isn't a readable PDF" message, never a raw TypeError.
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
+import { ENCRYPTED_MESSAGE, friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
+import { getPageCount } from "../lib/pdf/operations.ts";
+import { protectPdf } from "../lib/pdf/security.ts";
 import { mergeTool, pageNumbersTool, rotateTool, splitTool, unlockTool, watermarkTool } from "../lib/pdf/toolkit.ts";
 
 let pass = 0;
@@ -79,6 +81,16 @@ check(
   "pdf.js's circular page tree maps",
   friendlyPdfError(Object.assign(new Error("Pages tree contains circular reference."), { name: "UnknownErrorException" })).message === UNREADABLE_MESSAGE
 );
+// Opening a file in the editor counts its pages first: a locked file and a
+// broken one get different messages, named for the file.
+{
+  const locked = await protectPdf(good, { userPassword: "secret" });
+  const lockedMessage = await getPageCount(locked).then(() => "", (err) => friendlyPdfError(err, "locked.pdf").message);
+  check("editor: a locked file says so", lockedMessage === `locked.pdf: ${ENCRYPTED_MESSAGE}`, lockedMessage);
+  const brokenMessage = await getPageCount(new TextEncoder().encode("%PDF-1.7\n")).then(() => "", (err) => friendlyPdfError(err, "bad.pdf").message);
+  check("editor: a broken file says it isn't a PDF", brokenMessage === `bad.pdf: ${UNREADABLE_MESSAGE}`, brokenMessage);
+}
+
 check("our own messages still pass through", friendlyPdfError(new Error("Pick pages between 1 and 5.")).message === "Pick pages between 1 and 5.");
 
 console.log(`\n${pass}/${total} passed`);

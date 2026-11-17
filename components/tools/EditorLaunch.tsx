@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence } from "motion/react";
 import { FilePlus2 } from "lucide-react";
-import { saveLocalDoc, takeHandoff, handoffToFile, STORE_FAILED } from "@/lib/local-store";
+import { saveLocalDoc, takeHandoff, handoffToFile, fileToHandoff, tryHandoff, STORE_FAILED } from "@/lib/local-store";
+import { ENCRYPTED_MESSAGE, friendlyPdfError } from "@/lib/pdf/errors";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid } from "@/lib/utils";
 import { isLoadError, loadErrorMessage } from "@/lib/load-error";
@@ -26,6 +27,8 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [upsell, setUpsell] = useState(false);
+  /** A password-protected file, to take to Unlock PDF. */
+  const [locked, setLocked] = useState<File | null>(null);
   const limits = limitsFor(tier);
   const sign = mode === "sign";
   const query = sign ? "?sign=1" : "";
@@ -38,6 +41,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
 
   async function openFile(file: File) {
     setError(null);
+    setLocked(null);
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setError("Please choose a PDF file.");
       return;
@@ -55,7 +59,8 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
         pageCount = await getPageCount(bytes);
       } catch (err) {
         if (isLoadError(err)) throw err;
-        throw new Error("Couldn't open that PDF. It may be damaged or password-protected.");
+        // Says which: locked (Unlock PDF opens it) or not a readable PDF.
+        throw friendlyPdfError(err, file.name);
       }
 
       const { tryCreateClient } = await import("@/lib/supabase/client");
@@ -93,7 +98,9 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
       router.push(`/editor/${docId}${query}`);
     } catch (err) {
       // The editor's code didn't arrive (offline): the file is fine.
-      setError(isLoadError(err) ? loadErrorMessage("the editor") : err instanceof Error ? err.message : "Could not open the editor.");
+      const message = isLoadError(err) ? loadErrorMessage("the editor") : err instanceof Error ? err.message : "Could not open the editor.";
+      setError(message);
+      setLocked(message.endsWith(ENCRYPTED_MESSAGE) ? file : null);
       setBusy(false);
     }
   }
@@ -110,6 +117,12 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
       setError(isLoadError(err) ? loadErrorMessage("the editor") : STORE_FAILED);
       setBusy(false);
     }
+  }
+
+  /** Takes a locked file to Unlock PDF; without room to hand it over, the tool still opens. */
+  async function unlock(file: File) {
+    const handed = await tryHandoff([fileToHandoff(file, file.name)]);
+    router.push(handed ? "/tools/unlock-pdf?handoff=1" : "/tools/unlock-pdf");
   }
 
   // A file handed over from the homepage or another tool opens immediately.
@@ -152,7 +165,30 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
           )}
         </div>
       </ToolDropzone>
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <AnimatePresence>
+        {error && (
+          <InlineError
+            key="error"
+            message={
+              locked ? (
+                // In the text, so on a phone it wraps under the message, as on the other tools.
+                <>
+                  {error}{" "}
+                  <button
+                    type="button"
+                    onClick={() => void unlock(locked)}
+                    className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Open in Unlock PDF
+                  </button>
+                </>
+              ) : (
+                error
+              )
+            }
+          />
+        )}
+      </AnimatePresence>
       <UpgradeDialog open={upsell} onOpenChange={setUpsell} reason="file-size" tier={tier} />
     </div>
   );
