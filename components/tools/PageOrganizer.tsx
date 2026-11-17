@@ -36,8 +36,10 @@ import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
+import { getTool } from "@/lib/tools";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { ErrorHelp } from "./ErrorHelp";
+import { takesMessage } from "./file-pick";
 import { DRAWN_AT_ONCE, NEAR_MARGIN, taskLimiter } from "@/lib/editor/thumbnails";
 import { useHistory } from "@/lib/editor/history";
 import type { LoadedPdf } from "@/lib/pdf/render";
@@ -182,7 +184,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     if (!list?.length) return;
     const picked = Array.from(list).find(isPdf);
     if (!picked) {
-      fail("Choose a PDF file.");
+      fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.
@@ -234,7 +236,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   async function addMore(list: FileList | null) {
     const files = Array.from(list ?? []).filter(isPdf);
     if (!files.length) {
-      if (list?.length) fail("Choose a PDF file.");
+      if (list?.length) fail(takesMessage(getTool(slug)?.name, "application/pdf", true));
       return;
     }
     if (files.some((f) => f.size > limits.maxFileBytes)) {

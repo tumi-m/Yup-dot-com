@@ -39,8 +39,11 @@ export async function buildPages(sources: Uint8Array[], plan: PlanItem[], opts: 
     onProgress?.(0.05 + (0.3 * s) / sources.length, used.size > 1 ? `Reading file ${s + 1} of ${sources.length}…` : "Reading the PDF…");
     try {
       docs[s] = await openPdf(sources[s]);
+      // A page tree that's broken fails here, while it's known which file it is.
+      docs[s].getPageCount();
     } catch (err) {
-      throw friendlyPdfError(err, used.size > 1 ? opts.names?.[s] : undefined);
+      // With more than one file on the page, say which, even if only this one is used.
+      throw friendlyPdfError(err, sources.length > 1 ? opts.names?.[s] : undefined);
     }
   }
   stopIfAborted(signal);

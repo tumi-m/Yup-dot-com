@@ -277,6 +277,9 @@ const words = (r: Awaited<ReturnType<typeof read>>) => r.pages.map((p) => p.text
     (await failure(() => buildPages([rich, garbage], appendSource(planFor(0, 1), 1, 1), { mode: "organize", names: ["a.pdf", "bad.pdf"] }))).includes("bad.pdf"),
     await failure(() => buildPages([rich, garbage], appendSource(planFor(0, 1), 1, 1), { mode: "organize", names: ["a.pdf", "bad.pdf"] }))
   );
+  // The added file's pages are all gone, so only the broken first file is read.
+  const firstOnly = await failure(() => buildPages([garbage, rich], planFor(0, 1), { mode: "organize", names: ["bad.pdf", "b.pdf"] }));
+  check("a broken first file is named when others are open", firstOnly.endsWith(` bad.pdf: ${UNREADABLE_MESSAGE}`), firstOnly);
   // A page tree that holds itself: pdf-lib's walk overflows the stack.
   const loop = new TextEncoder().encode(
     "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R 2 0 R] /Count 2 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
@@ -285,6 +288,11 @@ const words = (r: Awaited<ReturnType<typeof read>>) => r.pages.map((p) => p.text
     const said = await failure(() => buildPages([loop], planFor(0, 1), { mode }));
     check(`${mode}: a page tree that loops says the file isn't readable`, said.includes(UNREADABLE_MESSAGE), said);
   }
+  // Found while the files are read, so it's known which one it is.
+  const loopAdded = await failure(() => buildPages([rich, loop], appendSource(planFor(0, 1), 1, 1), { mode: "organize", names: ["a.pdf", "loop.pdf"] }));
+  check("an added file whose page tree loops is named", loopAdded.endsWith(` loop.pdf: ${UNREADABLE_MESSAGE}`), loopAdded);
+  const loopFirst = await failure(() => buildPages([loop, rich], planFor(0, 1), { mode: "delete", names: ["loop.pdf", "b.pdf"] }));
+  check("a first file whose page tree loops is named", loopFirst.endsWith(` loop.pdf: ${UNREADABLE_MESSAGE}`), loopFirst);
   check("a page that isn't in the file is refused", (await failure(() => buildPages([rich], planFor(0, 9), { mode: "organize" }))).includes("Invalid page order"));
 }
 

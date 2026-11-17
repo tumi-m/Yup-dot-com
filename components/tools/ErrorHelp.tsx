@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fileToHandoff, tryHandoff } from "@/lib/local-store";
 import { errorFix } from "./file-pick";
 
 /**
- * An error message, with a button after it to the tool that fixes it when
+ * An error message, with a link after it to the tool that fixes it when
  * one can (errorFix: Repair, Unlock or OCR PDF). The file the message is
  * about goes with it, so it opens already chosen.
  */
@@ -36,14 +37,19 @@ export function ErrorHelp({
   return (
     <>
       {message}{" "}
-      <button
-        type="button"
-        onClick={() => void go(fix)}
+      <Link
+        href={`/tools/${fix.slug}`}
+        onClick={(e) => {
+          // A new tab or window opens the tool without the file.
+          if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+          e.preventDefault();
+          void go(fix);
+        }}
         className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         data-testid="error-help"
       >
         {fix.label}
-      </button>
+      </Link>
     </>
   );
 }
