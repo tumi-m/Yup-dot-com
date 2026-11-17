@@ -1,7 +1,7 @@
 import { PDFDocument } from "pdf-lib";
 import { insertBlankPage, rotatePagesBy } from "../lib/pdf/bake.ts";
 import { deletePages, mergePdfs, reorderPages } from "../lib/pdf/operations.ts";
-import { detectFormFields } from "../lib/pdf/forms.ts";
+import { detectFormFields, fillableCount } from "../lib/pdf/forms.ts";
 import { changedKeys, continuesRun, historyReducer, RUN_GAP_MS, type HistoryState } from "../lib/editor/history.ts";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap } from "../lib/editor/page-map.ts";
 import { pageKey, thumbKey, typedPage } from "../lib/editor/keyboard.ts";
@@ -104,6 +104,21 @@ check("the deleted page shown: the next one, or the last", pageAfter(1, deleteMa
   check("reorder keeps the fields", (await fields(await reorderPages(bytes, [2, 1, 0]))) === "name@2 city@1 agree@1");
   check("delete keeps the other pages' fields", (await fields(await deletePages(bytes, [0]))) === "city@0 agree@0");
   check("merge keeps the fields", (await fields(await mergePdfs([bytes, bytes]))).startsWith("name@0 city@1 agree@1"));
+}
+
+// The "fillable fields detected" count: one per field people can fill
+{
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const form = doc.getForm();
+  form.createTextField("name").addToPage(page, { x: 50, y: 700, width: 200, height: 20 });
+  const plan = form.createRadioGroup("plan");
+  for (const [i, v] of ["Free", "Pro", "Team"].entries()) plan.addOptionToPage(v, page, { x: 50 + i * 40, y: 650, width: 15, height: 15 });
+  const id = form.createTextField("id");
+  id.addToPage(page, { x: 50, y: 600, width: 200, height: 20 });
+  id.enableReadOnly();
+  const found = await detectFormFields(await doc.save());
+  check("fillable count: a radio group is one field, a read-only field none", found.length === 5 && fillableCount(found) === 2, [found.length, fillableCount(found)]);
 }
 
 // A run of changes to one setting is one undo step

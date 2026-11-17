@@ -541,12 +541,16 @@ export function flattenNote(report: FlattenReport): string | undefined {
   return parts.length ? parts.join(". ") + "." : undefined;
 }
 
-/** The editor's "Flatten form fields when saving": the same bytes back when there is no form. */
-export async function flattenFormsIfAny(bytes: Uint8Array): Promise<Uint8Array> {
+/**
+ * The editor's "Flatten form fields when saving or downloading": the same
+ * bytes back when there is no form, and a note when some fields stayed.
+ */
+export async function flattenFormsIfAny(bytes: Uint8Array): Promise<{ bytes: Uint8Array; note?: string }> {
   try {
-    return (await flattenPdf(bytes, "forms")).bytes;
+    const { bytes: out, report } = await flattenPdf(bytes, "forms");
+    return { bytes: out, note: flattenNote(report) };
   } catch (err) {
-    if (err instanceof NothingToFlattenError) return bytes;
+    if (err instanceof NothingToFlattenError) return { bytes };
     throw err;
   }
 }

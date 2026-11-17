@@ -26,7 +26,7 @@ import { documentFingerprint, EditCheckError, requestEdit } from "@/lib/edit-usa
 import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
 import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake";
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
-import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
+import { detectFormFields, fillableCount, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
 import { changedKeys, continuesRun, useHistory, type EditRun } from "@/lib/editor/history";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap, type PageMap } from "@/lib/editor/page-map";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
@@ -71,6 +71,9 @@ const MAX_ZOOM = 3;
 /** The page and zoom buttons: finger-sized on touch screens, as in the toolbar. */
 const pillButton = "pointer-coarse:h-11 pointer-coarse:w-11";
 
+/** A result message, with what flattening left as it was. */
+const withNote = (message: string, note?: string) => (note ? `${message} ${note}` : message);
+
 /** Phone-width layout, where side panels become overlays. */
 const narrow = () => window.matchMedia("(max-width: 767px)").matches;
 
@@ -88,12 +91,13 @@ export function PdfEditor({
   /** The bytes last loaded or saved. */
   const savedRef = useRef<{ bytes: Uint8Array | null }>({ bytes: null });
   /** The file last built, for which edits, and the fingerprint it was claimed under. */
-  const builtRef = useRef<{ key: string; out: Uint8Array; fp: string; watermark: boolean } | null>(null);
+  const builtRef = useRef<{ key: string; out: Uint8Array; note?: string; fp: string; watermark: boolean } | null>(null);
   const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const canvasArea = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
+  const fieldsAnnounced = useRef(false);
   const showSidebarRef = useRef(true);
 
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -212,11 +216,11 @@ export function PdfEditor({
         const fields = await detectFormFields(bytes);
         if (active) {
           setFormFields(fields);
-          if (fields.length) {
-            toast(
-              `${fields.length} fillable field${fields.length === 1 ? "" : "s"} detected`,
-              "info"
-            );
+          // Once per document: not again after a save or a page operation.
+          if (!fieldsAnnounced.current) {
+            fieldsAnnounced.current = true;
+            const n = fillableCount(fields);
+            if (n) toast(`${n} fillable field${n === 1 ? "" : "s"} detected`, "info");
           }
         }
       } catch {
@@ -438,11 +442,11 @@ export function PdfEditor({
       if (Object.keys(formValues).length) {
         out = await fillFormFields(out, formValues);
       }
-      if (flatten) {
-        const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
-        out = await flattenFormsIfAny(out);
-      }
-      return out;
+      if (!flatten) return { out };
+      const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
+      // The note says which fields stayed fillable, if any did.
+      const flat = await flattenFormsIfAny(out);
+      return { out: flat.bytes, note: flat.note };
     },
     [bytes, annotations, formValues, flatten]
   );
@@ -460,8 +464,8 @@ export function PdfEditor({
     let built = builtRef.current?.key === key ? builtRef.current : null;
     if (!built) {
       const watermark = limitsFor(tier).watermark;
-      const out = await buildOutput(watermark);
-      built = { key, out, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
+      const { out, note } = await buildOutput(watermark);
+      built = { key, out, note, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
     }
     let grant;
     try {
@@ -475,7 +479,7 @@ export function PdfEditor({
       return null;
     }
     if (grant.watermark !== built.watermark) {
-      built = { ...built, watermark: grant.watermark, out: await buildOutput(grant.watermark) };
+      built = { ...built, watermark: grant.watermark, ...(await buildOutput(grant.watermark)) };
     }
     builtRef.current = built;
     return built;
@@ -495,7 +499,7 @@ export function PdfEditor({
         `${docName}.pdf`
       );
       trackToolUsed();
-      toast("Downloaded.", "success");
+      toast(withNote("Downloaded.", built.note), "success");
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
@@ -559,14 +563,14 @@ export function PdfEditor({
       setBytes(saved);
       trackToolUsed();
       if (source.kind === "local") {
-        toast("Saved on this device.", "success");
+        toast(withNote("Saved on this device.", built.note), "success");
         // Offer the cloud once, after the user has saved something they value.
         if (tier === "guest" && !upsellShown.current) {
           upsellShown.current = true;
           setTimeout(() => setUpsellOpen(true), 700);
         }
       } else {
-        toast("Saved to your library.", "success");
+        toast(withNote("Saved to your library.", built.note), "success");
       }
     } catch (err) {
       toast(friendlyPdfError(err).message || "Save failed.", "error");
@@ -841,20 +845,21 @@ export function PdfEditor({
       )}
 
       {!loadError && hasFields && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-background px-3 text-sm">
-          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 sm:min-h-10">
+        <div className="shrink-0 border-b border-border bg-background px-3 pb-2 pt-0.5 text-sm">
+          <label className="flex cursor-pointer items-start gap-2.5 py-1.5 pointer-coarse:py-2.5">
             <input
               type="checkbox"
               checked={flattenOnSave}
               onChange={(e) => setFlattenOnSave(e.target.checked)}
               aria-describedby="flatten-on-save-hint"
-              className="h-4 w-4 shrink-0 cursor-pointer accent-[hsl(var(--primary))]"
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[hsl(var(--primary))]"
             />
-            Flatten form fields when saving
+            Flatten form fields when saving or downloading
           </label>
-          <span id="flatten-on-save-hint" className="hidden text-xs text-muted-foreground sm:inline">
+          {/* Under the checkbox's text, on phones too: the warning matters most there. */}
+          <p id="flatten-on-save-hint" className="-mt-1 pl-[1.625rem] text-xs text-muted-foreground pointer-coarse:-mt-2">
             They become part of the page and can&apos;t be changed again.
-          </span>
+          </p>
         </div>
       )}
 
