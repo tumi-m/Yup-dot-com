@@ -585,6 +585,7 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
 // ---------------------------------------------------------------------------
 
 const BULLET = /^\s*[•·▪◦‣\-–—*]\s+/;
+const ORDERED = /^\s*(\d{1,2}|[a-z])[.)]\s+/i;
 const SENTENCE_END = /[.!?]["'”’)\]]?$/;
 /** A page's number on its own: "7", "- 7 -", "Page 7 of 12", "vii". */
 const PAGE_NUMBER = /^(?:page\s+)?[-–—]?\s*(?:\d{1,4}|[ivxlc]{1,7})\s*[-–—]?(?:\s*(?:of|\/)\s*\d{1,4})?$/i;
@@ -603,7 +604,6 @@ function joinLines(texts: string[]): string {
   }
   return out.trim();
 }
-const ORDERED = /^\s*(\d{1,2}|[a-z])[.)]\s+/i;
 
 function classifyHeading(line: ParsedLine, bodySize: number): number | null {
   // A form field's value is never a heading, however large its box.
