@@ -315,6 +315,21 @@ export async function bakeAnnotations(
             font: helveticaBold,
             color: rgb(0.15, 0.12, 0.05),
           });
+          // Other scripts as a picture of the text, as for text boxes.
+          if (/[^\x00-\xFF]/.test(ann.text) && typeof document !== "undefined") {
+            const img = await renderTextImage(ann.text, 9, "#1a1a1a", false, ann.width - 10, ann.height - headerHeight - 4);
+            if (img) {
+              const embedded = await doc.embedPng(img.png);
+              // Its first baseline where Helvetica's would be.
+              page.drawImage(embedded, {
+                x: ann.x + 5,
+                y: bottom + ann.height - headerHeight - 3 - img.height,
+                width: img.width,
+                height: img.height,
+              });
+              break;
+            }
+          }
           const lines = wrapText(ann.text, helvetica, 9, ann.width - 10);
           lines.forEach((line, i) => {
             const y = bottom + ann.height - headerHeight - 12 - i * 11;
