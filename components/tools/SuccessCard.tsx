@@ -51,6 +51,7 @@ export function SuccessCard({
   files,
   actions,
   next,
+  nextNote,
   upsell,
   className,
 }: {
@@ -64,6 +65,8 @@ export function SuccessCard({
   actions: React.ReactNode;
   /** `failed`: the tool the file couldn't be passed to, if a pick failed. */
   next?: { slugs: string[]; onPick: (slug: string) => void; failed?: string | null };
+  /** Shown in place of next steps when the result can't go on, and why. */
+  nextNote?: React.ReactNode;
   upsell?: React.ReactNode;
   className?: string;
 }) {
@@ -197,6 +200,17 @@ export function SuccessCard({
             )}
           </AnimatePresence>
         </motion.div>
+      )}
+
+      {!tools.length && nextNote && (
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={at(SUCCESS.next)}
+          className="relative mx-auto mt-8 max-w-md text-sm text-muted-foreground"
+        >
+          {nextNote}
+        </motion.p>
       )}
 
       {upsell}

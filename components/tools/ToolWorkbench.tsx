@@ -350,6 +350,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     nudge.cancel();
     setNextFailed(null);
     const r = results[0];
+    // The next tool would turn it away, and this page's result would be gone.
+    if (r.blob.size > limits.maxFileBytes) return;
     if (await tryHandoff([fileToHandoff(r.blob, r.filename)])) router.push(`/tools/${nextSlug}?handoff=1`);
     else setNextFailed(nextSlug);
   }
@@ -388,6 +390,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setStatus("idle");
     setError(null);
   }
+
+  /** A single result too big for the next tool on this plan: no "keep going". */
+  const overLimit = results.length === 1 && results[0].blob.size > limits.maxFileBytes;
 
   const sizeDelta =
     proc.reportsSizeChange && results.length === 1 && inputBytes > 0
@@ -461,9 +466,23 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             </>
           }
           next={
-            results.length === 1
+            results.length === 1 && !overLimit
               ? { slugs: nextSteps(slug, results[0].filename), onPick: (next) => void continueWith(next), failed: nextFailed }
               : undefined
+          }
+          nextNote={
+            overLimit && nextSteps(slug, results[0].filename).length > 0 ? (
+              <>
+                Over {formatLimitBytes(limits.maxFileBytes)}, the limit on your plan: download it first.{" "}
+                <button
+                  type="button"
+                  onClick={() => setUpsell("file-size")}
+                  className="tap whitespace-nowrap rounded font-semibold text-foreground underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  See plans
+                </button>
+              </>
+            ) : undefined
           }
           upsell={
             showCard && (
