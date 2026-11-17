@@ -235,6 +235,7 @@ export function PageView({
               field={field}
               scale={scale}
               value={formValues[field.name] ?? field.value}
+              placing={tool !== "select"}
               onChange={(v) => onFormChange(field.name, v)}
             />
           ))}
@@ -288,11 +289,14 @@ function FormFieldOverlay({
   field,
   scale,
   value,
+  placing,
   onChange,
 }: {
   field: DetectedField;
   scale: number;
   value: string;
+  /** A tool other than Select is armed: clicks go through to the page. */
+  placing: boolean;
   onChange: (value: string) => void;
 }) {
   // A tiny field still gets a box big enough to see and tap, centred on it.
@@ -305,6 +309,11 @@ function FormFieldOverlay({
     width,
     height,
   };
+  // Clicks fill the field, or, with a tool armed, place on the page over it
+  // (a signature on a signature line).
+  const hold: React.HTMLAttributes<HTMLDivElement> = placing
+    ? { style: { ...style, pointerEvents: "none" } }
+    : { style, onPointerDown: (e) => e.stopPropagation() };
   // The text size the PDF draws the field at.
   const fontSize = field.fontSize * scale;
   // On a turned page the control keeps the field's own shape and turns with
@@ -352,7 +361,7 @@ function FormFieldOverlay({
 
   if (field.kind === "checkbox") {
     return (
-      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <button
           type="button"
           role="checkbox"
@@ -371,7 +380,7 @@ function FormFieldOverlay({
   if (field.kind === "radio") {
     const on = value && field.exportValue === value;
     return (
-      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <button
           type="button"
           role="radio"
@@ -392,7 +401,7 @@ function FormFieldOverlay({
     const ownHeight = sideways ? field.width : field.height;
     const rows = Math.max(2, Math.min(field.options.length, Math.floor(ownHeight / ((field.fontSize || 10) * 1.2))));
     return (
-      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <select
           aria-label={label}
           size={field.kind === "listbox" ? rows : undefined}
@@ -415,7 +424,7 @@ function FormFieldOverlay({
 
   if (field.multiline) {
     return (
-      <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
+      <div {...hold} className="leading-none">
         <textarea
           aria-label={label}
           value={value}
@@ -430,7 +439,7 @@ function FormFieldOverlay({
   }
 
   return (
-    <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
+    <div {...hold} className="leading-none">
       <input
         aria-label={label}
         type={field.password ? "password" : undefined}
