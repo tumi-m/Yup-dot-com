@@ -40,6 +40,7 @@ import {
   FileOutput,
   Layers,
   Scaling,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -180,6 +181,17 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "optimize",
     tint: "bg-emerald-100 text-emerald-700",
     keywords: "shrink reduce size smaller organise",
+  },
+  {
+    slug: "repair-pdf",
+    name: "Repair PDF",
+    title: "Repair PDF: fix a damaged or corrupt PDF",
+    description: "Recover a PDF that won't open.",
+    icon: Wrench,
+    category: "optimize",
+    tint: "bg-amber-100 text-amber-800",
+    badge: "New",
+    keywords: "repair fix recover restore corrupt corrupted damaged broken file won't open cannot open truncated xref error",
   },
   {
     slug: "pdf-to-jpg",

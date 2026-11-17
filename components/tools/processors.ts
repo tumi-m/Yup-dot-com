@@ -210,6 +210,15 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     note: "Pages stay sharp and text stays selectable. Form fields are flattened first.",
     run: async (files, o, ctx) => (await kit()).resizeTool(files, o, ctx),
   },
+  "repair-pdf": {
+    cancellable: true,
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [],
+    note: "Works on a copy: your original stays as it is.",
+    run: async (files, _o, ctx) => (await kit()).repairTool(files, ctx),
+  },
   "compress-pdf": {
     cancellable: true,
     reportsSizeChange: true,

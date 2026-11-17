@@ -299,9 +299,12 @@ for (const flate of [false, true]) {
   check(`cut off inside page 4's content (${kind}): 4 pages, the 4th marked as cut off`, mid.read.pages === 4 && mid.report.partial.join() === "4", { pages: mid.read.pages, partial: mid.report.partial, lines: mid.lines });
   check(`cut off inside page 4's content (${kind}): the report says so`, mid.lines.some((l) => /^Page 4 was cut off/.test(l)), mid.lines);
 
-  // In the index, after every object.
+  check(`cut off after page 3 (${kind}): the report warns that what was kept at the end may be gone`, a.lines.some((l) => /The end of the file was missing/.test(l)), a.lines);
+
+  // In the index, after every object: nothing is lost, and the report doesn't say so.
   const inIndex = await repaired(file.slice(0, offsetOf(file, "xref") + 30));
   check(`cut off in the index (${kind}): all 6 pages`, inIndex.read.pages === 6 && sameText(inIndex.read, markers(6)), inIndex.read.text);
+  check(`cut off in the index (${kind}): no warning that anything is gone`, !repairLines(inIndex.report).some((l) => l.warn), inIndex.lines);
 
   // A few bytes short: only %%EOF lost.
   const short = await repaired(file.slice(0, file.length - 4));
@@ -453,6 +456,27 @@ const rich = await richFile();
   check("rich file: the report names what was fixed", r.lines.some((l) => /removed data in front of the PDF/.test(l)) && r.lines.some((l) => /removed data after its end/.test(l)) && r.lines.some((l) => /rebuilt its broken index/.test(l)), r.lines);
 }
 
+// Objects lost from the middle (a field, a bookmark's target page, the info
+// dictionary): what points at them is cut loose, never pointed somewhere else.
+{
+  const s = asText(rich);
+  const objectOf = (needle: string) => {
+    const at = s.indexOf(needle);
+    const start = s.lastIndexOf("\n", s.lastIndexOf(" 0 obj", at)) + 1;
+    return s.slice(start, s.indexOf("endobj", at) + 6);
+  };
+  const notes = objectOf("/T <FEFF006E006F007400650073>");
+  const info = objectOf("/Producer");
+  const holed = latin1(s.replace(notes, "").replace(info, ""));
+  const r = await repaired(holed);
+  const ex = await extrasOf(r.out);
+  check("objects lost from the middle: 6 pages, text kept", r.read.pages === 6 && sameText(r.read, markers(6)), r.read.text);
+  check("objects lost from the middle: the form reads, with the fields that are there", ex.fields.name === "Ada Lovelace" && ex.fields.agree === true && Object.keys(ex.fields).length === 2, ex.fields);
+  const doc = await PDFDocument.load(r.out);
+  const infoRef = doc.context.trailerInfo.Info;
+  check("objects lost from the middle: the info entry leads to an info dictionary or nowhere", !infoRef || doc.context.lookup(infoRef) instanceof PDFDict && !doc.context.lookup(infoRef, PDFDict).has(PDFName.of("FT")));
+}
+
 // ---------------------------------------------------------------------------
 // A page pdf-lib can't copy (its font is damaged) is drawn by pdf.js as a
 // picture, its text laid over it; the other pages stay as they were.
@@ -530,7 +554,7 @@ if (canvasMod) {
   }
   // Cut off before its trailer: its ID, which decrypting needs, is gone.
   const e = await settle(repair(pw.slice(0, pw.length - 300)));
-  check("encrypted, cut off before its trailer: said plainly, no file made", !e.value && (e.error?.message === NEEDS_UNLOCK || /encrypted, and the part needed to decrypt it is damaged/.test(e.error?.message ?? "")), e.error?.message);
+  check("encrypted, cut off before its trailer: said plainly, no file made", !e.value && (e.error?.message === NEEDS_UNLOCK || /locked with encryption, and the part needed to unlock it is damaged/.test(e.error?.message ?? "")), e.error?.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +607,38 @@ check("page list: one page", pageList([3]) === "3");
 check("page list: two pages", pageList([5, 2]) === "2 and 5");
 check("page list: a run and singles", pageList([1, 2, 3, 4, 7, 9]) === "1–4, 7 and 9", pageList([1, 2, 3, 4, 7, 9]));
 check("page list: two in a row stay apart", pageList([1, 2, 5]) === "1, 2 and 5", pageList([1, 2, 5]));
+
+// ---------------------------------------------------------------------------
+// The tool: a file named for what was done, the report's lines, its errors
+// as they are; and listed where tools are.
+// ---------------------------------------------------------------------------
+{
+  const { repairTool } = await import("../lib/pdf/toolkit.ts");
+  const file = new File([join("junk\n", plain) as Uint8Array<ArrayBuffer>], "Scan 12.pdf", { type: "application/pdf" });
+  const out = await repairTool([file]);
+  check("tool: named after the file", out.filename === "Scan 12-repaired.pdf", out.filename);
+  check("tool: a PDF with all 4 pages", out.blob.type === "application/pdf" && (await readBoth(new Uint8Array(await out.blob.arrayBuffer()))).pages === 4);
+  check("tool: the report's lines come with it", out.report?.[0]?.text === "Recovered all 4 pages." && out.report.some((l) => /removed data in front/.test(l.text)), out.report);
+  const none = await settle(repairTool([new File([latin1("hello")], "notes.pdf")]));
+  check("tool: not a PDF keeps its own message", /isn't a PDF/.test(none.error?.message ?? ""), none.error?.message);
+  const { friendlyPdfError } = await import("../lib/pdf/errors.ts");
+  check("tool: its messages pass the page's error wording as they are", [NEEDS_UNLOCK, "This PDF is locked with encryption, and the part needed to unlock it is damaged, so nothing in it could be recovered.", "Nothing in this file could be recovered: its pages can't be read or are blank."].every((m) => friendlyPdfError(new Error(m)).message === m));
+
+  const { getTool, TOOLS } = await import("../lib/tools.tsx");
+  const { PROCESSORS } = await import("../components/tools/processors.ts");
+  const { panelSpec } = await import("../components/tools/panel-spec.tsx");
+  const { filterTools } = await import("../components/tool-filter.ts");
+  const sitemapModule = await import("../app/sitemap.ts");
+  // The app files are CommonJS to tsx here, so the default export may arrive wrapped.
+  let sitemap: unknown = sitemapModule.default;
+  while (typeof sitemap !== "function") sitemap = (sitemap as { default: unknown }).default;
+  const urls = (sitemap as () => { url: string }[])().map((e) => e.url);
+  check("in the sitemap", urls.some((u) => u.endsWith("/tools/repair-pdf")));
+  const tool = getTool("repair-pdf");
+  check("registered once, under Optimize", !!tool && tool.category === "optimize" && TOOLS.filter((t) => t.slug === "repair-pdf").length === 1);
+  check("a workbench tool for one PDF that can be cancelled", !!tool && panelSpec(tool).kind === "workbench" && !!PROCESSORS["repair-pdf"]?.cancellable && !PROCESSORS["repair-pdf"].multiple && PROCESSORS["repair-pdf"].accept === "application/pdf");
+  check("search finds it by what people type", ["repair", "fix pdf", "corrupt", "damaged", "won't open", "recover"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "repair-pdf")));
+}
 
 console.log(`\n${pass}/${total} passed`);
 if (pass !== total) process.exit(1);

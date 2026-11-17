@@ -25,6 +25,7 @@ work with or without an account.
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
 | **Resize PDF** | Every page onto A4, A3, A5, Letter, Legal, Tabloid or a custom size (mm, in or pt): keep each page's orientation or force one, fit inside, fill and crop, or don't scale, with optional margins, or 2 or 4 pages to a sheet. Pages stay vector; links, bookmarks and comments move with them; form fields are flattened first. Shows the first sheet before you start. Runs in a worker. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
+| **Repair PDF** | Recovers a damaged PDF: junk before the header or after the end, a broken or missing index, a download cut off part way (what arrived is kept, a page cut mid-way keeps its start), damaged object streams, a missing catalog and a page tree that loops. Pages are copied as they were, with their text, fields, links and bookmarks; a page pdf-lib can't copy is drawn by pdf.js as a picture with its text kept searchable. Says what came back: pages of pages, which are pictures, what was lost. Never makes an empty file; files that need a password go to Unlock PDF first. Reading and rebuilding run in a worker. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
@@ -347,8 +348,10 @@ round-trip, Flatten PDF (each result rendered by pdf.js and compared with
 the original, pixel by pixel), protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
 openpyxl), compression (images sized by placement, lossless graphics,
-text and forms kept), and resizing (page sizes, where text, links,
-bookmarks and notes land, turned pages, 2 and 4 to a sheet). Others cover PPTX parsing, editing and rendering,
+text and forms kept), resizing (page sizes, where text, links,
+bookmarks and notes land, turned pages, 2 and 4 to a sheet), and repair
+(files broken on purpose in each way real files break, each result opened
+by both pdf-lib and pdf.js). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
