@@ -112,6 +112,7 @@ function wrapText(
   maxWidth: number
 ): string[] {
   const lines: string[] = [];
+  const fits = (s: string) => font.widthOfTextAtSize(s, size) <= maxWidth;
   for (const paragraph of safeText(text, font).split("\n")) {
     if (!paragraph) {
       lines.push("");
@@ -120,11 +121,21 @@ function wrapText(
     let line = "";
     for (const word of paragraph.split(/\s+/)) {
       const candidate = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth || !line) {
+      if (fits(candidate) || !line) {
         line = candidate;
       } else {
         lines.push(line);
         line = word;
+      }
+      // A word wider than the box (a long link) breaks between letters, as
+      // the editor shows it, instead of running off the page.
+      let chars = Array.from(line);
+      while (chars.length > 1 && !fits(line)) {
+        let cut = chars.length - 1;
+        while (cut > 1 && !fits(chars.slice(0, cut).join(""))) cut--;
+        lines.push(chars.slice(0, cut).join(""));
+        chars = chars.slice(cut);
+        line = chars.join("");
       }
     }
     if (line) lines.push(line);
