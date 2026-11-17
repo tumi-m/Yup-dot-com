@@ -1,6 +1,7 @@
 import { OCR_LANGUAGES } from "@/lib/pdf/ocr-languages";
 import type { ToolContext, ToolFile } from "@/lib/pdf/toolkit";
 import { readOptions } from "@/lib/pdf/resize/geometry";
+import { acceptFor, ALL_FORMATS, type ImageFormat } from "@/lib/pdf/images-to-pdf/formats";
 
 /** pdf-lib and pdf.js load when a spell is cast, not with the page. */
 const kit = () => import("@/lib/pdf/toolkit");
@@ -29,7 +30,10 @@ export interface ToolField {
 }
 
 export interface ToolProcessor {
+  /** What the file picker offers. */
   accept: string;
+  /** Also taken when dropped or picked anyway (the file picker offers `accept` only). */
+  alsoAccepts?: string;
   multiple: boolean;
   minFiles: number;
   /** Bundle multiple outputs into a single zip download. */
@@ -56,6 +60,106 @@ export interface ToolProcessor {
     options: Record<string, string>,
     ctx: ToolContext
   ) => Promise<ToolFile | ToolFile[]>;
+}
+
+/** Page size and margin, as on every images-to-PDF page. */
+const IMAGE_FIELDS: ToolField[] = [
+  {
+    key: "pageSize",
+    label: "Page size",
+    type: "select",
+    default: "fit",
+    options: [
+      { value: "fit", label: "Fit to image" },
+      { value: "a4", label: "A4" },
+    ],
+  },
+  {
+    key: "margin",
+    label: "Margin (pt)",
+    type: "select",
+    default: "0",
+    options: [
+      { value: "0", label: "None" },
+      { value: "24", label: "Small" },
+      { value: "48", label: "Large" },
+    ],
+  },
+];
+
+/**
+ * JPG to PDF and its one-format pages (PNG, WebP, HEIC, TIFF, SVG to PDF):
+ * the same tool, offering that format in the file picker. Any other picture
+ * dropped on the page is taken too.
+ */
+function imageTool(formats: ImageFormat[]): ToolProcessor {
+  return {
+    cancellable: true,
+    accept: acceptFor(formats),
+    alsoAccepts: acceptFor(ALL_FORMATS),
+    multiple: true,
+    minFiles: 1,
+    fields: IMAGE_FIELDS,
+    run: async (files, o, ctx) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }, ctx),
+  };
+}
+
+const TEXT_ACCEPT = "text/plain,.txt,.text,.log,.csv,.tsv,.json,.xml,.yaml,.yml,.ini,.cfg,.conf,.js,.ts,.py,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.php,.sh,.sql,.css";
+const MARKDOWN_ACCEPT = "text/markdown,text/x-markdown,.md,.markdown,.mdown,.mkd";
+
+/** Text to PDF and Markdown to PDF: one file, laid out on pages. */
+function textTool(markdown: boolean): ToolProcessor {
+  return {
+    cancellable: true,
+    accept: markdown ? MARKDOWN_ACCEPT : TEXT_ACCEPT,
+    // Either page takes the other's files: Markdown read as text, or text as Markdown.
+    alsoAccepts: markdown ? TEXT_ACCEPT : MARKDOWN_ACCEPT,
+    multiple: false,
+    minFiles: 1,
+    note: "Writes Latin, Greek and Cyrillic letters. Chinese, Japanese, Korean, Arabic and Hebrew aren't supported yet.",
+    fields: [
+      {
+        key: "pageSize",
+        label: "Page size",
+        type: "select",
+        default: "a4",
+        options: [
+          { value: "a4", label: "A4" },
+          { value: "letter", label: "Letter" },
+        ],
+      },
+      {
+        key: "margin",
+        label: "Margins",
+        type: "select",
+        default: "normal",
+        options: [
+          { value: "narrow", label: "Narrow (0.5 in)" },
+          { value: "normal", label: "Normal (1 in)" },
+          { value: "wide", label: "Wide (1.5 in)" },
+        ],
+      },
+      {
+        key: "fontSize",
+        label: "Text size",
+        type: "select",
+        default: "11",
+        options: ["9", "10", "11", "12", "14"].map((v) => ({ value: v, label: `${v} pt` })),
+      },
+      {
+        key: "font",
+        label: "Font",
+        type: "select",
+        default: "sans",
+        options: [
+          { value: "sans", label: "Sans" },
+          { value: "mono", label: "Monospace", hint: "Every letter the same width, so code and columns line up." },
+        ],
+      },
+      { key: "pageNumbers", label: "Page numbers", type: "checkbox", default: "true" },
+    ],
+    run: async (files, o, ctx) => (await kit()).textToPdfTool(files, o, ctx, markdown),
+  };
 }
 
 export const PROCESSORS: Record<string, ToolProcessor> = {
@@ -286,36 +390,14 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     ],
     run: async (files, o, ctx) => (await kit()).pdfToImagesTool(files, { format: o.format, quality: o.quality }, ctx),
   },
-  "jpg-to-pdf": {
-    cancellable: true,
-    accept: "image/jpeg,image/png",
-    multiple: true,
-    minFiles: 1,
-    fields: [
-      {
-        key: "pageSize",
-        label: "Page size",
-        type: "select",
-        default: "fit",
-        options: [
-          { value: "fit", label: "Fit to image" },
-          { value: "a4", label: "A4" },
-        ],
-      },
-      {
-        key: "margin",
-        label: "Margin (pt)",
-        type: "select",
-        default: "0",
-        options: [
-          { value: "0", label: "None" },
-          { value: "24", label: "Small" },
-          { value: "48", label: "Large" },
-        ],
-      },
-    ],
-    run: async (files, o, ctx) => (await kit()).imagesToPdfTool(files, { pageSize: o.pageSize, margin: o.margin }, ctx),
-  },
+  "jpg-to-pdf": imageTool(ALL_FORMATS),
+  "png-to-pdf": imageTool(["png"]),
+  "webp-to-pdf": imageTool(["webp"]),
+  "heic-to-pdf": { ...imageTool(["heic"]), note: "Safari opens HEIC photos. In other browsers, save them as JPG first." },
+  "tiff-to-pdf": imageTool(["tiff"]),
+  "svg-to-pdf": { ...imageTool(["svg"]), note: "Each SVG becomes a picture sharp enough to print." },
+  "txt-to-pdf": textTool(false),
+  "markdown-to-pdf": textTool(true),
   "pdf-to-text": {
     accept: "application/pdf",
     multiple: false,

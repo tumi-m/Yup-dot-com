@@ -18,12 +18,16 @@ export function choiceFromHash(hash: string): JourneyChoice | null {
 
 export type DroppedKind = "pdf" | "image" | "pptx" | "legacy-slides" | "other";
 
+/** The pictures JPG to PDF takes (lib/pdf/images-to-pdf/formats.ts). */
+const IMAGE_NAME = /\.(png|jpe?g|jfif|webp|gif|bmp|tiff?|avif|heic|heif|svg)$/;
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif", "image/heic", "image/heif", "image/svg+xml"];
+
 /** Classifies a file by extension first (browsers often leave `type` empty for Office files). */
 export function fileKind(file: { name: string; type?: string }): DroppedKind {
   const name = file.name.toLowerCase();
   const type = (file.type ?? "").toLowerCase();
   if (name.endsWith(".pdf") || type === "application/pdf") return "pdf";
-  if (/\.(png|jpe?g)$/.test(name) || type === "image/png" || type === "image/jpeg") return "image";
+  if (IMAGE_NAME.test(name) || IMAGE_TYPES.includes(type)) return "image";
   if (name.endsWith(".pptx") || type === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
     return "pptx";
   }
