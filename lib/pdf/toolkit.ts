@@ -22,6 +22,8 @@ export interface ToolFile {
   filename: string;
   /** A short line for the result, e.g. what was left as it was. */
   note?: string;
+  /** The input handed back as it was, because nothing would make it smaller. */
+  unchanged?: boolean;
 }
 
 function hexToRgb(hex: string) {
@@ -67,6 +69,9 @@ function rangeParts(input: string): string[] {
     .map((part) => part.trim())
     .filter(Boolean);
 }
+
+/** Nothing typed in a page list (every typed part is checked by rangeProblem). */
+const NO_PAGES = "Type the pages, like 1-3, 5.";
 
 /**
  * Why `input` can't be split as typed, or null when every part is fine.
@@ -174,7 +179,7 @@ export async function splitTool(
     const problem = rangeProblem(opts.ranges ?? "", count);
     if (problem) throw new Error(problem);
     const pages = [...new Set(parseRanges(opts.ranges ?? "", count).flat())];
-    if (!pages.length) throw new Error(count === 1 ? "This PDF has only 1 page." : `Pick pages between 1 and ${count}.`);
+    if (!pages.length) throw new Error(NO_PAGES);
     stopIfAborted(ctx.signal);
     return { blob: pdfBlob(await extractorFor(src)(pages)), filename: `${base}-selected.pdf` };
   } else {
@@ -182,9 +187,7 @@ export async function splitTool(
     if (problem) throw new Error(problem);
     groups = parseRanges(opts.ranges ?? "", count);
     // Never hand back the whole document as if it were the requested split.
-    if (!groups.length) {
-      throw new Error(count === 1 ? "This PDF has only 1 page." : `Pick pages between 1 and ${count}.`);
-    }
+    if (!groups.length) throw new Error(NO_PAGES);
   }
 
   const extract = extractorFor(src);
@@ -236,7 +239,7 @@ export async function compressTool(
   }
   // Never hand back a bigger file, nor one that is barely smaller.
   if (compressed.length > file.size * 0.98) {
-    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf" };
+    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf", unchanged: true };
   }
   return { blob: pdfBlob(compressed), filename: suffixed(file, "compressed") };
 }
@@ -403,7 +406,7 @@ export async function rotateTool(
     const problem = which.trim() ? rangeProblem(which, count) : null;
     if (problem) throw new Error(problem);
     chosen = new Set(parseRanges(which, count).flat());
-    if (!chosen.size) throw new Error(`Pick pages between 1 and ${count}.`);
+    if (!chosen.size) throw new Error(NO_PAGES);
   }
   doc.getPages().forEach((page, i) => {
     if (chosen && !chosen.has(i)) return;

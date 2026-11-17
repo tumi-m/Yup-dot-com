@@ -5,6 +5,9 @@ import { readOptions } from "@/lib/pdf/resize/geometry";
 /** pdf-lib and pdf.js load when a spell is cast, not with the page. */
 const kit = () => import("@/lib/pdf/toolkit");
 
+/** Split and Rotate with no pages typed (the tools say the same). */
+const NO_PAGES = "Type the pages, like 1-3, 5.";
+
 export type FieldType = "select" | "text" | "password" | "range" | "color" | "checkbox";
 
 export interface ToolField {
@@ -131,6 +134,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         hint: (o) => (o.mode === "ranges" ? "Each range becomes its own PDF." : undefined),
       },
     ],
+    problem: (o) => (o.mode === "every" || o.ranges?.trim() ? null : { fields: ["ranges"], message: NO_PAGES }),
     run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
   },
   "rotate-pdf": {
@@ -168,6 +172,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         showIf: { key: "pages", value: "some" },
       },
     ],
+    problem: (o) => (o.pages !== "some" || o.which?.trim() ? null : { fields: ["which"], message: NO_PAGES }),
     run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle, pages: o.pages, which: o.which }),
   },
   "resize-pdf": {

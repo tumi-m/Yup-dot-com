@@ -51,7 +51,7 @@ export async function compressVideoTool(files: File[], opts: { quality: string }
     throw new VideoError("This video couldn't be compressed in this browser.");
   }
   const base = file.name.replace(/\.[^.]+$/, "") || "video";
-  if (out.action === "keep") return { blob: file, filename: file.name };
+  if (out.action === "keep") return { blob: file, filename: file.name, unchanged: true };
   // Rewrapped, or converted from another codec without getting smaller: an MP4 of it, not a compressed one.
   const smaller = out.action === "encode" && out.blob.size < file.size;
   return { blob: out.blob, filename: smaller ? `${base}-compressed.mp4` : `${base}.mp4` };

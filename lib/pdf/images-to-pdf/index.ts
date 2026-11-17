@@ -50,8 +50,12 @@ export async function imagesToPdf(
       rect = { x: margin, y: margin, width: w, height: h };
       // At 1 pt per pixel a phone photo makes a 42-inch page, which no one
       // prints or views at that size: size it for A4 paper instead. A long
-      // screenshot is printed on many sheets at its width, so it keeps its pixels.
-      print = Math.min(1, Math.max(A4.w / Math.min(w, h), A4.h / Math.max(w, h)));
+      // screenshot (over two sheets at A4 width) is printed on many sheets at
+      // its width, so it is sized for that width.
+      const long = Math.max(w, h);
+      const short = Math.min(w, h);
+      const strip = long / short > (2 * A4.h) / A4.w;
+      print = Math.min(1, strip ? A4.w / short : A4.h / long);
     } else {
       // A wide picture gets a landscape sheet.
       const landscape = shown.width > shown.height;

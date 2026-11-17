@@ -82,7 +82,10 @@ check("split: a part that doesn't parse is an error", typo === "Use commas betwe
 const spaced = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "1 3" })) as ToolFile[];
 check("split: '1 3' makes two files", spaced.length === 2, spaced.length);
 const empty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "" }));
-check("split: no pages picked is still an error", empty === "Pick pages between 1 and 5.", empty);
+check("split: no pages picked is still an error", empty === "Type the pages, like 1-3, 5.", empty);
+const single = await makePdf([[595, 842]]);
+const singleEmpty = await errorOf(splitTool([file(single, "one.pdf")], { mode: "ranges", ranges: "" }));
+check("split: a 1-page PDF with no pages typed asks for pages", singleEmpty === "Type the pages, like 1-3, 5.", singleEmpty);
 const parts = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "2-3, 5, 5" })) as ToolFile[];
 check(
   "split: files named after source and pages, no collisions",
@@ -126,6 +129,14 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
   check("protect: fine", keyOf({ password: "abcd", confirm: "abcd" }) === null);
   const mark = PROCESSORS["watermark-pdf"].problem!;
   check("watermark: blank text marks the text field, on the cast", mark({ text: "  " })?.fields.join() === "text" && !mark({ text: "  " })?.live && mark({ text: "DRAFT" }) === null);
+  const split = PROCESSORS["split-pdf"].problem!;
+  const noPages = split({ mode: "one", ranges: " " });
+  check("split: no pages marks Pages, on the cast, as the tool says", noPages?.fields.join() === "ranges" && !noPages.live && noPages.message === empty, noPages);
+  check("split: typed pages, or every page, have no problem", split({ mode: "ranges", ranges: "1-2" }) === null && split({ mode: "every", ranges: "" }) === null);
+  const turn = PROCESSORS["rotate-pdf"].problem!;
+  const noWhich = turn({ pages: "some", which: "" });
+  check("rotate: no pages marks Which pages, on the cast", noWhich?.fields.join() === "which" && !noWhich.live && noWhich.message === empty, noWhich);
+  check("rotate: all pages, or typed ones, have no problem", turn({ pages: "all", which: "" }) === null && turn({ pages: "some", which: "2" }) === null);
   const resize = PROCESSORS["resize-pdf"].problem!;
   const custom = resize({ size: "custom", width: "abc", height: "297", unit: "mm" });
   check("resize: a bad custom size marks both fields as it is typed", custom?.fields.join() === "width,height" && !!custom.live, custom);
@@ -144,7 +155,7 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
   check("protect: the tool keeps the same rule", tooShort === protect({ password: "abc", confirm: "abc" })!.message, tooShort);
 }
 const oneEmpty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "" }));
-check("split one: no pages picked is an error", oneEmpty === "Pick pages between 1 and 5.", oneEmpty);
+check("split one: no pages picked is an error", oneEmpty === "Type the pages, like 1-3, 5.", oneEmpty);
 
 // --- Stamps land where the reader sees the page ------------------------------
 const odd = await (async () => {
@@ -330,7 +341,7 @@ check("jpg-to-pdf: non-image explains itself", notImage === "anim.jpg: use a JPG
   const outside = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: "7" }));
   check("rotate: a page not in the PDF is an error", outside === "Page 7 isn't in this PDF (4 pages).", outside);
   const none = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: " " }));
-  check("rotate: no pages picked is an error", none === "Pick pages between 1 and 4.", none);
+  check("rotate: no pages picked is an error", none === "Type the pages, like 1-3, 5.", none);
 }
 
 // --- Tightly padded tables (HTML/Word exports) -------------------------------

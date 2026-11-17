@@ -292,8 +292,8 @@ const fit = new Uint8Array(
 );
 const fitDoc = await PDFDocument.load(fit);
 const [fitted] = await pdfImages(fit);
-// The default page size: 1 pt per pixel, but the picture is sized to fill A4 paper (short side 2480 px).
-check("jpg-to-pdf (fit): a big photo is sized for A4 paper at 300 DPI", fitted.width === 4961 && fitted.height === 2480 && fitted.length < sideways.length * 0.85, { ...fitted, contents: undefined });
+// The default page size: 1 pt per pixel, but the picture is sized for A4 paper (long side 3508 px).
+check("jpg-to-pdf (fit): a big photo is sized for A4 paper at 300 DPI", fitted.width === 3508 && fitted.height === 1754 &&fitted.length < sideways.length * 0.85, { ...fitted, contents: undefined });
 check("jpg-to-pdf (fit): the page stays 1 pt per pixel, portrait for EXIF 6", fitDoc.getPage(0).getWidth() === 3000 && fitDoc.getPage(0).getHeight() === 6000);
 check("jpg-to-pdf: progress counts the images", progress.join() === "Image 1 of 2,Image 2 of 2", progress);
 const modest = await encodeJpeg(photo(2000, 1500), { quality: 90 });
@@ -307,6 +307,9 @@ check("jpg-to-pdf (fit): a phone photo is sized for A4 paper", phoneOut.width ==
 const strip = await encodeJpeg(image(600, 20000, (x, y) => [(x / 3) | 0, (y / 80) & 255, 128]), { quality: 90 });
 const stripPdf = await PDFDocument.load(new Uint8Array(await (await imagesToPdfTool([file(strip, "strip.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
 const [stripOut] = await pdfImages(await stripPdf.save());
+const pano = await encodeJpeg(photo(5000, 2000), { quality: 90 });
+const [panoOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(pano, "w.jpg", "image/jpeg")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer()));
+check("jpg-to-pdf (fit): a wide photo fits one A4 sheet, not a strip", panoOut.width === 3508, { ...panoOut, contents: undefined });
 check("jpg-to-pdf (fit): a long strip keeps its pixels", stripOut.width === 600 && stripOut.height === 20000 && stripOut.length === strip.length, { ...stripOut, contents: undefined });
 check("jpg-to-pdf (fit): on a page within the 200-inch limit", stripPdf.getPage(0).getHeight() === 14400 && Math.round(stripPdf.getPage(0).getWidth()) === 432);
 // A4: a wide picture gets a landscape sheet, and fills its width.

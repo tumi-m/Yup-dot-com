@@ -306,7 +306,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       field.focus();
       return;
     }
-    if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
+    // Cast from the button or with Enter in a field: both leave, so focus
+    // follows the job to the progress bar and then the result.
+    if (document.activeElement?.closest("[data-cast], [data-options]")) focusNext.current = "progress";
     // Room for the result, reserved now while the click still explains it.
     flow.lock(resultFloor());
     setStatus("working");
@@ -448,6 +450,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     proc.reportsSizeChange && results.length === 1 && inputBytes > 0
       ? 1 - outputBytes / inputBytes
       : null;
+  /** About the same size: the file itself came back, or a new one (another format) that is no smaller. */
+  const sameSize = sizeDelta !== null && Math.abs(sizeDelta) <= 0.01;
+  const unchanged = results.length === 1 && !!results[0].unchanged;
 
   return (
     <>
@@ -457,7 +462,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
         <SuccessCard
           key="done"
           className="flex-1"
-          title={sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 ? "Already as small as it gets" : undefined}
+          title={sameSize ? "Already as small as it gets" : undefined}
           titleRef={focusRef("done")}
           stats={
             <>
@@ -486,9 +491,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   {Math.round(-sizeDelta * 100)}% larger
                 </span>
               )}
-              {sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 && (
+              {sameSize && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
-                  Your file is unchanged
+                  {unchanged ? "Your file is unchanged" : "About the same size"}
                 </span>
               )}
               {results.length === 1 && results[0].note && (
@@ -622,6 +627,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 initial={ENTER.initial}
                 animate={ENTER.animate}
                 exit={EXIT}
+                data-options
                 className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2"
               >
                 {visibleFields().map((field) => {
