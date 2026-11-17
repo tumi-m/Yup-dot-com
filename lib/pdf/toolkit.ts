@@ -8,7 +8,7 @@ import {
   extractTables,
   tableToCsv,
 } from "./parse";
-import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
+import { ENCRYPTED_MESSAGE, NO_TABLES_MESSAGE, SCANNED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
 import { openPdf } from "./open";
 import { extractorFor, mergeDocuments } from "./operations";
@@ -461,11 +461,9 @@ function pageProgress(ctx: ToolContext) {
   };
 }
 
-const NO_TEXT = "No text found. This looks like a scanned PDF: run OCR PDF on it first.";
-
 /** Fails instead of handing back an empty file when a PDF has no text layer. */
 function requireText(out: string): string {
-  if (!out.trim()) throw new Error(NO_TEXT);
+  if (!out.trim()) throw new Error(SCANNED_MESSAGE);
   return out;
 }
 
@@ -494,11 +492,7 @@ export async function extractTablesTool(files: File[], ctx: ToolContext = {}): P
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
-    throw new Error(
-      doc.likelyScanned
-        ? "No text found — this looks like a scanned PDF, which needs OCR."
-        : "No tables detected in this document."
-    );
+    throw new Error(doc.likelyScanned ? SCANNED_MESSAGE : NO_TABLES_MESSAGE);
   }
   const base = files[0].name.replace(/\.pdf$/i, "");
   return tables.map((table, i) => ({
@@ -515,7 +509,7 @@ export async function pdfToChunksTool(
 ): Promise<ToolFile> {
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const chunks = toChunks(doc, Number(opts.maxChars) || 1200);
-  if (!chunks.length) throw new Error(NO_TEXT);
+  if (!chunks.length) throw new Error(SCANNED_MESSAGE);
   const base = files[0].name.replace(/\.pdf$/i, "");
   const payload = {
     source: files[0].name,
@@ -664,7 +658,7 @@ export async function ocrTool(
 export async function pdfToWordTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   if (doc.likelyScanned) {
-    throw new Error("This looks like a scanned PDF. Run OCR PDF on it first, then convert.");
+    throw new Error(SCANNED_MESSAGE);
   }
   const { toDocxBlob } = await import("./convert");
   const base = files[0].name.replace(/\.pdf$/i, "");
@@ -675,11 +669,7 @@ export async function pdfToExcelTool(files: File[], ctx: ToolContext = {}): Prom
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
-    throw new Error(
-      doc.likelyScanned
-        ? "This looks like a scanned PDF. Run OCR PDF on it first."
-        : "No tables were detected in this document."
-    );
+    throw new Error(doc.likelyScanned ? SCANNED_MESSAGE : NO_TABLES_MESSAGE);
   }
   const { tablesToXlsx } = await import("./convert");
   const base = files[0].name.replace(/\.pdf$/i, "");

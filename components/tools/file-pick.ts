@@ -1,4 +1,5 @@
 import { formatLimitBytes } from "@/lib/limits";
+import { ENCRYPTED_MESSAGE } from "@/lib/pdf/errors";
 
 /**
  * Sorts the files of one pick or drop (already filtered to types the tool
@@ -54,4 +55,22 @@ export function splitNameEnd(name: string, keep = 12): [string, string] {
  */
 export function percentSmaller(sizeDelta: number): number {
   return Math.min(99, Math.floor(sizeDelta * 100));
+}
+
+/**
+ * The tool that fixes what a tool's error says, and the file to take there:
+ * the one the message names ("a.pdf: …"), or the only one. Null when there
+ * is none, or when that tool is the one already open.
+ */
+export function errorFix<F extends { name: string }>(
+  message: string | null,
+  files: F[],
+  slug: string
+): { slug: string; label: string; file: F } | null {
+  if (!message) return null;
+  const file = files.find((f) => message.startsWith(`${f.name}: `)) ?? (files.length === 1 ? files[0] : undefined);
+  if (!file) return null;
+  if (message.endsWith(ENCRYPTED_MESSAGE) && slug !== "unlock-pdf") return { slug: "unlock-pdf", label: "Open in Unlock PDF", file };
+  if (message.includes("scanned PDF") && slug !== "ocr-pdf") return { slug: "ocr-pdf", label: "Run OCR PDF", file };
+  return null;
 }

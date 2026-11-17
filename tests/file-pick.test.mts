@@ -2,7 +2,8 @@
 // used to throw away every file picked with it, without saying which one; a
 // one-file tool kept the first of several dropped files without a word; and
 // a big saving read "100% smaller".
-import { percentSmaller, sortPick, splitNameEnd } from "../components/tools/file-pick.ts";
+import { errorFix, percentSmaller, sortPick, splitNameEnd } from "../components/tools/file-pick.ts";
+import { ENCRYPTED_MESSAGE, SCANNED_MESSAGE, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
 
 let pass = 0;
 let total = 0;
@@ -64,6 +65,20 @@ const accent = splitNameEnd("cafe\u0301-page-1.pdf");
 check("accent stays on its letter", accent[0] === "caf" && accent[1] === "e\u0301-page-1.pdf", accent);
 check("short name: all in the end", JSON.stringify(splitNameEnd("a.pdf")) === JSON.stringify(["", "a.pdf"]));
 check("plain name: as before", JSON.stringify(splitNameEnd("report-final-page-12.jpg")) === JSON.stringify(["report-final", "-page-12.jpg"]));
+
+// An error that another tool fixes offers that tool, with the file it is about.
+const one = [pdf("scan.pdf", 1000)];
+const two = [pdf("a.pdf", 1000), pdf("locked.pdf", 1000)];
+const fixOf = (message: string | null, files: File[], slug: string) => {
+  const fix = errorFix(message, files, slug);
+  return fix ? `${fix.slug}:${fix.label}:${fix.file.name}` : null;
+};
+check("scan: Run OCR PDF", fixOf(SCANNED_MESSAGE, one, "pdf-to-word") === "ocr-pdf:Run OCR PDF:scan.pdf", fixOf(SCANNED_MESSAGE, one, "pdf-to-word"));
+check("password: Open in Unlock PDF", fixOf(ENCRYPTED_MESSAGE, one, "compress-pdf") === "unlock-pdf:Open in Unlock PDF:scan.pdf");
+check("merge: the named file goes, not the first", fixOf(`locked.pdf: ${ENCRYPTED_MESSAGE}`, two, "merge-pdf") === "unlock-pdf:Open in Unlock PDF:locked.pdf");
+check("merge: no name, no guess", fixOf(ENCRYPTED_MESSAGE, two, "merge-pdf") === null);
+check("not offered on the tool itself", fixOf(ENCRYPTED_MESSAGE, one, "unlock-pdf") === null && fixOf(SCANNED_MESSAGE, one, "ocr-pdf") === null);
+check("nothing for other errors", fixOf(UNREADABLE_MESSAGE, one, "compress-pdf") === null && fixOf(null, one, "compress-pdf") === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

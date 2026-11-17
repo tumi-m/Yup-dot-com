@@ -48,7 +48,7 @@ import {
 import { fieldShown, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { percentSmaller, sortPick } from "./file-pick";
+import { errorFix, percentSmaller, sortPick } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
@@ -353,6 +353,15 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     else setNextFailed(nextSlug);
   }
 
+  /** Takes the file the error is about to the tool that fixes it. */
+  async function fixWith(fix: { slug: string; file: File }) {
+    nudge.cancel();
+    // Without room to hand it over, the tool still opens, ready for the file.
+    const handed = await tryHandoff([fileToHandoff(fix.file, fix.file.name)]);
+    router.push(handed ? `/tools/${fix.slug}?handoff=1` : `/tools/${fix.slug}`);
+  }
+  const fix = errorFix(error, files, slug);
+
   // Files handed over from the homepage dropzone or a previous tool.
   useEffect(() => {
     if (params.get("handoff") !== "1") return;
@@ -617,7 +626,29 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           </AnimatePresence>
 
           <AnimatePresence>
-            {error && <InlineError key="error" message={error} shakeKey={errorKey} />}
+            {error && (
+              <InlineError
+                key="error"
+                shakeKey={errorKey}
+                message={
+                  fix ? (
+                    // In the text, so on a phone it wraps under the message instead of squeezing it.
+                    <>
+                      {error}{" "}
+                      <button
+                        type="button"
+                        onClick={() => void fixWith(fix)}
+                        className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {fix.label}
+                      </button>
+                    </>
+                  ) : (
+                    error
+                  )
+                }
+              />
+            )}
           </AnimatePresence>
 
           {/* Action: the Cast button gives way to the progress bar in place. */}
