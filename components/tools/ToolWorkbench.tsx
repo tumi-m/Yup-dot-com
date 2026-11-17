@@ -48,7 +48,7 @@ import {
 import { fieldShown, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { errorFix, percentSmaller, sortPick } from "./file-pick";
+import { errorFix, percentSmaller, sortPick, takesMessage } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
@@ -166,27 +166,28 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       })
     );
     if (!accepted.length) {
-      fail(`That file type isn't supported here.`);
+      fail(takesMessage(getTool(slug)?.name, proc.accept, proc.multiple));
       return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
-    const { keep, tooBig, message } = sortPick(accepted, list.length - accepted.length, {
+    const { keep, tooBig, overBatch, message } = sortPick(accepted, list.length - accepted.length, {
       maxFileBytes: limits.maxFileBytes,
       multiple: proc.multiple,
       toolName: getTool(slug)?.name,
+      maxBatchFiles: limits.maxBatchFiles,
+      room: proc.multiple ? limits.maxBatchFiles - entries.length : 1,
     });
     if (tooBig) setUpsell("file-size");
+    if (overBatch) setUpsell("batch");
     if (!keep.length) {
       fail(message);
       return false;
     }
     stopJob();
     const incoming = keep.map((file) => ({ id: `f${++entrySeq}`, file }));
-    // Decide from the current list, not inside the state updater: React may
-    // run updaters later, so a flag set there is still false when read here.
-    const next = proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1);
-    if (next.length > limits.maxBatchFiles) setUpsell("batch");
-    setEntries(next.slice(0, limits.maxBatchFiles));
+    // From the current list, not inside a state updater: the room counted
+    // above is for this list, and React may run updaters later.
+    setEntries(proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1));
     setStatus("idle");
     setResults([]);
     fail(message);
