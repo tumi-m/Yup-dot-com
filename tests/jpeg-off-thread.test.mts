@@ -26,6 +26,7 @@ const g = globalThis as unknown as Record<string, unknown>;
 g.postMessage = (reply: unknown) => setTimeout(() => current?.onmessage?.({ data: structuredClone(reply) }));
 await import("../lib/jpeg-encode/worker.ts");
 const handler = g.onmessage as (e: { data: unknown }) => void;
+const { canvasToJpeg } = await import("../lib/jpeg-encode/off-thread.ts");
 class FakeWorker {
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: { preventDefault(): void }) => void) | null = null;
@@ -55,18 +56,23 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
 
 const a = image(120, 80, 3);
 const b = image(64, 200, 7);
-const [ja, jb] = await Promise.all([codec.canvasToJpeg(canvas, 0.8, { pixels: a }), codec.canvasToJpeg(canvas, 0.6, { pixels: b })]);
+const [ja, jb] = await Promise.all([canvasToJpeg(canvas, 0.8, { pixels: a }), canvasToJpeg(canvas, 0.6, { pixels: b })]);
 check("each reply goes to its own request", same(ja, await inline(a, 0.8)) && same(jb, await inline(b, 0.6)));
 check("one worker serves every page", created === 1, created);
 check("the pixels stay readable for the caller", a.data.byteLength === 120 * 80 * 4 && b.data.byteLength === 64 * 200 * 4);
-await codec.canvasToJpeg(canvas, 0.8, { pixels: a });
+await canvasToJpeg(canvas, 0.8, { pixels: a });
 check("and it is kept between jobs", created === 1, created);
 
 crash = true;
-const jc = await codec.canvasToJpeg(canvas, 0.8, { pixels: a });
+const jc = await canvasToJpeg(canvas, 0.8, { pixels: a });
 check("a crashed worker: encoded on this thread instead", same(jc, ja));
-const jd = await codec.canvasToJpeg(canvas, 0.6, { pixels: b });
+const jd = await canvasToJpeg(canvas, 0.6, { pixels: b });
 check("and no new worker is started for later pages", same(jd, jb) && created === 1, created);
+
+// The worker loads image-codec.ts: if that started the worker in turn, the
+// bundler would build the worker into itself and the build would never end.
+const startsWorker = /jpeg-encode\/off-thread|new Worker/;
+check("the worker's own code never starts it", !startsWorker.test(readFileSync("lib/image-codec.ts", "utf8")) && !startsWorker.test(readFileSync("lib/jpeg-encode/worker.ts", "utf8")));
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

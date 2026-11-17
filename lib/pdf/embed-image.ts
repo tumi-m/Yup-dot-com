@@ -1,5 +1,6 @@
 import type { PDFDocument, PDFRef } from "pdf-lib";
-import { canvasPixels, canvasToJpeg, decodeJpeg, encodeJpeg, isGray, type RawImage } from "../image-codec";
+import { canvasPixels, decodeJpeg, encodeJpeg, isGray, type RawImage } from "../image-codec";
+import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import { downsampleTarget, resizeRgba } from "../image-fit";
 import {
   canDeflate,
