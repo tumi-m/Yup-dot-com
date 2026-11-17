@@ -9,8 +9,11 @@
  * Works on bytes, not strings: a 500 MB file must not become a second copy.
  */
 
-/** What was wrong with the file's bytes, and fixed. */
-export type ByteFix = "junk-before" | "junk-after" | "cut-off" | "header" | "index";
+/**
+ * What was wrong with the file's bytes, and fixed; "end-lost" says that
+ * objects were cut off with the end of the file, not only its index.
+ */
+export type ByteFix = "junk-before" | "junk-after" | "cut-off" | "end-lost" | "header" | "index";
 
 /** Not a PDF at all: no header and no PDF objects. */
 export class NotAPdfError extends Error {}
@@ -205,7 +208,11 @@ export function salvage(input: Uint8Array): Salvaged {
       closed = `${header.num} ${header.gen}`;
     }
   }
-  if (keep === 0 && !partial) throw new NotAPdfError("This file holds no PDF content to recover.");
+  if (keep === 0 && !partial) throw new NotAPdfError("This file was cut off before any of its content, so there's nothing to recover.");
+  // Cut inside the index at the end, nothing is lost; cut anywhere before it, the objects after the cut are.
+  const intoIndex = /^\s*(xref|trailer|startxref)\b/.test(text(tail.subarray(0, 64)));
+  const xrefStream = header && /\/Type\s*\/XRef\b/.test(text(tail.subarray(header.at, header.at + 1024)));
+  if (!intoIndex && !xrefStream) fixes.push("end-lost");
   // The last trailer there is still says how the file is encrypted (without
   // its /Encrypt and /ID nothing decrypts) and where its catalog is.
   const kept = lastTrailer(bytes);

@@ -49,7 +49,7 @@ export interface RepairOptions {
   canvas?: () => HTMLCanvasElement;
 }
 
-const UNDECRYPTABLE = "This PDF is encrypted, and the part needed to decrypt it is damaged, so nothing in it could be recovered.";
+const UNDECRYPTABLE = "This PDF is locked with encryption, and the part needed to unlock it is damaged, so nothing in it could be recovered.";
 
 /** A pdf.js copy of the file, or why there is none. */
 async function openForPictures(sources: (() => Promise<Uint8Array>)[], encrypted = false): Promise<LoadedPdf> {
@@ -178,7 +178,7 @@ export function pageList(pages: number[]): string {
 
 const pagesWord = (pages: number[]) => `${pages.length === 1 ? "Page" : "Pages"} ${pageList(pages)}`;
 
-const FIXED: Record<Fix, string> = {
+const FIXED: Record<Exclude<Fix, "end-lost">, string> = {
   "junk-before": "removed data in front of the PDF",
   "junk-after": "removed data after its end",
   "cut-off": "closed a file that was cut off",
@@ -207,8 +207,9 @@ export function repairLines(r: RepairReport): ReportLine[] {
       ? { text: r.pages === 1 ? "Recovered the page." : `Recovered all ${r.pages} pages.` }
       : { text: `Recovered ${r.pages} of ${r.of} pages.`, warn: true }
   );
-  if (r.fixes.length) {
-    const parts = r.fixes.map((f) => FIXED[f]);
+  const fixed = r.fixes.filter((f): f is Exclude<Fix, "end-lost"> => f !== "end-lost");
+  if (fixed.length) {
+    const parts = fixed.map((f) => FIXED[f]);
     const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
     lines.push({ text: `Fixed: ${joined}.` });
   }
@@ -229,6 +230,9 @@ export function repairLines(r: RepairReport): ReportLine[] {
   if (r.lost.length) {
     const one = r.lost.length === 1;
     lines.push({ text: `${pagesWord(r.lost)} of the original couldn't be read and ${one ? "is" : "are"} left out.`, warn: true });
+  }
+  if (r.fixes.includes("end-lost")) {
+    lines.push({ text: "The end of the file was missing, so anything kept there, such as some fields, links or bookmarks, may be gone.", warn: true });
   }
   if (r.before.fields > r.after.fields) {
     lines.push({

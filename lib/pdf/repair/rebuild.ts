@@ -15,6 +15,7 @@ import {
   PDFDocument,
   PDFInvalidObject,
   PDFName,
+  PDFNull,
   PDFNumber,
   PDFPageLeaf,
   PDFPageTree,
@@ -341,6 +342,43 @@ function checkPage(doc: PDFDocument, leaf: Leaf, memo: Map<PDFRef, boolean>, clo
   return { ok: sound(doc, node.get(Resources), memo), shows, partial };
 }
 
+/**
+ * Takes out references to objects that aren't in the file (lost to a cut or
+ * to damage): copied out, a reference to nothing would be given a number
+ * that something else then takes. In a list of references (fields, kids,
+ * comments) the entry goes; elsewhere it becomes null, so positions hold.
+ */
+export function pruneDangling(doc: PDFDocument) {
+  const { context } = doc;
+  const missing = (v: PDFObject | undefined) => v instanceof PDFRef && context.lookup(v) === undefined;
+  const seen = new Set<PDFObject>();
+  const visit = (obj: PDFObject | undefined) => {
+    if (!obj || seen.has(obj)) return;
+    seen.add(obj);
+    if (obj instanceof PDFDict) {
+      for (const [key, value] of obj.entries()) {
+        if (missing(value)) obj.delete(key);
+        else if (!(value instanceof PDFRef)) visit(value);
+      }
+    } else if (obj instanceof PDFArray) {
+      const items = obj.asArray();
+      const refs = items.every((v) => v instanceof PDFRef);
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (!missing(items[i])) {
+          if (!(items[i] instanceof PDFRef)) visit(items[i]);
+        } else if (refs) obj.remove(i);
+        else obj.set(i, PDFNull);
+      }
+    } else if (obj instanceof PDFStream) {
+      visit(obj.dict);
+    }
+  };
+  for (const [, obj] of context.enumerateIndirectObjects()) visit(obj);
+  // The trailer's own entries too: a lost /Info is dropped.
+  const trailer = context.trailerInfo;
+  if (missing(trailer.Info)) trailer.Info = undefined;
+}
+
 /** How many fields the document's form has (the ones that hold a value). */
 export function countFields(doc: PDFDocument): number {
   const { context } = doc;
@@ -473,6 +511,9 @@ export async function rebuildPdf(input: Uint8Array, opts: { onProgress?: Progres
   if (!leaves.length) return unread();
   if (broken) fixes.push("pages");
   replaceTree(doc, leaves);
+  pruneDangling(doc);
+  // Fields whose pages were lost go with them.
+  if (fixes.includes("pages") || fixes.includes("cut-off")) dropFieldsOffPages(doc);
   const before = extras(doc);
 
   const memo = new Map<PDFRef, boolean>();
