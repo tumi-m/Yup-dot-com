@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
-import { createAnnotation, createCentred, resizeDraft, isDraftUsable } from "@/lib/editor/factory";
+import { createAnnotation, createCentred, resizeDraft, finishDraft } from "@/lib/editor/factory";
 import { pageTouchAction } from "@/lib/editor/canvas";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
@@ -199,10 +199,10 @@ export function PageView({
     } catch {
       /* already released */
     }
-    const finished = draft;
+    const finished = draft && finishDraft(draft);
     setDraft(null);
     origin.current = null;
-    if (finished && isDraftUsable(finished)) onCreate(finished);
+    if (finished) onCreate(finished);
   }
 
   const editable = tool === "select";
