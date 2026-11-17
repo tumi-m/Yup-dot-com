@@ -29,6 +29,8 @@ export interface ParsedSpan {
   fontSize: number;
   fontName: string;
   bold: boolean;
+  /** A form field's value, drawn by the viewer rather than the page. */
+  field?: boolean;
 }
 
 export interface ParsedLine {
@@ -158,6 +160,70 @@ function toSpans(items: RawItem[], viewport: { transform: number[]; height: numb
   return spans;
 }
 
+/** What pdf.js tells of a form field's widget. */
+interface WidgetAnnotation {
+  subtype?: string;
+  hidden?: boolean;
+  rect?: number[];
+  fieldType?: string;
+  fieldValue?: string | string[] | null;
+  fieldFlags?: number;
+  checkBox?: boolean;
+  radioButton?: boolean;
+  exportValue?: string;
+  buttonValue?: string;
+  defaultAppearanceData?: { fontSize?: number };
+}
+
+/** A text field that shows dots instead of what was typed. */
+const PASSWORD_FIELD = 1 << 13;
+
+/** What a filled-in field shows, or "" when there is nothing to read. */
+function fieldText(a: WidgetAnnotation): string {
+  const value = a.fieldValue;
+  if (a.fieldType === "Tx") return a.fieldFlags && a.fieldFlags & PASSWORD_FIELD ? "" : typeof value === "string" ? value : "";
+  if (a.fieldType === "Ch") return Array.isArray(value) ? value.join(", ") : value ?? "";
+  if (a.fieldType === "Btn") {
+    if (a.checkBox) return value && value !== "Off" && value === a.exportValue ? "☒" : "";
+    if (a.radioButton) return value != null && a.buttonValue === value ? "◉" : "";
+  }
+  return "";
+}
+
+/**
+ * Filled-in form values as spans where their fields sit, in the same
+ * coordinates as toSpans. Their text is drawn by the viewer, not the page,
+ * so the page's own text has a label ("Name:") but not what was typed.
+ */
+function fieldSpans(annotations: WidgetAnnotation[], viewport: { transform: number[]; height: number }): ParsedSpan[] {
+  const [va, vb, vc, vd, ve, vf] = viewport.transform;
+  const spans: ParsedSpan[] = [];
+  for (const a of annotations) {
+    if (a.subtype !== "Widget" || a.hidden || !a.rect || a.rect.length < 4) continue;
+    const text = fieldText(a).replace(XML_ILLEGAL, "").trim();
+    if (!text) continue;
+    const [x1, y1, x2, y2] = a.rect;
+    const xs = [va * x1 + vc * y1 + ve, va * x2 + vc * y2 + ve];
+    const ys = [viewport.height - (vb * x1 + vd * y1 + vf), viewport.height - (vb * x2 + vd * y2 + vf)];
+    const height = Math.abs(ys[1] - ys[0]);
+    const auto = a.defaultAppearanceData?.fontSize;
+    const fontSize = Math.min(14, auto && auto > 0 ? auto : 0.7 * height) || 10;
+    spans.push({
+      text,
+      x: Math.min(...xs),
+      // Where a one-line field draws its text: centred, on a baseline below the middle.
+      y: Math.min(...ys) + Math.max(0, (height - fontSize * 0.7) / 2),
+      width: Math.abs(xs[1] - xs[0]),
+      height: fontSize,
+      fontSize,
+      fontName: "",
+      bold: false,
+      field: true,
+    });
+  }
+  return spans;
+}
+
 const RTL_LETTERS = /(?=\p{L})[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
 const LTR_LETTERS = /(?=\p{L})[^\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/gu;
 
@@ -247,7 +313,9 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
     const rtl = balance > 0 || (!balance && rtlPage);
     // Right-to-left lines (Arabic, Hebrew) read from the right.
     const ordered = [...group].sort((p, q) => (rtl ? q.x - p.x : p.x - q.x));
-    const fontSize = median(ordered.map((s) => s.fontSize));
+    // A field's value is drawn at whatever size its box allows: the label's size is the line's.
+    const printed = ordered.filter((s) => !s.field);
+    const fontSize = median((printed.length ? printed : ordered).map((s) => s.fontSize));
     return {
       text: joinSpans(ordered, rtl).replace(/\s+/g, " ").trim(),
       x: Math.min(...ordered.map((s) => s.x)),
@@ -454,7 +522,8 @@ function splitCells(line: ParsedLine): Cell[] {
   const groups: ParsedSpan[][] = [];
   line.spans.forEach((span, i) => {
     const prev = line.spans[i - 1];
-    if (!prev || gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM) groups.push([]);
+    // A form field's value stays with its label ("Name:", a tick box's caption), not a cell of its own.
+    if (!prev || (gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM && !prev.field && !span.field)) groups.push([]);
     groups[groups.length - 1].push(span);
   });
   return groups.map((spans) => ({
@@ -537,6 +606,8 @@ function joinLines(texts: string[]): string {
 const ORDERED = /^\s*(\d{1,2}|[a-z])[.)]\s+/i;
 
 function classifyHeading(line: ParsedLine, bodySize: number): number | null {
+  // A form field's value is never a heading, however large its box.
+  if (line.spans.every((s) => s.field)) return null;
   const ratio = line.fontSize / bodySize;
   if (ratio >= 1.8) return 1;
   if (ratio >= 1.45) return 2;
@@ -698,6 +769,12 @@ export async function parseDocument(
       }
     }
 
+    try {
+      // Before the gutter is found, so the values land in reading order.
+      spans.push(...fieldSpans((await page.getAnnotations({ intent: "display" })) as WidgetAnnotation[], viewport));
+    } catch {
+      // Damaged annotations: the page's own text is still there.
+    }
     const lines = linesInReadingOrder(spans, viewport.width);
     perPage.push({ lines, page: p });
 
