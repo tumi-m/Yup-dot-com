@@ -1003,6 +1003,16 @@ export function PdfEditor({
           )}
         </main>
 
+        {/* Wider screens keep the properties column whether or not something is
+            selected, so the page doesn't jump sideways under the pointer. */}
+        {!selected && !loadError && (
+          <aside
+            aria-label="Properties"
+            className="hidden w-64 shrink-0 border-l border-border bg-background p-4 md:block"
+          >
+            <p className="text-sm text-muted-foreground">Select an item to change it.</p>
+          </aside>
+        )}
         {selected && (
           <PropertiesPanel
             annotation={selected}
