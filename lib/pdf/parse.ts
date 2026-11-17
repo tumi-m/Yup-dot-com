@@ -210,7 +210,8 @@ function joinSpans(spans: ParsedSpan[], rtl: boolean): string {
 // Stage 2 — lines (cluster spans sharing a baseline)
 // ---------------------------------------------------------------------------
 
-function toLines(spans: ParsedSpan[]): ParsedLine[] {
+/** Spans grouped by shared baseline, top to bottom, each row in the order found. */
+function baselineRows(spans: ParsedSpan[]): ParsedSpan[][] {
   if (!spans.length) return [];
   // Top-to-bottom: PDF y grows upward, so sort descending.
   const sorted = [...spans].sort((p, q) => q.y - p.y || p.x - q.x);
@@ -230,6 +231,12 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
     }
   }
   lines.push(current);
+  return lines;
+}
+
+function toLines(spans: ParsedSpan[]): ParsedLine[] {
+  if (!spans.length) return [];
+  const lines = baselineRows(spans);
 
   // Lines of only numbers or signs read in the page's direction.
   const rtlPage = isRtl(spans.map((s) => s.text).join(""));
@@ -256,6 +263,11 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
 // Stage 3 — reading order (multi-column detection)
 // ---------------------------------------------------------------------------
 
+/** Spans wider than this share of the page are full-width text, not a column. */
+const FULL_WIDTH = 0.55;
+/** Column text is made of lines at least this share of the page wide; table cells are narrower. */
+const MIN_COLUMN_TEXT = 0.18;
+
 /**
  * Finds the x-coordinate of a vertical gutter separating two text columns.
  *
@@ -265,8 +277,12 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
  *
  * Returns null for single-column pages.
  */
-function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
-  if (spans.length < 6 || pageWidth <= 0) return null;
+function detectGutter(allSpans: ParsedSpan[], pageWidth: number): number | null {
+  if (pageWidth <= 0) return null;
+  // A full-width abstract or paragraph says nothing about the columns below
+  // it, and a few of its lines would otherwise fill the gutter.
+  const spans = allSpans.filter((s) => s.width <= pageWidth * FULL_WIDTH);
+  if (spans.length < 6) return null;
 
   const BIN = 4;
   const binCount = Math.ceil(pageWidth / BIN);
@@ -278,7 +294,7 @@ function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
     for (let i = from; i <= to; i++) occupancy[i]++;
   }
 
-  // Tolerate a few crossing spans (a full-width title over two columns).
+  // Tolerate a few crossing spans (a title over two columns).
   const tolerance = Math.max(1, Math.floor(spans.length * 0.06));
   const lo = Math.floor(binCount * 0.28);
   const hi = Math.ceil(binCount * 0.72);
@@ -303,38 +319,104 @@ function detectGutter(spans: ParsedSpan[], pageWidth: number): number | null {
   const right = spans.filter((s) => s.x >= gutter);
   // Both sides must carry real content for the split to be meaningful.
   if (left.length < spans.length * 0.2 || right.length < spans.length * 0.2) return null;
-
-  // Text columns are made of wide lines; table columns are made of short
-  // cells. Without this check, the empty space between two columns of a
-  // table reads as a page gutter and the table gets torn apart.
-  const medianWidth = (xs: ParsedSpan[]) => median(xs.map((s) => s.width));
-  const minColumnText = pageWidth * 0.18;
-  if (medianWidth(left) < minColumnText || medianWidth(right) < minColumnText) return null;
-
+  // The space between two columns of a table looks like a gutter too:
+  // linesInReadingOrder only splits runs of rows that are column text.
   return gutter;
 }
 
 /**
- * Orders spans into lines, splitting on a detected column gutter so the left
- * column is read completely before the right.
- *
- * Full-width spans (a title crossing the gutter) are emitted first, which is
- * correct for the common case of a banner heading above the columns.
+ * True when these spans are lines of running text, not table cells: without
+ * this, a table would be torn apart at the space between two of its columns.
+ */
+function columnText(spans: ParsedSpan[], pageWidth: number): boolean {
+  return spans.length > 0 && median(spans.map((s) => s.width)) >= pageWidth * MIN_COLUMN_TEXT;
+}
+
+/** Spans split wherever they stand more than `em` ems apart, left to right. */
+function groupsOf(spans: ParsedSpan[], em: number): { x: number; right: number }[] {
+  const groups: { x: number; right: number }[] = [];
+  let prev: ParsedSpan | undefined;
+  for (const span of [...spans].sort((p, q) => p.x - q.x)) {
+    const last = groups[groups.length - 1];
+    if (last && prev && span.x - last.right <= prev.fontSize * em) last.right = Math.max(last.right, span.x + span.width);
+    else groups.push({ x: span.x, right: span.x + span.width });
+    prev = span;
+  }
+  return groups;
+}
+
+/**
+ * Orders spans into lines, reading the page top to bottom in bands: a run of
+ * rows split by the gutter is read left column first, then right; a row
+ * that runs across it (a title, an abstract, a figure caption, a footer)
+ * is read where it stands. Short runs and table rows are read row by row,
+ * so a table keeps all its columns.
  */
 function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine[] {
   const gutter = detectGutter(spans, pageWidth);
   if (gutter === null) return toLines(spans);
 
-  const full: ParsedSpan[] = [];
-  const left: ParsedSpan[] = [];
-  const right: ParsedSpan[] = [];
-  for (const span of spans) {
-    if (span.x < gutter && span.x + span.width > gutter) full.push(span);
-    else if (span.x + span.width <= gutter) left.push(span);
-    else right.push(span);
-  }
+  const isLeft = (s: ParsedSpan) => s.x + s.width <= gutter;
+  const rowWidth = (row: ParsedSpan[]) => Math.max(...row.map((s) => s.x + s.width)) - Math.min(...row.map((s) => s.x));
+  const across = (row: ParsedSpan[]) => {
+    if (row.some((s) => s.x < gutter && s.x + s.width > gutter)) return true;
+    // Words of one line that happen to break at the gutter stand a word space apart.
+    const leftEdge = Math.max(...row.filter(isLeft).map((s) => s.x + s.width));
+    const rightEdge = Math.min(...row.filter((s) => !isLeft(s)).map((s) => s.x));
+    return rightEdge - leftEdge < Math.max(...row.map((s) => s.fontSize)) * CELL_GAP_EM;
+  };
+  // A table row: cells on both sides, none as wide as a line of column text.
+  const cells = (row: ParsedSpan[]) => {
+    const left = row.filter(isLeft);
+    const right = row.filter((s) => !isLeft(s));
+    return left.length > 0 && right.length > 0 &&
+      [...groupsOf(left, 1), ...groupsOf(right, 1)].every((g) => g.right - g.x < pageWidth * MIN_COLUMN_TEXT);
+  };
 
-  return [...toLines(full), ...toLines(left), ...toLines(right)];
+  const rows = baselineRows(spans);
+  const kind = rows.map((row): "across" | "cells" | "split" => (across(row) ? "across" : cells(row) ? "cells" : "split"));
+  // One such row is two short lines side by side, such as the ends of two paragraphs.
+  kind.forEach((k, i) => {
+    if (k === "cells" && kind[i - 1] !== "cells" && kind[i + 1] !== "cells") kind[i] = "split";
+  });
+
+  const out: ParsedLine[] = [];
+  let full: ParsedSpan[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    if (kind[i] !== "split") {
+      full.push(...rows[i++]);
+      continue;
+    }
+    let end = i;
+    while (end < rows.length && kind[end] === "split") end++;
+    let band = rows.slice(i, end);
+    // A heading or a line or two under the shorter column that lead into a
+    // table or full-width text below belong with what follows them.
+    const next = rows[end];
+    if (next && (kind[end] === "cells" || rowWidth(next) >= pageWidth * MIN_COLUMN_TEXT)) {
+      const lastLeft = band.findLastIndex((row) => row.some(isLeft));
+      const lastRight = band.findLastIndex((row) => row.some((s) => !isLeft(s)));
+      const tail = band.length - 1 - Math.min(lastLeft, lastRight);
+      if (tail > 0 && tail <= 3) {
+        end -= tail;
+        band = band.slice(0, -tail);
+      }
+    }
+    const left = band.flat().filter(isLeft);
+    const right = band.flat().filter((s) => !isLeft(s));
+    if (band.length >= 3 && columnText(left, pageWidth) && columnText(right, pageWidth)) {
+      out.push(...toLines(full), ...toLines(left), ...toLines(right));
+      full = [];
+    } else {
+      full.push(...band.flat());
+    }
+    i = end;
+    // The tail, if any, joins the rows that follow.
+    while (i < rows.length && kind[i] === "split") full.push(...rows[i++]);
+  }
+  out.push(...toLines(full));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
