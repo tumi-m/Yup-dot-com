@@ -3,8 +3,8 @@
 // and which way it is turned. A field on a /Rotate 90 page used to get a
 // font size from its displayed height (the field's length) and showed as a
 // black bar.
-import { PDFDocument, PDFName, PDFString, degrees } from "pdf-lib";
-import { detectFormFields, daFontSize, fieldFontSize } from "../lib/pdf/forms.ts";
+import { PDFDocument, PDFName, PDFRawStream, PDFString, decodePDFRawStream, degrees } from "pdf-lib";
+import { detectFormFields, daFontSize, fieldFontSize, fillFormFields } from "../lib/pdf/forms.ts";
 
 let pass = 0;
 let total = 0;
@@ -69,6 +69,36 @@ check("its text size comes from its own height, not its length", Math.abs(t("alo
 check("a field that turns back with /MK /R is upright", t("upright").rotation === 0, t("upright").rotation);
 check("and sized by its height on screen", t("upright").height < t("upright").width && Math.abs(t("upright").fontSize - t("upright").height * 0.6) < 0.01, t("upright"));
 check("a field on an upside-down page turns half", t("flipped").rotation === 180, t("flipped").rotation);
+
+/** Every stream in a file, decoded, to look for a value drawn into it. */
+async function allStreams(bytes: Uint8Array): Promise<string> {
+  const doc = await PDFDocument.load(bytes);
+  let out = "";
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFRawStream) out += Buffer.from(decodePDFRawStream(obj).decode()).toString("latin1");
+  }
+  return out;
+}
+const showsSecret = (text: string) => text.includes("736563726574") || text.includes("(secret)");
+
+// A password field: PDF forms don't store what is typed in one.
+const pw = await PDFDocument.create();
+const pwPage = pw.addPage([400, 400]);
+const secret = pw.getForm().createTextField("pin");
+secret.addToPage(pwPage, { x: 40, y: 330, width: 200, height: 24 });
+secret.setText("old");
+secret.enablePassword();
+pw.getForm().createTextField("name").addToPage(pwPage, { x: 40, y: 290, width: 200, height: 24 });
+const pwBytes = await pw.save();
+const pwField = (await detectFormFields(pwBytes)).find((f) => f.name === "pin");
+check("a password field is marked", pwField?.password === true, pwField);
+check("and its stored value isn't shown", pwField?.value === "", pwField?.value);
+const pwFilled = await fillFormFields(pwBytes, { pin: "secret", name: "Ada" });
+const pwOut = await PDFDocument.load(pwFilled);
+check("a typed password is not saved", pwOut.getForm().getTextField("pin").getText() === "old", pwOut.getForm().getTextField("pin").getText());
+check("nor drawn into the file", !showsSecret(await allStreams(pwFilled)));
+check("other fields are saved", pwOut.getForm().getTextField("name").getText() === "Ada");
+check("flattening doesn't print it", !showsSecret(await allStreams(await fillFormFields(pwBytes, { pin: "secret" }, { flatten: true }))));
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

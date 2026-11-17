@@ -428,6 +428,9 @@ function FormFieldOverlay({
     <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
       <input
         aria-label={label}
+        type={field.password ? "password" : undefined}
+        autoComplete={field.password ? "off" : undefined}
+        aria-description={field.password ? "Not saved in the PDF." : undefined}
         value={value}
         maxLength={field.maxLength}
         onChange={(e) => onChange(e.target.value)}

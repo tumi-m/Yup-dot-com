@@ -209,6 +209,8 @@ export interface DetectedField {
   maxLength?: number;
   /** Text fields that take several lines. */
   multiline?: boolean;
+  /** Password fields: what is typed is never stored in the file, nor shown. */
+  password?: boolean;
   /** The text size the field asks for (its /DA), or one that fits its height, in points. */
   fontSize: number;
   /**
@@ -318,10 +320,12 @@ export async function detectFormFields(
     let options: string[] = [];
     let maxLength: number | undefined;
     let multiline = false;
+    let password = false;
 
     try {
       if (field instanceof PDFTextField) {
-        value = field.getText() ?? "";
+        password = field.isPassword();
+        value = password ? "" : field.getText() ?? "";
         maxLength = field.getMaxLength();
         multiline = field.isMultiline();
       } else if (field instanceof PDFCheckBox) value = field.isChecked() ? "true" : "";
@@ -387,6 +391,7 @@ export async function detectFormFields(
         exportValue,
         maxLength,
         multiline,
+        password,
         fontSize: fieldFontSize(defaultAppearance(form, field, widget), height),
         rotation: (frame.rotation - own + 360) % 360,
         readOnly,
@@ -419,6 +424,8 @@ export async function fillFormFields(
     }
     try {
       if (field instanceof PDFTextField) {
+        // A password is for this session only: PDF forms don't store one.
+        if (field.isPassword()) continue;
         // The value as typed, in any script. Keep what fits: a value over the
         // field's limit would be dropped whole. Never half an emoji.
         const max = field.getMaxLength();
