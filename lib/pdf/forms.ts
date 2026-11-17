@@ -435,10 +435,10 @@ export async function fillFormFields(
         else field.uncheck();
       } else if (field instanceof PDFRadioGroup) {
         if (value) field.select(value);
-      } else if (field instanceof PDFDropdown) {
+      } else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
+        // "—" in the editor: nothing chosen.
         if (value) field.select(value);
-      } else if (field instanceof PDFOptionList) {
-        if (value) field.select(value);
+        else field.clear();
       }
     } catch {
       // Skip values the field rejects (e.g. an option that no longer exists).

@@ -3,6 +3,8 @@
 // and which way it is turned. A field on a /Rotate 90 page used to get a
 // font size from its displayed height (the field's length) and showed as a
 // black bar.
+process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs";
+
 import { PDFDocument, PDFName, PDFRawStream, PDFString, decodePDFRawStream, degrees } from "pdf-lib";
 import { detectFormFields, daFontSize, fieldFontSize, fillFormFields } from "../lib/pdf/forms.ts";
 
@@ -99,6 +101,31 @@ check("a typed password is not saved", pwOut.getForm().getTextField("pin").getTe
 check("nor drawn into the file", !showsSecret(await allStreams(pwFilled)));
 check("other fields are saved", pwOut.getForm().getTextField("name").getText() === "Ada");
 check("flattening doesn't print it", !showsSecret(await allStreams(await fillFormFields(pwBytes, { pin: "secret" }, { flatten: true }))));
+
+// Choosing "—" clears a dropdown or list in the file too.
+const choice = await PDFDocument.create();
+const choicePage = choice.addPage([400, 400]);
+const country = choice.getForm().createDropdown("country");
+country.setOptions(["South Africa", "Kenya"]);
+country.addToPage(choicePage, { x: 40, y: 330, width: 200, height: 24 });
+country.select("Kenya");
+const fruit = choice.getForm().createOptionList("fruit");
+fruit.setOptions(["Apple", "Banana"]);
+fruit.addToPage(choicePage, { x: 40, y: 250, width: 200, height: 50 });
+fruit.select("Banana");
+const cleared = await fillFormFields(await choice.save(), { country: "", fruit: "" });
+const clearedForm = (await PDFDocument.load(cleared)).getForm();
+check("a cleared dropdown is saved empty", clearedForm.getDropdown("country").getSelected().length === 0, clearedForm.getDropdown("country").getSelected());
+check("a cleared list is saved empty", clearedForm.getOptionList("fruit").getSelected().length === 0, clearedForm.getOptionList("fruit").getSelected());
+check("and reads back empty", (await detectFormFields(cleared)).every((f) => f.value === ""));
+const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+const pageText = async (bytes: Uint8Array) => {
+  const js = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  const items = (await (await js.getPage(1)).getTextContent()).items.map((i) => ("str" in i ? i.str : ""));
+  await js.destroy();
+  return items.join(" ");
+};
+check("Flatten doesn't print the old choice", !(await pageText(await fillFormFields(await choice.save(), { country: "" }, { flatten: true }))).includes("Kenya"));
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);
