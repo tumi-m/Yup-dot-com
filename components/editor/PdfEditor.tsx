@@ -635,14 +635,12 @@ export function PdfEditor({
     if (delta) main.scrollBy({ top: delta, behavior: scrollBehavior() });
   }, [selectedId, sheetCover]);
 
-  // Say which page is showing once it changes (not when the document opens).
-  const shownPage = useRef<number | null>(null);
-  useEffect(() => {
-    if (!loaded) return;
-    if (shownPage.current !== null && shownPage.current !== page) setLive(`Page ${page + 1} of ${numPages}`);
-    shownPage.current = page;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, loaded]);
+  /** Shows another page and says so, for page changes the visitor makes. */
+  const showPage = (next: number) => {
+    if (next === page) return;
+    setPage(next);
+    setLive(`Page ${next + 1} of ${numPages}`);
+  };
 
   // Opened from Fill & Sign: show where Signature is (off the side of a
   // phone's toolbar) and what to do. Nothing opens by itself.
@@ -662,7 +660,7 @@ export function PdfEditor({
     if (pageDraft === null) return;
     const to = typedPage(pageDraft, numPages);
     setPageDraft(null);
-    if (to !== null) setPage(to);
+    if (to !== null) showPage(to);
   };
 
   // ---- keyboard shortcuts ----
@@ -708,7 +706,7 @@ export function PdfEditor({
       const paged = mod || e.altKey || e.shiftKey || e.defaultPrevented ? null : pageKey(e.key, page, numPages);
       if (paged !== null && !target?.closest("[data-ann-id], [role=dialog], aside[aria-label=Pages]")) {
         e.preventDefault();
-        setPage(paged);
+        showPage(paged);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
@@ -871,7 +869,7 @@ export function PdfEditor({
             currentPage={page}
             busy={busy}
             onGoTo={(i) => {
-              setPage(i);
+              showPage(i);
               if (narrow()) setShowSidebar(false);
             }}
             onReorder={handleReorder}
@@ -935,7 +933,7 @@ export function PdfEditor({
                   variant="ghost"
                   size="icon"
                   className={pillButton}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  onClick={() => showPage(Math.max(0, page - 1))}
                   aria-disabled={page === 0}
                   aria-label="Previous page"
                 >
@@ -969,7 +967,7 @@ export function PdfEditor({
                   variant="ghost"
                   size="icon"
                   className={pillButton}
-                  onClick={() => setPage((p) => Math.min(numPages - 1, p + 1))}
+                  onClick={() => showPage(Math.min(numPages - 1, page + 1))}
                   aria-disabled={page >= numPages - 1}
                   aria-label="Next page"
                 >
