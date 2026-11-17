@@ -40,6 +40,7 @@ import {
   FileOutput,
   Layers,
   Scaling,
+  Crop,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -69,7 +70,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -170,6 +171,18 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-cyan-100 text-cyan-800",
     badge: "New",
     keywords: "page size paper size change size scale fit a4 a3 a5 letter legal tabloid margins n-up 2-up 4-up pages per sheet",
+  },
+  {
+    slug: "crop-pdf",
+    name: "Crop PDF",
+    title: "Crop PDF: trim margins and cut pages to size",
+    description: "Keep the part of the page you choose.",
+    icon: Crop,
+    category: "organize",
+    tint: "bg-lime-100 text-lime-800",
+    badge: "New",
+    custom: "crop",
+    keywords: "crop cut trim margins white space edges border clip area box pages remove",
   },
   {
     slug: "compress-pdf",

@@ -30,6 +30,7 @@ import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { isPdf, readPdf } from "./read-pdf";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
@@ -86,23 +87,7 @@ interface Source {
 /** The page tools' small buttons, 44px tall on touch screens like the rest of the site. */
 const TOUCH = "pointer-coarse:h-11 pointer-coarse:min-w-11";
 
-const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-async function readPdf(file: File): Promise<LoadedPdf> {
-  const { loadForRender } = await import("@/lib/pdf/render");
-  const loaded = await loadForRender(new Uint8Array(await file.arrayBuffer()));
-  try {
-    if (!loaded.numPages) throw new Error("This PDF has no pages.");
-    // A page tree that loops shows its first pages and fails further on:
-    // reaching the last page finds out now, not when the file is saved.
-    await loaded.getPageViewport(loaded.numPages, 1);
-  } catch (err) {
-    loaded.destroy();
-    throw err;
-  }
-  return loaded;
-}
 
 export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: string; tier: Tier }) {
   const router = useRouter();

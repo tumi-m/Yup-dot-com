@@ -11,6 +11,7 @@ export type PanelSpec =
   | { kind: "slides-import"; format: "pdf" | "pptx" }
   | { kind: "samples" }
   | { kind: "pages"; mode: NonNullable<ToolMeta["pages"]>["mode"]; slug: string }
+  | { kind: "crop"; slug: string }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -23,6 +24,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "slides-import" && tool.slides) return { kind: "slides-import", format: tool.slides.format };
   if (tool.custom === "samples") return { kind: "samples" };
   if (tool.custom === "pages" && tool.pages) return { kind: "pages", mode: tool.pages.mode, slug: tool.slug };
+  if (tool.custom === "crop") return { kind: "crop", slug: tool.slug };
   return { kind: "workbench", slug: tool.slug };
 }
 

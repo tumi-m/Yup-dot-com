@@ -23,6 +23,7 @@ work with or without an account.
 | **Delete Pages** | Pick pages, or type ranges like `2-4, 7`, and save the PDF without them. |
 | **Extract Pages** | Pick pages, or type ranges, and save them as one new PDF. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
+| **Crop PDF** | Drag a box on a page (or use the arrow keys, or type the margins in mm, in or pt), or trim each page's white margins, and apply it to all pages, this page, odd or even pages, or a typed list. Every page box is set, so viewers and printers agree. A crop hides what's outside; **Remove what's outside the box** turns those pages into pictures of the area kept (text inside stays searchable, links inside keep working), so what was outside leaves the file. Links, notes and fields wholly outside go. |
 | **Resize PDF** | Every page onto A4, A3, A5, Letter, Legal, Tabloid or a custom size (mm, in or pt): keep each page's orientation or force one, fit inside, fill and crop, or don't scale, with optional margins, or 2 or 4 pages to a sheet. Pages stay vector; links, bookmarks and comments move with them; form fields are flattened first. Shows the first sheet before you start. Runs in a worker. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
@@ -334,6 +335,17 @@ is instant. Thumbnails are drawn two at a time and let go of their pixels
 when scrolled away. A file with no pages, or a page tree that loops, is
 turned away when it opens.
 
+**Crop PDF** (`components/tools/CropTool.tsx`, `lib/pdf/crop/`) keeps the box
+as margins measured on the page as shown (`geometry.ts`), and maps them
+through `lib/pdf/page-frame.ts`, so turned pages and MediaBoxes that don't
+start at 0,0 crop where the box was drawn. Writing the file runs in a Web
+Worker (`index.ts`). Finding white margins and drawing the pictures for
+"Remove what's outside the box" need pdf.js and a canvas, so they run in the
+page a page at a time (`pictures.ts`), with progress and Cancel, and a run
+that would hold more pictures than a tab can is turned away first. Redrawing
+the old content clipped to the box would look the same but keep every word
+in the file, so removing is done with pictures and the page says so.
+
 ## Tests
 
 ```bash
@@ -347,8 +359,10 @@ round-trip, Flatten PDF (each result rendered by pdf.js and compared with
 the original, pixel by pixel), protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
 openpyxl), compression (images sized by placement, lossless graphics,
-text and forms kept), and resizing (page sizes, where text, links,
-bookmarks and notes land, turned pages, 2 and 4 to a sheet). Others cover PPTX parsing, editing and rendering,
+text and forms kept), resizing (page sizes, where text, links,
+bookmarks and notes land, turned pages, 2 and 4 to a sheet), and cropping
+(page boxes, turned and offset pages, what stays and goes, and that removed
+content is gone from the file's streams). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
@@ -624,6 +638,7 @@ pdf-wizard/
 │   │   ├── ToolWorkbench.tsx     ← Dropzone + options + run + download
 │   │   ├── EditorLaunch.tsx      ← Uploads a PDF into the editor
 │   │   ├── PageOrganizer.tsx     ← Page grid for Organize PDF, Delete and Extract pages
+│   │   ├── CropTool.tsx          ← Crop PDF: page preview, the box, margins, trim
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -643,6 +658,7 @@ pdf-wizard/
 │   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
 │   ├── pdf/operations.ts         ← pdf-lib page ops
 │   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
+│   ├── pdf/crop/                 ← Crop PDF: the box, page boxes, pictures, white-margin trim
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
