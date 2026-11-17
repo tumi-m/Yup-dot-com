@@ -16,6 +16,7 @@
 import encodeWasm, { init as initEncoder } from "@jsquash/jpeg/encode.js";
 import decodeWasm, { init as initDecoder } from "@jsquash/jpeg/decode.js";
 import { imageSize } from "./pdf/images";
+import { encodeJpegOffThread } from "./jpeg-encode/off-thread";
 
 export const JSQUASH_JPEG_VERSION = "1.6.0";
 
@@ -269,7 +270,8 @@ export function canvasPixels(canvas: HTMLCanvasElement): RawImage | null {
  * Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if
  * the wasm can't load. Pass `pixels` when they have been read already.
  * Grey renders get a one-channel JPEG; at quality 1 colour is kept at full
- * resolution, as the browser does.
+ * resolution, as the browser does. In a page the encoding runs in a worker,
+ * so the page keeps answering clicks while each picture is made.
  */
 export async function canvasToJpeg(
   canvas: HTMLCanvasElement,
@@ -279,12 +281,13 @@ export async function canvasToJpeg(
   try {
     const pixels = opts.pixels ?? canvasPixels(canvas);
     if (pixels) {
-      return await encodeJpeg(pixels, {
+      const jpeg: JpegOptions = {
         quality: mozQuality(browserQuality),
         progressive: opts.progressive,
         gray: isGray(pixels),
         fullChroma: browserQuality >= 1,
-      });
+      };
+      return (await encodeJpegOffThread(pixels, jpeg)) ?? (await encodeJpeg(pixels, jpeg));
     }
   } catch {
     // Fall back below.
