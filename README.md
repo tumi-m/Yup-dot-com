@@ -26,7 +26,9 @@ work with or without an account.
 | **Resize PDF** | Every page onto A4, A3, A5, Letter, Legal, Tabloid or a custom size (mm, in or pt): keep each page's orientation or force one, fit inside, fill and crop, or don't scale, with optional margins, or 2 or 4 pages to a sheet. Pages stay vector; links, bookmarks and comments move with them; form fields are flattened first. Shows the first sheet before you start. Runs in a worker. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
-| **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
+| **JPG → PDF** | Combine pictures into a PDF (fit-to-image or A4): JPG, PNG, WebP, GIF (first frame), BMP, TIFF (every page; previews skipped), AVIF, HEIC (where the browser reads it: Safari; elsewhere it says how to save a JPG) and SVG (drawn at print resolution), mixed in any order. EXIF and TIFF orientation kept; pictures right-sized to 300 DPI on the page; transparency kept. Runs in a worker (SVG and HEIC are decoded on the page first). Separate pages for PNG, WebP, HEIC, TIFF and SVG to PDF offer that format in the file picker and take any picture. |
+| **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek and Cyrillic come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
+| **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
 | **PDF → Text** | Extract text in true reading order (multi-column aware). |
@@ -347,8 +349,11 @@ round-trip, Flatten PDF (each result rendered by pdf.js and compared with
 the original, pixel by pixel), protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
 openpyxl), compression (images sized by placement, lossless graphics,
-text and forms kept), and resizing (page sizes, where text, links,
-bookmarks and notes land, turned pages, 2 and 4 to a sheet). Others cover PPTX parsing, editing and rendering,
+text and forms kept), resizing (page sizes, where text, links,
+bookmarks and notes land, turned pages, 2 and 4 to a sheet), pictures to
+PDF (multi-page and turned TIFFs rendered by pdf.js, mixed formats, looping
+and lying TIFFs turned away) and text and Markdown to PDF (read back with
+pdf.js: wrapping inside the margins, pages, fonts, links, tables). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
@@ -643,6 +648,8 @@ pdf-wizard/
 │   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
 │   ├── pdf/operations.ts         ← pdf-lib page ops
 │   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
+│   ├── pdf/images-to-pdf/        ← Pictures to PDF: formats, browser and TIFF decoding, in a worker
+│   ├── pdf/text-to-pdf/          ← Text and Markdown to PDF: fonts, layout, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)
