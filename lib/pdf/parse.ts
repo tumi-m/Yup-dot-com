@@ -799,8 +799,51 @@ export function toPlainText(doc: ParsedDocument): string {
   return out.join("\n\n") + "\n";
 }
 
+/**
+ * Text repeated at the top or foot of the pages: short paragraphs that appear
+ * on more than one page once their numbers are set aside ("Page 3", a report's title).
+ */
+function runningText(blocks: Block[]): (block: Block) => boolean {
+  const key = (text: string) => text.replace(/\d+/g, "#").trim().toLowerCase();
+  const pages = new Map<string, Set<number>>();
+  for (const b of blocks) {
+    if (b.type !== "paragraph" || b.text.length > 80) continue;
+    const seen = pages.get(key(b.text)) ?? new Set<number>();
+    seen.add(b.page);
+    pages.set(key(b.text), seen);
+  }
+  return (b) =>
+    b.type === "paragraph" && b.text.length <= 80 && (PAGE_NUMBER.test(b.text) || (pages.get(key(b.text))?.size ?? 0) > 1);
+}
+
+/**
+ * The document's tables. One that runs on over a page break is one table:
+ * a table that opens a page continues the one that closed the page before
+ * when they have as many columns, and a header repeated on the new page is
+ * dropped. It keeps the page it starts on.
+ */
 export function extractTables(doc: ParsedDocument): TableBlock[] {
-  return doc.blocks.filter((b): b is TableBlock => b.type === "table");
+  const running = runningText(doc.blocks);
+  const tables: TableBlock[] = [];
+  let prev: Block | undefined;
+  // The page the last table's latest part is on.
+  let reaches = 0;
+  for (const block of doc.blocks) {
+    if (running(block)) continue;
+    if (block.type === "table") {
+      const last = tables[tables.length - 1];
+      const width = (t: TableBlock) => t.rows[0]?.length ?? 0;
+      if (prev?.type === "table" && last && reaches === block.page - 1 && width(last) === width(block)) {
+        const repeated = block.rows[0]?.join("\u0000") === last.rows[0]?.join("\u0000");
+        last.rows.push(...(repeated ? block.rows.slice(1) : block.rows));
+      } else {
+        tables.push({ ...block, rows: [...block.rows] });
+      }
+      reaches = block.page;
+    }
+    prev = block;
+  }
+  return tables;
 }
 
 function csvCell(cell: string): string {
