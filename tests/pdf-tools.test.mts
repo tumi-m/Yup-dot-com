@@ -92,6 +92,26 @@ check(
 const firstPart = await PDFDocument.load(await parts[0].blob.arrayBuffer());
 check("split: range has its pages", firstPart.getPageCount() === 2);
 
+// "1, 3" used to give two files with no way to keep them together.
+const widths = await makePdf([501, 502, 503, 504, 505].map((w): [number, number] => [w, 842]));
+const selected = (await splitTool([file(widths, "doc.pdf")], { mode: "one", ranges: "4, 1-2, 2" })) as ToolFile;
+const selectedDoc = await PDFDocument.load(await selected.blob.arrayBuffer());
+const sizes = selectedDoc.getPages().map((p) => p.getWidth()).join();
+check("split one: the chosen pages in one PDF", !Array.isArray(selected) && selectedDoc.getPageCount() === 3, selectedDoc.getPageCount());
+check("split one: in the order typed, each once", sizes === "504,501,502", sizes);
+check("split one: named for a selection", selected.filename === "doc-selected.pdf", selected.filename);
+const oneOut = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "2, 9" }));
+check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't in this PDF (5 pages).", oneOut);
+{
+  const { PROCESSORS, fieldShown } = await import("../components/tools/processors.ts");
+  const pagesField = PROCESSORS["split-pdf"].fields.find((f) => f.key === "ranges")!;
+  const shownFor = ["ranges", "one", "every"].filter((mode) => fieldShown(pagesField, { mode }));
+  check("split: Pages shows for both page modes", shownFor.join() === "ranges,one", shownFor);
+  check("split: Pages starts empty, with an example", pagesField.default === "" && !!pagesField.placeholder);
+}
+const oneEmpty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "" }));
+check("split one: no pages picked is an error", oneEmpty === "Pick pages between 1 and 5.", oneEmpty);
+
 // --- Stamps land where the reader sees the page ------------------------------
 const odd = await (async () => {
   const d = await PDFDocument.create();
@@ -267,6 +287,16 @@ check("jpg-to-pdf: non-image explains itself", notImage === "anim.jpg: use a JPG
   const doc = await PDFDocument.load(await rotated.blob.arrayBuffer());
   check("rotate: adds to each page's rotation", doc.getPages().map((p) => p.getRotation().angle).join() === "90,180,90,0");
   check("rotate: result named after source", rotated.filename === "scan-rotated.pdf", rotated.filename);
+  const some = await rotateTool([file(odd, "scan.pdf")], { angle: "180", pages: "some", which: "2, 4-" });
+  const someDoc = await PDFDocument.load(await some.blob.arrayBuffer());
+  check("rotate: only the pages picked", someDoc.getPages().map((p) => p.getRotation().angle).join() === "0,270,0,90", someDoc.getPages().map((p) => p.getRotation().angle));
+  const all = await rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "all", which: "2" });
+  const allDoc = await PDFDocument.load(await all.blob.arrayBuffer());
+  check("rotate: all pages ignores the page list", allDoc.getPages().map((p) => p.getRotation().angle).join() === "90,180,90,0");
+  const outside = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: "7" }));
+  check("rotate: a page not in the PDF is an error", outside === "Page 7 isn't in this PDF (4 pages).", outside);
+  const none = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: " " }));
+  check("rotate: no pages picked is an error", none === "Pick pages between 1 and 4.", none);
 }
 
 // --- Tightly padded tables (HTML/Word exports) -------------------------------

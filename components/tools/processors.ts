@@ -15,8 +15,17 @@ export interface ToolField {
   min?: number;
   max?: number;
   step?: number;
-  /** Only show this field when another field has a given value. */
-  showIf?: { key: string; value: string };
+  /** Only show this field when another field has a given value (or one of several). */
+  showIf?: { key: string; value: string | string[] };
+  /** Example input, shown in an empty text field. */
+  placeholder?: string;
+}
+
+/** Whether `field` shows with these options. */
+export function fieldShown(field: ToolField, options: Record<string, string>): boolean {
+  if (!field.showIf) return true;
+  const { key, value } = field.showIf;
+  return Array.isArray(value) ? value.includes(options[key]) : options[key] === value;
 }
 
 export interface ToolProcessor {
@@ -63,16 +72,18 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "ranges",
         options: [
-          { value: "ranges", label: "By page ranges" },
+          { value: "ranges", label: "A PDF per range" },
+          { value: "one", label: "Chosen pages in one PDF" },
           { value: "every", label: "Every page separately" },
         ],
       },
       {
         key: "ranges",
-        label: "Pages (e.g. 1-3, 5)",
+        label: "Pages",
         type: "text",
-        default: "1-1",
-        showIf: { key: "mode", value: "ranges" },
+        default: "",
+        placeholder: "e.g. 1-3, 5",
+        showIf: { key: "mode", value: ["ranges", "one"] },
       },
     ],
     run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
@@ -93,8 +104,26 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "270", label: "90° counter-clockwise" },
         ],
       },
+      {
+        key: "pages",
+        label: "Pages",
+        type: "select",
+        default: "all",
+        options: [
+          { value: "all", label: "All pages" },
+          { value: "some", label: "Only these pages" },
+        ],
+      },
+      {
+        key: "which",
+        label: "Which pages",
+        type: "text",
+        default: "",
+        placeholder: "e.g. 2, 5-6",
+        showIf: { key: "pages", value: "some" },
+      },
     ],
-    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
+    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle, pages: o.pages, which: o.which }),
   },
   "compress-pdf": {
     cancellable: true,

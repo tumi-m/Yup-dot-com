@@ -45,7 +45,7 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { PROCESSORS, type ToolField } from "./processors";
+import { fieldShown, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { percentSmaller, sortPick } from "./file-pick";
@@ -247,7 +247,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }
 
   function visibleFields(): ToolField[] {
-    return proc.fields.filter((f) => !f.showIf || options[f.showIf.key] === f.showIf.value);
+    return proc.fields.filter((f) => fieldShown(f, options));
   }
 
   async function run() {
@@ -559,6 +559,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       <Input
                         id={`opt-${field.key}`}
                         value={options[field.key]}
+                        placeholder={field.placeholder}
                         onChange={(e) => setOption(field.key, e.target.value)}
                         className="pointer-coarse:h-11"
                       />

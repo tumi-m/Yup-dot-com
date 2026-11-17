@@ -167,6 +167,14 @@ export async function splitTool(
   let groups: number[][];
   if (opts.mode === "every") {
     groups = Array.from({ length: count }, (_, i) => [i]);
+  } else if (opts.mode === "one") {
+    // The chosen pages together, in the order typed, each once.
+    const problem = rangeProblem(opts.ranges ?? "", count);
+    if (problem) throw new Error(problem);
+    const pages = [...new Set(parseRanges(opts.ranges ?? "", count).flat())];
+    if (!pages.length) throw new Error(count === 1 ? "This PDF has only 1 page." : `Pick pages between 1 and ${count}.`);
+    stopIfAborted(ctx.signal);
+    return { blob: pdfBlob(await extractorFor(src)(pages)), filename: `${base}-selected.pdf` };
   } else {
     const problem = rangeProblem(opts.ranges ?? "", count);
     if (problem) throw new Error(problem);
@@ -311,11 +319,21 @@ export async function imagesToPdfTool(
 // ---------------------------------------------------------------------------
 export async function rotateTool(
   files: File[],
-  opts: { angle: string }
+  opts: { angle: string; pages?: string; which?: string }
 ): Promise<ToolFile> {
   const delta = Number(opts.angle) || 90;
   const doc = await openPdf(await buf(files[0]));
-  doc.getPages().forEach((page) => {
+  const count = doc.getPageCount();
+  let chosen: Set<number> | null = null;
+  if (opts.pages === "some") {
+    const which = opts.which ?? "";
+    const problem = which.trim() ? rangeProblem(which, count) : null;
+    if (problem) throw new Error(problem);
+    chosen = new Set(parseRanges(which, count).flat());
+    if (!chosen.size) throw new Error(`Pick pages between 1 and ${count}.`);
+  }
+  doc.getPages().forEach((page, i) => {
+    if (chosen && !chosen.has(i)) return;
     const current = page.getRotation().angle;
     page.setRotation(degrees((current + delta + 360) % 360));
   });
