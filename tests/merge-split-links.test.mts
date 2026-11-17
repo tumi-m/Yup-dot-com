@@ -137,5 +137,60 @@ const editedSecond = await read(edited, N + 1);
 check("editor merge: second file's links go to its own pages", editedSecond.targets === "8,9,10,11,12,8,11", editedSecond.targets);
 check("editor merge: no loose page copies", editedSecond.pageObjects === 2 * N, editedSecond);
 
+// --- Merge: every file's bookmarks and page labels ---------------------------
+// Only the first file's bookmarks came along, and its page labels (i, ii)
+// ran on over the other files' pages.
+async function chapter(title: string, n: number, more: { labels?: object; named?: boolean } = {}) {
+  const doc = await PDFDocument.create();
+  const pages = Array.from({ length: n }, () => doc.addPage([300, 300]));
+  const root = doc.context.nextRef();
+  const items = pages.map(() => doc.context.nextRef());
+  if (more.named) {
+    const names = doc.context.obj({ Names: [PDFString.of("last"), doc.context.obj([pages[n - 1].ref, "Fit"])] });
+    doc.catalog.set(PDFName.of("Names"), doc.context.obj({ Dests: doc.context.register(names) }));
+  }
+  pages.forEach((page, i) => {
+    // With a name, the last bookmark goes by it, as LaTeX writes them.
+    const dest = more.named && i === n - 1 ? { A: { S: "GoTo", D: PDFString.of("last") } } : { Dest: [page.ref, "Fit"] };
+    const links = { Parent: root, ...(i ? { Prev: items[i - 1] } : {}), ...(i < n - 1 ? { Next: items[i + 1] } : {}) };
+    doc.context.assign(items[i], doc.context.obj({ Title: PDFString.of(`${title} ${i + 1}`), ...dest, ...links }));
+  });
+  doc.context.assign(root, doc.context.obj({ Type: "Outlines", First: items[0], Last: items[n - 1], Count: n }));
+  doc.catalog.set(PDFName.of("Outlines"), root);
+  if (more.labels) doc.catalog.set(PDFName.of("PageLabels"), doc.context.obj({ Nums: [0, more.labels] }));
+  return doc.save();
+}
+/** Each bookmark as "title→page", and the page labels. */
+async function marks(bytes: Uint8Array) {
+  const doc = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  const out: string[] = [];
+  for (const o of (await doc.getOutline()) ?? []) {
+    const dest = typeof o.dest === "string" ? await doc.getDestination(o.dest) : o.dest;
+    out.push(`${o.title}→${dest ? (await doc.getPageIndex(dest[0])) + 1 : "nowhere"}`);
+  }
+  const labels = await doc.getPageLabels();
+  await doc.destroy();
+  return { bookmarks: out.join(", "), labels: labels?.join(",") ?? null };
+}
+const alpha = await chapter("Alpha", 2, { labels: { S: "r" } });
+const beta = await chapter("Beta", 3, { named: true });
+const both = await marks(await bytesOf(await mergeTool([file(alpha, "alpha.pdf"), file(beta, "beta.pdf")])));
+check("merge: every file's bookmarks, each to its own page", both.bookmarks === "Alpha 1→1, Alpha 2→2, Beta 1→3, Beta 2→4, Beta 3→5", both.bookmarks);
+check("merge: the second file's pages read 1, 2, 3", both.labels === "i,ii,1,2,3", both.labels);
+const flipped = await marks(await bytesOf(await mergeTool([file(beta, "beta.pdf"), file(alpha, "alpha.pdf")])));
+check("merge: bookmarks after a first file's", flipped.bookmarks === "Beta 1→1, Beta 2→2, Beta 3→3, Alpha 1→4, Alpha 2→5", flipped.bookmarks);
+check("merge: a later file's own labels move with its pages", flipped.labels === "1,2,3,i,ii", flipped.labels);
+const plain = async (n: number) => {
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < n; i++) doc.addPage([300, 300]);
+  return doc.save();
+};
+const none = await marks(await bytesOf(await mergeTool([file(await plain(2), "a.pdf"), file(beta, "beta.pdf")])));
+check("merge: bookmarks when the first file has none", none.bookmarks === "Beta 1→3, Beta 2→4, Beta 3→5", none.bookmarks);
+check("merge: no labels when no file has them", none.labels === null, none.labels);
+const trio = await marks(await bytesOf(await mergeTool([file(alpha, "a.pdf"), file(await plain(1), "p.pdf"), file(alpha, "c.pdf")])));
+check("merge: three files, labels by file", trio.labels === "i,ii,1,i,ii", trio.labels);
+check("merge: three files, bookmarks by file", trio.bookmarks === "Alpha 1→1, Alpha 2→2, Alpha 1→4, Alpha 2→5", trio.bookmarks);
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);
