@@ -68,6 +68,9 @@ export type EditorSource =
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;
 
+/** The page and zoom buttons: finger-sized on touch screens, as in the toolbar. */
+const pillButton = "pointer-coarse:h-11 pointer-coarse:w-11";
+
 /** Phone-width layout, where side panels become overlays. */
 const narrow = () => window.matchMedia("(max-width: 767px)").matches;
 
@@ -102,6 +105,10 @@ export function PdfEditor({
   const [busy, setBusy] = useState(false);
   /** Set while a page operation, save or download runs; Ctrl+S must not start another. */
   const busyRef = useRef(false);
+  /** What the busy state is for, to say so on the buttons. */
+  const [working, setWorking] = useState<"save" | "download" | null>(null);
+  /** Read out by screen readers: the page after a page change, or what is being done. */
+  const [live, setLive] = useState("");
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
@@ -459,9 +466,11 @@ export function PdfEditor({
   }, [bytes, pristine, annotations, formValues, flatten, buildOutput, tier, toast]);
 
   async function handleDownload() {
-    if (busyRef.current) return;
+    if (!bytes || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    setLive("Preparing download…");
+    setWorking("download");
     try {
       const built = await buildAuthorized();
       if (!built) return;
@@ -476,6 +485,8 @@ export function PdfEditor({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      setWorking(null);
+      setLive("");
     }
   }
 
@@ -487,6 +498,8 @@ export function PdfEditor({
     }
     busyRef.current = true;
     setBusy(true);
+    setLive("Saving…");
+    setWorking("save");
     try {
       const built = await buildAuthorized();
       if (!built) return;
@@ -544,6 +557,8 @@ export function PdfEditor({
     } finally {
       busyRef.current = false;
       setBusy(false);
+      setWorking(null);
+      setLive("");
     }
   }, [bytes, pristine, buildAuthorized, supabase, source, docName, numPages, history, toast, tier]);
 
@@ -599,6 +614,15 @@ export function PdfEditor({
     const delta = revealOffset(box, { top: view.top, bottom: Math.min(view.bottom, window.innerHeight) - sheetCover });
     if (delta) main.scrollBy({ top: delta, behavior: scrollBehavior() });
   }, [selectedId, sheetCover]);
+
+  // Say which page is showing once it changes (not when the document opens).
+  const shownPage = useRef<number | null>(null);
+  useEffect(() => {
+    if (!loaded) return;
+    if (shownPage.current !== null && shownPage.current !== page) setLive(`Page ${page + 1} of ${numPages}`);
+    shownPage.current = page;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, loaded]);
 
   // Opened from Fill & Sign: show where Signature is (off the side of a
   // phone's toolbar) and what to do. Nothing opens by itself.
@@ -745,8 +769,8 @@ export function PdfEditor({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => mergeInput.current?.click()}
-            disabled={busy}
+            onClick={() => !busy && mergeInput.current?.click()}
+            aria-disabled={busy}
             title="Merge another PDF"
             aria-label="Merge another PDF"
           >
@@ -754,17 +778,22 @@ export function PdfEditor({
             <span className="hidden lg:inline">Merge</span>
           </Button>
           <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
-          <Button variant="outline" onClick={handleDownload} disabled={busy || !bytes} aria-label="Download">
-            <Download />
+          {/* aria-disabled while busy, as Undo: focus stays on the button. Both return early then. */}
+          <Button variant="outline" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
+            {working === "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
             <span className="hidden sm:inline">Download</span>
           </Button>
-          <Button onClick={handleSave} disabled={busy || !bytes} aria-label="Save">
-            {busy ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
-            <span className="hidden sm:inline">Save</span>
+          <Button onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
+            {busy && working !== "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
+            <span className="hidden sm:inline">{working === "save" ? "Saving…" : "Save"}</span>
           </Button>
         </div>
         )}
       </header>
+      {/* The page shown after a page change, and what Save or Download is doing. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {live}
+      </span>
 
       {!loadError && (
         <Toolbar
@@ -864,12 +893,14 @@ export function PdfEditor({
           {loaded && (
             // left-0 keeps the controls in view while a zoomed page scrolls sideways.
             <div className="pointer-events-none sticky bottom-4 left-0 flex justify-center">
-              <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur">
+              <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-background/95 px-1.5 py-1.5 shadow-lg backdrop-blur sm:gap-1 sm:px-2">
+                {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
+                  aria-disabled={page === 0}
                   aria-label="Previous page"
                 >
                   <ChevronLeft />
@@ -880,35 +911,39 @@ export function PdfEditor({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setPage((p) => Math.min(numPages - 1, p + 1))}
-                  disabled={page >= numPages - 1}
+                  aria-disabled={page >= numPages - 1}
                   aria-label="Next page"
                 >
                   <ChevronRight />
                 </Button>
-                <div className="mx-1 h-5 w-px bg-border" />
+                <div className="mx-1 hidden h-5 w-px bg-border min-[400px]:block" />
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setScale((s) => Math.max(MIN_ZOOM, +(s - 0.2).toFixed(2)))}
-                  disabled={scale <= MIN_ZOOM}
+                  aria-disabled={scale <= MIN_ZOOM}
                   aria-label="Zoom out"
                 >
                   <ZoomOut />
                 </Button>
-                <span className="w-12 text-center text-sm tabular-nums">
+                {/* The smallest phones keep the buttons and leave out the number. */}
+                <span className="hidden w-12 text-center text-sm tabular-nums min-[400px]:inline">
                   {Math.round(scale * 100)}%
                 </span>
                 <Button
                   variant="ghost"
                   size="icon"
+                  className={pillButton}
                   onClick={() => setScale((s) => Math.min(MAX_ZOOM, +(s + 0.2).toFixed(2)))}
-                  disabled={scale >= MAX_ZOOM}
+                  aria-disabled={scale >= MAX_ZOOM}
                   aria-label="Zoom in"
                 >
                   <ZoomIn />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={fitWidth} aria-label="Fit width">
+                <Button variant="ghost" size="icon" className={pillButton} onClick={fitWidth} aria-label="Fit width">
                   <Maximize />
                 </Button>
               </div>
