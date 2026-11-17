@@ -16,7 +16,7 @@ REA commands used:
 |---|---|
 | `rea capture-browser-scenario <scenario.json> --format json` (launch mode, run with `REA_BROWSER_NO_SANDBOX=true`) | Loading every competitor's tools index page, PDF Wizard's live `/tools`, the iLovePDF and Smallpdf pricing pages, iLovePDF scan, and PDF24 Word to PDF. Each run saved an end-of-scenario screenshot, the accessibility snapshot (the tool lists were read from this), the final URL and `network` events (every request with its status or failure). |
 | `rea list-browser-targets http://127.0.0.1:9222` | Finding the page target in a Chromium started with `--remote-debugging-port=9222`. |
-| `rea inspect-web-page <cdp> <target> --observation-ms N --include-script-sources --allowed-origins <origin>` | 27 runs on individual tool pages, 26 of which returned Evidence. Each records the script inventory with full source text (library fingerprints were read from this), the resources, and same-origin network requests during the observation window, including while a test file was being handled. |
+| `rea inspect-web-page <cdp> <target> --observation-ms N --include-script-sources --allowed-origins <origin>` | 31 runs on individual tool pages, 30 of which returned Evidence (27 on 14 Nov, plus 4 for Xodo on 17 Nov: its tools index and three tool pages). Each records the script inventory with full source text (library fingerprints were read from this), the resources, and same-origin network requests during the observation window, including while a test file was being handled. |
 
 Three things REA could not do here, and the fallbacks used:
 
@@ -48,13 +48,13 @@ No accounts were created. Paywalls, captchas and rate limits were left alone, an
 | www.adobe.com | **No** | HTTP 403 "Access Denied" from the edge network for this headless browser. No Adobe data is included. |
 | www.pdf2go.com | Partly | Pages and scripts loaded. The API host `dragon.pdf2go.com` was blocked, so no job could run. |
 | www.sodapdf.com | Yes | Marketing and tool pages. Processing hosts were not reached. |
-| www.xodo.com | **No** | Redirects to `xodo.com` (no `www`), which isn't allowed here (`ERR_NAME_NOT_RESOLVED`). No Xodo data is included. |
+| www.xodo.com → xodo.com | Partly (added 17 Nov) | `www.xodo.com` redirects to `xodo.com`, which was added to the environment's allowed hosts on 17 Nov. The tools index (`/tools`, 30+ tools) and three tool pages loaded. The app scripts come from `cdn.xodo.com`, which is not allowed, so the tool widgets stayed at "Loading...". Every page showed a "Daily free use reached." banner, so no file was uploaded. REA's own browser launch still failed DNS for `xodo.com` shortly after the change, so the Xodo pages were observed with `inspect-web-page` on a CDP browser started with `--proxy-server`. |
 | pdfcandy.com | Partly | HTML and links loaded. `static.pdfcandy.com` was blocked. The Edit PDF text page showed a sign-in wall. |
 | www.pdfgear.com | Yes | Full. |
 | www.dochub.com | Partly | Links loaded; the `cdn.mrkhub.com` assets were blocked. |
 | www.foxit.com | Yes | Online tools catalogue loaded. Tool pages render as a generic shell here. |
 
-The counts below therefore cover the **11 competitors with data**. Adobe and Xodo are excluded because they could not be observed.
+The counts below therefore cover the **12 competitors with data**. Adobe is excluded because it could not be observed. Xodo was added on 17 Nov from its tools catalogue and tool pages only (its app did not load).
 
 ### PDF Wizard baseline (code and live site checked)
 
@@ -71,77 +71,77 @@ The counts below therefore cover the **11 competitors with data**. Adobe and Xod
 
 ## 2. Full inventory
 
-Competitor letters: **I** iLovePDF, **S** Smallpdf, **J** Sejda, **P** PDF24, **E** PDFescape, **G** PDF2Go, **D** Soda PDF, **C** PDF Candy, **R** PDFgear, **H** DocHub, **F** Foxit.
+Competitor letters: **I** iLovePDF, **S** Smallpdf, **J** Sejda, **P** PDF24, **E** PDFescape, **G** PDF2Go, **D** Soda PDF, **C** PDF Candy, **R** PDFgear, **H** DocHub, **F** Foxit, **X** Xodo.
 
 Each entry is listed if it appears as a tool or feature on that competitor's tools index or catalogue as captured. For PDFescape, "premium" features are the ones its homepage lists under Premium.
 
 | Feature | # | Competitors | PDF Wizard |
 |---|---|---|---|
-| Edit / annotate PDF | 11 | I S J P E G D C R H F | Have |
-| Sign / fill forms | 11 | I S J P E G D C R H F | Have |
-| Merge | 11 | I S J P E(premium) G D C R H F | Have |
-| Split | 10 | I S J P G D C R H F | Have |
-| Compress | 10 | I S J P E(premium) G D C R F | Have |
-| Rotate | 10 | I S J P G D C R H F | Have |
-| JPG to PDF | 10 | I S J P G D C R H F | Have |
-| PDF to Word | 10 | I S J P E(premium) G D C R F | Have |
+| Edit / annotate PDF | 12 | I S J P E G D C R H F X | Have |
+| Sign / fill forms | 12 | I S J P E G D C R H F X | Have |
+| Merge | 12 | I S J P E(premium) G D C R H F X | Have |
+| Split | 11 | I S J P G D C R H F X | Have |
+| Compress | 11 | I S J P E(premium) G D C R F X | Have |
+| Rotate | 11 | I S J P G D C R H F X | Have |
+| JPG to PDF | 11 | I S J P G D C R H F X | Have |
+| PDF to Word | 11 | I S J P E(premium) G D C R F X | Have |
+| **Word to PDF** | 11 | I S J P G D C R H F X | **Missing** |
 | Protect (password) | 10 | I S J P E G D C H F | Have |
-| **Word to PDF** | 10 | I S J P G D C R H F | **Missing** |
-| PDF to JPG | 9 | I S J P G D C R F | Have |
-| PDF to Excel | 9 | I S J P G D C R F | Have |
-| PDF to PowerPoint | 9 | I S J P G D C R F | Have |
-| PowerPoint to PDF | 9 | I S P G D C R H F | Have |
+| PDF to JPG | 10 | I S J P G D C R F X | Have |
+| PDF to Excel | 10 | I S J P G D C R F X | Have |
+| PDF to PowerPoint | 10 | I S J P G D C R F X | Have |
+| PowerPoint to PDF | 10 | I S P G D C R H F X | Have |
+| OCR | 10 | I S J P G D C R F X | Have |
+| **Delete pages (own tool)** | 10 | S J P G D C R H F X | **Partly** (editor only) |
 | Unlock | 9 | I S J P G D C R F | Have |
-| OCR | 9 | I S J P G D C R F | Have |
-| **Delete pages (own tool)** | 9 | S J P G D C R H F | **Partly** (editor only) |
 | **HTML / URL to PDF** | 9 | I S J P G D C H F | **Missing** |
+| **Organize / rearrange pages (own tool)** | 9 | I S J P G C H F X | **Partly** (editor only) |
+| **Crop** | 9 | I S J P G C R F X | **Missing** |
+| **Excel to PDF** | 9 | I S P G D C R F X | **Missing** |
+| Chat with PDF (AI Q&A) | 9 | I S G D C R H F X | Have |
 | Watermark | 8 | I S J P E(premium) G D C | Have (text only; J also does image) |
-| **Organize / rearrange pages (own tool)** | 8 | I S J P G C H F | **Partly** (editor only) |
-| **Crop** | 8 | I S J P G C R F | **Missing** |
-| **Excel to PDF** | 8 | I S P G D C R F | **Missing** |
-| Chat with PDF (AI Q&A) | 8 | I S G D C R H F | Have |
+| PNG to PDF | 8 | P D C R H F X (+S converter) | Have (inside JPG to PDF) |
 | Page numbers | 7 | I S J P E(premium) C F | Have (basic) |
 | AI summarise | 7 | I S G D C H F | Have (inside Chat with PDF) |
 | **TXT to PDF** | 7 | S P D C R H F | **Missing** |
-| PNG to PDF | 7 | P D C R H F (+S converter) | Have (inside JPG to PDF) |
-| PDF to PNG | 6 | S J P C R F | Have (option in PDF to JPG; no own page) |
+| PDF to PNG | 7 | S J P C R F X | Have (option in PDF to JPG; no own page) |
+| **Flatten** | 7 | S J P C R H X | **Partly** (code exists, no UI) |
 | **Extract pages into one PDF** | 6 | S J P C R F | **Partly** (split makes one file per range) |
 | **Translate PDF** | 6 | I S G D C F | **Missing** |
-| **Flatten** | 6 | S J P C R H | **Partly** (code exists, no UI) |
 | RTF / ODT and other office formats to PDF | 6 | S P C R H F | Missing |
-| **Redact** | 5 | I S P G F (Foxit: paid "Smart Redact") | **Missing** |
-| **PDF to PDF/A** | 5 | I S P G C | **Missing** |
+| **Redact** | 6 | I S P G F X (Foxit: paid "Smart Redact") | **Missing** |
+| **PDF to PDF/A** | 6 | I S P G C X | **Missing** |
 | **Repair** | 5 | I J P G C | **Missing** (compress has a raster fallback only) |
 | **Resize / change page size** | 5 | J P G D C | **Missing** |
 | Create fillable form | 5 | I P E R H | Have (editor form fields) |
-| **Edit existing text in place** | 4+ | J ("Change PDF text"), C ("Edit PDF text"), E (premium "Edit Text and Images"), F (desktop/web editor) | **Partly** (whiteout + new text) |
+| **Edit existing text in place** | 5+ | X ("PDF Text Editor"), J ("Change PDF text"), C ("Edit PDF text"), E (premium "Edit Text and Images"), F (desktop/web editor) | **Partly** (whiteout + new text) |
+| PDF to text | 5 | J P G C F | Have |
 | **Scan to PDF (phone camera)** | 4 | I S("PDF Scanner") P F (+R mobile app) | **Missing** |
-| HEIC / WebP / TIFF / GIF / BMP to PDF | 4–6 | P C R D F H (varies by format) | Missing |
+| HEIC / WebP / TIFF / GIF / BMP to PDF | 4–7 | P C R D F H X (varies by format; X: HEIC) | Missing |
 | Extract images | 4 | J P G C | Missing |
 | PDF to TIFF | 4 | J P C F | Missing |
 | EPUB to PDF | 4 | S P G C | Missing |
 | Add blank / extra pages | 4 | R F J(editor) P(assemble) | Have (editor) |
 | Create blank PDF | 4 | P G C H | Missing |
-| **Compare PDFs** | 3 | I P G | **Missing** |
+| **Compare PDFs** | 4 | I P G X | **Missing** |
 | Grayscale / black & white | 3 | J P C | Missing |
 | N-up / pages per sheet | 3 | J P G | Missing |
 | Edit / remove metadata | 3 | J P C | Missing |
 | PDF to EPUB | 3 | P G C | Missing |
-| e-sign request (send for signature) | 3 on-site (D H F); 6 with sister products (iLoveSign, Sign.com, esigngear) | | Missing |
+| e-sign request (send for signature) | 3 on-site (D H F); 7 with sister products (iLoveSign, Sign.com, esigngear, Xodo Sign) | | Missing |
 | Share by link | 3 | E G H | Missing |
+| Validate PDF/A | 3 | P G X | Missing |
+| PDF to HTML | 3 | P F X | Missing |
 | Header & footer | 2 | J C | Missing |
 | Booklet | 2 | P G | Missing |
 | Print as poster / tile | 2 | P G | Missing |
 | Bookmarks (create) | 2 | J P | Missing |
 | Deskew | 2 | J P | Missing |
 | Linearize (web optimise) | 2 | P G | Missing |
-| Validate PDF/A | 2 | P G | Missing |
 | Halve / split double pages | 2 | J ("split in half") P | Missing |
-| PDF to HTML | 2 | P F | Missing |
 | PDF to SVG | 2 | P C | Missing |
 | Workflows / batch chains | 2 | I ("Create a workflow", premium) G ("workspace") | Missing |
 | PDF to Markdown | 2 | I P | Have |
-| PDF to text | 5 | J P G C F | Have |
 | Bates numbering | 1 | J | Missing |
 | Alternate & mix | 1 | J | Missing |
 | Flip pages | 1 | J | Missing |
@@ -154,6 +154,9 @@ Each entry is listed if it appears as a tool or feature on that competitor's too
 | Overlay PDF | 1 | P | Missing |
 | Spellcheck, extract facts, text-to-speech, speech-to-text | 1 | G | Missing |
 | AI question generator | 1 | S | Missing |
+| Online DOCX (Word) editor, Office file viewer | 1 | X | Missing |
+| Text compare (paste two texts) | 1 | X | Missing |
+| HEIC to JPG / PNG (image conversion) | 1 | X | Missing |
 | Accessible PDF | 1? | S (footer link only; not confirmed as a tool) | Missing |
 | Fax, bulk send, kiosk / in-person signing, audit trail, certify, templates | 1 | H | Missing |
 | Invoices / e-invoice (EN 16931), QR code, cards, job applications | 1 | P | Missing |
@@ -175,7 +178,7 @@ PDF to Markdown is shared with only iLovePDF and PDF24, and table-to-CSV extract
 
 **How they were ranked.** Three factors:
 
-1. How many of the 11 competitors offer the feature.
+1. How many of the 12 competitors offer the feature.
 2. Real-world demand, judged from search experience. This is general knowledge, not measured: for example, "word to pdf", "edit pdf text", "crop pdf", "html to pdf" and "delete pages from pdf" are perennial high-volume queries.
 3. Fit with PDF Wizard: browser-first processing, a small server only where unavoidable, Vercel + Supabase, and no paid PDF SDK.
 
@@ -183,18 +186,19 @@ PDF to Markdown is shared with only iLovePDF and PDF24, and table-to-CSV extract
 
 **What the observations showed overall.**
 
-- **Many competitors buy a commercial SDK** for these features. Apryse WebViewer / PDFNet shows up in iLovePDF's crop, redact and compare bundles, and in Smallpdf identifiers.
+- **Many competitors buy a commercial SDK** for these features. Apryse WebViewer / PDFNet shows up in iLovePDF's crop, redact and compare bundles, and in Smallpdf identifiers. Xodo is Apryse's own product: its tool pages say "Powered by Apryse".
 - **Others do it with the same open-source stack PDF Wizard already ships.** PDFgear and PDF24 use pdf.js and pdf-lib in the browser. Every feature below can be built on PDF Wizard's existing pdf-lib (`@cantoo/pdf-lib`), `pdfjs-dist` 4.8 and the media worker.
 
 ### 1. Word to PDF
 
-**What it does for the user:** turns a `.docx` (or `.doc`/`.odt`) into a PDF that keeps the layout. It's one of the highest-volume PDF searches, and 10 of 11 competitors have it.
+**What it does for the user:** turns a `.docx` (or `.doc`/`.odt`) into a PDF that keeps the layout. It's one of the highest-volume PDF searches, and 11 of 12 competitors have it.
 
 **Who offers it and how (observed):**
 
 - **Soda PDF:** the page says the file is uploaded and "deleted from our servers within 24 hours". The flow is choose file (or Dropbox / Google Drive pickers, seen as `filePickers/dropbox`, `googleDrive` scripts), then automatic conversion, preview, download. Free use is marked "free*".
 - **PDF24:** the Word to PDF page sends work to `filetoolsNN.pdf24.org` hosts. Four different numbered hosts were contacted on load (blocked here), so it's server-side.
 - **Foxit:** the tool page ships a Next.js app with a `(online-pdf)/[id]` route. It didn't render a tool here.
+- **Xodo:** lists Word to PDF, Excel to PDF and PowerPoint to PDF, plus an online "DOCX Word editor" and an "Office viewer". Its tool pages say files are "encrypted at rest (AES-256) and in transit (TLS 1.2+)", which implies server storage. The app itself did not load here.
 - **Server-side everywhere it could be seen.** No competitor converts Word in the browser.
 
 **Build plan for PDF Wizard:**
@@ -274,6 +278,7 @@ PDF to Markdown is shared with only iLovePDF and PDF24, and table-to-CSV extract
   4. "Crop PDF" finishes with "Your PDF has been cropped successfully" and a download.
   5. **No file upload happened.** The only request after clicking was a download template call with `taskId=-1&workerId=-1`. Fully client-side.
 - **Sejda** describes crop as "Trim PDF margins, change PDF page size".
+- **Xodo** lists Crop PDF in its Organize group (catalogue only).
 - **PDF24** offers "Trim white margins, per edge or visually on a page preview" (auto white-margin detection).
 
 **Build plan:**
@@ -294,7 +299,7 @@ PDF to Markdown is shared with only iLovePDF and PDF24, and table-to-CSV extract
 
 **What it does:** converts `.xlsx`/`.xls`/`.ods`/`.csv` to PDF with sensible page breaks. 8 competitors have it.
 
-**Who offers it and how:** listed by iLovePDF, Smallpdf, PDF24, PDF2Go, Soda, PDF Candy, PDFgear and Foxit, plus DocHub's CSV to PDF. Server-side wherever a request was visible (PDF24 posts to `filetoolsNN` hosts; Soda keeps files up to 24 hours).
+**Who offers it and how:** listed by iLovePDF, Smallpdf, PDF24, PDF2Go, Soda, PDF Candy, PDFgear, Foxit and Xodo, plus DocHub's CSV to PDF. Server-side wherever a request was visible (PDF24 posts to `filetoolsNN` hosts; Soda keeps files up to 24 hours).
 
 **Build plan:**
 
@@ -322,6 +327,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
 
 - **PDF Candy "Edit PDF text"** sat behind a sign-in wall here.
 - **PDFescape** lists "Edit Text and Images" as premium.
+- **Xodo "PDF Text Editor":** "Add, delete, and edit text in PDFs"; steps are upload, then "edit, delete, add and replace text", then download. "Powered by Apryse". The editor did not load here, so how it applies edits wasn't observed.
 
 **Build plan:**
 
@@ -377,6 +383,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
   - **"Flatten only form fields":** pdf-lib's form flatten.
   - **"Flatten all content":** each page is drawn to a canvas with pdf.js, encoded as JPEG and placed on a new pdf-lib page. The whole page becomes an image.
 - **Smallpdf** describes flattening "text, images, annotations, and form fields" and working "in your browser".
+- **Xodo** lists Flatten PDF and Fill PDF form (catalogue only).
 - **DocHub** offers "Flatten fields on a PDF" inside its editor (upload up to 31 MB, account required).
 
 **Build plan:**
@@ -404,6 +411,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
   - The editor modules are `redactLayer.mjs`, `searchLayer.mjs` (search and redact every occurrence) and `outputLayer.mjs`.
   - Its `pdfEditor/core/api.mjs` uploads the PDF (`FormData` "file", `POST …upload`) and its save step shows uploading / processing / downloading states. **Rasterising is done on their server.**
 - **Foxit** sells "Smart Redact" (AI) as a paid product.
+- **Xodo "Redact PDF":** "Permanently redact and black out sensitive information"; steps are upload, then "mark and permanently redact sensitive text or entire pages", then download. Its FAQ separates *redacting* from *sanitizing* a PDF, which is a useful distinction for PDF Wizard's metadata clean-up step. Sources: Select File, Xodo Drive, Dropbox, Google Drive. "Powered by Apryse". The editor did not load here.
 
 **Build plan:**
 
@@ -450,6 +458,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
 
 - **iLovePDF:** marked **Premium** on the tool page here. A "Set the PDF/A conformance level" select offers PDF/A-1b, 1a, 2b, 2u, 2a, 3b, 3u and 3a, plus an "Allow Downgrade of PDF/A Compliance Level" option with an explanation. Server-side (plupload upload).
 - **PDF2Go:** conformance levels described as "a setting, not a guess"; it also has a separate "Validate PDF/A" tool. Server workflow API.
+- **Xodo** lists both PDF to PDF/A and Validate PDF/A (catalogue only).
 - **PDF24:** "PDF to PDF/A" and a separate "Validate PDF/A".
 
 **Build plan:**
@@ -503,6 +512,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
   - Modules loaded: `pdfCompare.mjs`, `textIndex.mjs`, `normalize.mjs`, `diffCore.mjs`, `alignment.mjs`, `compareEngine.mjs`, `pixelDiff.mjs`, `ocrBridge.mjs` (OCR for scans), `report.mjs`, and pdf.js `pdf.mjs`/`pdf.worker.mjs`.
 - **iLovePDF "Compare PDF":** two file inputs; the bundle `pdfcompare.<hash>.js` mounts an Apryse WebViewer web component (browser-side).
 - **PDF2Go** lists Compare.
+- **Xodo "PDF Compare":** "Select File(s)", compare, then "download each PDF separately or merge them into one file". Xodo also has a separate **Text Compare** tool (paste two texts). "Powered by Apryse". The tool did not load here.
 
 **Build plan:**
 
@@ -581,7 +591,7 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
 | Bookmarks, deskew, linearize, validate PDF/A, verify signatures, overlay, invert, halve pages, alternate & mix, flip, delete annotations, split by size, bookmarks or text | 1–2 each | Each has a single competitor or low demand. Deskew and validation fit later with OCR and PDF/A. |
 | AI extras (question generator, extract facts, spellcheck, text-to-speech) | Smallpdf, PDF2Go | Single-competitor gimmicks. Chat with PDF already covers Q&A and summary. |
 | Share by link, fax, kiosk signing | PDFescape, PDF2Go, DocHub | Off-model: they need stored documents and accounts. |
-| Niche inputs (DjVu, DWG, XPS, MOBI, PUB, CBZ, …) | PDF Candy, PDF24 | Long tail. Several come free once the LibreOffice/Calibre-style server conversion exists. |
+| Niche inputs (DjVu, DWG, XPS, MOBI, PUB, CBZ, DICOM, …) | PDF Candy, PDF24, Xodo (DICOM) | Long tail. Several come free once the LibreOffice/Calibre-style server conversion exists. |
 | Invoice and e-invoice tools | PDF24 | Region-specific (EN 16931) and outside the PDF-tools core. |
 
 ## 5. Notes on evidence quality
@@ -596,7 +606,8 @@ The free tier showed "2 free saves left for the next 59 minutes". The page state
   - iLovePDF redact and compare use Apryse (web component code in their bundles);
   - Smallpdf uses Apryse: only identifiers in the page source (an `internal-apryse-processing` route name and a blog slug about selling tools to Apryse). Its app scripts were blocked.
 - **Not observed:**
-  - Adobe Acrobat online and Xodo (blocked);
+  - Adobe Acrobat online (blocked);
+  - Xodo tool behaviour: only its catalogue and tool-page text were observed, because `cdn.xodo.com` is blocked and a "Daily free use reached." banner showed;
   - Smallpdf and PDF Candy tool behaviour (CDNs blocked);
   - PDFescape's editor (app host blocked).
 - **From general knowledge, marked as such:**
