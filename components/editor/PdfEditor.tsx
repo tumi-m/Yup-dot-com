@@ -27,7 +27,7 @@ import { loadForRender, type LoadedPdf } from "@/lib/pdf/render";
 import { bakeAnnotations, rotatePagesBy, insertBlankPage } from "@/lib/pdf/bake";
 import { deletePages, reorderPages, mergePdfs } from "@/lib/pdf/operations";
 import { detectFormFields, fillFormFields, type DetectedField } from "@/lib/pdf/forms";
-import { useHistory } from "@/lib/editor/history";
+import { changedKeys, continuesRun, useHistory, type EditRun } from "@/lib/editor/history";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap, type PageMap } from "@/lib/editor/page-map";
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
@@ -256,12 +256,26 @@ export function PdfEditor({
     [history]
   );
 
-  /** Property-panel edits are discrete, so they record their own history entry. */
+  /** The last properties-panel change, and the annotation it left. */
+  const panelRun = useRef<(EditRun & { ann: Annotation }) | null>(null);
+  /**
+   * A properties-panel change is its own undo step, except that a run of
+   * changes to one setting (a slider drag, typing a URL) is one step: the
+   * first records the state before it, the rest update it.
+   */
   const commitAnnotation = useCallback(
-    (next: Annotation) => {
-      history.commit((prev) => prev.map((a) => (a.id === next.id ? next : a)));
+    (next: Annotation, continuous = false) => {
+      const prev = annotations.find((a) => a.id === next.id);
+      const run = { id: next.id, keys: prev ? changedKeys(prev, next).join() : "", at: Date.now() };
+      const last = panelRun.current;
+      // Only while nothing else has changed it since (an undo, a drag).
+      const carryOn = continuous && !!prev && last?.ann === prev && continuesRun(last, run);
+      const update = (list: Annotation[]) => list.map((a) => (a.id === next.id ? next : a));
+      if (carryOn) history.live(update);
+      else history.commit(update);
+      panelRun.current = continuous ? { ...run, ann: next } : null;
     },
-    [history]
+    [annotations, history]
   );
 
   const deleteAnnotation = useCallback(

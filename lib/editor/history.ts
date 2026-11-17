@@ -97,6 +97,30 @@ export function historyReducer<T>(state: HistoryState<T>, action: HistoryAction<
   }
 }
 
+/** The names of the properties that differ between two versions of an item. */
+export function changedKeys<T extends object>(prev: T, next: T): string[] {
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  return [...keys].filter((k) => !Object.is((prev as Record<string, unknown>)[k], (next as Record<string, unknown>)[k])).sort();
+}
+
+/** How long a pause ends a run of changes to one setting. */
+export const RUN_GAP_MS = 1000;
+
+/** One change made in the properties panel. */
+export interface EditRun {
+  id: string;
+  keys: string;
+  at: number;
+}
+
+/**
+ * Whether a change carries on the last one: the same setting of the same
+ * item, soon after. A slider drag or a burst of typing is then one undo step.
+ */
+export function continuesRun(last: EditRun | null, next: EditRun): boolean {
+  return !!last && last.id === next.id && last.keys === next.keys && next.at - last.at < RUN_GAP_MS;
+}
+
 /**
  * Undo/redo stack.
  *

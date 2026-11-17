@@ -2,7 +2,7 @@ import { PDFDocument } from "pdf-lib";
 import { insertBlankPage, rotatePagesBy } from "../lib/pdf/bake.ts";
 import { deletePages, mergePdfs, reorderPages } from "../lib/pdf/operations.ts";
 import { detectFormFields } from "../lib/pdf/forms.ts";
-import { historyReducer, type HistoryState } from "../lib/editor/history.ts";
+import { changedKeys, continuesRun, historyReducer, RUN_GAP_MS, type HistoryState } from "../lib/editor/history.ts";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap } from "../lib/editor/page-map.ts";
 import { pageKey, thumbKey, typedPage } from "../lib/editor/keyboard.ts";
 import type { Annotation } from "../lib/editor/types.ts";
@@ -104,6 +104,27 @@ check("the deleted page shown: the next one, or the last", pageAfter(1, deleteMa
   check("reorder keeps the fields", (await fields(await reorderPages(bytes, [2, 1, 0]))) === "name@2 city@1 agree@1");
   check("delete keeps the other pages' fields", (await fields(await deletePages(bytes, [0]))) === "city@0 agree@0");
   check("merge keeps the fields", (await fields(await mergePdfs([bytes, bytes]))).startsWith("name@0 city@1 agree@1"));
+}
+
+// A run of changes to one setting is one undo step
+{
+  const a = text("a", 0);
+  check("changed keys: only what differs", changedKeys(a, { ...a, color: "#ff0000", bold: true }).join() === "bold,color");
+  const run = { id: "a", keys: "opacity", at: 1000 };
+  check("run: the same setting soon after carries on", continuesRun(run, { ...run, at: 1000 + RUN_GAP_MS - 1 }));
+  check("run: a pause ends it", !continuesRun(run, { ...run, at: 1000 + RUN_GAP_MS }));
+  check("run: another setting starts a new one", !continuesRun(run, { ...run, keys: "color", at: 1100 }));
+  check("run: another item starts a new one", !continuesRun(run, { ...run, id: "b", at: 1100 }));
+  check("run: the first change starts one", !continuesRun(null, run));
+
+  // Nine slider steps as the editor records them: a commit, then updates.
+  type S = HistoryState<number[]>;
+  let st: S = { past: [[0.5]], present: [1], future: [], pending: null };
+  st = historyReducer(st, { type: "commit", next: [0.95] });
+  for (let v = 0.9; v > 0.5; v -= 0.05) st = historyReducer(st, { type: "live", next: [+v.toFixed(2)] });
+  check("run: nine slider steps leave one undo step", st.past.length === 2 && st.present[0] === 0.55, st);
+  st = historyReducer(st, { type: "undo" });
+  check("run: one undo goes back past the whole drag", st.present[0] === 1 && st.past.length === 1, st);
 }
 
 // The page box and the page keys
