@@ -264,32 +264,3 @@ export function canvasPixels(canvas: HTMLCanvasElement): RawImage | null {
     return null;
   }
 }
-
-/**
- * Canvas pixels → JPEG with MozJPEG, falling back to the browser's encoder if
- * the wasm can't load. Pass `pixels` when they have been read already.
- * Grey renders get a one-channel JPEG; at quality 1 colour is kept at full
- * resolution, as the browser does.
- */
-export async function canvasToJpeg(
-  canvas: HTMLCanvasElement,
-  browserQuality: number,
-  opts: { progressive?: boolean; pixels?: RawImage | null } = {}
-): Promise<Uint8Array> {
-  try {
-    const pixels = opts.pixels ?? canvasPixels(canvas);
-    if (pixels) {
-      return await encodeJpeg(pixels, {
-        quality: mozQuality(browserQuality),
-        progressive: opts.progressive,
-        gray: isGray(pixels),
-        fullChroma: browserQuality >= 1,
-      });
-    }
-  } catch {
-    // Fall back below.
-  }
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", browserQuality));
-  if (!blob) throw new Error("This page is too large to render on this device.");
-  return new Uint8Array(await blob.arrayBuffer());
-}

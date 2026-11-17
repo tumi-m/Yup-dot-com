@@ -6,6 +6,9 @@ import { acceptFor, ALL_FORMATS, type ImageFormat } from "@/lib/pdf/images-to-pd
 /** pdf-lib and pdf.js load when a spell is cast, not with the page. */
 const kit = () => import("@/lib/pdf/toolkit");
 
+/** Split and Rotate with no pages typed (the tools say the same). */
+const NO_PAGES = "Type the pages, like 1-3, 5.";
+
 export type FieldType = "select" | "text" | "password" | "range" | "color" | "checkbox";
 
 export interface ToolField {
@@ -16,8 +19,12 @@ export interface ToolField {
   default: string;
   /** `hint`: one plain sentence under the select while that option is picked. */
   options?: { value: string; label: string; hint?: string }[];
-  /** One plain sentence under the field. */
-  hint?: string;
+  /**
+   * One plain sentence under the field, where the label alone doesn't say what
+   * it does; a function when it depends on the other options. A picked
+   * option's own hint comes first.
+   */
+  hint?: string | ((options: Record<string, string>) => string | undefined);
   /** Takes the whole row. */
   wide?: boolean;
   min?: number;
@@ -25,8 +32,44 @@ export interface ToolField {
   step?: number;
   /** The phone keyboard a text field brings up. */
   inputMode?: "decimal";
-  /** Only show this field when another field has a given value. */
-  showIf?: { key: string; value: string };
+  /** Only show this field when another field has a given value (or one of several). */
+  showIf?: { key: string; value: string | string[] };
+  /** Example input, shown in an empty text field. */
+  placeholder?: string;
+}
+
+/** The sentence under a field with these options: the picked option's, or the field's own. */
+export function fieldHint(field: ToolField, options: Record<string, string>): string | undefined {
+  const picked = field.options?.find((o) => o.value === options[field.key])?.hint;
+  return picked ?? (typeof field.hint === "function" ? field.hint(options) : field.hint);
+}
+
+/** Whether `field` shows with these options. */
+export function fieldShown(field: ToolField, options: Record<string, string>): boolean {
+  if (!field.showIf) return true;
+  const { key, value } = field.showIf;
+  return Array.isArray(value) ? value.includes(options[key]) : options[key] === value;
+}
+
+/**
+ * What's wrong with the options, said once: under the last shown field it
+ * names, which with the other shown named fields is marked invalid and
+ * described by it. Casting the spell (the button, or Enter in a field) waits
+ * while there is one and focuses its first shown field, or says it as an error
+ * when none of them is shown. A `live` problem is about something typed and
+ * shows as the options change; the rest, like nothing typed yet, would nag, so
+ * they show once the spell is cast, until an option changes.
+ */
+export interface OptionProblem {
+  fields: string[];
+  message: string;
+  live?: boolean;
+}
+
+/** The fields a problem names that are shown, in the order they show. */
+export function problemFields(problem: OptionProblem | null, fields: ToolField[], options: Record<string, string>): string[] {
+  if (!problem) return [];
+  return fields.filter((f) => problem.fields.includes(f.key) && fieldShown(f, options)).map((f) => f.key);
 }
 
 export interface ToolProcessor {
@@ -52,11 +95,8 @@ export interface ToolProcessor {
   needs?: "heic";
   /** Shows the result for the chosen options before the spell is cast. */
   preview?: "resize";
-  /**
-   * What is wrong with the options as they stand, if anything: shown under
-   * the fields it names as they are typed, and the spell waits until it's fixed.
-   */
-  problem?: (options: Record<string, string>) => { fields: string[]; message: string } | null;
+  /** What is wrong with the options as they stand, if anything (see OptionProblem). */
+  problem?: (options: Record<string, string>) => OptionProblem | null;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -78,7 +118,7 @@ const IMAGE_FIELDS: ToolField[] = [
   },
   {
     key: "margin",
-    label: "Margin (pt)",
+    label: "Margin",
     type: "select",
     default: "0",
     options: [
@@ -170,7 +210,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: true,
     minFiles: 2,
     fields: [],
-    run: async (files) => (await kit()).mergeTool(files),
+    run: async (files, _o, ctx) => (await kit()).mergeTool(files, ctx),
   },
   "split-pdf": {
     cancellable: true,
@@ -185,18 +225,22 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "ranges",
         options: [
-          { value: "ranges", label: "By page ranges" },
+          { value: "ranges", label: "A PDF per range" },
+          { value: "one", label: "Chosen pages in one PDF" },
           { value: "every", label: "Every page separately" },
         ],
       },
       {
         key: "ranges",
-        label: "Pages (e.g. 1-3, 5)",
+        label: "Pages",
         type: "text",
-        default: "1-1",
-        showIf: { key: "mode", value: "ranges" },
+        default: "",
+        placeholder: "e.g. 1-3, 5",
+        showIf: { key: "mode", value: ["ranges", "one"] },
+        hint: (o) => (o.mode === "ranges" ? "Each range becomes its own PDF." : undefined),
       },
     ],
+    problem: (o) => (o.mode === "every" || o.ranges?.trim() ? null : { fields: ["ranges"], message: NO_PAGES }),
     run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
   },
   "rotate-pdf": {
@@ -215,8 +259,27 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "270", label: "90° counter-clockwise" },
         ],
       },
+      {
+        key: "pages",
+        label: "Pages",
+        type: "select",
+        default: "all",
+        options: [
+          { value: "all", label: "All pages" },
+          { value: "some", label: "Only these pages" },
+        ],
+      },
+      {
+        key: "which",
+        label: "Which pages",
+        type: "text",
+        default: "",
+        placeholder: "e.g. 2, 5-6",
+        showIf: { key: "pages", value: "some" },
+      },
     ],
-    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle }),
+    problem: (o) => (o.pages !== "some" || o.which?.trim() ? null : { fields: ["which"], message: NO_PAGES }),
+    run: async (files, o) => (await kit()).rotateTool(files, { angle: o.angle, pages: o.pages, which: o.which }),
   },
   "resize-pdf": {
     cancellable: true,
@@ -227,7 +290,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         readOptions(o);
         return null;
       } catch (err) {
-        return { fields: ["width", "height"], message: (err as Error).message };
+        return { fields: ["width", "height"], message: (err as Error).message, live: true };
       }
     },
     accept: "application/pdf",
@@ -342,6 +405,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "balanced", label: "Recommended" },
           { value: "high", label: "High quality" },
         ],
+        hint: "Smaller files have softer photos. Text stays sharp.",
       },
     ],
     run: async (files, o, ctx) => (await kit()).compressTool(files, { quality: o.quality }, ctx),
@@ -411,6 +475,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
   "txt-to-pdf": textTool(false),
   "markdown-to-pdf": textTool(true),
   "pdf-to-text": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -418,6 +483,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToTextTool(files, ctx),
   },
   "pdf-to-markdown": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -425,6 +491,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).pdfToMarkdownTool(files, ctx),
   },
   "extract-tables": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -433,6 +500,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, _o, ctx) => (await kit()).extractTablesTool(files, ctx),
   },
   "pdf-to-chunks": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -452,13 +520,16 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     run: async (files, o, ctx) => (await kit()).pdfToChunksTool(files, { maxChars: o.maxChars }, ctx),
   },
   "pdf-to-word": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
     fields: [],
+    note: "Pictures and links aren't carried over.",
     run: async (files, _o, ctx) => (await kit()).pdfToWordTool(files, ctx),
   },
   "pdf-to-pptx": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -472,6 +543,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "standard", label: "Standard" },
           { value: "high", label: "High" },
         ],
+        hint: "Each page becomes a picture on a slide. High is sharper and bigger.",
       },
     ],
     run: async (files, o, ctx) => {
@@ -480,6 +552,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     },
   },
   "pdf-to-excel": {
+    cancellable: true,
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -529,6 +602,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
       {
         key: "copying",
@@ -539,9 +613,22 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
     ],
     note: "Lost passwords can't be recovered.",
+    // The same rules protectTool keeps, checked first so the field can be marked.
+    problem: (o) => {
+      if (!o.password) return { fields: ["password"], message: "Please enter a password." };
+      // Not said while the first characters are typed, only once the second field is.
+      if (o.password.length < 4) return { fields: ["password"], message: "Use at least 4 characters.", live: !!o.confirm };
+      if (o.password !== o.confirm) {
+        // Said while typing only once the second one can't become the first.
+        const live = !!o.confirm && !o.password.startsWith(o.confirm);
+        return { fields: ["confirm"], message: "The passwords don't match.", live };
+      }
+      return null;
+    },
     run: async (files, o) =>
       (await kit()).protectTool(files, {
         password: o.password,
@@ -685,6 +772,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         step: 0.05,
       },
     ],
+    problem: (o) => (o.text?.trim() ? null : { fields: ["text"], message: "Type the watermark text." }),
     run: async (files, o) =>
       (await kit()).watermarkTool(files, {
         text: o.text,

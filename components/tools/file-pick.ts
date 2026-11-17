@@ -1,4 +1,6 @@
 import { formatLimitBytes } from "@/lib/limits";
+import { ENCRYPTED_MESSAGE, UNREADABLE_MESSAGE } from "@/lib/pdf/errors";
+import { FORMAT_NAMES, formatsIn } from "@/lib/pdf/images-to-pdf/formats";
 
 /** Types some systems hand over without naming them (an empty type, or "application/octet-stream"). */
 const BY_NAME: Record<string, RegExp> = {
@@ -36,8 +38,15 @@ export function takesFile(accept: string, file: { name: string; type: string }):
 export function sortPick(
   accepted: File[],
   skipped: number,
-  o: { maxFileBytes: number; multiple: boolean; toolName?: string }
-): { keep: File[]; tooBig: number; message: string | null } {
+  o: {
+    maxFileBytes: number;
+    multiple: boolean;
+    toolName?: string;
+    /** Files the plan allows at once, and how many more the list has room for. */
+    maxBatchFiles?: number;
+    room?: number;
+  }
+): { keep: File[]; tooBig: number; overBatch: boolean; message: string | null } {
   const fits = accepted.filter((f) => f.size <= o.maxFileBytes);
   const tooBig = accepted.filter((f) => f.size > o.maxFileBytes);
   const notes: string[] = [];
@@ -53,11 +62,54 @@ export function sortPick(
   if (!o.multiple && fits.length > 1) {
     notes.push(`${o.toolName ?? "This tool"} takes one file at a time. Using ${fits[0].name}.`);
   }
+  // Past the plan's batch size the rest are named, so the note outlasts the upgrade prompt.
+  const room = Math.max(0, o.room ?? Infinity);
+  const keep = o.multiple ? fits.slice(0, room) : fits.slice(0, 1);
+  const left = o.multiple ? fits.slice(keep.length) : [];
+  if (left.length) {
+    const max = o.maxBatchFiles ?? keep.length;
+    const rest = left.length - 1;
+    notes.push(
+      `${keep.length ? `Added ${keep.length} of ${fits.length}. ` : ""}Up to ${max} files at once on your plan: ` +
+        `${left[0].name}${rest ? ` and ${rest} more` : ""} ${left.length === 1 ? "wasn't" : "weren't"} added.`
+    );
+  }
   return {
-    keep: o.multiple ? fits : fits.slice(0, 1),
+    keep,
     tooBig: tooBig.length,
+    overBatch: left.length > 0,
     message: notes.length ? notes.join(" ") : null,
   };
+}
+
+/** "a, b or c" */
+const either = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}` : names[0]);
+
+/** What a tool takes, for a file it can't: "Merge PDF takes PDFs." */
+export function takesMessage(toolName: string | undefined, accept: string, multiple: boolean): string {
+  // Types say what kind of file; extensions only repeat them.
+  const types = accept
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t && !t.startsWith("."));
+  const images = formatsIn(accept).map((f) => FORMAT_NAMES[f]);
+  // Text and Markdown, in the order the list gives them.
+  const texts = [...new Set(types.map((t) => (t === "text/plain" ? "text" : /markdown/.test(t) ? "Markdown" : "")).filter(Boolean))];
+  const all = (test: (t: string) => boolean) => types.length > 0 && types.every(test);
+  const what = all((t) => t === "application/pdf")
+    ? multiple
+      ? "PDFs"
+      : "a PDF"
+    : images.length && types.every((t) => t.startsWith("image/"))
+      ? `${either(images)} images`
+      : all((t) => t.startsWith("video/"))
+        ? "MP4, MOV or WebM videos"
+        : texts.length && all((t) => t.startsWith("text/"))
+          ? multiple
+            ? `${either(texts)} files`
+            : `a ${either(texts)} file`
+          : null;
+  return what ? `${toolName ?? "This tool"} takes ${what}.` : "That file type isn't supported here.";
 }
 
 /**
@@ -81,4 +133,26 @@ export function splitNameEnd(name: string, keep = 12): [string, string] {
  */
 export function percentSmaller(sizeDelta: number): number {
   return Math.min(99, Math.floor(sizeDelta * 100));
+}
+
+/**
+ * The tool that fixes what a tool's error says, and the file to take there:
+ * the one the message names ("a.pdf: …"), or the only one. Repair PDF for a
+ * file that won't read, Unlock PDF for a locked one, OCR PDF for a scan.
+ * Null when there is none, or when that tool is the one already open.
+ */
+export function errorFix<F extends { name: string }>(
+  message: string | null,
+  files: F[],
+  slug: string
+): { slug: string; label: string; file: F } | null {
+  if (!message) return null;
+  const file = files.find((f) => message.startsWith(`${f.name}: `)) ?? (files.length === 1 ? files[0] : undefined);
+  if (!file) return null;
+  if (message.endsWith(UNREADABLE_MESSAGE) && slug !== "repair-pdf") return { slug: "repair-pdf", label: "Try Repair PDF", file };
+  // Repair PDF's own wording ("…Unlock it first, then repair it.") counts too;
+  // a locked PowerPoint ("This file is password-protected…") is no PDF to unlock.
+  if (message.includes(ENCRYPTED_MESSAGE.replace(/\.$/, "")) && slug !== "unlock-pdf") return { slug: "unlock-pdf", label: "Open in Unlock PDF", file };
+  if (message.includes("scanned PDF") && slug !== "ocr-pdf") return { slug: "ocr-pdf", label: "Run OCR PDF", file };
+  return null;
 }

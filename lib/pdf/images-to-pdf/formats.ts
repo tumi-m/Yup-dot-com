@@ -19,12 +19,12 @@ export const FORMAT_NAMES: Record<ImageFormat, string> = {
   svg: "SVG",
 };
 
-/** Types and extensions per format, for a file picker's accept list. */
+/** Types and extensions per format, for a file picker's accept list, in the order messages name them. */
 const ACCEPT: Record<ImageFormat, string[]> = {
   jpeg: ["image/jpeg", ".jpg", ".jpeg", ".jfif"],
   png: ["image/png", ".png"],
-  gif: ["image/gif", ".gif"],
   webp: ["image/webp", ".webp"],
+  gif: ["image/gif", ".gif"],
   bmp: ["image/bmp", "image/x-ms-bmp", ".bmp"],
   tiff: ["image/tiff", ".tif", ".tiff"],
   avif: ["image/avif", ".avif"],
@@ -37,6 +37,12 @@ export const ALL_FORMATS = Object.keys(ACCEPT) as ImageFormat[];
 /** The accept list for a tool that takes these formats. */
 export function acceptFor(formats: ImageFormat[]): string {
   return formats.flatMap((f) => ACCEPT[f]).join(",");
+}
+
+/** The formats an accept list names, by type or extension, in the usual order. */
+export function formatsIn(accept: string): ImageFormat[] {
+  const entries = new Set(accept.split(",").map((t) => t.trim().toLowerCase()));
+  return ALL_FORMATS.filter((f) => ACCEPT[f].some((t) => entries.has(t)));
 }
 
 /** ISO base media brands (the "ftyp" box) of AVIF and HEIC files. */

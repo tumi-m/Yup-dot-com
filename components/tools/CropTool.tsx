@@ -20,6 +20,8 @@ import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/loc
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { ErrorHelp } from "./ErrorHelp";
+import { takesMessage } from "./file-pick";
+import { getTool } from "@/lib/tools";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import {
   GRIPS,
@@ -257,7 +259,7 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
     if (!list?.length) return;
     const picked = Array.from(list).find(isPdf);
     if (!picked) {
-      fail("Choose a PDF file.");
+      fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.
@@ -823,9 +825,11 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
 
               <AnimatePresence>
                 {error && (
-                  <InlineError key="error" message={error} shakeKey={errorKey}>
-                    <ErrorHelp message={error} slug={slug} file={source?.file ?? failedFile} />
-                  </InlineError>
+                  <InlineError
+                    key="error"
+                    shakeKey={errorKey}
+                    message={<ErrorHelp message={error} slug={slug} files={source?.file ? [source.file] : failedFile ? [failedFile] : []} onLeave={nudge.cancel} />}
+                  />
                 )}
               </AnimatePresence>
 

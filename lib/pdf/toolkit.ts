@@ -8,12 +8,12 @@ import {
   extractTables,
   tableToCsv,
 } from "./parse";
-import { ENCRYPTED_MESSAGE, friendlyPdfError } from "./errors";
+import { ENCRYPTED_MESSAGE, NO_TABLES_MESSAGE, SCANNED_MESSAGE, friendlyPdfError } from "./errors";
 import { pageFrame } from "./page-frame";
 import { openPdf } from "./open";
 import { extractorFor, mergeDocuments } from "./operations";
 import { isAbort, stopIfAborted } from "../abort";
-import { canvasToJpeg } from "../image-codec";
+import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import type { OcrProgress } from "./ocr";
 
 /** A processed result ready to hand to the browser for download. */
@@ -24,6 +24,8 @@ export interface ToolFile {
   note?: string;
   /** Short lines on what was done; `warn` marks what was lost or changed. */
   report?: { text: string; warn?: boolean }[];
+  /** The input handed back as it was, because nothing would make it smaller. */
+  unchanged?: boolean;
 }
 
 function hexToRgb(hex: string) {
@@ -36,7 +38,8 @@ function hexToRgb(hex: string) {
 }
 
 function pdfBlob(bytes: Uint8Array): Blob {
-  return new Blob([bytes.slice() as unknown as BlobPart], {
+  // No copy: the bytes are the tool's own, and a merge can be hundreds of MB.
+  return new Blob([bytes as unknown as BlobPart], {
     type: "application/pdf",
   });
 }
@@ -68,6 +71,9 @@ function rangeParts(input: string): string[] {
     .map((part) => part.trim())
     .filter(Boolean);
 }
+
+/** Nothing typed in a page list (every typed part is checked by rangeProblem). */
+const NO_PAGES = "Type the pages, like 1-3, 5.";
 
 /**
  * Why `input` can't be split as typed, or null when every part is fine.
@@ -122,17 +128,30 @@ export function parseRanges(input: string, pageCount: number): number[][] {
 // ---------------------------------------------------------------------------
 // Merge
 // ---------------------------------------------------------------------------
-export async function mergeTool(files: File[]): Promise<ToolFile> {
-  const docs: PDFDocument[] = [];
-  for (const file of files) {
+export async function mergeTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const n = files.length;
+  /** Opened one at a time as the merge reaches it, so only one source is held at once. */
+  const open = async (file: File) => {
     try {
-      docs.push(await openPdf(await buf(file)));
+      const doc = await openPdf(await buf(file));
+      // A header with no document after it opens, then fails on the first
+      // page lookup: fail here, where the file can be named.
+      doc.getPageCount();
+      return doc;
     } catch (err) {
       throw friendlyPdfError(err, file.name);
     }
+  };
+  async function* rest() {
+    for (let i = 1; i < n; i++) {
+      stopIfAborted(ctx.signal);
+      ctx.progress?.(i / n, `File ${i + 1} of ${n}`);
+      yield await open(files[i]);
+    }
   }
+  ctx.progress?.(0, `File 1 of ${n}`);
   // Built on the first file, so its form, title and bookmarks stay.
-  return { blob: pdfBlob(await mergeDocuments(docs[0], docs.slice(1))), filename: "merged.pdf" };
+  return { blob: pdfBlob(await mergeDocuments(await open(files[0]), rest())), filename: "merged.pdf" };
 }
 
 function pageLabel(pages: number[]): string {
@@ -157,14 +176,20 @@ export async function splitTool(
   let groups: number[][];
   if (opts.mode === "every") {
     groups = Array.from({ length: count }, (_, i) => [i]);
+  } else if (opts.mode === "one") {
+    // The chosen pages together, in the order typed, each once.
+    const problem = rangeProblem(opts.ranges ?? "", count);
+    if (problem) throw new Error(problem);
+    const pages = [...new Set(parseRanges(opts.ranges ?? "", count).flat())];
+    if (!pages.length) throw new Error(NO_PAGES);
+    stopIfAborted(ctx.signal);
+    return { blob: pdfBlob(await extractorFor(src)(pages)), filename: `${base}-selected.pdf` };
   } else {
     const problem = rangeProblem(opts.ranges ?? "", count);
     if (problem) throw new Error(problem);
     groups = parseRanges(opts.ranges ?? "", count);
     // Never hand back the whole document as if it were the requested split.
-    if (!groups.length) {
-      throw new Error(count === 1 ? "This PDF has only 1 page." : `Pick pages between 1 and ${count}.`);
-    }
+    if (!groups.length) throw new Error(NO_PAGES);
   }
 
   const extract = extractorFor(src);
@@ -216,7 +241,7 @@ export async function compressTool(
   }
   // Never hand back a bigger file, nor one that is barely smaller.
   if (compressed.length > file.size * 0.98) {
-    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf" };
+    return { blob: new Blob([file], { type: "application/pdf" }), filename: file.name.replace(/\.pdf$/i, "") + ".pdf", unchanged: true };
   }
   return { blob: pdfBlob(compressed), filename: suffixed(file, "compressed") };
 }
@@ -405,11 +430,21 @@ export async function resizeTool(
 // ---------------------------------------------------------------------------
 export async function rotateTool(
   files: File[],
-  opts: { angle: string }
+  opts: { angle: string; pages?: string; which?: string }
 ): Promise<ToolFile> {
   const delta = Number(opts.angle) || 90;
   const doc = await openPdf(await buf(files[0]));
-  doc.getPages().forEach((page) => {
+  const count = doc.getPageCount();
+  let chosen: Set<number> | null = null;
+  if (opts.pages === "some") {
+    const which = opts.which ?? "";
+    const problem = which.trim() ? rangeProblem(which, count) : null;
+    if (problem) throw new Error(problem);
+    chosen = new Set(parseRanges(which, count).flat());
+    if (!chosen.size) throw new Error(NO_PAGES);
+  }
+  doc.getPages().forEach((page, i) => {
+    if (chosen && !chosen.has(i)) return;
     const current = page.getRotation().angle;
     page.setRotation(degrees((current + delta + 360) % 360));
   });
@@ -537,11 +572,9 @@ function pageProgress(ctx: ToolContext) {
   };
 }
 
-const NO_TEXT = "No text found. This looks like a scanned PDF: run OCR PDF on it first.";
-
 /** Fails instead of handing back an empty file when a PDF has no text layer. */
 function requireText(out: string): string {
-  if (!out.trim()) throw new Error(NO_TEXT);
+  if (!out.trim()) throw new Error(SCANNED_MESSAGE);
   return out;
 }
 
@@ -570,11 +603,7 @@ export async function extractTablesTool(files: File[], ctx: ToolContext = {}): P
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
-    throw new Error(
-      doc.likelyScanned
-        ? "No text found — this looks like a scanned PDF, which needs OCR."
-        : "No tables detected in this document."
-    );
+    throw new Error(doc.likelyScanned ? SCANNED_MESSAGE : NO_TABLES_MESSAGE);
   }
   const base = files[0].name.replace(/\.pdf$/i, "");
   return tables.map((table, i) => ({
@@ -591,7 +620,7 @@ export async function pdfToChunksTool(
 ): Promise<ToolFile> {
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const chunks = toChunks(doc, Number(opts.maxChars) || 1200);
-  if (!chunks.length) throw new Error(NO_TEXT);
+  if (!chunks.length) throw new Error(SCANNED_MESSAGE);
   const base = files[0].name.replace(/\.pdf$/i, "");
   const payload = {
     source: files[0].name,
@@ -645,7 +674,17 @@ export async function unlockTool(
 ): Promise<ToolFile> {
   const { unlockPdf, isEncrypted } = await import("./security");
   const bytes = await buf(files[0]);
-  if (!(await isEncrypted(bytes))) {
+  const encrypted = await isEncrypted(bytes).catch((err) => {
+    throw friendlyPdfError(err);
+  });
+  if (!encrypted) {
+    // The encryption check reads only the header and trailer, so a damaged
+    // file would pass as an unprotected one: open it properly first.
+    await openPdf(bytes)
+      .then((d) => d.getPageCount())
+      .catch((err) => {
+        throw friendlyPdfError(err);
+      });
     throw new Error("This PDF isn't password-protected — there's nothing to unlock.");
   }
   let out: Uint8Array;
@@ -730,7 +769,7 @@ export async function ocrTool(
 export async function pdfToWordTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   if (doc.likelyScanned) {
-    throw new Error("This looks like a scanned PDF. Run OCR PDF on it first, then convert.");
+    throw new Error(SCANNED_MESSAGE);
   }
   const { toDocxBlob } = await import("./convert");
   const base = files[0].name.replace(/\.pdf$/i, "");
@@ -741,11 +780,7 @@ export async function pdfToExcelTool(files: File[], ctx: ToolContext = {}): Prom
   const doc = await parseDocument(await buf(files[0]), pageProgress(ctx), ctx.signal);
   const tables = extractTables(doc);
   if (!tables.length) {
-    throw new Error(
-      doc.likelyScanned
-        ? "This looks like a scanned PDF. Run OCR PDF on it first."
-        : "No tables were detected in this document."
-    );
+    throw new Error(doc.likelyScanned ? SCANNED_MESSAGE : NO_TABLES_MESSAGE);
   }
   const { tablesToXlsx } = await import("./convert");
   const base = files[0].name.replace(/\.pdf$/i, "");

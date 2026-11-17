@@ -82,7 +82,10 @@ check("split: a part that doesn't parse is an error", typo === "Use commas betwe
 const spaced = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "1 3" })) as ToolFile[];
 check("split: '1 3' makes two files", spaced.length === 2, spaced.length);
 const empty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "" }));
-check("split: no pages picked is still an error", empty === "Pick pages between 1 and 5.", empty);
+check("split: no pages picked is still an error", empty === "Type the pages, like 1-3, 5.", empty);
+const single = await makePdf([[595, 842]]);
+const singleEmpty = await errorOf(splitTool([file(single, "one.pdf")], { mode: "ranges", ranges: "" }));
+check("split: a 1-page PDF with no pages typed asks for pages", singleEmpty === "Type the pages, like 1-3, 5.", singleEmpty);
 const parts = (await splitTool([file(five, "doc.pdf")], { mode: "ranges", ranges: "2-3, 5, 5" })) as ToolFile[];
 check(
   "split: files named after source and pages, no collisions",
@@ -91,6 +94,68 @@ check(
 );
 const firstPart = await PDFDocument.load(await parts[0].blob.arrayBuffer());
 check("split: range has its pages", firstPart.getPageCount() === 2);
+
+// "1, 3" used to give two files with no way to keep them together.
+const widths = await makePdf([501, 502, 503, 504, 505].map((w): [number, number] => [w, 842]));
+const selected = (await splitTool([file(widths, "doc.pdf")], { mode: "one", ranges: "4, 1-2, 2" })) as ToolFile;
+const selectedDoc = await PDFDocument.load(await selected.blob.arrayBuffer());
+const sizes = selectedDoc.getPages().map((p) => p.getWidth()).join();
+check("split one: the chosen pages in one PDF", !Array.isArray(selected) && selectedDoc.getPageCount() === 3, selectedDoc.getPageCount());
+check("split one: in the order typed, each once", sizes === "504,501,502", sizes);
+check("split one: named for a selection", selected.filename === "doc-selected.pdf", selected.filename);
+const oneOut = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "2, 9" }));
+check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't in this PDF (5 pages).", oneOut);
+{
+  const { PROCESSORS, fieldShown } = await import("../components/tools/processors.ts");
+  const pagesField = PROCESSORS["split-pdf"].fields.find((f) => f.key === "ranges")!;
+  const shownFor = ["ranges", "one", "every"].filter((mode) => fieldShown(pagesField, { mode }));
+  check("split: Pages shows for both page modes", shownFor.join() === "ranges,one", shownFor);
+  check("split: Pages starts empty, with an example", pagesField.default === "" && !!pagesField.placeholder);
+  const { fieldHint } = await import("../components/tools/processors.ts");
+  check("split: the per-range hint only in that mode", !!fieldHint(pagesField, { mode: "ranges" }) && !fieldHint(pagesField, { mode: "one" }));
+
+  // Option problems are found before the job, so the page can mark the field.
+  // A missing value waits for the cast; a value that was typed is said at once.
+  const protect = PROCESSORS["protect-pdf"].problem!;
+  const keyOf = (o: Record<string, string>) => {
+    const p = protect(o);
+    return p ? `${p.fields.join()}${p.live ? " (live)" : ""}: ${p.message}` : null;
+  };
+  check("protect: empty password", keyOf({ password: "", confirm: "" }) === "password: Please enter a password.");
+  check("protect: short password, said on the cast while only it is typed", keyOf({ password: "s", confirm: "" }) === "password: Use at least 4 characters." && keyOf({ password: "sec", confirm: "" }) === "password: Use at least 4 characters.");
+  check("protect: short password, said at once when the second is typed", keyOf({ password: "abc", confirm: "abc" }) === "password (live): Use at least 4 characters.");
+  check("protect: mismatch marks the confirm field", keyOf({ password: "abcd", confirm: "abce" }) === "confirm (live): The passwords don't match.");
+  check("protect: no mismatch said while the second is still being typed", keyOf({ password: "abcd", confirm: "ab" }) === "confirm: The passwords don't match." && keyOf({ password: "abcd", confirm: "" }) === "confirm: The passwords don't match.");
+  check("protect: fine", keyOf({ password: "abcd", confirm: "abcd" }) === null);
+  const mark = PROCESSORS["watermark-pdf"].problem!;
+  check("watermark: blank text marks the text field, on the cast", mark({ text: "  " })?.fields.join() === "text" && !mark({ text: "  " })?.live && mark({ text: "DRAFT" }) === null);
+  const split = PROCESSORS["split-pdf"].problem!;
+  const noPages = split({ mode: "one", ranges: " " });
+  check("split: no pages marks Pages, on the cast, as the tool says", noPages?.fields.join() === "ranges" && !noPages.live && noPages.message === empty, noPages);
+  check("split: typed pages, or every page, have no problem", split({ mode: "ranges", ranges: "1-2" }) === null && split({ mode: "every", ranges: "" }) === null);
+  const turn = PROCESSORS["rotate-pdf"].problem!;
+  const noWhich = turn({ pages: "some", which: "" });
+  check("rotate: no pages marks Which pages, on the cast", noWhich?.fields.join() === "which" && !noWhich.live && noWhich.message === empty, noWhich);
+  check("rotate: all pages, or typed ones, have no problem", turn({ pages: "all", which: "" }) === null && turn({ pages: "some", which: "2" }) === null);
+  const resize = PROCESSORS["resize-pdf"].problem!;
+  const custom = resize({ size: "custom", width: "abc", height: "297", unit: "mm" });
+  check("resize: a bad custom size marks both fields as it is typed", custom?.fields.join() === "width,height" && !!custom.live, custom);
+  // Only fields that show are marked, in the order they show.
+  const { problemFields } = await import("../components/tools/processors.ts");
+  const sized = PROCESSORS["resize-pdf"].fields;
+  const both = { fields: ["height", "width"], message: "x" };
+  check("problem fields: shown ones, in field order", problemFields(both, sized, { size: "custom" }).join() === "width,height");
+  check("problem fields: none while hidden", problemFields(both, sized, { size: "a4" }).length === 0 && problemFields(null, sized, {}).length === 0);
+  check("problem fields: a hidden one is left out", problemFields({ fields: ["size", "width"], message: "x" }, sized, { size: "a4" }).join() === "size");
+  check("resize: a paper size has no problem", resize({ size: "a4", width: "abc", height: "297", unit: "mm" }) === null);
+  const flatten = PROCESSORS["flatten-pdf"].fields.find((f) => f.key === "mode")!;
+  check("hints: a picked option's hint comes first", fieldHint(flatten, { mode: "images" }) === flatten.options!.find((o) => o.value === "images")!.hint);
+  // The check and the tool agree, so nothing the field allows fails later.
+  const tooShort = await errorOf((await import("../lib/pdf/toolkit.ts")).protectTool([file(five, "doc.pdf")], { password: "abc", confirm: "abc", printing: "yes", copying: "no" }));
+  check("protect: the tool keeps the same rule", tooShort === protect({ password: "abc", confirm: "abc" })!.message, tooShort);
+}
+const oneEmpty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "" }));
+check("split one: no pages picked is an error", oneEmpty === "Type the pages, like 1-3, 5.", oneEmpty);
 
 // --- Stamps land where the reader sees the page ------------------------------
 const odd = await (async () => {
@@ -267,6 +332,16 @@ check("jpg-to-pdf: non-image explains itself", notImage === "scan.jpg: use a JPG
   const doc = await PDFDocument.load(await rotated.blob.arrayBuffer());
   check("rotate: adds to each page's rotation", doc.getPages().map((p) => p.getRotation().angle).join() === "90,180,90,0");
   check("rotate: result named after source", rotated.filename === "scan-rotated.pdf", rotated.filename);
+  const some = await rotateTool([file(odd, "scan.pdf")], { angle: "180", pages: "some", which: "2, 4-" });
+  const someDoc = await PDFDocument.load(await some.blob.arrayBuffer());
+  check("rotate: only the pages picked", someDoc.getPages().map((p) => p.getRotation().angle).join() === "0,270,0,90", someDoc.getPages().map((p) => p.getRotation().angle));
+  const all = await rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "all", which: "2" });
+  const allDoc = await PDFDocument.load(await all.blob.arrayBuffer());
+  check("rotate: all pages ignores the page list", allDoc.getPages().map((p) => p.getRotation().angle).join() === "90,180,90,0");
+  const outside = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: "7" }));
+  check("rotate: a page not in the PDF is an error", outside === "Page 7 isn't in this PDF (4 pages).", outside);
+  const none = await errorOf(rotateTool([file(odd, "scan.pdf")], { angle: "90", pages: "some", which: " " }));
+  check("rotate: no pages picked is an error", none === "Type the pages, like 1-3, 5.", none);
 }
 
 // --- Tightly padded tables (HTML/Word exports) -------------------------------

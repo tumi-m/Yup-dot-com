@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { configureWorker } from "../pdf/worker";
+import { ENCRYPTED_MESSAGE, UNREADABLE_MESSAGE } from "../pdf/errors";
 import { encodeRender } from "../pdf/embed-image";
 import { flateToPng } from "../pdf/flate-image";
 import { sniffImage } from "../pdf/images";
@@ -168,9 +169,9 @@ async function openPdf(data: Uint8Array, standardFontDataUrl?: string): Promise<
     return await pdfjsLib.getDocument({ data: data.slice(), standardFontDataUrl, isEvalSupported: false }).promise;
   } catch (err) {
     if ((err as { name?: string })?.name === "PasswordException") {
-      throw new Error("This PDF is password-protected. Unlock it first, then convert.");
+      throw new Error(ENCRYPTED_MESSAGE);
     }
-    throw new Error("Couldn't open that PDF. It may be damaged.");
+    throw new Error(UNREADABLE_MESSAGE);
   }
 }
 

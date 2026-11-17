@@ -343,9 +343,9 @@ const frame = (w: number, h: number, rgba: (x: number, y: number) => number[], s
   const pic = await render(out, 1);
   if (pic) check("decoded: the logo's clear areas show the white page", near(pic.at(2, 2), [255, 255, 255], 5) && near(pic.at(40, 20), [255, 0, 0]), [pic.at(2, 2), pic.at(40, 20)]);
 
-  // A4 with a margin: the picture fits inside it, centred.
+  // A4 with a margin: the picture fits inside it, centred. A wide one gets a landscape sheet.
   const a4 = await imagesToPdf([file(enc("RIFF\x10\x00\x00\x00WEBPVP8 "), "wide.webp")], { pageSize: "a4", margin: "48" }, undefined, undefined, fake);
-  check("a4: one A4 page", (await sizes(a4)).join() === "595x842");
+  check("a4: one landscape A4 page for a wide picture", (await sizes(a4)).join() === "842x595", await sizes(a4));
   // Where pdf.js finds the picture drawn: its transform before the paint.
   const doc = await pdfjs.getDocument({ data: a4.slice(), isEvalSupported: false }).promise;
   const list = await (await doc.getPage(1)).getOperatorList();
@@ -359,7 +359,9 @@ const frame = (w: number, h: number, rgba: (x: number, y: number) => number[], s
   }
   const [w, , , h, x, y] = m;
   await doc.destroy();
-  check("a4: drawn 499 pt wide between the margins, centred", Math.abs(w - 499.28) < 0.1 && Math.abs(x - 48) < 0.1 && Math.abs(y - (841.89 - h) / 2) < 0.1, [w, h, x, y]);
+  check("a4: drawn 746 pt wide between the margins, centred", Math.abs(w - 745.89) < 0.1 && Math.abs(x - 48) < 0.1 && Math.abs(y - (595.28 - h) / 2) < 0.1, [w, h, x, y]);
+  const tall = await imagesToPdf([file(enc("RIFF\x10\x00\x00\x00WEBPVP8 "), "tall.webp")], { pageSize: "a4", margin: "0" }, undefined, undefined, async () => frame(40, 80, () => [0, 0, 255, 255]));
+  check("a4: a tall picture keeps a portrait sheet", (await sizes(tall)).join() === "595x842", await sizes(tall));
 
   // A big photo: right-sized for print on its page.
   let wanted: { width: number; height: number } | null = null;
@@ -369,7 +371,15 @@ const frame = (w: number, h: number, rgba: (x: number, y: number) => number[], s
   });
   const [bigImg] = await images(huge);
   check("right-sized: a 12 MP picture on A4 is stored at about 300 DPI", bigImg.width < 4000 && bigImg.width >= 2400, bigImg);
-  check("right-sized: the decoder is asked for only the pixels A4 needs (2480 wide at 300 DPI)", !!wanted && Math.abs(wanted!.width - 2480) <= 2, wanted);
+  check("right-sized: the decoder is asked for only the pixels landscape A4 needs (2480 high at 300 DPI)", !!wanted && Math.abs(wanted!.height - 2480) <= 2 && Math.abs(wanted!.width - 3307) <= 2, wanted);
+  // Fit to image follows JPG to PDF's rules for every format: a wide photo is
+  // sized for one A4 sheet, a long strip keeps every pixel.
+  const { wantFor } = await import("../lib/pdf/images-to-pdf/index.ts");
+  const fitWant = wantFor({ pageSize: "fit", margin: "0" });
+  const photo = fitWant(4000, 3000);
+  check("fit: a wide photo is sized for one A4 sheet (3508 wide at 300 DPI)", !!photo && Math.abs(photo.width - 3508) <= 2, photo);
+  // No smaller size asked for: the strip is decoded whole.
+  check("fit: a long strip keeps every pixel", fitWant(1080, 20000) === null, fitWant(1080, 20000));
   check("right-sized: a lossy photo goes in as a JPEG", bigImg.filter === "/DCTDecode", bigImg.filter);
 
   const ctl = new AbortController();

@@ -7,7 +7,7 @@
  * One page is drawn at a time and its canvas is let go of at once.
  */
 import type { LoadedPdf } from "../render";
-import { canvasToJpeg } from "../../image-codec";
+import { canvasToJpeg } from "../../jpeg-encode/off-thread";
 import { stopIfAborted } from "../../abort";
 import { MAX_JPEG_BYTES, MAX_PIXELS, TooManyPixelsError } from "../raster";
 import type { CropPicture } from "./index";

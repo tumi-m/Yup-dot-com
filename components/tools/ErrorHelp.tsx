@@ -1,31 +1,49 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fileToHandoff, tryHandoff } from "@/lib/local-store";
-import { helpFor } from "./error-help";
+import { errorFix } from "./file-pick";
 
 /**
- * A link after an error to the tool that can help (error-help.ts). The file
- * goes with it when the browser can keep it, so it opens already chosen.
+ * An error message, with a button after it to the tool that fixes it when
+ * one can (errorFix: Repair, Unlock or OCR PDF). The file the message is
+ * about goes with it, so it opens already chosen.
  */
-export function ErrorHelp({ message, slug, file }: { message: string | null; slug: string; file?: File | null }) {
+export function ErrorHelp({
+  message,
+  slug,
+  files,
+  onLeave,
+}: {
+  message: string;
+  slug: string;
+  files: File[];
+  /** Runs before the page is left, e.g. to cancel a pending prompt. */
+  onLeave?: () => void;
+}) {
   const router = useRouter();
-  const help = helpFor(message, slug);
-  if (!help) return null;
-  const href = `/tools/${help.slug}`;
+  const fix = errorFix(message, files, slug);
+  if (!fix) return <>{message}</>;
+
+  async function go(to: { slug: string; file: File }) {
+    onLeave?.();
+    // Without room to hand it over, the tool still opens, ready for the file.
+    const handed = await tryHandoff([fileToHandoff(to.file, to.file.name)]);
+    router.push(handed ? `/tools/${to.slug}?handoff=1` : `/tools/${to.slug}`);
+  }
+
+  // In the text, so on a phone it wraps under the message instead of squeezing it.
   return (
-    <Link
-      href={href}
-      onClick={(e) => {
-        if (!file || e.metaKey || e.ctrlKey || e.shiftKey) return;
-        e.preventDefault();
-        void tryHandoff([fileToHandoff(file)]).then((ok) => router.push(ok ? `${href}?handoff=1` : href));
-      }}
-      className="shrink-0 rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:py-2.5"
-      data-testid="error-help"
-    >
-      {help.label}
-    </Link>
+    <>
+      {message}{" "}
+      <button
+        type="button"
+        onClick={() => void go(fix)}
+        className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="error-help"
+      >
+        {fix.label}
+      </button>
+    </>
   );
 }

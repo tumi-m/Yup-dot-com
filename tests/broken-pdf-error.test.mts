@@ -2,7 +2,7 @@
 // "isn't a readable PDF" message, never a raw TypeError.
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { friendlyFileError, friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
-import { mergeTool, pageNumbersTool, rotateTool, splitTool, watermarkTool } from "../lib/pdf/toolkit.ts";
+import { mergeTool, pageNumbersTool, rotateTool, splitTool, unlockTool, watermarkTool } from "../lib/pdf/toolkit.ts";
 
 let pass = 0;
 let total = 0;
@@ -47,7 +47,27 @@ for (const [label, bytes] of broken) {
   check(`watermark, ${label}: readable message`, mark === UNREADABLE_MESSAGE, mark);
   const merged = await errorOf(mergeTool([file(good, "a.pdf"), f()]));
   check(`merge, ${label}: readable message`, merged.endsWith(UNREADABLE_MESSAGE) && !/Cannot read|undefined/.test(merged), merged);
+  // The damaged one is named, wherever it is in the list.
+  const middle = await errorOf(mergeTool([file(good, "a.pdf"), file(bytes, "Invoice-March.pdf"), file(good, "c.pdf")]));
+  check(`merge, ${label} in the middle: names it`, middle === `Invoice-March.pdf: ${UNREADABLE_MESSAGE}`, middle);
+  const head = await errorOf(mergeTool([file(bytes, "first.pdf"), file(good, "b.pdf")]));
+  check(`merge, ${label} first: names it`, head === `first.pdf: ${UNREADABLE_MESSAGE}`, head);
+  // The encryption check alone passes a damaged file as an unprotected one.
+  for (const password of ["", "x"]) {
+    const unlock = await errorOf(unlockTool([f()], { password }));
+    check(`unlock, ${label}, password "${password}": readable message`, unlock === UNREADABLE_MESSAGE, unlock);
+  }
 }
+
+const cut = await errorOf(unlockTool([file(good.slice(0, 400), "cut.pdf")], { password: "" }));
+check("unlock, cut after 400 bytes: readable message", cut === UNREADABLE_MESSAGE, cut);
+const plain = await errorOf(unlockTool([file(good, "plain.pdf")], { password: "" }));
+check("unlock, a plain PDF: nothing to unlock", /isn't password-protected/.test(plain), plain);
+
+// Merge reports each file as it opens it, so a long merge shows where it is.
+const steps: string[] = [];
+await mergeTool([file(good, "a.pdf"), file(good, "b.pdf"), file(good, "c.pdf")], { progress: (_f, label) => steps.push(label) });
+check("merge: progress by file", steps.join("|") === "File 1 of 3|File 2 of 3|File 3 of 3", steps);
 
 check(
   "a TypeError from the library maps",
@@ -65,12 +85,17 @@ check("our own messages still pass through", friendlyPdfError(new Error("Pick pa
 check("file tools keep their own messages", friendlyFileError(new Error("notes.md: this file is nested too deeply to lay out.")).message === "notes.md: this file is nested too deeply to lay out.");
 check("file tools: a bare library error is said plainly, not as a PDF", !/PDF/.test(friendlyFileError(new RangeError("Maximum call stack size exceeded")).message) && !/Cannot read/.test(friendlyFileError(new TypeError("Cannot read properties of undefined")).message));
 
-// After the message, a link to the tool that can help: never to the page that failed.
-const { helpFor } = await import("../components/tools/error-help.ts");
-check("an unreadable PDF points at Repair PDF", helpFor(`a.pdf: ${UNREADABLE_MESSAGE}`, "crop-pdf")?.slug === "repair-pdf" && helpFor(UNREADABLE_MESSAGE, "merge-pdf")?.label === "Try Repair PDF");
-check("Repair PDF doesn't point at itself", helpFor(UNREADABLE_MESSAGE, "repair-pdf") === null);
-check("a locked PDF points at Unlock PDF, from Repair too", helpFor("This PDF is password-protected. Unlock it first.", "crop-pdf")?.slug === "unlock-pdf" && helpFor("This PDF is password-protected. Unlock it first, then repair it.", "repair-pdf")?.slug === "unlock-pdf" && helpFor("This PDF is password-protected. Unlock it first.", "unlock-pdf") === null);
-check("other messages get no link", helpFor("Pick pages between 1 and 5.", "split-pdf") === null && helpFor(null, "split-pdf") === null);
+// After the message, a button to the tool that can help: never to the page that failed.
+const { errorFix } = await import("../components/tools/file-pick.ts");
+const one = [{ name: "a.pdf" }];
+const fixOf = (message: string | null, slug: string) => errorFix(message, one, slug);
+check("an unreadable PDF points at Repair PDF", fixOf(`a.pdf: ${UNREADABLE_MESSAGE}`, "crop-pdf")?.slug === "repair-pdf" && fixOf(UNREADABLE_MESSAGE, "merge-pdf")?.label === "Try Repair PDF");
+check("Repair PDF doesn't point at itself", fixOf(UNREADABLE_MESSAGE, "repair-pdf") === null);
+check("a locked PDF points at Unlock PDF, from Repair too", fixOf("This PDF is password-protected. Unlock it first.", "crop-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first, then repair it.", "repair-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first.", "unlock-pdf") === null);
+check("other messages get no link", fixOf("Pick pages between 1 and 5.", "split-pdf") === null && fixOf(null, "split-pdf") === null);
+// Merge names the damaged file, and that file is the one taken to Repair PDF.
+const named = errorFix(`b.pdf: ${UNREADABLE_MESSAGE}`, [{ name: "a.pdf" }, { name: "b.pdf" }], "merge-pdf");
+check("merge: the damaged file named goes to Repair PDF", named?.slug === "repair-pdf" && named.file.name === "b.pdf", named);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

@@ -653,6 +653,7 @@ const TARGET = [px(300), px(200)];
   check("text-only: never grows", result.blob.size <= textOnly.length, [textOnly.length, result.blob.size]);
   const again = await compressTool([new File([result.blob], result.filename)], { quality: "balanced" });
   check("text-only: no gain hands back the original", again.blob.size === result.blob.size && again.filename === result.filename.replace(/\.pdf$/, "") + ".pdf", [again.filename, again.blob.size]);
+  check("text-only: the original is marked as unchanged, a smaller file is not", again.unchanged === true && (result.blob.size === textOnly.length || !result.unchanged));
 
   const locked = await (async () => {
     const d = await SecurePDFDocument.load(textOnly);

@@ -1,6 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, Reorder, useDragControls, useReducedMotion } from "motion/react";
 import {
@@ -47,10 +48,10 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { PROCESSORS, type ToolField } from "./processors";
+import { fieldHint, fieldShown, problemFields, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { percentSmaller, sortPick, takesFile } from "./file-pick";
+import { percentSmaller, sortPick, takesFile, takesMessage } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
@@ -101,11 +102,6 @@ function nextSteps(slug: string, filename: string): string[] {
   return [];
 }
 
-/** The sentence under a field: its own, or the picked option's. */
-function fieldHint(field: ToolField, value: string): string | undefined {
-  return field.options?.find((o) => o.value === value)?.hint ?? field.hint;
-}
-
 type Status = "idle" | "working" | "done";
 
 interface Entry {
@@ -136,6 +132,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
+  /**
+   * Set when a cast stopped at a problem with the options, until an option
+   * changes: problems that wait for the cast show, and `readOut` has the message
+   * announced when focus was in its field already (moving focus there reads it).
+   */
+  const [tried, setTried] = useState<{ n: number; readOut: boolean } | null>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -187,7 +189,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     const takes = proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept;
     const taken = Array.from(list).filter((f) => takesFile(takes, f));
     if (!taken.length) {
-      fail(`That file type isn't supported here.`);
+      fail(takesMessage(getTool(slug)?.name, takes, proc.multiple));
       return false;
     }
     // HEIC photos this browser can't open: said now, not after Cast spell.
@@ -199,23 +201,24 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
-    const { keep, tooBig, message } = sortPick(accepted, list.length - accepted.length, {
+    const { keep, tooBig, overBatch, message } = sortPick(accepted, list.length - accepted.length, {
       maxFileBytes: limits.maxFileBytes,
       multiple: proc.multiple,
       toolName: getTool(slug)?.name,
+      maxBatchFiles: limits.maxBatchFiles,
+      room: proc.multiple ? limits.maxBatchFiles - entries.length : 1,
     });
     if (tooBig) setUpsell("file-size");
+    if (overBatch) setUpsell("batch");
     if (!keep.length) {
       fail(message);
       return false;
     }
     stopJob();
     const incoming = keep.map((file) => ({ id: `f${++entrySeq}`, file }));
-    // Decide from the current list, not inside the state updater: React may
-    // run updaters later, so a flag set there is still false when read here.
-    const next = proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1);
-    if (next.length > limits.maxBatchFiles) setUpsell("batch");
-    setEntries(next.slice(0, limits.maxBatchFiles));
+    // From the current list, not inside a state updater: the room counted
+    // above is for this list, and React may run updaters later.
+    setEntries(proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1));
     setStatus("idle");
     setResults([]);
     fail(heicNote ?? message);
@@ -275,13 +278,30 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setOptions((prev) => ({ ...prev, [key]: value }));
     // A message about the old options would stay after they were fixed.
     setError(null);
+    setTried(null);
   }
 
-  /** What is wrong with the options, shown under their fields as they change. */
-  const problem = proc.problem?.(options) ?? null;
+  /** What is wrong with the options (see OptionProblem), and whether it shows yet. */
+  const found = proc.problem?.(options) ?? null;
+  const problem = found && (found.live || tried) ? found : null;
+  /** The shown fields it is about: marked, and the message goes under the last. */
+  const problemAt = problemFields(problem, proc.fields, options);
+
+  /** Enter in a text field casts the spell, as in a form (the panel isn't one: its buttons would submit it). */
+  function runOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (status !== "working") void run();
+  }
+
+  /** What describes a field: its hint, and the problem when it is about this field. */
+  function describedBy(field: ToolField): string | undefined {
+    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, problemAt.includes(field.key) && "opt-problem"];
+    return ids.filter(Boolean).join(" ") || undefined;
+  }
 
   function visibleFields(): ToolField[] {
-    return proc.fields.filter((f) => !f.showIf || options[f.showIf.key] === f.showIf.value);
+    return proc.fields.filter((f) => fieldShown(f, options));
   }
 
   async function run() {
@@ -289,12 +309,24 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       fail(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
       return;
     }
-    if (problem) {
-      // Said under the field already: take the person there.
-      flow.ref.current?.querySelector<HTMLElement>(`#opt-${problem.fields[0]}`)?.focus();
+    if (found) {
+      const first = problemFields(found, proc.fields, options)[0];
+      const field = first ? flow.ref.current?.querySelector<HTMLElement>(`#opt-${first}`) : null;
+      if (!field) {
+        fail(found.message);
+        return;
+      }
+      // Said under the field: shown before focus lands there, so it is read with it.
+      flushSync(() => {
+        setError(null);
+        setTried((t) => ({ n: (t?.n ?? 0) + 1, readOut: document.activeElement === field }));
+      });
+      field.focus();
       return;
     }
-    if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
+    // Cast from the button or with Enter in a field: both leave, so focus
+    // follows the job to the progress bar and then the result.
+    if (document.activeElement?.closest("[data-cast], [data-options]")) focusNext.current = "progress";
     // Room for the result, reserved now while the click still explains it.
     flow.lock(resultFloor());
     setStatus("working");
@@ -389,6 +421,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     nudge.cancel();
     setNextFailed(null);
     const r = results[0];
+    // The next tool would turn it away, and this page's result would be gone.
+    if (r.blob.size > limits.maxFileBytes) return;
     if (await tryHandoff([fileToHandoff(r.blob, r.filename)])) router.push(`/tools/${nextSlug}?handoff=1`);
     else setNextFailed(nextSlug);
   }
@@ -419,10 +453,16 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setError(null);
   }
 
+  /** A single result too big for the next tool on this plan: no "keep going". */
+  const overLimit = results.length === 1 && results[0].blob.size > limits.maxFileBytes;
+
   const sizeDelta =
     proc.reportsSizeChange && results.length === 1 && inputBytes > 0
       ? 1 - outputBytes / inputBytes
       : null;
+  /** About the same size: the file itself came back, or a new one (another format) that is no smaller. */
+  const sameSize = sizeDelta !== null && Math.abs(sizeDelta) <= 0.01;
+  const unchanged = results.length === 1 && !!results[0].unchanged;
 
   return (
     <>
@@ -432,6 +472,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
         <SuccessCard
           key="done"
           className="flex-1"
+          title={sameSize ? "Already as small as it gets" : undefined}
           titleRef={focusRef("done")}
           stats={
             <>
@@ -441,7 +482,10 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-muted-foreground">
                 {results.length} file{results.length === 1 ? "" : "s"} ·{" "}
                 {sizeDelta !== null && sizeDelta > 0.01 ? (
-                  <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  <>
+                    {formatBytes(inputBytes)} →{" "}
+                    <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  </>
                 ) : (
                   formatBytes(outputBytes)
                 )}
@@ -457,9 +501,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   {Math.round(-sizeDelta * 100)}% larger
                 </span>
               )}
-              {sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 && (
+              {sameSize && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
-                  Already optimized
+                  {unchanged ? "Your file is unchanged" : "About the same size"}
                 </span>
               )}
               {results.length === 1 && results[0].report && (
@@ -512,9 +556,23 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             </>
           }
           next={
-            results.length === 1
+            results.length === 1 && !overLimit
               ? { slugs: nextSteps(slug, results[0].filename), onPick: (next) => void continueWith(next), failed: nextFailed }
               : undefined
+          }
+          nextNote={
+            overLimit && nextSteps(slug, results[0].filename).length > 0 ? (
+              <>
+                Over {formatLimitBytes(limits.maxFileBytes)}, the limit on your plan: download it first.{" "}
+                <button
+                  type="button"
+                  onClick={() => setUpsell("file-size")}
+                  className="tap whitespace-nowrap rounded font-semibold text-foreground underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  See plans
+                </button>
+              </>
+            ) : undefined
           }
           upsell={
             showCard && (
@@ -607,12 +665,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 initial={ENTER.initial}
                 animate={ENTER.animate}
                 exit={EXIT}
+                data-options
                 className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2"
               >
                 {visibleFields().map((field) => {
-                  const hint = fieldHint(field, options[field.key]);
-                  const invalid = !!problem?.fields.includes(field.key);
-                  const hintId = [hint && `opt-${field.key}-hint`, invalid && "opt-problem"].filter(Boolean).join(" ") || undefined;
+                  const hint = fieldHint(field, options);
+                  const invalid = problemAt.includes(field.key);
+                  const describes = describedBy(field);
                   return (
                   <div key={field.key} className={field.wide ? "sm:col-span-2" : undefined}>
                     {field.type === "checkbox" ? (
@@ -623,7 +682,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           type="checkbox"
                           checked={options[field.key] === "true"}
                           onChange={(e) => setOption(field.key, e.target.checked ? "true" : "")}
-                          aria-describedby={hintId}
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={describes}
                           className="h-5 w-5 shrink-0 cursor-pointer rounded border-input accent-[hsl(var(--primary))]"
                         />
                         {field.label}
@@ -638,8 +698,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        aria-describedby={hintId}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
+                        aria-invalid={invalid || undefined}
+                        aria-describedby={describes}
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm aria-[invalid=true]:border-destructive"
                       >
                         {field.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -653,10 +714,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         inputMode={field.inputMode}
                         value={options[field.key]}
+                        placeholder={field.placeholder}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        onKeyDown={runOnEnter}
                         aria-invalid={invalid || undefined}
-                        aria-describedby={hintId}
-                        className={cn("pointer-coarse:h-11", invalid && "border-destructive")}
+                        aria-describedby={describes}
+                        className="pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
                     {field.type === "password" && (
@@ -665,9 +728,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           id={`opt-${field.key}`}
                           type={revealed[field.key] ? "text" : "password"}
                           autoComplete="new-password"
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={describes}
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11"
+                          onKeyDown={runOnEnter}
+                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11 aria-[invalid=true]:border-destructive"
                         />
                         <button
                           type="button"
@@ -685,7 +751,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         type="color"
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11"
+                        aria-invalid={invalid || undefined}
+                        aria-describedby={describes}
+                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
                     {field.type === "range" && (
@@ -697,10 +765,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           max={field.max}
                           step={field.step}
                           value={options[field.key]}
+                          aria-valuetext={`${Math.round(Number(options[field.key]) * 100)}%`}
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={describes}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           className="h-6 flex-1 accent-[hsl(var(--primary))]"
                         />
-                        <span className="w-12 text-right text-sm tabular-nums text-muted-foreground">
+                        <span aria-hidden className="w-12 text-right text-sm tabular-nums text-muted-foreground">
                           {Math.round(Number(options[field.key]) * 100)}%
                         </span>
                       </div>
@@ -710,9 +781,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         {hint}
                       </p>
                     )}
-                    {/* Once, under the last field it is about. */}
-                    {invalid && problem!.fields.at(-1) === field.key && (
-                      <p id="opt-problem" className="mt-1.5 text-xs text-destructive">
+                    {/* Once, under the last field it is about; read out when a cast stopped at it in its own field. */}
+                    {invalid && problemAt.at(-1) === field.key && (
+                      <p
+                        key={tried?.n ?? 0}
+                        id="opt-problem"
+                        role={tried?.readOut ? "alert" : undefined}
+                        className="mt-1.5 text-xs text-destructive"
+                      >
                         {problem!.message}
                       </p>
                     )}
@@ -731,9 +807,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
           <AnimatePresence>
             {error && (
-              <InlineError key="error" message={error} shakeKey={errorKey}>
-                <ErrorHelp message={error} slug={slug} file={entries.find((e) => error.startsWith(`${e.file.name}: `))?.file ?? (entries.length === 1 ? entries[0].file : null)} />
-              </InlineError>
+              <InlineError
+                key="error"
+                shakeKey={errorKey}
+                message={<ErrorHelp message={error} slug={slug} files={files} onLeave={nudge.cancel} />}
+              />
             )}
           </AnimatePresence>
 

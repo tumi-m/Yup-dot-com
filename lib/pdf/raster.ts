@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, type PDFFont } from "pdf-lib";
 import { loadForRender, type LoadedPdf } from "./render";
-import { canvasToJpeg } from "../image-codec";
+import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import { encodable, textLayer, type OcrText } from "./ocr-layer";
 import { stopIfAborted } from "../abort";
 

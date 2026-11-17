@@ -896,9 +896,11 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
 
               <AnimatePresence>
                 {error && (
-                  <InlineError key="error" message={error} shakeKey={errorKey}>
-                    <ErrorHelp message={error} slug={slug} file={failedFile ?? sources[0]?.file} />
-                  </InlineError>
+                  <InlineError
+                    key="error"
+                    shakeKey={errorKey}
+                    message={<ErrorHelp message={error} slug={slug} files={failedFile ? [failedFile] : sources.map((s) => s.file)} onLeave={nudge.cancel} />}
+                  />
                 )}
               </AnimatePresence>
 

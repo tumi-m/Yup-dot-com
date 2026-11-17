@@ -64,6 +64,30 @@ check("a scan behind a short typed cover page is still a scan",
 check("a text document is not a scan",
   !(await scanned(["The quarterly revenue grew steadily across all three regions.\n".repeat(6), "More text on page two about costs and hiring plans."])));
 
+// Every tool says a scan the same way, so the page can offer OCR PDF next to it.
+{
+  const kit = await import("../lib/pdf/toolkit.ts");
+  const { SCANNED_MESSAGE, NO_TABLES_MESSAGE } = await import("../lib/pdf/errors.ts");
+  const scan = await pdf(["", "", ""]);
+  const text = await pdf(["The quarterly revenue grew steadily across all three regions.\n".repeat(6)]);
+  const file = (bytes: Uint8Array) => new File([bytes.slice() as unknown as BlobPart], "scan.pdf", { type: "application/pdf" });
+  const said = (p: Promise<unknown>) => p.then(() => "", (err) => (err as Error).message);
+  const tools: [string, Promise<unknown>][] = [
+    ["PDF to Text", kit.pdfToTextTool([file(scan)])],
+    ["PDF to Markdown", kit.pdfToMarkdownTool([file(scan)])],
+    ["PDF to Chunks", kit.pdfToChunksTool([file(scan)], { maxChars: "1200" })],
+    ["Extract Tables", kit.extractTablesTool([file(scan)])],
+    ["PDF to Word", kit.pdfToWordTool([file(scan)])],
+    ["PDF to Excel", kit.pdfToExcelTool([file(scan)])],
+  ];
+  for (const [name, run] of tools) {
+    const message = await said(run);
+    check(`${name}: a scan gets the one message`, message === SCANNED_MESSAGE, message);
+  }
+  const noTables = [await said(kit.extractTablesTool([file(text)])), await said(kit.pdfToExcelTool([file(text)]))];
+  check("no tables: one message for both tools", noTables.every((m) => m === NO_TABLES_MESSAGE), noTables);
+}
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);

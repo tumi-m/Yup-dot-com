@@ -227,5 +227,13 @@ delete g.Worker;
   check("PDF to Text: a page left before it starts does nothing", (await outcome(pdfToTextTool([pdfFile(text, "t.pdf")], { signal: gone.signal }))) === "AbortError");
 }
 
+// The conversions stop on the signal too, so they offer Cancel while they run.
+{
+  const { PROCESSORS } = await import("../components/tools/processors.ts");
+  const long = ["pdf-to-text", "pdf-to-markdown", "extract-tables", "pdf-to-chunks", "pdf-to-word", "pdf-to-pptx", "pdf-to-excel"];
+  const missing = long.filter((slug) => !PROCESSORS[slug]?.cancellable);
+  check("conversions offer Cancel", !missing.length, missing);
+}
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

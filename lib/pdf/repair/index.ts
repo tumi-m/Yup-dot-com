@@ -21,7 +21,7 @@ import { NothingRecoveredError, type Extras, type Fix } from "./rebuild";
 export { NothingRecoveredError } from "./rebuild";
 export { NotAPdfError } from "./salvage";
 
-// The page links to Unlock PDF after it (components/tools/error-help.ts).
+// The page offers Unlock PDF after it (errorFix in components/tools/file-pick.ts).
 export const NEEDS_UNLOCK = "This PDF is password-protected. Unlock it first, then repair it.";
 const TOO_MANY = "This file has too many damaged pages to draw again in a browser tab.";
 
