@@ -4,7 +4,7 @@ import { deletePages, mergePdfs, reorderPages } from "../lib/pdf/operations.ts";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { historyReducer, type HistoryState } from "../lib/editor/history.ts";
 import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameMap } from "../lib/editor/page-map.ts";
-import { pageKey, typedPage } from "../lib/editor/keyboard.ts";
+import { pageKey, thumbKey, typedPage } from "../lib/editor/keyboard.ts";
 import type { Annotation } from "../lib/editor/types.ts";
 
 let pass = 0;
@@ -115,6 +115,14 @@ check("PageDown goes on a page, not past the end", pageKey("PageDown", 4, 300) =
 check("PageUp goes back a page, not before the start", pageKey("PageUp", 4, 300) === 3 && pageKey("PageUp", 0, 300) === 0);
 check("Home and End go to the first and last page", pageKey("Home", 40, 300) === 0 && pageKey("End", 40, 300) === 299);
 check("other keys are not page keys", pageKey("ArrowDown", 4, 300) === null && pageKey("a", 4, 300) === null);
+
+// The page panel: one tab stop, arrows move along it
+const key = (k: string, mods: Partial<{ altKey: boolean; shiftKey: boolean }> = {}) => ({ key: k, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
+check("page panel: ↓ goes to the next page, not past the last", thumbKey(key("ArrowDown"), 3, 10) === 4 && thumbKey(key("ArrowDown"), 9, 10) === 9);
+check("page panel: ↑ goes to the page before, not before the first", thumbKey(key("ArrowUp"), 3, 10) === 2 && thumbKey(key("ArrowUp"), 0, 10) === 0);
+check("page panel: Home and End go to the ends", thumbKey(key("Home"), 3, 10) === 0 && thumbKey(key("End"), 3, 10) === 9);
+check("page panel: Alt+arrows are left for moving the page", thumbKey(key("ArrowDown", { altKey: true }), 3, 10) === null);
+check("page panel: other keys are left alone", thumbKey(key("Enter"), 3, 10) === null && thumbKey(key("Tab"), 3, 10) === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

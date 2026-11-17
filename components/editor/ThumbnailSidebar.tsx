@@ -3,7 +3,7 @@
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RotateCw, Trash2, Plus, GripVertical, ArrowUp, ArrowDown } from "lucide-react";
 import type { LoadedPdf } from "@/lib/pdf/render";
-import { pageActionFocus, type PageAction } from "@/lib/editor/keyboard";
+import { pageActionFocus, thumbKey, type PageAction } from "@/lib/editor/keyboard";
 import { DRAWN_AT_ONCE, NEAR_MARGIN, taskLimiter } from "@/lib/editor/thumbnails";
 import { cn } from "@/lib/utils";
 
@@ -125,13 +125,20 @@ export function ThumbnailSidebar({
   const [actions] = useState<RowActions>(() => ({
     goTo: (i) => latest.current.onGoTo(i),
     keyDown: (e, i) => {
+      // One tab stop for the whole list (the current page): arrows move along it.
+      const to = thumbKey(e, i, latest.current.numPages);
+      if (to !== null) {
+        e.preventDefault();
+        list.current?.querySelectorAll<HTMLButtonElement>("button[data-thumb]")[to]?.focus();
+        return;
+      }
       // Alt+↑/↓ moves the page: the keyboard version of dragging.
       if (!e.altKey || latest.current.busy) return;
-      const to = e.key === "ArrowUp" ? i - 1 : e.key === "ArrowDown" ? i + 1 : -1;
-      if (to < 0 || to >= latest.current.numPages) return;
+      const moveTo = e.key === "ArrowUp" ? i - 1 : e.key === "ArrowDown" ? i + 1 : -1;
+      if (moveTo < 0 || moveTo >= latest.current.numPages) return;
       e.preventDefault();
-      movedTo.current = to;
-      latest.current.onReorder(i, to);
+      movedTo.current = moveTo;
+      latest.current.onReorder(i, moveTo);
     },
     move: (from, to) => {
       movedTo.current = to;
@@ -212,6 +219,7 @@ const PageRow = memo(function PageRow({
   dragOver: boolean;
   actions: RowActions;
 }) {
+  const tab = current ? 0 : -1;
   return (
     <li
       draggable
@@ -225,8 +233,11 @@ const PageRow = memo(function PageRow({
         dragOver && "border-primary border-dashed"
       )}
     >
+      {/* Only the current page is in the tab order; its buttons too. */}
       <button
         data-thumb
+        tabIndex={tab}
+        aria-current={current ? "page" : undefined}
         onClick={() => actions.goTo(i)}
         onKeyDown={(e) => actions.keyDown(e, i)}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
@@ -243,21 +254,21 @@ const PageRow = memo(function PageRow({
         </span>
         {/* Touch has no drag and drop: move buttons instead. */}
         <span className="hidden gap-0.5 hover-none:flex">
-          <IconButton label={`Move page ${i + 1} up`} onClick={() => actions.move(i, i - 1)} disabled={i === 0}>
+          <IconButton tab={tab} label={`Move page ${i + 1} up`} onClick={() => actions.move(i, i - 1)} disabled={i === 0}>
             <ArrowUp className="h-3 w-3" />
           </IconButton>
-          <IconButton label={`Move page ${i + 1} down`} onClick={() => actions.move(i, i + 1)} disabled={last}>
+          <IconButton tab={tab} label={`Move page ${i + 1} down`} onClick={() => actions.move(i, i + 1)} disabled={last}>
             <ArrowDown className="h-3 w-3" />
           </IconButton>
         </span>
         <span className="flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 hover-none:opacity-100">
-          <IconButton label={`Rotate page ${i + 1}`} action="rotate" onClick={() => actions.act("rotate", i)}>
+          <IconButton tab={tab} label={`Rotate page ${i + 1}`} action="rotate" onClick={() => actions.act("rotate", i)}>
             <RotateCw className="h-3 w-3" />
           </IconButton>
-          <IconButton label={`Insert page after page ${i + 1}`} action="insert" onClick={() => actions.act("insert", i)}>
+          <IconButton tab={tab} label={`Insert page after page ${i + 1}`} action="insert" onClick={() => actions.act("insert", i)}>
             <Plus className="h-3 w-3" />
           </IconButton>
-          <IconButton label={`Delete page ${i + 1}`} action="delete" onClick={() => actions.act("delete", i)} disabled={only}>
+          <IconButton tab={tab} label={`Delete page ${i + 1}`} action="delete" onClick={() => actions.act("delete", i)} disabled={only}>
             <Trash2 className="h-3 w-3" />
           </IconButton>
         </span>
@@ -272,9 +283,11 @@ function IconButton({
   action,
   onClick,
   disabled,
+  tab,
 }: {
   children: React.ReactNode;
   label: string;
+  tab: number;
   action?: PageAction;
   onClick: () => void;
   disabled?: boolean;
@@ -282,6 +295,7 @@ function IconButton({
   return (
     <button
       data-action={action}
+      tabIndex={tab}
       onClick={onClick}
       disabled={disabled}
       title={label}
