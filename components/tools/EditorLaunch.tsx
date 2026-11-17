@@ -17,8 +17,9 @@ import { UpgradeDialog } from "@/components/upsell/Upsell";
  * Opens a PDF in the editor with no account required.
  * Signed-in users get the document in their cloud library; everyone else
  * edits on-device (IndexedDB), exactly like PDFescape's free online editor.
+ * Fill & Sign (`mode: "sign"`) opens the same editor, pointed at signing.
  */
-export function EditorLaunch({ tier }: { tier: Tier }) {
+export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
   const router = useRouter();
   const params = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -26,11 +27,13 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
   const [error, setError] = useState<string | null>(null);
   const [upsell, setUpsell] = useState(false);
   const limits = limitsFor(tier);
+  const sign = mode === "sign";
+  const query = sign ? "?sign=1" : "";
 
   async function openLocal(bytes: Uint8Array, name: string, pageCount: number) {
     const id = uuid();
     await saveLocalDoc({ id, name, bytes, pageCount, updatedAt: Date.now() });
-    router.push(`/edit/${id}`);
+    router.push(`/edit/${id}${query}`);
   }
 
   async function openFile(file: File) {
@@ -87,7 +90,7 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
         await supabase.from("documents").delete().eq("id", docId);
         throw upErr;
       }
-      router.push(`/editor/${docId}`);
+      router.push(`/editor/${docId}${query}`);
     } catch (err) {
       // The editor's code didn't arrive (offline): the file is fine.
       setError(isLoadError(err) ? loadErrorMessage("the editor") : err instanceof Error ? err.message : "Could not open the editor.");
@@ -121,7 +124,7 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
   return (
     <div className="space-y-4">
       <ToolDropzone
-        label={busy ? "Opening the editor…" : "Drop a PDF to start editing"}
+        label={busy ? "Opening the editor…" : sign ? "Drop a PDF to fill and sign" : "Drop a PDF to start editing"}
         dragLabel="Release to open"
         busy={busy}
         onFiles={(files) => files[0] && openFile(files[0])}
@@ -141,9 +144,12 @@ export function EditorLaunch({ tier }: { tier: Tier }) {
           <Button className="h-11" onClick={() => inputRef.current?.click()} disabled={busy}>
             Choose PDF
           </Button>
-          <Button variant="outline" className="h-11" onClick={blankDocument} disabled={busy}>
-            <FilePlus2 /> Blank page
-          </Button>
+          {/* A blank page has nothing to fill in or sign. */}
+          {!sign && (
+            <Button variant="outline" className="h-11" onClick={blankDocument} disabled={busy}>
+              <FilePlus2 /> Blank page
+            </Button>
+          )}
         </div>
       </ToolDropzone>
       <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>

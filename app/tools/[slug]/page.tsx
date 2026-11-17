@@ -70,7 +70,7 @@ export default async function ToolPage({
             <div className="mt-10">
               {/* The tool reads search params, so it renders after hydration;
                   a placeholder of its usual size keeps the page from jumping. */}
-              <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind)} />}>
+              <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind, spec.kind === "editor" ? spec.mode : undefined)} />}>
                 <ToolPanel spec={spec} tier={tier} />
               </Suspense>
             </div>

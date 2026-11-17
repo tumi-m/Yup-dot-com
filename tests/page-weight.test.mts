@@ -41,6 +41,12 @@ check(
   kinds.every(([, s]) => (s.kind === "media" ? !!s.media.platform : s.kind === "slides-import" ? !!s.format : true))
 );
 check("edit-pdf opens the editor", panelSpec(TOOLS.find((t) => t.slug === "edit-pdf")!).kind === "editor");
+{
+  const sign = panelSpec(TOOLS.find((t) => t.slug === "sign-pdf")!);
+  const edit = panelSpec(TOOLS.find((t) => t.slug === "edit-pdf")!);
+  check("sign-pdf opens the editor for signing", sign.kind === "editor" && sign.mode === "sign", sign);
+  check("edit-pdf opens it for editing", edit.kind === "editor" && edit.mode === undefined, edit);
+}
 check(
   "the page tools are page grids with their own mode",
   ["organize-pdf:organize", "delete-pages:delete", "extract-pages:extract"].every((pair) => {

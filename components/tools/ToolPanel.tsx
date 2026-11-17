@@ -17,13 +17,13 @@ const PageOrganizer = lazy(() => import("./PageOrganizer").then((m) => ({ defaul
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
-  return <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind)} />}>{panel(spec, tier)}</Suspense>;
+  return <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind, spec.kind === "editor" ? spec.mode : undefined)} />}>{panel(spec, tier)}</Suspense>;
 }
 
 function panel(spec: PanelSpec, tier: Tier): ReactNode {
   switch (spec.kind) {
     case "editor":
-      return <EditorLaunch tier={tier} />;
+      return <EditorLaunch tier={tier} mode={spec.mode} />;
     case "assistant":
       return <PdfAssistant tier={tier} />;
     case "media":

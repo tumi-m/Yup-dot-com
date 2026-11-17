@@ -600,6 +600,19 @@ export function PdfEditor({
     if (delta) main.scrollBy({ top: delta, behavior: scrollBehavior() });
   }, [selectedId, sheetCover]);
 
+  // Opened from Fill & Sign: show where Signature is (off the side of a
+  // phone's toolbar) and what to do. Nothing opens by itself.
+  const signHinted = useRef(false);
+  useEffect(() => {
+    if (!loaded || signHinted.current) return;
+    signHinted.current = true;
+    if (new URLSearchParams(window.location.search).get("sign") !== "1") return;
+    document
+      .querySelector<HTMLElement>('[data-tool="signature"]')
+      ?.scrollIntoView({ inline: "center", block: "nearest", behavior: scrollBehavior() });
+    toast("Fill in the fields, then choose Signature to sign.", "info");
+  }, [loaded, toast]);
+
   // ---- keyboard shortcuts ----
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
