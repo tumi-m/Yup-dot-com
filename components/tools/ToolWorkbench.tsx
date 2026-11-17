@@ -45,7 +45,7 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { fieldShown, PROCESSORS, type ToolField } from "./processors";
+import { fieldHint, fieldShown, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { errorFix, percentSmaller, sortPick, takesMessage } from "./file-pick";
@@ -118,6 +118,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
+  /** The option field the error is about, marked invalid until it changes. */
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -140,6 +142,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
+    setFieldError(null);
     setError(message);
     if (message) setErrorKey((k) => k + 1);
   }
@@ -244,7 +247,21 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }
 
   function setOption(key: string, value: string) {
+    setFieldError(null);
     setOptions((prev) => ({ ...prev, [key]: value }));
+  }
+
+  /** Enter in a text field casts the spell, as in a form (the panel isn't one: its buttons would submit it). */
+  function runOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    if (status !== "working") void run();
+  }
+
+  /** What describes a field: its hint, and the error when it is about this field. */
+  function describedBy(field: ToolField): string | undefined {
+    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, fieldError === field.key && error && "tool-error"];
+    return ids.filter(Boolean).join(" ") || undefined;
   }
 
   function visibleFields(): ToolField[] {
@@ -254,6 +271,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   async function run() {
     if (files.length < proc.minFiles) {
       fail(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
+      return;
+    }
+    const problem = proc.check?.(options);
+    if (problem) {
+      fail(problem.message);
+      setFieldError(problem.key);
+      document.getElementById(`opt-${problem.key}`)?.focus();
       return;
     }
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
@@ -573,6 +597,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "select" && (
                       <select
                         id={`opt-${field.key}`}
+                        aria-describedby={describedBy(field)}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
                         className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
@@ -587,10 +612,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "text" && (
                       <Input
                         id={`opt-${field.key}`}
+                        aria-invalid={fieldError === field.key || undefined}
+                        aria-describedby={describedBy(field)}
                         value={options[field.key]}
                         placeholder={field.placeholder}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="pointer-coarse:h-11"
+                        onKeyDown={runOnEnter}
+                        className="pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
                     {field.type === "password" && (
@@ -599,9 +627,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           id={`opt-${field.key}`}
                           type={revealed[field.key] ? "text" : "password"}
                           autoComplete="new-password"
+                          aria-invalid={fieldError === field.key || undefined}
+                          aria-describedby={describedBy(field)}
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
-                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11"
+                          onKeyDown={runOnEnter}
+                          className="pr-10 pointer-coarse:h-11 pointer-coarse:pr-11 aria-[invalid=true]:border-destructive"
                         />
                         <button
                           type="button"
@@ -631,13 +662,20 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           max={field.max}
                           step={field.step}
                           value={options[field.key]}
+                          aria-valuetext={`${Math.round(Number(options[field.key]) * 100)}%`}
+                          aria-describedby={describedBy(field)}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           className="h-6 flex-1 accent-[hsl(var(--primary))]"
                         />
-                        <span className="w-12 text-right text-sm tabular-nums text-muted-foreground">
+                        <span aria-hidden className="w-12 text-right text-sm tabular-nums text-muted-foreground">
                           {Math.round(Number(options[field.key]) * 100)}%
                         </span>
                       </div>
+                    )}
+                    {fieldHint(field, options) && (
+                      <p id={`opt-${field.key}-hint`} className="mt-1 text-xs text-muted-foreground">
+                        {fieldHint(field, options)}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -649,6 +687,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
             {error && (
               <InlineError
                 key="error"
+                id="tool-error"
                 shakeKey={errorKey}
                 message={
                   fix ? (

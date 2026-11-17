@@ -108,6 +108,24 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
   const shownFor = ["ranges", "one", "every"].filter((mode) => fieldShown(pagesField, { mode }));
   check("split: Pages shows for both page modes", shownFor.join() === "ranges,one", shownFor);
   check("split: Pages starts empty, with an example", pagesField.default === "" && !!pagesField.placeholder);
+  const { fieldHint } = await import("../components/tools/processors.ts");
+  check("split: the per-range hint only in that mode", !!fieldHint(pagesField, { mode: "ranges" }) && !fieldHint(pagesField, { mode: "one" }));
+
+  // Option problems are found before the job, so the page can mark the field.
+  const protect = PROCESSORS["protect-pdf"].check!;
+  const keyOf = (o: Record<string, string>) => {
+    const p = protect(o);
+    return p ? `${p.key}: ${p.message}` : null;
+  };
+  check("protect: empty password", keyOf({ password: "", confirm: "" }) === "password: Please enter a password.");
+  check("protect: short password", keyOf({ password: "abc", confirm: "abc" }) === "password: Use at least 4 characters.");
+  check("protect: mismatch marks the confirm field", keyOf({ password: "abcd", confirm: "abce" }) === "confirm: The passwords don't match.");
+  check("protect: fine", keyOf({ password: "abcd", confirm: "abcd" }) === null);
+  const mark = PROCESSORS["watermark-pdf"].check!;
+  check("watermark: blank text marks the text field", mark({ text: "  " })?.key === "text" && mark({ text: "DRAFT" }) === null);
+  // The check and the tool agree, so nothing the field allows fails later.
+  const tooShort = await errorOf((await import("../lib/pdf/toolkit.ts")).protectTool([file(five, "doc.pdf")], { password: "abc", confirm: "abc", printing: "yes", copying: "no" }));
+  check("protect: the tool keeps the same rule", tooShort === protect({ password: "abc", confirm: "abc" })!.message, tooShort);
 }
 const oneEmpty = await errorOf(splitTool([file(five, "doc.pdf")], { mode: "one", ranges: "" }));
 check("split one: no pages picked is an error", oneEmpty === "Pick pages between 1 and 5.", oneEmpty);

@@ -19,6 +19,13 @@ export interface ToolField {
   showIf?: { key: string; value: string | string[] };
   /** Example input, shown in an empty text field. */
   placeholder?: string;
+  /** A line under the field where the label alone doesn't say what the choice does. */
+  hint?: string | ((options: Record<string, string>) => string | undefined);
+}
+
+/** The field's hint with these options, if any. */
+export function fieldHint(field: ToolField, options: Record<string, string>): string | undefined {
+  return typeof field.hint === "function" ? field.hint(options) : field.hint;
 }
 
 /** Whether `field` shows with these options. */
@@ -44,6 +51,8 @@ export interface ToolProcessor {
   reportsSizeChange?: boolean;
   /** A long job that stops on ctx.signal: offer Cancel while it runs. */
   cancellable?: boolean;
+  /** An option that can't work, found before the job starts, so its field can be marked. */
+  check?: (options: Record<string, string>) => { key: string; message: string } | null;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -84,6 +93,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         default: "",
         placeholder: "e.g. 1-3, 5",
         showIf: { key: "mode", value: ["ranges", "one"] },
+        hint: (o) => (o.mode === "ranges" ? "Each range becomes its own PDF." : undefined),
       },
     ],
     run: async (files, o, ctx) => (await kit()).splitTool(files, { mode: o.mode, ranges: o.ranges }, ctx),
@@ -142,6 +152,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "balanced", label: "Recommended" },
           { value: "high", label: "High quality" },
         ],
+        hint: "Smaller files have softer photos. Text stays sharp.",
       },
     ],
     run: async (files, o, ctx) => (await kit()).compressTool(files, { quality: o.quality }, ctx),
@@ -219,7 +230,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
       {
         key: "margin",
-        label: "Margin (pt)",
+        label: "Margin",
         type: "select",
         default: "0",
         options: [
@@ -300,6 +311,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "standard", label: "Standard" },
           { value: "high", label: "High" },
         ],
+        hint: "Each page becomes a picture on a slide. High is sharper and bigger.",
       },
     ],
     run: async (files, o, ctx) => {
@@ -358,6 +370,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
       {
         key: "copying",
@@ -368,9 +381,17 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           { value: "yes", label: "Yes" },
           { value: "no", label: "No" },
         ],
+        hint: "Most PDF apps respect this; some ignore it.",
       },
     ],
     note: "Lost passwords can't be recovered.",
+    // The same rules protectTool keeps, checked first so the field can be marked.
+    check: (o) => {
+      if (!o.password) return { key: "password", message: "Please enter a password." };
+      if (o.password.length < 4) return { key: "password", message: "Use at least 4 characters." };
+      if (o.password !== o.confirm) return { key: "confirm", message: "The passwords don't match." };
+      return null;
+    },
     run: async (files, o) =>
       (await kit()).protectTool(files, {
         password: o.password,
@@ -459,6 +480,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         step: 0.05,
       },
     ],
+    check: (o) => (o.text?.trim() ? null : { key: "text", message: "Type the watermark text." }),
     run: async (files, o) =>
       (await kit()).watermarkTool(files, {
         text: o.text,
