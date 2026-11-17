@@ -57,18 +57,18 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all ten panels lazily",
-  lazy.join() === "EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
+  "ToolPanel loads all eleven panels lazily",
+  lazy.join() === "CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
   lazy
 );
 
 // Heavy libraries load when used, not with the panel.
-const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
+const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
 for (const file of [
   "components/tools/ToolWorkbench.tsx",
   "components/tools/processors.ts",
@@ -82,12 +82,15 @@ for (const file of [
   "components/tools/SampleFinder.tsx",
   "components/tools/PageOrganizer.tsx",
   "components/tools/ResizePreview.tsx",
+  "components/tools/CropTool.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
 }
 // Resize PDF's preview lays pages out with plain numbers: the layout code never brings pdf-lib.
 check("resize layout has no imports", staticImports(src("lib/pdf/resize/geometry.ts"), /./).length === 0);
+// Crop PDF's box and keys load with the page; they only bring the page-list reader.
+check("crop geometry imports only the page-list reader", staticImports(src("lib/pdf/crop/geometry.ts"), /./).join() === "../pages/plan");
 // The Sample Finder's page never carries the hand-checked list or the server's MusicBrainz code.
 {
   const files = ["components/tools/SampleFinder.tsx", ...readdirSync(new URL("../components/tools/samples", import.meta.url)).map((f) => `components/tools/samples/${f}`)];

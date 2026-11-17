@@ -32,6 +32,10 @@ const { cropFile } = await import("../lib/pdf/crop/off-thread.ts");
 const { cropDocument, NothingToTrimError } = await import("../lib/pdf/crop/run.ts");
 const { findMargins } = await import("../lib/pdf/crop/pictures.ts");
 const { loadForRender } = await import("../lib/pdf/render.ts");
+const { TOOLS, getTool } = await import("../lib/tools.tsx");
+const { filterTools } = await import("../components/tool-filter.ts");
+const { panelSpec } = await import("../components/tools/panel-spec.tsx");
+const sitemap = (await import("../app/sitemap.ts")).default;
 
 let pass = 0;
 let total = 0;
@@ -537,6 +541,15 @@ if (!canvasMod) {
   lockedTrim.encrypt({ ownerPassword: "o", userPassword: "user" });
   const lockedRun = await settle(cropDocument(new Blob([(await lockedTrim.save()) as Uint8Array<ArrayBuffer>]), { pages: [0], cut: { trim: { padding: 6 } } }, { canvas }));
   check("trim: a locked file says to unlock it", lockedRun.error?.message === "This PDF is password-protected. Unlock it first.", lockedRun.error?.message);
+}
+
+// --- On the site ---------------------------------------------------------------
+{
+  const tool = getTool("crop-pdf");
+  check("registered once, under Organize", !!tool && tool.category === "organize" && TOOLS.filter((t) => t.slug === "crop-pdf").length === 1);
+  check("its own panel", !!tool && panelSpec(tool).kind === "crop");
+  check("search finds it by what people type", ["crop", "trim margins", "cut margins", "crop pdf pages"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "crop-pdf")));
+  check("in the sitemap", sitemap().some((u) => u.url.endsWith("/tools/crop-pdf")));
 }
 
 console.log(`\n${pass}/${total} passed`);
