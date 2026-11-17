@@ -118,6 +118,8 @@ const clearedForm = (await PDFDocument.load(cleared)).getForm();
 check("a cleared dropdown is saved empty", clearedForm.getDropdown("country").getSelected().length === 0, clearedForm.getDropdown("country").getSelected());
 check("a cleared list is saved empty", clearedForm.getOptionList("fruit").getSelected().length === 0, clearedForm.getOptionList("fruit").getSelected());
 check("and reads back empty", (await detectFormFields(cleared)).every((f) => f.value === ""));
+const listed = (await detectFormFields(await choice.save())).find((f) => f.name === "fruit");
+check("a list box is told apart from a dropdown", listed?.kind === "listbox" && listed.value === "Banana" && listed.options.join() === "Apple,Banana", listed);
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const pageText = async (bytes: Uint8Array) => {
   const js = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;

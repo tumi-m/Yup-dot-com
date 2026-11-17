@@ -185,6 +185,7 @@ export type DetectedFieldKind =
   | "checkbox"
   | "radio"
   | "dropdown"
+  | "listbox"
   | "unsupported";
 
 /** An interactive form field already present in an uploaded PDF. */
@@ -254,8 +255,8 @@ function kindOf(field: unknown): DetectedFieldKind {
   if (field instanceof PDFTextField) return "text";
   if (field instanceof PDFCheckBox) return "checkbox";
   if (field instanceof PDFRadioGroup) return "radio";
-  if (field instanceof PDFDropdown || field instanceof PDFOptionList)
-    return "dropdown";
+  if (field instanceof PDFDropdown) return "dropdown";
+  if (field instanceof PDFOptionList) return "listbox";
   return "unsupported";
 }
 

@@ -333,15 +333,16 @@ function FormFieldOverlay({
     const shown =
       field.kind === "checkbox" ? (value === "true" ? "✓" : "")
       : field.kind === "radio" ? (value && field.exportValue === value ? "●" : "")
-      : field.kind === "dropdown" ? value
+      : field.kind === "dropdown" || field.kind === "listbox" ? value
       : "";
+    const choice = field.kind === "dropdown" || field.kind === "listbox";
     return (
       <div style={style} className="pointer-events-none leading-none">
         <div
-          style={{ ...inner, fontSize: field.kind === "dropdown" ? fontSize : undefined }}
-          className={`flex h-full w-full items-center overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 text-slate-600 ${
-            field.kind === "dropdown" ? "px-1" : "justify-center text-sm"
-          }`}
+          style={{ ...inner, fontSize: choice ? fontSize : undefined }}
+          className={`flex h-full w-full overflow-hidden whitespace-nowrap rounded-sm border border-dashed border-muted-foreground/40 text-slate-600 ${
+            choice ? "px-1" : "justify-center text-sm"
+          } ${field.kind === "listbox" ? "items-start pt-0.5" : "items-center"}`}
         >
           {shown}
         </div>
@@ -386,11 +387,15 @@ function FormFieldOverlay({
     );
   }
 
-  if (field.kind === "dropdown") {
+  if (field.kind === "dropdown" || field.kind === "listbox") {
+    // A list box shows as many options as its height holds.
+    const ownHeight = sideways ? field.width : field.height;
+    const rows = Math.max(2, Math.min(field.options.length, Math.floor(ownHeight / ((field.fontSize || 10) * 1.2))));
     return (
       <div style={style} className="leading-none" onPointerDown={(e) => e.stopPropagation()}>
         <select
           aria-label={label}
+          size={field.kind === "listbox" ? rows : undefined}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`h-full w-full rounded-sm px-1 ${shared}`}
