@@ -71,7 +71,7 @@ export interface RedeemDeps {
   minAnswerMs?: number;
 }
 
-let bodySchema: z.ZodType<{ code: string; check: boolean }, z.ZodTypeDef, unknown> | null = null;
+let bodySchema: z.ZodType<{ code: string; check: boolean }, unknown> | null = null;
 function schema() {
   return (bodySchema ??= z.object({
     code: z.string().max(TESTER_CODE_MAX_INPUT),

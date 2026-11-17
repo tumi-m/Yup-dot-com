@@ -35,9 +35,15 @@ import {
   FileSliders,
   Shrink,
   Disc3,
+  LayoutGrid,
+  FileMinus,
+  FileOutput,
+  Layers,
+  Scaling,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
+import type { PagesMode } from "./pdf/pages/plan";
 
 export type ToolCategory =
   | "organize"
@@ -63,7 +69,9 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages";
+  /** Page grid settings: what the picked pages are for. */
+  pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
   slides?: { format: "pdf" | "pptx" };
   /** Downloader settings for Video & Audio tools. */
@@ -99,12 +107,48 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "split-pdf",
     name: "Split PDF",
-    title: "Split PDF: extract pages from a PDF",
+    title: "Split PDF: split a PDF into separate files",
     description: "Split by page ranges or into single pages.",
     icon: Scissors,
     category: "organize",
     tint: "bg-fuchsia-100 text-fuchsia-700",
     keywords: "extract separate organise",
+  },
+  {
+    slug: "organize-pdf",
+    name: "Organize PDF",
+    title: "Organize PDF: reorder, rotate and delete pages",
+    description: "Move, turn, add and delete pages.",
+    icon: LayoutGrid,
+    category: "organize",
+    tint: "bg-purple-100 text-purple-700",
+    custom: "pages",
+    pages: { mode: "organize" },
+    keywords: "organise organiser organizer rearrange reorder sort move order reverse insert blank page pages",
+  },
+  {
+    slug: "delete-pages",
+    name: "Delete Pages",
+    title: "Delete pages from a PDF",
+    description: "Remove the pages you don't need.",
+    icon: FileMinus,
+    category: "organize",
+    tint: "bg-rose-100 text-rose-700",
+    custom: "pages",
+    pages: { mode: "delete" },
+    keywords: "remove pages delete page cut organise",
+  },
+  {
+    slug: "extract-pages",
+    name: "Extract Pages",
+    title: "Extract pages from a PDF into a new PDF",
+    description: "Save the pages you pick as one PDF.",
+    icon: FileOutput,
+    category: "organize",
+    tint: "bg-sky-100 text-sky-700",
+    custom: "pages",
+    pages: { mode: "extract" },
+    keywords: "select pages pick pages save pages copy pages pull out organise",
   },
   {
     slug: "rotate-pdf",
@@ -115,6 +159,17 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "organize",
     tint: "bg-indigo-100 text-indigo-700",
     keywords: "organise",
+  },
+  {
+    slug: "resize-pdf",
+    name: "Resize PDF",
+    title: "Resize PDF: change page size to A4 or Letter",
+    description: "Make every page one size, or put 2 or 4 on a sheet.",
+    icon: Scaling,
+    category: "organize",
+    tint: "bg-cyan-100 text-cyan-800",
+    badge: "New",
+    keywords: "page size paper size change size scale fit a4 a3 a5 letter legal tabloid margins n-up 2-up 4-up pages per sheet",
   },
   {
     slug: "compress-pdf",
@@ -309,6 +364,16 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Stamp,
     category: "edit",
     tint: "bg-purple-100 text-purple-700",
+  },
+  {
+    slug: "flatten-pdf",
+    name: "Flatten PDF",
+    title: "Flatten PDF: lock form fields and comments",
+    description: "Make fields and comments part of the page.",
+    icon: Layers,
+    category: "edit",
+    tint: "bg-sky-100 text-sky-800",
+    keywords: "flatten flattened form fields fillable annotations comments lock non-editable read-only print acroform",
   },
   {
     slug: "edit-pdf",

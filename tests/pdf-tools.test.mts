@@ -112,17 +112,25 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
   check("split: the per-range hint only in that mode", !!fieldHint(pagesField, { mode: "ranges" }) && !fieldHint(pagesField, { mode: "one" }));
 
   // Option problems are found before the job, so the page can mark the field.
-  const protect = PROCESSORS["protect-pdf"].check!;
+  // A missing value waits for the cast; a value that was typed is said at once.
+  const protect = PROCESSORS["protect-pdf"].problem!;
   const keyOf = (o: Record<string, string>) => {
     const p = protect(o);
-    return p ? `${p.key}: ${p.message}` : null;
+    return p ? `${p.fields.join()}${p.live ? " (live)" : ""}: ${p.message}` : null;
   };
   check("protect: empty password", keyOf({ password: "", confirm: "" }) === "password: Please enter a password.");
-  check("protect: short password", keyOf({ password: "abc", confirm: "abc" }) === "password: Use at least 4 characters.");
-  check("protect: mismatch marks the confirm field", keyOf({ password: "abcd", confirm: "abce" }) === "confirm: The passwords don't match.");
+  check("protect: short password", keyOf({ password: "abc", confirm: "abc" }) === "password (live): Use at least 4 characters.");
+  check("protect: mismatch marks the confirm field", keyOf({ password: "abcd", confirm: "abce" }) === "confirm (live): The passwords don't match.");
+  check("protect: no mismatch said while the second is still being typed", keyOf({ password: "abcd", confirm: "ab" }) === "confirm: The passwords don't match." && keyOf({ password: "abcd", confirm: "" }) === "confirm: The passwords don't match.");
   check("protect: fine", keyOf({ password: "abcd", confirm: "abcd" }) === null);
-  const mark = PROCESSORS["watermark-pdf"].check!;
-  check("watermark: blank text marks the text field", mark({ text: "  " })?.key === "text" && mark({ text: "DRAFT" }) === null);
+  const mark = PROCESSORS["watermark-pdf"].problem!;
+  check("watermark: blank text marks the text field, on the cast", mark({ text: "  " })?.fields.join() === "text" && !mark({ text: "  " })?.live && mark({ text: "DRAFT" }) === null);
+  const resize = PROCESSORS["resize-pdf"].problem!;
+  const custom = resize({ size: "custom", width: "abc", height: "297", unit: "mm" });
+  check("resize: a bad custom size marks both fields as it is typed", custom?.fields.join() === "width,height" && !!custom.live, custom);
+  check("resize: a paper size has no problem", resize({ size: "a4", width: "abc", height: "297", unit: "mm" }) === null);
+  const flatten = PROCESSORS["flatten-pdf"].fields.find((f) => f.key === "mode")!;
+  check("hints: a picked option's hint comes first", fieldHint(flatten, { mode: "images" }) === flatten.options!.find((o) => o.value === "images")!.hint);
   // The check and the tool agree, so nothing the field allows fails later.
   const tooShort = await errorOf((await import("../lib/pdf/toolkit.ts")).protectTool([file(five, "doc.pdf")], { password: "abc", confirm: "abc", printing: "yes", copying: "no" }));
   check("protect: the tool keeps the same rule", tooShort === protect({ password: "abc", confirm: "abc" })!.message, tooShort);

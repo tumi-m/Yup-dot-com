@@ -392,12 +392,9 @@ export function InlineError({
   compact = false,
   className,
   children,
-  id,
 }: {
   message: React.ReactNode;
   shakeKey?: number | string;
-  /** For a field the message is about to point at (aria-describedby). */
-  id?: string;
   /** Small text without the pill, for tight spaces like the hero panel. */
   compact?: boolean;
   className?: string;
@@ -420,7 +417,6 @@ export function InlineError({
   return (
     <motion.p
       ref={scope}
-      id={id}
       role="alert"
       data-testid="tool-error"
       initial={{ opacity: 0, y: -4 }}

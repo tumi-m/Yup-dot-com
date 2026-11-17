@@ -19,7 +19,11 @@ work with or without an account.
 | ---- | ------------ |
 | **Merge PDF** | Combine multiple PDFs into one (drag to reorder). |
 | **Split PDF** | Extract page ranges, or split every page into its own file. |
+| **Organize PDF** | Reorder pages by dragging or with the keyboard, turn single pages, delete them, add blank pages or another PDF's pages, reverse the order. Undo until you save. |
+| **Delete Pages** | Pick pages, or type ranges like `2-4, 7`, and save the PDF without them. |
+| **Extract Pages** | Pick pages, or type ranges, and save them as one new PDF. |
 | **Rotate PDF** | Rotate all pages 90° / 180° / 270°. |
+| **Resize PDF** | Every page onto A4, A3, A5, Letter, Legal, Tabloid or a custom size (mm, in or pt): keep each page's orientation or force one, fit inside, fill and crop, or don't scale, with optional margins, or 2 or 4 pages to a sheet. Pages stay vector; links, bookmarks and comments move with them; form fields are flattened first. Shows the first sheet before you start. Runs in a worker. |
 | **Compress PDF** | Resizes images to the size they're shown at and re-encodes them; text, links, bookmarks and forms stay as they are. Never returns a bigger file. |
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine images into a PDF (fit-to-image or A4). |
@@ -47,6 +51,7 @@ work with or without an account.
 | **Sample Finder** | Paste a YouTube or TikTok link, or type a song: what it samples, where it was sampled, covers and remixes. Reads only the video's title, so it works while YouTube downloads are paused. Data from MusicBrainz and a hand-checked list. [More below](#sample-finder). |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
+| **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable; a run that would make more pictures than a browser tab can hold is turned away first, naming a resolution that fits. What was flattened leaves the file, along with anything only it used (an attached file, XFA data, an old field picture). The editor can flatten fields when it saves. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
 | **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
@@ -317,6 +322,18 @@ per-page rotate/insert/delete, a contextual **properties panel**, keyboard
 shortcuts, and toasts. Structural operations bake current annotations first,
 then transform the bytes and re-render.
 
+**Organize PDF, Delete Pages and Extract Pages** share one page grid
+(`components/tools/PageOrganizer.tsx`). Moves, turns, blank pages and
+deletions only change a list of pages (`lib/pdf/pages/plan.ts`), so they are
+instant and undo is free; the PDF is written once, on save, in a Web Worker
+(`lib/pdf/pages/`). Organize and Delete change the file in place, like the
+editor's page operations; Extract copies the picked pages out, like Split.
+Only the rows near the visible part of the grid are on the page at all (the
+rest is kept as scroll room), so reversing or undoing on a 20,000-page file
+is instant. Thumbnails are drawn two at a time and let go of their pixels
+when scrolled away. A file with no pages, or a page tree that loops, is
+turned away when it opens.
+
 ## Tests
 
 ```bash
@@ -326,10 +343,12 @@ npm test
 The suites in `tests/` run the real pipeline against generated files. For PDFs:
 structure extraction, multi-column reading order, table-vs-gutter
 disambiguation, baking every annotation type, the form detect/fill/flatten
-round-trip, protect/unlock (verified by pdf.js as an independent reader), the
+round-trip, Flatten PDF (each result rendered by pdf.js and compared with
+the original, pixel by pixel), protect/unlock (verified by pdf.js as an independent reader), the
 OCR text layer, Word/Excel output (verified with python-docx and
-openpyxl), and compression (images sized by placement, lossless graphics,
-text and forms kept). Others cover PPTX parsing, editing and rendering,
+openpyxl), compression (images sized by placement, lossless graphics,
+text and forms kept), and resizing (page sizes, where text, links,
+bookmarks and notes land, turned pages, 2 and 4 to a sheet). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
@@ -604,6 +623,7 @@ pdf-wizard/
 │   ├── tools/
 │   │   ├── ToolWorkbench.tsx     ← Dropzone + options + run + download
 │   │   ├── EditorLaunch.tsx      ← Uploads a PDF into the editor
+│   │   ├── PageOrganizer.tsx     ← Page grid for Organize PDF, Delete and Extract pages
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -622,6 +642,7 @@ pdf-wizard/
 │   ├── pdf/bake.ts               ← Flatten annotations, links, form fields
 │   ├── pdf/forms.ts              ← Detect / fill / flatten existing AcroForms
 │   ├── pdf/operations.ts         ← pdf-lib page ops
+│   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
 │   ├── editor/                   ← Annotation model, history, factory
 │   ├── tools.tsx                 ← Tool registry (metadata + icons)

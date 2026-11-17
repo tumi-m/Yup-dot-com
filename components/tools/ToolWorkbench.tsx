@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, Reorder, useDragControls, useReducedMotion } from "motion/react";
 import {
@@ -15,6 +16,7 @@ import {
   RotateCcw,
   Timer,
   TrendingDown,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +59,9 @@ import { friendlyPdfError } from "@/lib/pdf/errors";
 import { trackToolUsed } from "@/lib/analytics";
 import { getTool } from "@/lib/tools";
 
+/** Resize PDF's preview loads with that tool only. */
+const ResizePreview = lazy(() => import("./ResizePreview").then((m) => ({ default: m.ResizePreview })));
+
 /** Where a finished PDF can go next — Smallpdf-style "keep going" chaining. */
 const NEXT_STEPS: Record<string, string[]> = {
   default: ["compress-pdf", "edit-pdf", "sign-pdf", "protect-pdf"],
@@ -65,7 +70,9 @@ const NEXT_STEPS: Record<string, string[]> = {
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
+  "resize-pdf": ["compress-pdf", "page-numbers", "merge-pdf", "protect-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
+  "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
   // An encrypted result can't be opened by the other tools.
   "protect-pdf": [],
 };
@@ -118,8 +125,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [errorKey, setErrorKey] = useState(0);
-  /** The option field the error is about, marked invalid until it changes. */
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  /**
+   * Set when a cast stopped at a problem with the options, until an option
+   * changes: problems that wait for the cast show, and `readOut` has the message
+   * announced when focus was in its field already (moving focus there reads it).
+   */
+  const [tried, setTried] = useState<{ n: number; readOut: boolean } | null>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -142,7 +153,6 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
-    setFieldError(null);
     setError(message);
     if (message) setErrorKey((k) => k + 1);
   }
@@ -247,9 +257,15 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   }
 
   function setOption(key: string, value: string) {
-    setFieldError(null);
     setOptions((prev) => ({ ...prev, [key]: value }));
+    // A message about the old options would stay after they were fixed.
+    setError(null);
+    setTried(null);
   }
+
+  /** What is wrong with the options (see OptionProblem), and whether it shows yet. */
+  const found = proc.problem?.(options) ?? null;
+  const problem = found && (found.live || tried) ? found : null;
 
   /** Enter in a text field casts the spell, as in a form (the panel isn't one: its buttons would submit it). */
   function runOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -258,9 +274,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     if (status !== "working") void run();
   }
 
-  /** What describes a field: its hint, and the error when it is about this field. */
+  /** What describes a field: its hint, and the problem when it is about this field. */
   function describedBy(field: ToolField): string | undefined {
-    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, fieldError === field.key && error && "tool-error"];
+    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, problem?.fields.includes(field.key) && "opt-problem"];
     return ids.filter(Boolean).join(" ") || undefined;
   }
 
@@ -273,11 +289,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       fail(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
       return;
     }
-    const problem = proc.check?.(options);
-    if (problem) {
-      fail(problem.message);
-      setFieldError(problem.key);
-      document.getElementById(`opt-${problem.key}`)?.focus();
+    if (found) {
+      const field = flow.ref.current?.querySelector<HTMLElement>(`#opt-${found.fields[0]}`);
+      if (!field) {
+        fail(found.message);
+        return;
+      }
+      // Said under the field: shown before focus lands there, so it is read with it.
+      flushSync(() => {
+        setError(null);
+        setTried((t) => ({ n: (t?.n ?? 0) + 1, readOut: document.activeElement === field }));
+      });
+      field.focus();
       return;
     }
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
@@ -465,6 +488,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   Your file is unchanged
                 </span>
               )}
+              {results.length === 1 && results[0].note && (
+                <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-left font-medium text-amber-800">
+                  <Info className="mt-0.5 h-3 w-3 shrink-0" /> {results[0].note}
+                </span>
+              )}
             </>
           }
           files={results.map((r) => ({
@@ -593,17 +621,36 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                 exit={EXIT}
                 className="grid gap-4 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2"
               >
-                {visibleFields().map((field) => (
-                  <div key={field.key}>
-                    <label htmlFor={`opt-${field.key}`} className="mb-1.5 block text-sm font-medium">
-                      {field.label}
-                    </label>
+                {visibleFields().map((field) => {
+                  const hint = fieldHint(field, options);
+                  const invalid = !!problem?.fields.includes(field.key);
+                  const describes = describedBy(field);
+                  return (
+                  <div key={field.key} className={field.wide ? "sm:col-span-2" : undefined}>
+                    {field.type === "checkbox" ? (
+                      // The box sits level with the selects beside it.
+                      <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm font-medium sm:mt-7 sm:min-h-10">
+                        <input
+                          id={`opt-${field.key}`}
+                          type="checkbox"
+                          checked={options[field.key] === "true"}
+                          onChange={(e) => setOption(field.key, e.target.checked ? "true" : "")}
+                          aria-describedby={describes}
+                          className="h-5 w-5 shrink-0 cursor-pointer rounded border-input accent-[hsl(var(--primary))]"
+                        />
+                        {field.label}
+                      </label>
+                    ) : (
+                      <label htmlFor={`opt-${field.key}`} className="mb-1.5 block text-sm font-medium">
+                        {field.label}
+                      </label>
+                    )}
                     {field.type === "select" && (
                       <select
                         id={`opt-${field.key}`}
-                        aria-describedby={describedBy(field)}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        aria-describedby={describes}
                         className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
                       >
                         {field.options!.map((o) => (
@@ -616,12 +663,13 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                     {field.type === "text" && (
                       <Input
                         id={`opt-${field.key}`}
-                        aria-invalid={fieldError === field.key || undefined}
-                        aria-describedby={describedBy(field)}
+                        inputMode={field.inputMode}
                         value={options[field.key]}
                         placeholder={field.placeholder}
                         onChange={(e) => setOption(field.key, e.target.value)}
                         onKeyDown={runOnEnter}
+                        aria-invalid={invalid || undefined}
+                        aria-describedby={describes}
                         className="pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
@@ -631,8 +679,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           id={`opt-${field.key}`}
                           type={revealed[field.key] ? "text" : "password"}
                           autoComplete="new-password"
-                          aria-invalid={fieldError === field.key || undefined}
-                          aria-describedby={describedBy(field)}
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={describes}
                           value={options[field.key]}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           onKeyDown={runOnEnter}
@@ -654,6 +702,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         type="color"
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        aria-describedby={describes}
                         className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11"
                       />
                     )}
@@ -667,7 +716,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           step={field.step}
                           value={options[field.key]}
                           aria-valuetext={`${Math.round(Number(options[field.key]) * 100)}%`}
-                          aria-describedby={describedBy(field)}
+                          aria-describedby={describes}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           className="h-6 flex-1 accent-[hsl(var(--primary))]"
                         />
@@ -676,22 +725,39 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         </span>
                       </div>
                     )}
-                    {fieldHint(field, options) && (
-                      <p id={`opt-${field.key}-hint`} className="mt-1 text-xs text-muted-foreground">
-                        {fieldHint(field, options)}
+                    {hint && (
+                      <p id={`opt-${field.key}-hint`} className={`mt-1.5 text-xs text-muted-foreground ${field.type === "checkbox" ? "pl-[30px]" : ""}`}>
+                        {hint}
+                      </p>
+                    )}
+                    {/* Once, under the last field it is about; read out when a cast stopped at it in its own field. */}
+                    {invalid && problem!.fields.at(-1) === field.key && (
+                      <p
+                        key={tried?.n ?? 0}
+                        id="opt-problem"
+                        role={tried?.readOut ? "alert" : undefined}
+                        className="mt-1.5 text-xs text-destructive"
+                      >
+                        {problem!.message}
                       </p>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </motion.div>
             )}
           </AnimatePresence>
+
+          {proc.preview === "resize" && entries.length > 0 && (
+            <Suspense fallback={null}>
+              <ResizePreview file={entries[0].file} options={options} />
+            </Suspense>
+          )}
 
           <AnimatePresence>
             {error && (
               <InlineError
                 key="error"
-                id="tool-error"
                 shakeKey={errorKey}
                 message={
                   fix ? (

@@ -290,7 +290,7 @@ export function contentDisposition(name: string): string {
 
 // Built on first use: the importer imports this module, and a top-level
 // schema would pull zod into the browser bundle.
-let querySchema: z.ZodType<{ url: string; format: SlidesFormat }, z.ZodTypeDef, unknown> | null = null;
+let querySchema: z.ZodType<{ url: string; format: SlidesFormat }, unknown> | null = null;
 function slidesQuerySchema() {
   return (querySchema ??= z.object({
     url: z.string().trim().min(4).max(2000),

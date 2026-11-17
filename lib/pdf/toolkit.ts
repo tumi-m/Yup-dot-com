@@ -20,6 +20,8 @@ import type { OcrProgress } from "./ocr";
 export interface ToolFile {
   blob: Blob;
   filename: string;
+  /** A short line for the result, e.g. what was left as it was. */
+  note?: string;
 }
 
 function hexToRgb(hex: string) {
@@ -241,26 +243,76 @@ export async function compressTool(
 
 /** Last resort for damaged files: each page becomes a JPEG (text is no longer selectable). */
 async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolContext): Promise<Uint8Array> {
-  const { canvasToJpeg } = await import("../jpeg-encode/off-thread");
-  const loaded = await loadForRender(bytes);
-  const out = await PDFDocument.create();
-  const scale = 1.5; // ~108 DPI
-  try {
-    for (let i = 1; i <= loaded.numPages; i++) {
-      stopIfAborted(ctx.signal);
-      ctx.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
-      const vp = await loaded.getPageViewport(i, scale);
-      const canvas = document.createElement("canvas");
-      await loaded.renderPage(i, canvas, scale, { pixelRatio: 1 });
-      const img = await out.embedJpg(await canvasToJpeg(canvas, quality));
-      canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
-      const page = out.addPage([vp.baseWidth, vp.baseHeight]);
-      page.drawImage(img, { x: 0, y: 0, width: vp.baseWidth, height: vp.baseHeight });
-    }
-  } finally {
-    loaded.destroy();
+  const { pagesAsImages } = await import("./raster");
+  // ~108 DPI
+  return pagesAsImages(bytes, { scale: 1.5, quality, progress: ctx.progress, signal: ctx.signal });
+}
+
+// ---------------------------------------------------------------------------
+// Flatten — fields and annotations become part of the page (lib/pdf/flatten),
+// or every page becomes a picture (lib/pdf/raster.ts).
+// ---------------------------------------------------------------------------
+export const FLATTEN_DPI = [100, 150, 200, 300];
+
+/** Pages too big to turn into pictures: the highest resolution that would fit, if there is one. */
+export function tooBigToPicture(pixels: number, dpi: number, max: number): string {
+  // Pixels grow with the square of the resolution.
+  const lower = FLATTEN_DPI.filter((d) => d < dpi && pixels * (d / dpi) ** 2 <= max).at(-1);
+  if (lower) return `These pages are too big to turn into pictures at ${dpi} DPI. Pick ${lower} DPI or less.`;
+  if (Number.isNaN(pixels) && dpi > FLATTEN_DPI[0]) {
+    return "These pictures are too big to put in one file here. Pick a lower resolution, or split the PDF first.";
   }
-  return out.save();
+  return "These pages are too many to turn into pictures at once. Split the PDF first, or choose Fields and comments.";
+}
+
+export async function flattenTool(
+  files: File[],
+  opts: { mode: string; dpi: string; text: string },
+  ctx: ToolContext = {}
+): Promise<ToolFile> {
+  const file = files[0];
+  const [{ NothingToFlattenError, flattenNote }, { flattenFile }] = await Promise.all([
+    import("./flatten"),
+    import("./flatten/off-thread"),
+  ]);
+  if (opts.mode === "images") {
+    const keepText = opts.text === "true";
+    const dpi = FLATTEN_DPI.includes(Number(opts.dpi)) ? Number(opts.dpi) : 150;
+    let bytes = await buf(file);
+    if (keepText) {
+      // Filled-in values become page text first, so search finds them too.
+      ctx.progress?.(0, "Reading the file…");
+      try {
+        bytes = (await flattenFile(file, "annotations", undefined, ctx.signal)).bytes;
+      } catch (err) {
+        if (isAbort(err)) throw err;
+        // Nothing to flatten, or a file only pdf.js reads: the pictures show it all the same.
+      }
+    }
+    const { pagesAsImages, MAX_PIXELS, TooManyPixelsError } = await import("./raster");
+    try {
+      const out = await pagesAsImages(bytes, {
+        scale: dpi / 72,
+        quality: 0.85,
+        keepText,
+        progress: ctx.progress,
+        signal: ctx.signal,
+        maxPixels: MAX_PIXELS,
+      });
+      return { blob: pdfBlob(out), filename: suffixed(file, "flattened") };
+    } catch (err) {
+      if (isAbort(err)) throw err;
+      if (err instanceof TooManyPixelsError) throw new Error(tooBigToPicture(err.pixels, dpi, MAX_PIXELS));
+      throw friendlyPdfError(err);
+    }
+  }
+  try {
+    const { bytes, report } = await flattenFile(file, opts.mode === "forms" ? "forms" : "annotations", ctx.progress, ctx.signal);
+    return { blob: pdfBlob(bytes), filename: suffixed(file, "flattened"), note: flattenNote(report) };
+  } catch (err) {
+    if (isAbort(err) || err instanceof NothingToFlattenError) throw err;
+    throw friendlyPdfError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +364,27 @@ export async function imagesToPdfTool(
   // Decoding, resizing and encoding phone photos takes seconds each: it runs in a worker.
   const { imagesToPdfFile } = await import("./images-to-pdf/off-thread");
   return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename: "images.pdf" };
+}
+
+// ---------------------------------------------------------------------------
+// Resize — every page onto one paper size, or 2 or 4 to a sheet; pages stay
+// vector (see lib/pdf/resize). Runs in a worker: long files take a while.
+// ---------------------------------------------------------------------------
+export async function resizeTool(
+  files: File[],
+  opts: Record<string, string>,
+  ctx: ToolContext = {}
+): Promise<ToolFile> {
+  const [{ readOptions }, { resizeFile }] = await Promise.all([import("./resize/geometry"), import("./resize/off-thread")]);
+  // A size that can't be used is said before the file is read.
+  const options = readOptions(opts);
+  try {
+    const bytes = await resizeFile(files[0], options, ctx.progress, ctx.signal);
+    return { blob: pdfBlob(bytes), filename: suffixed(files[0], options.perSheet > 1 ? `${options.perSheet}-up` : "resized") };
+  } catch (err) {
+    if (isAbort(err)) throw err;
+    throw friendlyPdfError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------

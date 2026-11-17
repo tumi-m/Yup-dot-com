@@ -104,7 +104,7 @@ function treeEntries(doc: PDFDocument, node: PDFObject | undefined, kind: "Names
 }
 
 /** The document's named destinations: the /Names /Dests tree, and the older /Dests dictionary. */
-function namedDests(doc: PDFDocument): Map<string, PDFObject> {
+export function namedDests(doc: PDFDocument): Map<string, PDFObject> {
   const out = new Map<string, PDFObject>();
   const names = doc.catalog.lookup(Names);
   if (names instanceof PDFDict) {
@@ -120,7 +120,7 @@ function namedDests(doc: PDFDocument): Map<string, PDFObject> {
 }
 
 /** The dictionary and key holding a link's or bookmark's destination: its /Dest, or its GoTo action's /D. */
-function destinationEntry(holder: PDFDict): [PDFDict, PDFName] | undefined {
+export function destinationEntry(holder: PDFDict): [PDFDict, PDFName] | undefined {
   if (holder.has(Dest)) return [holder, Dest];
   const action = holder.lookup(A);
   if (action instanceof PDFDict && action.lookup(PDFName.of("S")) === GoTo) return [action, D];
@@ -147,8 +147,8 @@ function once<T>(make: () => T): () => T {
   return () => (value ??= { v: make() }).v;
 }
 
-/** Drops objects nothing refers to any more, so removed pages leave nothing behind in the file. */
-function dropUnreachable(doc: PDFDocument) {
+/** Drops objects nothing refers to any more, so removed pages, fields or comments leave nothing behind in the file. */
+export function dropUnreachable(doc: PDFDocument) {
   const { context } = doc;
   const reached = new Set<PDFRef>();
   const pending: unknown[] = [context.trailerInfo.Root, context.trailerInfo.Info];
@@ -221,8 +221,16 @@ function checkOrder(pages: PDFPage[], order: number[]) {
 /** Whether `order` keeps every page of `pages` where it was. */
 const unmoved = (pages: PDFPage[], order: number[]) => order.length === pages.length && order.every((p, i) => p === i);
 
-/** Keeps the given (0-indexed) pages, in that order, and drops the rest. */
-function arrangePages(doc: PDFDocument, order: number[]) {
+/** How far a long page loop is, 0..1, reported every so many pages. */
+type Progress = (fraction: number) => void;
+const PROGRESS_EVERY = 250;
+
+/**
+ * Keeps the given (0-indexed) pages, in that order, and drops the rest.
+ * `onProgress` hears how far the pages are moved: on a long document it takes
+ * seconds.
+ */
+export function arrangePages(doc: PDFDocument, order: number[], onProgress?: Progress) {
   const pages = doc.getPages();
   checkOrder(pages, order);
   const kept = new Set(order);
@@ -250,8 +258,16 @@ function arrangePages(doc: PDFDocument, order: number[]) {
       if (own) pages[i].node.set(Resources, own);
     }
   }
-  for (let i = pages.length - 1; i >= 0; i--) doc.removePage(i);
-  for (const i of order) doc.addPage(pages[i]);
+  const steps = pages.length + order.length;
+  const tick = (done: number) => onProgress && done % PROGRESS_EVERY === 0 && onProgress(done / steps);
+  for (let i = pages.length - 1; i >= 0; i--) {
+    doc.removePage(i);
+    tick(pages.length - i);
+  }
+  order.forEach((i, k) => {
+    doc.addPage(pages[i]);
+    tick(pages.length + k + 1);
+  });
   dropLinksTo(doc, droppedRefs);
   if (dropped.length) {
     const tags = readTags(doc);
@@ -768,6 +784,53 @@ export async function mergeDocuments(
   return first.save();
 }
 
+/** One page of a composed document: a page of one of the documents, or a blank one. */
+export type ComposedPage = ({ source: number; page: number } | { blank: { width: number; height: number } }) & {
+  /** Turned this far clockwise on top of the page's own rotation. */
+  rotate?: number;
+};
+
+/**
+ * Rebuilds `docs[0]` with the pages `plan` lists, in that order: its own,
+ * pages of the other `docs` (with their links, form fields and layers, as
+ * Merge brings them) and blank ones. Like reorderPages and deletePages it
+ * works in the document itself, so its form, bookmarks, title and
+ * attachments stay; what only the pages left out use goes with them.
+ */
+export async function composePages(docs: PDFDocument[], plan: ComposedPage[], onProgress?: Progress): Promise<Uint8Array> {
+  const [first] = docs;
+  if (!first || !plan.length) throw new Error("Keep at least one page.");
+  // Where each document's pages start in `first` once copied in.
+  const starts = new Map<number, number>([[0, 0]]);
+  for (const item of plan) {
+    if (!("source" in item) || starts.has(item.source)) continue;
+    const src = docs[item.source];
+    if (!src) throw new Error("Invalid page order.");
+    starts.set(item.source, first.getPageCount());
+    const { pages, copier } = copyAllPages(first, src);
+    pages.forEach((p) => first.addPage(p));
+    adoptFields(first, src, pages, copier);
+    adoptLayers(first, src, copier);
+  }
+  const order = plan.map((item) => {
+    if ("blank" in item) {
+      first.addPage([item.blank.width, item.blank.height]);
+      return first.getPageCount() - 1;
+    }
+    const count = docs[item.source].getPageCount();
+    if (!Number.isInteger(item.page) || item.page < 0 || item.page >= count) throw new Error("Invalid page order.");
+    return starts.get(item.source)! + item.page;
+  });
+  arrangePages(first, order, onProgress && ((f) => onProgress(f * 0.99)));
+  first.getPages().forEach((page, i) => {
+    const turn = plan[i].rotate ?? 0;
+    if (turn % 360) page.setRotation(degrees((((page.getRotation().angle + turn) % 360) + 360) % 360));
+  });
+  // 1 means the pages are in place and the file is being written.
+  onProgress?.(1);
+  return first.save();
+}
+
 /** Merge multiple PDFs (as byte arrays) into a single document. */
 export async function mergePdfs(parts: (ArrayBuffer | Uint8Array)[]): Promise<Uint8Array> {
   if (!parts.length) return (await PDFDocument.create()).save();
@@ -801,7 +864,7 @@ const PART_ENTRIES = ["Version", "Extensions", "PageLayout", "PageMode", "Viewer
  * the file once for all its parts: what every part needs of `src` (its tags)
  * is read once too.
  */
-export function extractorFor(src: PDFDocument): (order: number[]) => Promise<Uint8Array> {
+export function extractorFor(src: PDFDocument): (order: number[], onProgress?: Progress) => Promise<Uint8Array> {
   const tags = readTags(src);
   const trimmed = new Map<number, PDFPageLeaf>();
   const trim = (i: number) => {
@@ -817,7 +880,7 @@ export function extractorFor(src: PDFDocument): (order: number[]) => Promise<Uin
     }
     return leaf;
   };
-  return (order) => extractPart(src, tags, order, trim);
+  return (order, onProgress) => extractPart(src, tags, order, trim, onProgress);
 }
 
 /**
@@ -828,15 +891,21 @@ export function extractorFor(src: PDFDocument): (order: number[]) => Promise<Uin
  * left out comes along (such as the alt text and link addresses in their
  * tags), nor do the document's attachments and scripts.
  */
-export async function extractFrom(src: PDFDocument, order: number[]): Promise<Uint8Array> {
-  return extractorFor(src)(order);
+export async function extractFrom(src: PDFDocument, order: number[], onProgress?: Progress): Promise<Uint8Array> {
+  return extractorFor(src)(order, onProgress);
 }
 
 /**
  * `trim` gives page `i` of `src` to copy with only the resources its content
  * uses, for a part that leaves pages out.
  */
-async function extractPart(src: PDFDocument, tags: Tags, order: number[], trim: (i: number) => PDFPageLeaf): Promise<Uint8Array> {
+async function extractPart(
+  src: PDFDocument,
+  tags: Tags,
+  order: number[],
+  trim: (i: number) => PDFPageLeaf,
+  onProgress?: Progress
+): Promise<Uint8Array> {
   const srcPages = src.getPages();
   checkOrder(srcPages, order);
   const doc = await PDFDocument.create({ updateMetadata: false });
@@ -878,6 +947,7 @@ async function extractPart(src: PDFDocument, tags: Tags, order: number[], trim: 
     const node = copier.copy(partial ? trim(i) : srcPages[i].node) as PDFPageLeaf;
     doc.context.assign(refs[k], node);
     doc.addPage(PDFPage.of(node, refs[k], doc));
+    if (onProgress && (k + 1) % PROGRESS_EVERY === 0) onProgress(((k + 1) / order.length) * 0.99);
   });
   // The rest of the document: title, form, bookmarks, named destinations, layers.
   for (const key of PART_ENTRIES) {
@@ -902,6 +972,7 @@ async function extractPart(src: PDFDocument, tags: Tags, order: number[], trim: 
   copyTags(src, doc, tags, new Set(order.map((i) => srcPages[i].ref)), copy, numbers);
   dropXfa(doc);
   dropUnreachable(doc);
+  onProgress?.(1);
   return doc.save();
 }
 

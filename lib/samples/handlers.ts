@@ -326,7 +326,7 @@ export function byHashtag(candidates: Candidate[], tags: string[] = []): Candida
   return [...candidates.filter(named), ...candidates.filter((c) => !named(c))];
 }
 
-let identifySchema: z.ZodType<{ input: string }, z.ZodTypeDef, unknown> | null = null;
+let identifySchema: z.ZodType<{ input: string }, unknown> | null = null;
 
 export async function handleIdentify(request: Request, deps: SampleDeps): Promise<Response> {
   const body = await request.json().catch(() => null);
@@ -408,7 +408,7 @@ interface LookupBody {
   cacheOnly?: boolean;
 }
 
-let lookupSchema: z.ZodType<LookupBody, z.ZodTypeDef, unknown> | null = null;
+let lookupSchema: z.ZodType<LookupBody, unknown> | null = null;
 function lookupBodySchema() {
   return (lookupSchema ??= z.object({
     rec: z.string().regex(MBID).nullish(),

@@ -126,6 +126,8 @@ const finds: [string, string][] = [
   ["encrypt", "protect-pdf"],
   ["split pages", "split-pdf"],
   ["organise", "merge-pdf"],
+  ["organise pdf", "organize-pdf"],
+  ["organiser", "organize-pdf"],
   ["ppt to pdf", "pptx-to-pdf"],
   ["twitter video", "x-to-mp4"],
   ["pdf-to-jpg", "pdf-to-jpg"],
