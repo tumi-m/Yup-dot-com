@@ -48,6 +48,38 @@ export function tiffDirectories(bytes: Uint8Array): number[] | null {
 
 type Ifd = Record<string, unknown> & { width?: number; height?: number; data?: Uint8Array };
 const first = (ifd: Ifd, tag: number): number | undefined => (ifd[`t${tag}`] as number[] | undefined)?.[0];
+const all = (ifd: Ifd, tag: number): number[] => (ifd[`t${tag}`] as number[] | undefined) ?? [];
+
+/**
+ * The most each compression can grow its data: none, PackBits, LZW and
+ * Deflate. Fax and JPEG data can shrink a page much further, so for them
+ * only where the data sits is checked.
+ */
+const MAX_GROWTH: Record<number, number> = { 1: 1, 32773: 64, 5: 2731, 8: 1032, 32946: 1032 };
+
+/**
+ * True when a page's data lies inside the file and there is enough of it to
+ * fill the page. UTIF reads past the end as zeros, so a cut-off file would
+ * otherwise give a blank page, and a tiny one claiming millions of pixels a
+ * huge page from nothing.
+ */
+export function pageDataFits(ifd: Ifd, fileLength: number): boolean {
+  const tiled = all(ifd, 324).length > 0;
+  const offsets = all(ifd, tiled ? 324 : 273);
+  const counts = all(ifd, tiled ? 325 : 279);
+  if (!offsets.length || counts.length < offsets.length) return false;
+  let total = 0;
+  for (const [i, at] of offsets.entries()) {
+    if (at + counts[i] > fileLength) return false;
+    total += counts[i];
+  }
+  const growth = MAX_GROWTH[first(ifd, 259) ?? 1];
+  if (growth === undefined) return total > 0;
+  const samples = first(ifd, 277) ?? 1;
+  const bits = all(ifd, 258);
+  const perPixel = bits.length >= samples ? bits.slice(0, samples).reduce((a, b) => a + b, 0) : (bits[0] ?? 1) * samples;
+  return total * growth * 8 >= first(ifd, 256)! * first(ifd, 257)! * perPixel;
+}
 
 /**
  * The pages of a TIFF, decoded one at a time when asked for, so a long fax
@@ -85,6 +117,7 @@ export async function tiffPages(bytes: Uint8Array, name: string): Promise<{ coun
       const width = first(ifd, 256)!;
       const height = first(ifd, 257)!;
       if (width * height > MAX_PIXELS) throw new Error(`${name}: this image is too large to convert on this device.`);
+      if (!pageDataFits(ifd, bytes.length)) throw new Error(`${name}: this image looks damaged.`);
       let rgba: Uint8Array;
       try {
         (UTIF.decodeImage as (b: ArrayBuffer, ifd: Ifd, all: Ifd[]) => void)(buffer, ifd, ifds);

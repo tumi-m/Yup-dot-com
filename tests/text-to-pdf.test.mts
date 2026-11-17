@@ -23,7 +23,7 @@ const settle = <T,>(p: Promise<T>) => p.then((value) => ({ value, error: null as
 
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const { textToPdf } = await import("../lib/pdf/text-to-pdf/index.ts");
-const { markdownToPdf, decodeEntities, htmlText } = await import("../lib/pdf/text-to-pdf/markdown.ts");
+const { markdownToPdf, decodeEntities, htmlText, limitNesting, TOO_DEEP, MAX_INDENT, MAX_QUOTE_DEPTH } = await import("../lib/pdf/text-to-pdf/markdown.ts");
 const { decodeText, cleanText, expandTabs, NOT_TEXT } = await import("../lib/pdf/text-to-pdf/read-text.ts");
 const { safeLink, MAX_PAGES } = await import("../lib/pdf/text-to-pdf/layout.ts");
 const fontsModule = await import("../lib/pdf/text-to-pdf/fonts.ts");
@@ -203,6 +203,36 @@ check("entities decode", decodeEntities("a &amp; b &lt;c&gt; &#233; &#x3A9; &bog
 check("html: tags dropped, words kept, scripts gone", htmlText('<div align="center"><img src=x onerror="alert(1)"><b>Hi</b> <script>alert(2)</script>there<br>next<!-- note --></div>') === "Hi there\nnext");
 check("links: only web and mail links open", safeLink("https://example.com/a b") === "https://example.com/a%20b" && safeLink("mailto:a@b.co") === "mailto:a@b.co" && !safeLink("javascript:alert(1)") && !safeLink("file:///etc/passwd") && !safeLink("docs/intro.md") && !safeLink("#top"));
 check("links: a non-ASCII host becomes punycode", safeLink("https://münchen.de/straße") === "https://xn--mnchen-3ya.de/stra%C3%9Fe", safeLink("https://münchen.de/straße"));
+
+{
+  // A lone ")" or a trailing backslash in an address would end the PDF string early and break the file.
+  const cases: [string, string, string][] = [
+    ["a trailing backslash", "[the query](https://example.com/?q=a\\\\)", "https://example.com/?q=a\\"],
+    ["an autolink with a )", "<https://example.com/a)b>", "https://example.com/a)b"],
+    ["a ) inside <>", "[one](<https://example.com/a)>)", "https://example.com/a)"],
+    ["balanced brackets", "[w](https://en.wikipedia.org/wiki/X_(disambiguation))", "https://en.wikipedia.org/wiki/X_(disambiguation)"],
+  ];
+  for (const [label, src, url] of cases) {
+    const out = await markdownToPdf(enc(src), "links.md", {}, fonts);
+    const pages = await settle(read(out.bytes));
+    check(`links: ${label} opens and keeps its address`, pages.value?.[0].links[0]?.url === url, pages.error?.message ?? pages.value?.[0].links);
+  }
+}
+{
+  // Deep nesting is flattened before marked reads it: it would run out of stack, or take minutes and gigabytes.
+  const quotes = await settle(markdownToPdf(enc(">".repeat(2000) + " deep"), "deep.md", {}, fonts));
+  check("nesting: 2,000 quotes deep still lays out", !!quotes.value && all(await read(quotes.value.bytes)).includes("deep"), quotes.error?.message);
+  const list = Array.from({ length: 3000 }, (_, i) => " ".repeat(2 * i) + "- item " + i).join("\n");
+  const started = Date.now();
+  const lists = await settle(markdownToPdf(enc(list), "lists.md", {}, fonts));
+  const took = Date.now() - started;
+  check("nesting: 3,000 nested lists (9 MB) lay out in seconds", !!lists.value && took < 15_000 && all(await read(lists.value.bytes)).includes("item 2999"), [took, lists.error?.message]);
+  const mixed = await settle(markdownToPdf(enc("- > ".repeat(3000) + "x"), "mixed.md", {}, fonts));
+  check("nesting: deeper than that is said plainly", mixed.error?.message === `mixed.md: ${TOO_DEEP}`, mixed.error?.message);
+  const code = "```\n" + " ".repeat(60) + "code\n```";
+  check("nesting: indent in fenced code is kept", limitNesting(code) === code);
+  check("nesting: limits", limitNesting(" ".repeat(60) + "- x") === " ".repeat(MAX_INDENT) + "- x" && limitNesting(">".repeat(30) + " q") === ">".repeat(MAX_QUOTE_DEPTH) + " q" && limitNesting("> > - a") === "> > - a");
+}
 
 const md = `# Release notes
 

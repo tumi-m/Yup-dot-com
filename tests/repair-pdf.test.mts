@@ -46,7 +46,7 @@ try {
   canvasMod = null;
 }
 
-const { repairPdf, repairLines, pageList, NEEDS_UNLOCK } = await import("../lib/pdf/repair/index.ts");
+const { repairPdf, repairLines, pageList, originalNumbers, NEEDS_UNLOCK } = await import("../lib/pdf/repair/index.ts");
 const { salvage } = await import("../lib/pdf/repair/salvage.ts");
 const { inflateUpToDamage } = await import("../lib/pdf/repair/rebuild.ts");
 
@@ -265,6 +265,14 @@ const offsetOf = (bytes: Uint8Array, find: string) => asText(bytes).indexOf(find
   check("a page missing from the tree: the other 3 come back", m.read.pages === 3 && sameText(m.read, [1, 2, 4].map(pageText)), m.read.text);
   check("a page missing: the report says 3 of 4", m.lines[0] === "Recovered 3 of 4 pages.", m.lines);
 
+  check("a page missing: the report names it", m.lines.includes("Page 3 of the original couldn't be read and is left out."), m.lines);
+
+  // Every page is there and only /Count is wrong: nothing was lost, and the report doesn't say so.
+  for (const n of [5, 99999]) {
+    const c = await repaired(edit(plain, "/Count 4", `/Count ${n}`));
+    check(`count says ${n}, all 4 pages there: all recovered, the count corrected`, c.read.pages === 4 && c.lines[0] === "Recovered all 4 pages." && c.lines.some((l) => /^Fixed: .*corrected its page count\.$/.test(l)) && !c.lines.some((l) => / of \d+ pages|left out/.test(l)), c.lines);
+  }
+
   // Inherited size, rotation and resources from the tree survive the rebuild.
   const inherited = writePdf([
     { num: 1, body: "<< /Type /Catalog /Pages 2 0 R >>" },
@@ -299,6 +307,7 @@ for (const flate of [false, true]) {
   check(`cut off inside page 4's content (${kind}): 4 pages, the 4th marked as cut off`, mid.read.pages === 4 && mid.report.partial.join() === "4", { pages: mid.read.pages, partial: mid.report.partial, lines: mid.lines });
   check(`cut off inside page 4's content (${kind}): the report says so`, mid.lines.some((l) => /^Page 4 was cut off/.test(l)), mid.lines);
 
+  check(`cut off after page 3 (${kind}): every page lost is named`, a.lines.includes("Pages 4–6 of the original couldn't be read and are left out."), a.lines);
   check(`cut off after page 3 (${kind}): the report warns that what was kept at the end may be gone`, a.lines.some((l) => /The end of the file was missing/.test(l)), a.lines);
 
   // In the index, after every object: nothing is lost, and the report doesn't say so.
@@ -314,6 +323,17 @@ for (const flate of [false, true]) {
   const early = await settle(repair(file.slice(0, offsetOf(file, "4 0 obj") + 5)));
   check(`cut off before any page (${kind}): nothing recovered, said plainly`, !early.value && /Nothing in this file could be recovered|too damaged/.test(early.error?.message ?? ""), early.error?.message);
 }
+
+// A good 3-page file cut to 60%: page 1 whole, page 2 cut off, page 3 never arrived.
+{
+  const file = writePdf(layoutObjects({ pages: 3, pageExtra: () => " /Annots []", contentExtra: (n) => (n === 2 ? "q 1 0 0 1 0 0 cm Q\n".repeat(40) : "") }));
+  const t = await repaired(file.slice(0, Math.floor(file.length * 0.6)));
+  const named = new Set<number>([...t.report.lost]);
+  check("cut to 60%: every page of the original is either kept or named as left out", t.report.pages + named.size === 3 && t.report.of === 3, { report: t.report, lines: t.lines });
+}
+check("original numbers: a page lost in the middle", JSON.stringify(originalNumbers(3, [2], 4)) === JSON.stringify({ number: [1, 2, 4], lost: [3] }));
+check("original numbers: a cut-off end", JSON.stringify(originalNumbers(2, [], 5)) === JSON.stringify({ number: [1, 2], lost: [3, 4, 5] }));
+check("original numbers: nothing lost", JSON.stringify(originalNumbers(3, [], 3)) === JSON.stringify({ number: [1, 2, 3], lost: [] }));
 
 // The partial inflate keeps what arrived up to the last whole line.
 {

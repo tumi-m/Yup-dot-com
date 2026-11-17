@@ -32,7 +32,7 @@ import { unpackObjectStreams } from "./object-streams";
 import { stopIfAborted } from "../../abort";
 
 /** What was wrong with the file and fixed: its bytes, its object streams ("objects") or its page list ("pages"). */
-export type Fix = ByteFix | "objects" | "pages";
+export type Fix = ByteFix | "objects" | "pages" | "count";
 
 /** How each page of the repaired file is made: copied as it was, or drawn as a picture. */
 export interface Slot {
@@ -51,13 +51,13 @@ export interface Extras {
 
 export type Rebuilt =
   /** Every page copied as it was: the repaired file is ready. */
-  | { kind: "done"; bytes: Uint8Array; slots: Slot[]; declared: number; fixes: Fix[]; before: Extras; after: Extras }
+  | { kind: "done"; bytes: Uint8Array; slots: Slot[]; declared: number; missing: number[]; fixes: Fix[]; before: Extras; after: Extras }
   /**
    * Some pages need pictures: `render` holds those pages for pdf.js, page
    * `renderPages[k]` (1-based) for the k-th of them; `vector` the whole
    * document, with those pages left empty for the pictures (see splicePictures).
    */
-  | { kind: "pictures"; vector: Uint8Array; render: Uint8Array; renderPages: number[]; slots: Slot[]; declared: number; fixes: Fix[]; before: Extras }
+  | { kind: "pictures"; vector: Uint8Array; render: Uint8Array; renderPages: number[]; slots: Slot[]; declared: number; missing: number[]; fixes: Fix[]; before: Extras }
   /** pdf-lib can't read it (or can't decrypt it): pdf.js gets the salvaged bytes. */
   | { kind: "unread"; bytes: Uint8Array; fixes: Fix[]; encrypted: boolean };
 
@@ -96,12 +96,14 @@ type Inherited = Map<PDFName, PDFObject>;
  * isn't a page is stepped over. A tree that yields nothing is replaced by
  * every page object in the file, in object number order.
  */
-function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; declared: number } {
+function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; countWrong: boolean; declared: number; missing: number[] } {
   const { context } = doc;
   const leaves: Leaf[] = [];
   const seen = new Set<PDFObject>();
   let broken = false;
   let declared = 0;
+  // Where in the page order a kid that couldn't be read sat: a page, or more, lost there.
+  const missing: number[] = [];
 
   const asLeaf = (raw: PDFObject, node: PDFDict, inherited: Inherited) => {
     for (const [key, value] of inherited) if (!node.has(key)) node.set(key, value);
@@ -111,6 +113,8 @@ function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; decl
     const node = raw === undefined ? undefined : context.lookup(raw);
     if (!(node instanceof PDFDict) || seen.has(node) || depth > MAX_DEPTH) {
       broken = true;
+      // A loop or a too-deep tree repeats pages; a kid that isn't there is a page lost.
+      if (!(node instanceof PDFDict) && depth > 0) missing.push(leaves.length);
       return;
     }
     seen.add(node);
@@ -127,7 +131,10 @@ function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; decl
     }
     // A page, or a node that draws like one (some writers leave /Type out).
     if (type === Page || node.has(Contents) || node.has(MediaBox)) asLeaf(raw!, node, inherited);
-    else broken = true;
+    else {
+      broken = true;
+      if (depth > 0) missing.push(leaves.length);
+    }
   };
 
   const catalog = context.lookup(context.trailerInfo.Root);
@@ -136,9 +143,10 @@ function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; decl
   const count = rootNode instanceof PDFDict ? rootNode.lookup(Count) : undefined;
   if (count instanceof PDFNumber && Number.isInteger(count.asNumber()) && count.asNumber() <= 100_000) declared = count.asNumber();
   walk(root, new Map(), 0);
-  if (leaves.length && declared !== leaves.length) broken = true;
+  const countWrong = leaves.length > 0 && declared !== leaves.length;
 
-  if (!leaves.length) {
+  const loose = !leaves.length;
+  if (loose) {
     // No usable tree: every page object there is, with what its parents give it.
     broken = true;
     const orphans = context
@@ -158,8 +166,16 @@ function collectPages(doc: PDFDocument): { leaves: Leaf[]; broken: boolean; decl
       asLeaf(ref, obj as PDFDict, inherited);
     }
   }
-  // The declared count only counts when it is at least what was found.
-  return { leaves, broken, declared: Math.max(declared, leaves.length) };
+  if (missing.length && !loose) {
+    // Some kids weren't there: the count says how many pages they held, when it is at least one each.
+    return { leaves, broken, countWrong, declared: Math.max(declared, leaves.length + missing.length), missing };
+  }
+  if (loose) {
+    // Found by what they are: the count, when it is more than were found, is the best guess at what is gone.
+    return { leaves, broken, countWrong, declared: Math.max(declared, leaves.length), missing: [] };
+  }
+  // Every kid was there (a loop only repeats pages): a wrong count loses nothing.
+  return { leaves, broken, countWrong, declared: leaves.length, missing: [] };
 }
 
 /**
@@ -507,9 +523,10 @@ export async function rebuildPdf(input: Uint8Array, opts: { onProgress?: Progres
     if (!doc || doc.isEncrypted) return unread(true);
   }
 
-  const { leaves, broken, declared } = collectPages(doc);
+  const { leaves, broken, countWrong, declared, missing } = collectPages(doc);
   if (!leaves.length) return unread();
   if (broken) fixes.push("pages");
+  else if (countWrong) fixes.push("count");
   replaceTree(doc, leaves);
   pruneDangling(doc);
   // Fields whose pages were lost go with them.
@@ -561,9 +578,9 @@ export async function rebuildPdf(input: Uint8Array, opts: { onProgress?: Progres
     return unread();
   }
   progress(0.95, "Rebuilding the file…");
-  if (render) return { kind: "pictures", vector, render, renderPages, slots, declared, fixes, before };
+  if (render) return { kind: "pictures", vector, render, renderPages, slots, declared, missing, fixes, before };
   const out = await load(vector);
-  return { kind: "done", bytes: vector, slots, declared, fixes, before, after: extras(out) };
+  return { kind: "done", bytes: vector, slots, declared, missing, fixes, before, after: extras(out) };
 }
 
 /**

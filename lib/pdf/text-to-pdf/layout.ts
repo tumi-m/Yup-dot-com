@@ -67,6 +67,15 @@ export function safeLink(href: string | undefined): string | undefined {
   }
 }
 
+/**
+ * A literal PDF string. pdf-lib writes PDFString.of's text as it is, so a
+ * lone ")" or a trailing "\" in a link would end the string early and break
+ * the file; they are escaped here.
+ */
+export function pdfString(text: string): PDFString {
+  return PDFString.of(text.replace(/[\\()]/g, (c) => `\\${c}`));
+}
+
 type Part = { span: Span; text: string };
 type Atom = { kind: "word" | "space"; parts: Part[] } | { kind: "break"; span: Span };
 
@@ -293,7 +302,7 @@ export class Writer {
       Subtype: "Link",
       Rect: [x, y, x + width, y + height],
       Border: [0, 0, 0],
-      A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+      A: { Type: "Action", S: "URI", URI: pdfString(url) },
     });
     this.page!.node.addAnnot(this.doc.context.register(annot));
   }

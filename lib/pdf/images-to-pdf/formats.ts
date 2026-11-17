@@ -109,3 +109,6 @@ function cssLength(value: string | undefined): number | null {
 /** Said when a browser can't open a HEIC photo (only Safari can). */
 export const HEIC_MESSAGE =
   "this browser can't open HEIC photos. Open this page in Safari, or save the photo as JPG first. On an iPhone, Settings > Camera > Formats > Most Compatible takes new photos as JPG.";
+
+/** A HEIC photo by its name or type, known before it is read. */
+export const looksHeic = (file: { name: string; type: string }) => /\.hei[cf]$/i.test(file.name) || /^image\/hei[cf]/i.test(file.type);

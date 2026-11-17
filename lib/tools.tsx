@@ -89,6 +89,8 @@ export interface ToolMeta {
   badge?: string;
   /** Extra words the tools search matches (never shown). */
   keywords?: string;
+  /** Other names people search it by ("Image to PDF"): ranked as its name is. */
+  aliases?: string[];
 }
 
 export const CATEGORY_LABELS: Record<ToolCategory, string> = {
@@ -226,12 +228,13 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "jpg-to-pdf",
     name: "JPG to PDF",
-    title: "JPG to PDF: convert JPG, PNG, HEIC and other images to PDF",
+    title: "JPG to PDF: convert images and photos to PDF",
     description: "Photos and pictures into one PDF.",
     icon: FileImage,
     category: "convert",
     tint: "bg-orange-100 text-orange-700",
     keywords: "png jpeg image photo picture webp gif bmp tiff avif heic svg",
+    aliases: ["Image to PDF", "Picture to PDF", "Photo to PDF", "JPEG to PDF", "Images to PDF"],
   },
   {
     slug: "png-to-pdf",
@@ -291,7 +294,8 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: LetterText,
     category: "convert",
     tint: "bg-slate-200 text-slate-800",
-    keywords: "text plain notepad log code notes",
+    keywords: "text plain notepad log code notes csv tsv json xml yaml",
+    aliases: ["Text to PDF", "Log to PDF", "CSV to PDF"],
   },
   {
     slug: "markdown-to-pdf",
@@ -302,6 +306,7 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "convert",
     tint: "bg-indigo-100 text-indigo-700",
     keywords: "md readme notes documentation github",
+    aliases: ["MD to PDF"],
   },
   {
     slug: "pdf-to-text",
@@ -649,6 +654,42 @@ export const TOOLS: ToolMeta[] = YOUTUBE_ENABLED ? ALL_TOOLS : ALL_TOOLS.filter(
 
 export function getTool(slug: string): ToolMeta | undefined {
   return TOOLS.find((t) => t.slug === slug);
+}
+
+/**
+ * "More tools" for the pages whose category neighbours aren't the next step:
+ * text and Markdown point at each other, pictures at other picture formats
+ * (not PDF to JPG, the opposite way), Crop at the other page-shape tools.
+ */
+const RELATED: Record<string, string[]> = {
+  "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
+  "markdown-to-pdf": ["txt-to-pdf", "pdf-to-markdown", "pdf-to-text", "merge-pdf"],
+  "jpg-to-pdf": ["png-to-pdf", "heic-to-pdf", "tiff-to-pdf", "compress-pdf"],
+  "png-to-pdf": ["jpg-to-pdf", "webp-to-pdf", "svg-to-pdf", "compress-pdf"],
+  "webp-to-pdf": ["jpg-to-pdf", "png-to-pdf", "svg-to-pdf", "compress-pdf"],
+  "heic-to-pdf": ["jpg-to-pdf", "png-to-pdf", "webp-to-pdf", "compress-pdf"],
+  "tiff-to-pdf": ["jpg-to-pdf", "ocr-pdf", "png-to-pdf", "compress-pdf"],
+  "svg-to-pdf": ["png-to-pdf", "jpg-to-pdf", "webp-to-pdf", "merge-pdf"],
+  "crop-pdf": ["resize-pdf", "rotate-pdf", "organize-pdf", "split-pdf"],
+  "resize-pdf": ["crop-pdf", "rotate-pdf", "organize-pdf", "compress-pdf"],
+  "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
+};
+
+/** Four tools to offer under a tool: its own list, else its category's first, then the most used. */
+export function relatedTools(slug: string): ToolMeta[] {
+  const tool = getTool(slug);
+  if (!tool) return [];
+  const popular = ["merge-pdf", "compress-pdf", "pdf-to-word", "edit-pdf", "ocr-pdf", "sign-pdf"];
+  const picks = [
+    ...(RELATED[slug] ?? []),
+    ...TOOLS.filter((t) => t.category === tool.category).map((t) => t.slug),
+    ...popular,
+  ];
+  return [...new Set(picks)]
+    .filter((s) => s !== slug)
+    .map((s) => getTool(s))
+    .filter((t): t is ToolMeta => !!t)
+    .slice(0, 4);
 }
 
 export const WORKBENCH_TOOLS = TOOLS.filter((t) => !t.editor);

@@ -499,7 +499,8 @@ export async function bakeAnnotations(
               : {
                   Type: "Action",
                   S: "URI",
-                  URI: PDFString.of(ann.url || "https://example.com"),
+                  // pdf-lib writes the text as it is: escaped so a ")" or a backslash in the address can't end the string early.
+                  URI: PDFString.of((ann.url || "https://example.com").replace(/[\\()]/g, (c) => `\\${c}`)),
                 };
           addRawAnnotation(doc, page, {
             Type: "Annot",

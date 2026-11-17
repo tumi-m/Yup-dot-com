@@ -55,9 +55,12 @@ import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
-import { friendlyPdfError } from "@/lib/pdf/errors";
+import { friendlyFileError, friendlyPdfError } from "@/lib/pdf/errors";
+import { ErrorHelp } from "./ErrorHelp";
 import { trackToolUsed } from "@/lib/analytics";
 import { getTool } from "@/lib/tools";
+import { HEIC_MESSAGE, looksHeic } from "@/lib/pdf/images-to-pdf/formats";
+import Link from "next/link";
 
 /** Resize PDF's preview loads with that tool only. */
 const ResizePreview = lazy(() => import("./ResizePreview").then((m) => ({ default: m.ResizePreview })));
@@ -153,6 +156,21 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** Files were just added: scroll them into view once they render. */
   const bringUp = useRef(false);
 
+  /** False once this browser is known not to open HEIC photos (only Safari does). */
+  const [heicOk, setHeicOk] = useState<boolean | null>(null);
+  const takesHeic = takesFile(proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept, { name: "photo.heic", type: "image/heic" });
+  useEffect(() => {
+    if (!takesHeic) return;
+    let live = true;
+    void import("@/lib/pdf/images-to-pdf/heic-check")
+      .then((m) => m.canOpenHeic())
+      .then((ok) => live && setHeicOk(ok))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [takesHeic]);
+
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
     setError(message);
@@ -167,9 +185,17 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   function addFiles(list: FileList | File[] | null): boolean {
     if (!list?.length) return false;
     const takes = proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept;
-    const accepted = Array.from(list).filter((f) => takesFile(takes, f));
-    if (!accepted.length) {
+    const taken = Array.from(list).filter((f) => takesFile(takes, f));
+    if (!taken.length) {
       fail(`That file type isn't supported here.`);
+      return false;
+    }
+    // HEIC photos this browser can't open: said now, not after Cast spell.
+    const heic = heicOk === false ? taken.filter(looksHeic) : [];
+    const heicNote = heic.length ? `${heic[0].name}${heic.length > 1 ? ` and ${heic.length - 1} more` : ""}: ${HEIC_MESSAGE}` : null;
+    const accepted = taken.filter((f) => !heic.includes(f));
+    if (!accepted.length) {
+      fail(heicNote);
       return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
@@ -192,7 +218,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setEntries(next.slice(0, limits.maxBatchFiles));
     setStatus("idle");
     setResults([]);
-    fail(message);
+    fail(heicNote ?? message);
     bringUp.current = true;
     return true;
   }
@@ -302,7 +328,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       if (recordTask(tier === "guest")) nudge.arm();
     } catch (err) {
       if (ctl.signal.aborted) return;
-      fail(friendlyPdfError(err).message);
+      // PDF messages only where PDFs go in: a broken .md isn't "a PDF".
+      fail((proc.accept.includes("pdf") ? friendlyPdfError : friendlyFileError)(err).message);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
       // The work view stays, so nothing else lets go of the room kept for the result.
       flow.release();
@@ -512,6 +539,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           onAnimationStart={(def) => def !== EXIT && flow.release()}
           className="space-y-5"
         >
+          {proc.needs === "heic" && heicOk === false && (
+            <p role="status" className="flex items-start gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-testid="heic-unsupported">
+              <Info aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                This browser can&apos;t open HEIC photos. Open this page in Safari, or save the photos as JPG first and use{" "}
+                <Link href="/tools/jpg-to-pdf" className="font-medium underline underline-offset-2">
+                  JPG to PDF
+                </Link>
+                . On an iPhone, Settings &gt; Camera &gt; Formats &gt; Most Compatible takes new photos as JPG.
+              </span>
+            </p>
+          )}
           <ToolDropzone label={`Drop ${proc.multiple ? "files" : "a file"} here`} onFiles={addFiles}>
             <input
               ref={inputRef}
@@ -691,7 +730,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           )}
 
           <AnimatePresence>
-            {error && <InlineError key="error" message={error} shakeKey={errorKey} />}
+            {error && (
+              <InlineError key="error" message={error} shakeKey={errorKey}>
+                <ErrorHelp message={error} slug={slug} file={entries.find((e) => error.startsWith(`${e.file.name}: `))?.file ?? (entries.length === 1 ? entries[0].file : null)} />
+              </InlineError>
+            )}
           </AnimatePresence>
 
           {/* Action: the Cast button gives way to the progress bar in place. */}

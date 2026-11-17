@@ -35,7 +35,7 @@ try {
 }
 
 const { sniffFormat, svgSize, acceptFor, ALL_FORMATS, HEIC_MESSAGE } = await import("../lib/pdf/images-to-pdf/formats.ts");
-const { sizeSvg, canvasFit, decodeBitmap } = await import("../lib/pdf/images-to-pdf/decode.ts");
+const { sizeSvg, canvasFit, decodeBitmap, dropForeignObjects } = await import("../lib/pdf/images-to-pdf/decode.ts");
 const { tiffDirectories } = await import("../lib/pdf/images-to-pdf/tiff.ts");
 const { imagesToPdf } = await import("../lib/pdf/images-to-pdf/index.ts");
 const { imagesToPdfTool } = await import("../lib/pdf/toolkit.ts");
@@ -207,6 +207,10 @@ function tiff(pages: TiffPage[], little = true): Uint8Array {
   check("svg: no size at all is null", s("") === null);
   const resized = sizeSvg('<svg width="10" height="5" class="x"><g/></svg>', { width: 10, height: 5 }, { width: 400, height: 200 });
   check("svg: drawn at print size with a viewBox added", resized === '<svg width="400" height="200" viewBox="0 0 10 5" class="x"><g/></svg>', resized);
+  // HTML inside an SVG (diagram labels) would make the browser refuse to hand back any pixels.
+  const fo = dropForeignObjects('<svg><rect/><switch><foreignObject x="1" y=\'2\' requiredFeatures="a>b"><div xmlns="http://www.w3.org/1999/xhtml"><svg><foreignObject/><foreignObject><p>in</p></foreignObject></svg>Label</div></foreignObject><text>Label</text></switch><svg:foreignObject/></svg>');
+  check("svg: foreignObject parts go, the fallback text stays", fo === "<svg><rect/><switch><text>Label</text></switch></svg>", fo);
+  check("svg: an SVG without them is untouched", dropForeignObjects('<svg><g id="foreignObjects"/></svg>') === '<svg><g id="foreignObjects"/></svg>');
   const kept = sizeSvg("<svg viewBox='0 0 1 1' width='1in'>", { width: 96, height: 96 }, { width: 4096, height: 4096 });
   check("svg: its own viewBox is kept", kept === `<svg width="4096" height="4096" viewBox='0 0 1 1'>`, kept);
   const big = canvasFit(8000, 6000);
@@ -267,6 +271,20 @@ const multi = tiff([
   const cut = await settle(imagesToPdf([file(multi.slice(0, 12), "cut.tiff")], fit));
   check("tiff: a cut-off file is damaged", cut.error?.message === "cut.tiff: this image looks damaged.", cut.error?.message);
 
+  // Data that isn't in the file: refused, not drawn blank (UTIF reads zeros past the end).
+  const away = tiff([{ width: 5, height: 5, kind: 1, pixel: () => [128] }]);
+  const ai = new DataView(away.buffer).getUint32(4, true);
+  new DataView(away.buffer).setUint32(ai + 2 + 6 * 12 + 8, 999999, true);
+  const gone = await settle(imagesToPdf([file(away, "strip-away.tiff")], fit));
+  check("tiff: strip data past the end of the file is damaged", gone.error?.message === "strip-away.tiff: this image looks damaged.", gone.error?.message);
+  // 49.9 MP claimed with 25 bytes of uncompressed data behind it.
+  const thin = tiff([{ width: 5, height: 5, kind: 1, pixel: () => [128] }]);
+  const ti = new DataView(thin.buffer).getUint32(4, true);
+  new DataView(thin.buffer).setUint32(ti + 2 + 1 * 12 + 8, 7000, true);
+  new DataView(thin.buffer).setUint32(ti + 2 + 2 * 12 + 8, 7128, true);
+  const short = await settle(imagesToPdf([file(thin, "short.tiff")], fit));
+  check("tiff: too little data for the page's size is damaged", short.error?.message === "short.tiff: this image looks damaged.", short.error?.message);
+
   // A 60 MP page is refused before decoding.
   const giant = tiff([{ width: 1, height: 1, kind: 1, pixel: () => [0] }]);
   const gi = new DataView(giant.buffer).getUint32(4, true);
@@ -307,6 +325,15 @@ const frame = (w: number, h: number, rgba: (x: number, y: number) => number[], s
   const out = await imagesToPdf(inputs, fit, (_f, label) => progress.push(label), undefined, fake);
   const got = await sizes(out);
   check("mixed batch: every file in order, a TIFF's three pages among them", got.join() === "80x40,30x10,100x50,40x20,60x30,64x16,16x16", got);
+  // Sizes only an SVG reaches: a fraction of a point, or a hairline a million wide.
+  const odd = async (width: number, height: number) => {
+    const bytes = await imagesToPdf([file(enc('<svg xmlns="http://www.w3.org/2000/svg"/>'), "odd.svg", "image/svg+xml")], fit, undefined, undefined, async () => frame(4, 4, () => [0, 0, 0, 255], { width, height }));
+    return (await PDFDocument.load(bytes)).getPage(0).getSize();
+  };
+  const tiny = await odd(0.001, 0.001);
+  const wide = await odd(1_000_000, 1);
+  check("fit: a picture a fraction of a point across gets the smallest page", tiny.width === 3 && tiny.height === 3, tiny);
+  check("fit: a hairline gets a page at least 3 points tall", wide.width === 14400 && wide.height === 3, wide);
   check("mixed batch: only the formats that need it go to the decoder", asked.join() === "logo.webp:webp,chart.svg:svg,anim.gif:gif", asked);
   check("mixed batch: progress names the image and the TIFF page", progress.includes("Image 4 of 5, page 2 of 3"), progress);
   const imgs = await images(out);
@@ -419,6 +446,15 @@ const frame = (w: number, h: number, rgba: (x: number, y: number) => number[], s
   check("pickers: a PDF tool still takes an untyped .pdf", takesFile("application/pdf", { name: "x.PDF", type: "" }));
   check("pickers: a PDF tool turns a picture away", !takesFile("application/pdf", { name: "x.png", type: "image/png" }));
   check("pickers: video by name when untyped", takesFile("video/mp4,video/quicktime", { name: "clip.MOV", type: "" }));
+  const { looksHeic } = await import("../lib/pdf/images-to-pdf/formats.ts");
+  check("heic: the HEIC page checks the browser before a file is picked", PROCESSORS["heic-to-pdf"].needs === "heic" && !PROCESSORS["jpg-to-pdf"].needs);
+  check("heic: known by name or type before reading", looksHeic({ name: "IMG_1.HEIC", type: "" }) && looksHeic({ name: "x", type: "image/heif" }) && !looksHeic({ name: "a.jpg", type: "image/jpeg" }));
+  {
+    // The sample the check opens is a real HEIC (Safari decodes it; there's no HEIC decoder here).
+    const src = readFileSync("lib/pdf/images-to-pdf/heic-check.ts", "utf8");
+    const sample = Uint8Array.from(Buffer.from(/SAMPLE =\s*"([^"]+)"/.exec(src)![1], "base64"));
+    check("heic: the check's sample reads as HEIC", sniffFormat(sample) === "heic" && sample.length < 600, sample.length);
+  }
   check("pickers: a typed JPEG named oddly is still taken by type", takesFile("image/jpeg,image/png", { name: "download", type: "image/jpeg" }));
 }
 

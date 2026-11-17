@@ -36,6 +36,8 @@ export type Decoder = (bytes: Uint8Array, format: ImageFormat, name: string, wan
 
 const A4 = { w: 595.28, h: 841.89 };
 const MAX_PAGE_PT = 14400;
+/** PDF's smallest page side: viewers may refuse a page smaller than 3 units. */
+const MIN_PAGE_PT = 3;
 
 export const UNSUPPORTED = "use a JPG, PNG, WebP, GIF, BMP, TIFF, AVIF, HEIC or SVG image.";
 
@@ -54,11 +56,14 @@ function layout(opts: ImagesToPdfOptions, shown: { width: number; height: number
   let print = 1;
   if (opts.pageSize === "fit") {
     // 1 px = 1 pt, capped at the 200-inch page limit PDF viewers enforce.
-    const scale = Math.min(1, (MAX_PAGE_PT - margin * 2) / Math.max(shown.width, shown.height));
+    // An SVG sized in fractions of a pixel is scaled up to the smallest page.
+    const long = Math.max(shown.width, shown.height);
+    const scale = Math.min(Math.max(1, MIN_PAGE_PT / long), (MAX_PAGE_PT - margin * 2) / long);
     const w = shown.width * scale;
     const h = shown.height * scale;
-    size = [w + margin * 2, h + margin * 2];
-    rect = { x: margin, y: margin, width: w, height: h };
+    // A hairline (1,000,000 x 1) still gets a page a viewer will open, the line across its middle.
+    size = [Math.max(MIN_PAGE_PT, w + margin * 2), Math.max(MIN_PAGE_PT, h + margin * 2)];
+    rect = { x: (size[0] - w) / 2, y: (size[1] - h) / 2, width: w, height: h };
     // At 1 pt per pixel a phone photo makes a 42-inch page, which no one
     // prints or views at that size: size it for A4 paper instead.
     print = Math.min(1, A4.h / Math.max(w, h));

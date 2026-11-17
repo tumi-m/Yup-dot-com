@@ -106,7 +106,7 @@ export const CONVERT_COPY: Record<string, ConvertCopy> = {
       },
       {
         q: "Why does my SVG look different?",
-        a: "Fonts it names must be installed on your device, and pictures or styles it loads from the web aren't fetched. Scripts in an SVG never run.",
+        a: "Fonts it names must be installed on your device, and pictures or styles it loads from the web aren't fetched. Labels written as HTML inside it, as some diagram apps do, are left out, with their plain-text stand-in drawn if the file has one. Scripts in an SVG never run.",
       },
       ...IMAGE_FAQ,
     ],

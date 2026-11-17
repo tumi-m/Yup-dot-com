@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { getTool, TOOLS } from "@/lib/tools";
+import { getTool, relatedTools } from "@/lib/tools";
 import { Reveal } from "@/components/motion/primitives";
 import { cn } from "@/lib/utils";
 
@@ -29,14 +29,9 @@ export function ToolHeader({ slug }: { slug: string }) {
   );
 }
 
-/** Same-category tools first, then the most-used ones, excluding this tool. */
+/** The tool's own next steps, or same-category tools, then the most-used ones (lib/tools relatedTools). */
 export function RelatedTools({ slug }: { slug: string }) {
-  const tool = getTool(slug)!;
-  const popular = ["merge-pdf", "compress-pdf", "pdf-to-word", "edit-pdf", "ocr-pdf", "sign-pdf"];
-  const related = [
-    ...TOOLS.filter((t) => t.category === tool.category && t.slug !== slug),
-    ...popular.map((s) => getTool(s)!).filter((t) => t && t.slug !== slug && t.category !== tool.category),
-  ].slice(0, 4);
+  const related = relatedTools(slug);
 
   return (
     <section className="mt-20">

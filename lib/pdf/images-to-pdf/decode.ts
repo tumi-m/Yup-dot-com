@@ -111,7 +111,7 @@ export async function decodeSvg(bytes: Uint8Array, name: string): Promise<Frame>
   const long = Math.max(own.width, own.height);
   const scale = Math.min(4096 / long, Math.max(3508 / long, 300 / 72));
   const raster = canvasFit(Math.max(1, Math.round(own.width * scale)), Math.max(1, Math.round(own.height * scale)));
-  const sized = sizeSvg(text, own, raster);
+  const sized = sizeSvg(dropForeignObjects(text), own, raster);
   const url = URL.createObjectURL(new Blob([sized], { type: "image/svg+xml" }));
   try {
     const img = new Image();
@@ -121,10 +121,44 @@ export async function decodeSvg(bytes: Uint8Array, name: string): Promise<Frame>
     } catch {
       throw new Error(`${name}: this SVG couldn't be drawn. Check that it opens in a browser.`);
     }
-    return { pixels: readPixels(img, raster.width, raster.height), width: own.width, height: own.height, orientation: 1 };
+    try {
+      return { pixels: readPixels(img, raster.width, raster.height), width: own.width, height: own.height, orientation: 1 };
+    } catch (err) {
+      // The browser won't hand back pixels it thinks came from elsewhere.
+      if ((err as { name?: string })?.name === "SecurityError") throw new Error(`${name}: ${SVG_HTML}`);
+      throw err;
+    }
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+export const SVG_HTML = "this SVG holds web page content that can't be drawn into a PDF. Export it from your drawing app as plain SVG, PNG or PDF instead.";
+
+/**
+ * The SVG without its <foreignObject> parts (HTML inside the drawing, as
+ * diagram apps write their labels): a browser won't let a page read back the
+ * pixels of an SVG holding one, so the whole picture would fail. Inside a
+ * <switch> the plain-SVG fallback next to it is drawn instead, as intended.
+ */
+export function dropForeignObjects(text: string): string {
+  const tag = /<(\/?)(?:[\w.-]+:)?foreignObject\b(?:"[^"]*"|'[^']*'|[^'">])*?(\/?)>/gi;
+  let out = "";
+  let from = 0;
+  let depth = 0;
+  for (const m of text.matchAll(tag)) {
+    const [all, close, self] = m;
+    const at = m.index!;
+    if (close) {
+      if (depth && !--depth) from = at + all.length;
+    } else if (!depth) {
+      out += text.slice(from, at);
+      if (self) from = at + all.length;
+      else depth = 1;
+    } else if (!self) depth++;
+  }
+  // One left open: the file isn't well-formed, and a browser can't draw it either way.
+  return depth ? text : out + text.slice(from);
 }
 
 /** The SVG with its root's width and height set to `to`, and a viewBox so its drawing scales with them. */

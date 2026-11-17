@@ -48,6 +48,8 @@ export interface ToolProcessor {
   reportsSizeChange?: boolean;
   /** A long job that stops on ctx.signal: offer Cancel while it runs. */
   cancellable?: boolean;
+  /** A decoder the browser must have: without it the page says so before any file is picked. */
+  needs?: "heic";
   /** Shows the result for the chosen options before the spell is cast. */
   preview?: "resize";
   /**
@@ -402,7 +404,8 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
   "jpg-to-pdf": imageTool(ALL_FORMATS),
   "png-to-pdf": imageTool(["png"]),
   "webp-to-pdf": imageTool(["webp"]),
-  "heic-to-pdf": { ...imageTool(["heic"]), note: "Safari opens HEIC photos. In other browsers, save them as JPG first." },
+  // Only Safari opens HEIC: the page checks when it opens and says so before a file is picked.
+  "heic-to-pdf": { ...imageTool(["heic"]), needs: "heic" },
   "tiff-to-pdf": imageTool(["tiff"]),
   "svg-to-pdf": { ...imageTool(["svg"]), note: "Each SVG becomes a picture sharp enough to print." },
   "txt-to-pdf": textTool(false),

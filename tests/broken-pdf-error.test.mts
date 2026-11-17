@@ -1,7 +1,7 @@
 // A file with a PDF header but no document after it must get the plain
 // "isn't a readable PDF" message, never a raw TypeError.
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
+import { friendlyFileError, friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
 import { mergeTool, pageNumbersTool, rotateTool, splitTool, watermarkTool } from "../lib/pdf/toolkit.ts";
 
 let pass = 0;
@@ -60,6 +60,17 @@ check(
   friendlyPdfError(Object.assign(new Error("Pages tree contains circular reference."), { name: "UnknownErrorException" })).message === UNREADABLE_MESSAGE
 );
 check("our own messages still pass through", friendlyPdfError(new Error("Pick pages between 1 and 5.")).message === "Pick pages between 1 and 5.");
+
+// Tools that take pictures or text never say "isn't a readable PDF".
+check("file tools keep their own messages", friendlyFileError(new Error("notes.md: this file is nested too deeply to lay out.")).message === "notes.md: this file is nested too deeply to lay out.");
+check("file tools: a bare library error is said plainly, not as a PDF", !/PDF/.test(friendlyFileError(new RangeError("Maximum call stack size exceeded")).message) && !/Cannot read/.test(friendlyFileError(new TypeError("Cannot read properties of undefined")).message));
+
+// After the message, a link to the tool that can help: never to the page that failed.
+const { helpFor } = await import("../components/tools/error-help.ts");
+check("an unreadable PDF points at Repair PDF", helpFor(`a.pdf: ${UNREADABLE_MESSAGE}`, "crop-pdf")?.slug === "repair-pdf" && helpFor(UNREADABLE_MESSAGE, "merge-pdf")?.label === "Try Repair PDF");
+check("Repair PDF doesn't point at itself", helpFor(UNREADABLE_MESSAGE, "repair-pdf") === null);
+check("a locked PDF points at Unlock PDF, from Repair too", helpFor("This PDF is password-protected. Unlock it first.", "crop-pdf")?.slug === "unlock-pdf" && helpFor("This PDF is password-protected. Unlock it first, then repair it.", "repair-pdf")?.slug === "unlock-pdf" && helpFor("This PDF is password-protected. Unlock it first.", "unlock-pdf") === null);
+check("other messages get no link", helpFor("Pick pages between 1 and 5.", "split-pdf") === null && helpFor(null, "split-pdf") === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

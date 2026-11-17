@@ -82,7 +82,7 @@ check("pro: nothing turned away", takePdfs("pro", [], [a, big], false).tooBig.le
 // iPhone photos, WebP, TIFF and SVG are pictures too, handed over with their own type.
 const heic = { name: "IMG_0001.HEIC", type: "" };
 const svg = { name: "logo.svg", type: "image/svg+xml" };
-check("HEIC with no type: JPG to PDF", heroActions("pdf", [heic]) === IMAGE_ACTIONS);
+check("HEIC with no type: HEIC to PDF, which says up front if the browser can't open it", heroActions("pdf", [heic]).join() === "heic-to-pdf");
 check("mixed picture formats: JPG to PDF", heroActions("pdf", [jpg, svg, { name: "a.webp", type: "image/webp" }, { name: "fax.tif", type: "" }]) === IMAGE_ACTIONS);
 check("handoff: an untyped HEIC goes as image/heic", handoffType(heic) === "image/heic", handoffType(heic));
 check("handoff: an untyped TIFF goes as image/tiff", handoffType({ name: "scan.TIFF", type: "" }) === "image/tiff");

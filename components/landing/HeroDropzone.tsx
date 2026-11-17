@@ -17,7 +17,7 @@ import { acceptFor, ALL_FORMATS } from "@/lib/pdf/images-to-pdf/formats";
 import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL, tooBigFor } from "./hero-actions";
 
 const ACCEPT = {
-  pdf: `application/pdf,${acceptFor(ALL_FORMATS)}`,
+  pdf: `application/pdf,${acceptFor(ALL_FORMATS)},text/plain,text/markdown,.txt,.md,.markdown`,
   pptx: `.pptx,${PPTX_TYPE}`,
 };
 
@@ -311,7 +311,7 @@ export function HeroDropzone({
           )}
           {!held.length && actions === MIXED_ACTIONS && (
             <p role="status" className="mt-3 text-center text-sm text-muted-foreground">
-              PDFs and images go to different tools. Pick one kind.
+              PDFs, images and text files go to different tools. Pick one kind.
             </p>
           )}
           <AnimatePresence>

@@ -37,6 +37,7 @@ import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { friendlyPdfError } from "@/lib/pdf/errors";
+import { ErrorHelp } from "./ErrorHelp";
 import { DRAWN_AT_ONCE, NEAR_MARGIN, taskLimiter } from "@/lib/editor/thumbnails";
 import { useHistory } from "@/lib/editor/history";
 import type { LoadedPdf } from "@/lib/pdf/render";
@@ -121,6 +122,8 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   /** Read out after a page action. */
   const [note, setNote] = useState("");
+  /** The file that wouldn't open, for the link to a tool that can help. */
+  const [failedFile, setFailedFile] = useState<File | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
   const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose">();
@@ -195,6 +198,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     history.reset([]);
     setResult(null);
     fail(null);
+    setFailedFile(null);
     setStatus("reading");
     try {
       const loaded = await readPdf(picked);
@@ -219,6 +223,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
       if (hadFocus) focusPage(first[0]?.id);
     } catch (err) {
       if (id !== opened.current) return;
+      setFailedFile(picked);
       fail(friendlyPdfError(err).message);
       if (hadFocus) focusNext.current = "choose";
       setStatus("idle");
@@ -250,6 +255,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     try {
       for (const file of files) {
         const loaded = await readPdf(file).catch((err) => {
+          setFailedFile(file);
           throw friendlyPdfError(err, file.name);
         });
         if (id !== opened.current) {
@@ -888,7 +894,13 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                 </motion.div>
               )}
 
-              <AnimatePresence>{error && <InlineError key="error" message={error} shakeKey={errorKey} />}</AnimatePresence>
+              <AnimatePresence>
+                {error && (
+                  <InlineError key="error" message={error} shakeKey={errorKey}>
+                    <ErrorHelp message={error} slug={slug} file={failedFile ?? sources[0]?.file} />
+                  </InlineError>
+                )}
+              </AnimatePresence>
 
               {sources.length > 0 && (
                 <motion.div initial={ENTER.initial} animate={ENTER.animate} exit={FADE_EXIT} className="relative flex flex-col items-center gap-3">

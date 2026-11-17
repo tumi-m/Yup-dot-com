@@ -21,7 +21,8 @@ import { NothingRecoveredError, type Extras, type Fix } from "./rebuild";
 export { NothingRecoveredError } from "./rebuild";
 export { NotAPdfError } from "./salvage";
 
-export const NEEDS_UNLOCK = "This PDF is password-protected. Unlock it with Unlock PDF first, then repair it.";
+// The page links to Unlock PDF after it (components/tools/error-help.ts).
+export const NEEDS_UNLOCK = "This PDF is password-protected. Unlock it first, then repair it.";
 const TOO_MANY = "This file has too many damaged pages to draw again in a browser tab.";
 
 export interface RepairReport {
@@ -78,6 +79,30 @@ async function pictures(loaded: LoadedPdf, pages: number[], opts: RepairOptions,
   }
 }
 
+/**
+ * Each found page's number in the original, and the original's pages that
+ * weren't found at all. `missing` says where among the found pages a page
+ * that couldn't be read sat; pages the count says there were beyond those
+ * are put with the last of them (a lost part of the tree holds several), or
+ * at the end, where a cut-off file loses them.
+ */
+export function originalNumbers(found: number, missing: number[], declared: number): { number: number[]; lost: number[] } {
+  const gaps = missing.length ? missing : declared > found ? [found] : [];
+  const extra = Math.max(0, declared - found - gaps.length);
+  const number: number[] = [];
+  const lost: number[] = [];
+  let n = 0;
+  let g = 0;
+  for (let i = 0; i <= found; i++) {
+    for (; g < gaps.length && gaps[g] <= i; g++) {
+      const size = 1 + (g === gaps.length - 1 ? extra : 0);
+      for (let k = 0; k < size; k++) lost.push(++n);
+    }
+    if (i < found) number.push(++n);
+  }
+  return { number, lost };
+}
+
 export async function repairPdf(file: Blob, opts: RepairOptions = {}): Promise<{ bytes: Uint8Array; report: RepairReport }> {
   const { signal } = opts;
   const progress = opts.progress ?? (() => {});
@@ -86,6 +111,7 @@ export async function repairPdf(file: Blob, opts: RepairOptions = {}): Promise<{
 
   if (rebuilt.kind === "done") {
     const pages = rebuilt.slots.length;
+    const { lost } = originalNumbers(pages, rebuilt.missing, rebuilt.declared);
     return {
       bytes: rebuilt.bytes,
       report: {
@@ -94,7 +120,7 @@ export async function repairPdf(file: Blob, opts: RepairOptions = {}): Promise<{
         pictures: [],
         searchable: [],
         partial: rebuilt.slots.flatMap((s, i) => (s.partial ? [i + 1] : [])),
-        lost: [],
+        lost,
         fixes: rebuilt.fixes,
         before: rebuilt.before,
         after: rebuilt.after,
@@ -141,6 +167,7 @@ export async function repairPdf(file: Blob, opts: RepairOptions = {}): Promise<{
   const empty = bad.filter((i) => !made.has(i));
   const spliced = await spliceFile(rebuilt.vector, drawn.bytes, placed, empty, signal);
 
+  const original = originalNumbers(slots.length, rebuilt.missing, rebuilt.declared);
   // Numbers in the repaired file, where the pages left out are gone.
   const gone = new Set(empty);
   const position = new Map<number, number>();
@@ -153,7 +180,7 @@ export async function repairPdf(file: Blob, opts: RepairOptions = {}): Promise<{
       pictures: placed.map((i) => position.get(i)!),
       searchable: placed.filter((i) => made.get(i)!.text).map((i) => position.get(i)!),
       partial: slots.flatMap((s, i) => (s.partial && position.has(i) ? [position.get(i)!] : [])),
-      lost: empty.map((i) => i + 1),
+      lost: [...original.lost, ...empty.map((i) => original.number[i])].sort((a, b) => a - b),
       fixes: rebuilt.fixes,
       before: rebuilt.before,
       after: spliced.after,
@@ -186,6 +213,7 @@ const FIXED: Record<Exclude<Fix, "end-lost">, string> = {
   index: "rebuilt its broken index",
   objects: "recovered objects from a damaged compressed part",
   pages: "rebuilt its page list",
+  count: "corrected its page count",
 };
 
 export interface ReportLine {

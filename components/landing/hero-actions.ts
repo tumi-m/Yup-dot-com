@@ -1,6 +1,6 @@
 /** The tools the homepage offers for the files dropped on it. */
 
-import { fileKind } from "@/lib/journey";
+import { fileKind, MARKDOWN_NAME } from "@/lib/journey";
 import { limitsFor, type Tier } from "@/lib/limits";
 
 export const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -23,6 +23,17 @@ export const PDF_ACTIONS = [
  */
 export const MULTI_ACTIONS = ["merge-pdf"];
 export const IMAGE_ACTIONS = ["jpg-to-pdf"];
+/** Pictures all of one format with a page of its own go there, named for it. */
+const FORMAT_PAGES: [RegExp, string][] = [
+  [/\.png$|^image\/png$/, "png-to-pdf"],
+  [/\.webp$|^image\/webp$/, "webp-to-pdf"],
+  [/\.hei[cf]$|^image\/hei[cf]$/, "heic-to-pdf"],
+  [/\.tiff?$|^image\/tiff$/, "tiff-to-pdf"],
+  [/\.svg$|^image\/svg\+xml$/, "svg-to-pdf"],
+];
+/** A text or Markdown file: one at a time, laid out as pages. */
+export const TEXT_ACTIONS = ["txt-to-pdf", "markdown-to-pdf"];
+export const MARKDOWN_ACTIONS = ["markdown-to-pdf", "txt-to-pdf"];
 /**
  * PDFs and images together: no tool takes both. Merge PDF would drop the
  * images and could be left with one file, so the panel says to pick one kind.
@@ -31,14 +42,20 @@ export const MIXED_ACTIONS: string[] = [];
 export const PPTX_ACTIONS = ["pptx-to-pdf", "edit-pptx"];
 
 /** Tools handed every file; the others get the first. */
-export const TAKES_ALL = ["merge-pdf", "jpg-to-pdf"];
+export const TAKES_ALL = ["merge-pdf", "jpg-to-pdf", ...FORMAT_PAGES.map(([, slug]) => slug)];
 
 export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: string }[]): string[] {
   if (mode === "pptx") return PPTX_ACTIONS;
   // By name too: a photo from a share sheet or a phone picker can come without a type.
   const images = files.filter((f) => fileKind(f) === "image").length;
-  if (files.length > 0 && images === files.length) return IMAGE_ACTIONS;
-  if (images > 0) return MIXED_ACTIONS;
+  const texts = files.filter((f) => fileKind(f) === "text").length;
+  if (files.length > 0 && images === files.length) {
+    const page = FORMAT_PAGES.find(([test]) => files.every((f) => test.test(f.name.toLowerCase()) || test.test(f.type.toLowerCase())));
+    return page ? [page[1]] : IMAGE_ACTIONS;
+  }
+  // The text tools take one file: the first, Markdown or not.
+  if (files.length > 0 && texts === files.length) return MARKDOWN_NAME.test(files[0].name) || /markdown/.test(files[0].type) ? MARKDOWN_ACTIONS : TEXT_ACTIONS;
+  if (images > 0 || texts > 0) return MIXED_ACTIONS;
   return files.length > 1 ? MULTI_ACTIONS : PDF_ACTIONS;
 }
 
@@ -54,6 +71,7 @@ export function handoffType(file: { name: string; type: string }): string {
     const ext = file.name.toLowerCase().match(/\.(\w+)$/)?.[1] ?? "";
     return IMAGE_TYPE_BY_EXT[ext] ?? "image/jpeg";
   }
+  if (kind === "text") return MARKDOWN_NAME.test(file.name) ? "text/markdown" : "text/plain";
   return kind === "pptx" ? PPTX_TYPE : "application/pdf";
 }
 

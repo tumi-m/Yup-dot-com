@@ -65,6 +65,47 @@ export function htmlText(html: string): string {
     .trim();
 }
 
+/** Quotes or lists deeper than this are drawn at this depth. Past it the indent leaves no room for words. */
+export const MAX_QUOTE_DEPTH = 20;
+/** Columns of indent a line keeps: about 20 levels of list. */
+export const MAX_INDENT = 40;
+export const TOO_DEEP = "this file is nested too deeply to lay out.";
+
+/**
+ * Flattens nesting past the limits before the file is read: marked works
+ * through each level again for every level under it, so a few thousand
+ * nested lists take minutes and gigabytes, and a few thousand ">" run it out
+ * of stack. Lines inside fenced code keep their indent.
+ */
+export function limitNesting(source: string): string {
+  let fence = "";
+  return source
+    .split("\n")
+    .map((line) => {
+      const quotes = /^(?: {0,3}>)+/.exec(line)?.[0] ?? "";
+      const rest = line.slice(quotes.length);
+      const mark = /^[ \t]*(`{3,}|~{3,})/.exec(rest)?.[1];
+      if (fence) {
+        if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = "";
+        return line;
+      }
+      if (mark) fence = mark;
+      let depth = 0;
+      let keep = quotes;
+      for (let i = 0; i < quotes.length; i++) {
+        if (quotes[i] === ">" && ++depth === MAX_QUOTE_DEPTH) {
+          keep = quotes.slice(0, i + 1);
+          break;
+        }
+      }
+      const indent = /^[ \t]*/.exec(rest)![0];
+      const wide = expandTabs(indent).length > MAX_INDENT;
+      if (keep === quotes && !wide) return line;
+      return keep + (wide ? " ".repeat(MAX_INDENT) + rest.slice(indent.length) : rest);
+    })
+    .join("\n");
+}
+
 function faceOf(s: Style, heading: boolean): Face {
   const bold = s.bold || heading;
   if (s.code) return bold ? "monoBold" : "mono";
@@ -422,12 +463,16 @@ export async function markdownToPdf(
   if (!source.trim()) throw new Error(`${name}: this file has no text.`);
   const { Lexer } = await import("marked");
   stopIfAborted(signal);
-  const tokens = new Lexer({ gfm: true }).lex(source);
-
   const doc = await PDFDocument.create();
   const book = new FontBook(doc, fonts);
   const builder = new Builder(book, size, mono);
-  builder.blocksOf(tokens, 0, []);
+  try {
+    builder.blocksOf(new Lexer({ gfm: true }).lex(limitNesting(source)), 0, []);
+  } catch (err) {
+    // Nesting the limits don't catch (a list in a quote in a list..., on one line) can still run out of stack.
+    if (err instanceof RangeError) throw new Error(`${name}: ${TOO_DEEP}`);
+    throw err;
+  }
   if (!builder.blocks.length) throw new Error(`${name}: this file has no text.`);
   book.need(PAGE_NUMBER_TEXT, "regular", false);
   onProgress?.(0, "Loading the font");

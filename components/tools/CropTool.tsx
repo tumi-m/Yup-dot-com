@@ -19,6 +19,7 @@ import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { friendlyPdfError } from "@/lib/pdf/errors";
+import { ErrorHelp } from "./ErrorHelp";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import {
   GRIPS,
@@ -177,9 +178,11 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   /** Read out after the box moves from the keyboard. */
   const [note, setNote] = useState("");
+  /** The file that wouldn't open, for the link to a tool that can help. */
+  const [failedFile, setFailedFile] = useState<File | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
-  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose">();
+  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose" | "file">();
   const flow = useHeightLock<HTMLDivElement>();
   /** The running job; aborted on Cancel, on a new file and when the page goes away. */
   const job = useRef<AbortController | null>(null);
@@ -269,6 +272,7 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
     dropSource();
     setResult(null);
     fail(null);
+    setFailedFile(null);
     setStatus("reading");
     try {
       const loaded = await readPdf(picked);
@@ -289,8 +293,12 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
       setScope("all");
       setRangeText("");
       setStatus("ready");
+      // "Choose file" goes once the PDF opens: focus moves to the file it opened, or the news is read out.
+      if (hadFocus) focusNext.current = "file";
+      else say(`${picked.name}, ${plural(loaded.numPages, "page")}.`);
     } catch (err) {
       if (id !== opened.current) return;
+      setFailedFile(picked);
       fail(friendlyPdfError(err).message);
       if (hadFocus) focusNext.current = "choose";
       setStatus("idle");
@@ -574,9 +582,12 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
                 </ToolDropzone>
               ) : (
                 <motion.div
+                  ref={focusRef("file")}
+                  tabIndex={-1}
                   initial={{ opacity: 0, y: -6 }}
                   animate={ENTER.animate}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="crop-file"
                 >
                   <FileIcon className="h-5 w-5 shrink-0 text-primary" aria-hidden />
                   <div className="min-w-0 flex-1">
@@ -646,7 +657,7 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
                               Drag the box or its handles, or draw a new one. Keys: arrows move the box, Alt + arrows resize it, Shift moves
                               10 times further.
                             </span>
-                            <span className="hidden hover-none:inline">Drag the box or its handles, or type the margins below.</span>
+                            <span className="hidden hover-none:inline">Drag the box&apos;s handles, or type the margins below.</span>
                           </>
                         ) : finding ? (
                           "Finding the edges of this page…"
@@ -810,7 +821,13 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
                 </motion.div>
               )}
 
-              <AnimatePresence>{error && <InlineError key="error" message={error} shakeKey={errorKey} />}</AnimatePresence>
+              <AnimatePresence>
+                {error && (
+                  <InlineError key="error" message={error} shakeKey={errorKey}>
+                    <ErrorHelp message={error} slug={slug} file={source?.file ?? failedFile} />
+                  </InlineError>
+                )}
+              </AnimatePresence>
 
               {source && (
                 <motion.div initial={ENTER.initial} animate={ENTER.animate} exit={FADE_EXIT} className="relative flex flex-col items-center gap-3">
@@ -948,10 +965,10 @@ const MAX_HEIGHT = 560;
 
 /**
  * The page shown, drawn by pdf.js, with the box over it: what's outside is
- * dimmed. The box moves with a drag (mouse, pen or touch), its handles
- * resize it, a drag elsewhere on the page draws a new one (mouse and pen:
- * a finger there scrolls the page), and the arrow keys work on it as on the
- * editor's boxes.
+ * dimmed. The box moves with a drag (mouse and pen), its handles resize it
+ * (a finger too), a drag elsewhere on the page draws a new one (mouse and
+ * pen: a finger on the page, in the box or out, scrolls it), and the arrow
+ * keys work on it as on the editor's boxes.
  */
 function CropPreview({
   loaded,
@@ -1026,8 +1043,10 @@ function CropPreview({
   function grab(grip: Grip | "draw") {
     return (e: React.PointerEvent) => {
       if (!editable || !size || (e.pointerType === "mouse" && e.button !== 0)) return;
-      // A finger on the page outside the box scrolls; mouse and pen draw a new box there.
-      if (grip === "draw" && e.pointerType === "touch") return;
+      // A finger on the page scrolls it, inside the box too (it covers most of
+      // a phone's screen): only the handles take a finger. Mouse and pen also
+      // move the box and draw a new one.
+      if ((grip === "draw" || grip === "move") && e.pointerType === "touch") return;
       e.preventDefault();
       e.stopPropagation();
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -1095,7 +1114,7 @@ function CropPreview({
                 className={cn(
                   // An outline inside the box, not a ring: the box's shadow is the dimmed page round it, and the page clips it.
                   "absolute outline-none focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[-6px] focus-visible:outline-ring",
-                  editable ? "pointer-events-auto cursor-move touch-none border-2 border-primary" : "border-2 border-dashed border-primary"
+                  editable ? "pointer-events-auto cursor-move border-2 border-primary" : "border-2 border-dashed border-primary"
                 )}
                 style={{
                   left: box.x * scale,

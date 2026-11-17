@@ -35,7 +35,7 @@ import {
 import { isNavActive } from "../components/nav-utils.ts";
 import { needsScrollIntoView, reservedHeight, RESERVE_MAX, SETTLE_TOP, settleTarget } from "../components/motion/focus.ts";
 import { safeRedirect } from "../components/auth-redirect.ts";
-import { TOOLS } from "../lib/tools.tsx";
+import { relatedTools, TOOLS } from "../lib/tools.tsx";
 
 let pass = 0;
 let total = 0;
@@ -142,6 +142,27 @@ check("search: 'sign' lists Fill & Sign first", found("sign")[0] === "sign-pdf",
 check("search: 'edit' lists the Edit tools first", found("edit").slice(0, 2).join() === "edit-pptx,edit-pdf", found("edit"));
 check("search: 'ppt to pdf' lists PPTX to PDF before PDF to PPTX", found("ppt to pdf").join() === "pptx-to-pdf,pdf-to-pptx", found("ppt to pdf"));
 check("search: 'pdf-to-jpg' lists PDF to JPG first", found("pdf-to-jpg")[0] === "pdf-to-jpg", found("pdf-to-jpg"));
+// Into PDF or out of it: the search's direction wins, by a tool's name or another name it goes by.
+for (const [q, first] of [
+  ["text to pdf", "txt-to-pdf"],
+  ["pdf to text", "pdf-to-text"],
+  ["image to pdf", "jpg-to-pdf"],
+  ["picture to pdf", "jpg-to-pdf"],
+  ["photo to pdf", "jpg-to-pdf"],
+  ["jpeg to pdf", "jpg-to-pdf"],
+  ["pdf to image", "pdf-to-jpg"],
+  ["png to pdf", "png-to-pdf"],
+  ["log to pdf", "txt-to-pdf"],
+  ["csv to pdf", "txt-to-pdf"],
+  ["pdf to csv", "extract-tables"],
+  ["md to pdf", "markdown-to-pdf"],
+]) check(`search: '${q}' lists ${first} first`, found(q)[0] === first, found(q));
+// "More tools": the next steps, not the first four of a crowded category.
+const related = (slug: string) => relatedTools(slug).map((t) => t.slug);
+check("related: TXT and Markdown point at each other", related("txt-to-pdf").includes("markdown-to-pdf") && related("markdown-to-pdf").includes("txt-to-pdf"), [related("txt-to-pdf"), related("markdown-to-pdf")]);
+check("related: picture pages offer other pictures, not PDF to JPG", ["jpg-to-pdf", "png-to-pdf", "webp-to-pdf", "heic-to-pdf", "tiff-to-pdf", "svg-to-pdf"].every((s) => !related(s).includes("pdf-to-jpg") && related(s).some((r) => r.endsWith("-to-pdf"))));
+check("related: Crop offers Resize", related("crop-pdf").includes("resize-pdf"), related("crop-pdf"));
+check("related: always four others, never the tool itself", TOOLS.every((t) => { const r = related(t.slug); return r.length === 4 && !r.includes(t.slug) && new Set(r).size === 4; }));
 check("search: the rest keep catalogue order", found("password").join() === "protect-pdf,unlock-pdf" && found("compress").join() === "compress-pdf,compress-video", [found("password"), found("compress")]);
 check("search: only filler words means no filter", found("to").length === TOOLS.length && found(" the  ").length === TOOLS.length);
 check("search: words start a word, not the middle of one", found("ompress").length === 0);

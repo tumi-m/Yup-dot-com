@@ -141,12 +141,12 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
     const target = choiceForFiles(files);
     if (!target) {
       setPptxError(null);
-      setDropError("Drop a PDF, image or PPTX.");
+      setDropError("Drop a PDF, image, text file or PPTX.");
       return;
     }
     setDropError(null);
     if (target === "pdf") {
-      const picked = files.filter((f) => ["pdf", "image"].includes(fileKind(f)));
+      const picked = files.filter((f) => ["pdf", "image", "text"].includes(fileKind(f)));
       // More files on the PDF branch join the ones there (a second PDF opens
       // Merge); coming from anywhere else starts afresh.
       const next = takePdfs(tier, pdfFiles, picked, choice === "pdf");

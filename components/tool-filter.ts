@@ -51,23 +51,36 @@ function matchesInOrder(query: string[], text: string[]): boolean {
 
 /**
  * Tools in a category whose words cover the search. Tools named by the search
- * come first (in its word order before any order), then the rest as listed.
+ * (by their name or another name they go by) come first, in its word order
+ * before any order: "text to pdf" is TXT to PDF before PDF to Text. Then
+ * tools going the search's way (into PDF or out of it), then those whose
+ * title has its words in its order, then those matching whole words ("log"
+ * before "logo"), each as listed.
  */
 export function filterTools(tools: ToolMeta[], pill: ToolPill, query: string): ToolMeta[] {
   const q = words(query).filter((w) => !FILLER.has(w));
   const inPill = tools.filter((t) => pill === "all" || groupOf(t.category) === pill);
   if (!q.length) return inPill;
-  const ranked: { tool: ToolMeta; rank: number }[] = [];
+  const into = q.length > 1 && q.at(-1) === "pdf";
+  const out = q.length > 1 && q[0] === "pdf";
+  const ranked: { tool: ToolMeta; rank: number; toward: number; titled: number; whole: number }[] = [];
   for (const t of inPill) {
     const text = words(
       `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]} ${CATEGORY_LABELS[groupOf(t.category)]} ${t.keywords ?? ""}`
     );
-    if (!matchesAll(q, text)) continue;
     const name = words(t.name);
-    ranked.push({ tool: t, rank: matchesInOrder(q, name) ? 0 : matchesAll(q, name) ? 1 : 2 });
+    const aliases = (t.aliases ?? []).map(words);
+    if (!matchesAll(q, [...text, ...aliases.flat()])) continue;
+    // Another name counts only in the search's order: "pdf to image" isn't Image to PDF.
+    const rank = matchesInOrder(q, name) || aliases.some((a) => matchesInOrder(q, a)) ? 0 : matchesAll(q, name) ? 1 : 2;
+    // "png to pdf" wants a tool into PDF, "pdf to png" one out of it.
+    const toward = (into && name.at(-1) === "pdf") || (out && name[0] === "pdf") ? 1 : 0;
+    const titled = matchesInOrder(q, words(t.title)) ? 1 : 0;
+    const whole = q.filter((w) => text.includes(w)).length;
+    ranked.push({ tool: t, rank, toward, titled, whole });
   }
   // Array sort is stable, so each rank keeps the catalogue's order.
-  return ranked.sort((a, b) => a.rank - b.rank).map((r) => r.tool);
+  return ranked.sort((a, b) => a.rank - b.rank || b.toward - a.toward || b.titled - a.titled || b.whole - a.whole).map((r) => r.tool);
 }
 
 /** Roving focus in a radio group: arrows wrap, Home and End jump. */
