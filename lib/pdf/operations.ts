@@ -651,11 +651,17 @@ function adoptFields(doc: PDFDocument, src: PDFDocument, pages: PDFPage[], copie
 /**
  * Adds the pages of `others` after `first`'s, with their links, form fields
  * and layers. `first` stays the document: its title, form, bookmarks and
- * named destinations carry over.
+ * named destinations carry over. `others` can be opened one at a time as the
+ * merge reaches them, so only one is held at once.
  */
-export async function mergeDocuments(first: PDFDocument, others: PDFDocument[]): Promise<Uint8Array> {
-  if (others.length) dropXfa(first);
-  for (const src of others) {
+export async function mergeDocuments(
+  first: PDFDocument,
+  others: Iterable<PDFDocument> | AsyncIterable<PDFDocument>
+): Promise<Uint8Array> {
+  let merged = false;
+  for await (const src of others) {
+    if (!merged) dropXfa(first);
+    merged = true;
     const { pages, copier } = copyAllPages(first, src);
     pages.forEach((p) => first.addPage(p));
     adoptFields(first, src, pages, copier);

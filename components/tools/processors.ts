@@ -48,7 +48,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     multiple: true,
     minFiles: 2,
     fields: [],
-    run: async (files) => (await kit()).mergeTool(files),
+    run: async (files, _o, ctx) => (await kit()).mergeTool(files, ctx),
   },
   "split-pdf": {
     cancellable: true,

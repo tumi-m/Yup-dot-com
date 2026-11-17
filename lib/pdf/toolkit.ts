@@ -32,7 +32,8 @@ function hexToRgb(hex: string) {
 }
 
 function pdfBlob(bytes: Uint8Array): Blob {
-  return new Blob([bytes.slice() as unknown as BlobPart], {
+  // No copy: the bytes are the tool's own, and a merge can be hundreds of MB.
+  return new Blob([bytes as unknown as BlobPart], {
     type: "application/pdf",
   });
 }
@@ -118,17 +119,30 @@ export function parseRanges(input: string, pageCount: number): number[][] {
 // ---------------------------------------------------------------------------
 // Merge
 // ---------------------------------------------------------------------------
-export async function mergeTool(files: File[]): Promise<ToolFile> {
-  const docs: PDFDocument[] = [];
-  for (const file of files) {
+export async function mergeTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const n = files.length;
+  /** Opened one at a time as the merge reaches it, so only one source is held at once. */
+  const open = async (file: File) => {
     try {
-      docs.push(await openPdf(await buf(file)));
+      const doc = await openPdf(await buf(file));
+      // A header with no document after it opens, then fails on the first
+      // page lookup: fail here, where the file can be named.
+      doc.getPageCount();
+      return doc;
     } catch (err) {
       throw friendlyPdfError(err, file.name);
     }
+  };
+  async function* rest() {
+    for (let i = 1; i < n; i++) {
+      stopIfAborted(ctx.signal);
+      ctx.progress?.(i / n, `File ${i + 1} of ${n}`);
+      yield await open(files[i]);
+    }
   }
+  ctx.progress?.(0, `File 1 of ${n}`);
   // Built on the first file, so its form, title and bookmarks stay.
-  return { blob: pdfBlob(await mergeDocuments(docs[0], docs.slice(1))), filename: "merged.pdf" };
+  return { blob: pdfBlob(await mergeDocuments(await open(files[0]), rest())), filename: "merged.pdf" };
 }
 
 function pageLabel(pages: number[]): string {
@@ -537,7 +551,17 @@ export async function unlockTool(
 ): Promise<ToolFile> {
   const { unlockPdf, isEncrypted } = await import("./security");
   const bytes = await buf(files[0]);
-  if (!(await isEncrypted(bytes))) {
+  const encrypted = await isEncrypted(bytes).catch((err) => {
+    throw friendlyPdfError(err);
+  });
+  if (!encrypted) {
+    // The encryption check reads only the header and trailer, so a damaged
+    // file would pass as an unprotected one: open it properly first.
+    await openPdf(bytes)
+      .then((d) => d.getPageCount())
+      .catch((err) => {
+        throw friendlyPdfError(err);
+      });
     throw new Error("This PDF isn't password-protected — there's nothing to unlock.");
   }
   let out: Uint8Array;
