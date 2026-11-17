@@ -431,6 +431,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
         <SuccessCard
           key="done"
           className="flex-1"
+          title={sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 ? "Already as small as it gets" : undefined}
           titleRef={focusRef("done")}
           stats={
             <>
@@ -440,7 +441,10 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-muted-foreground">
                 {results.length} file{results.length === 1 ? "" : "s"} ·{" "}
                 {sizeDelta !== null && sizeDelta > 0.01 ? (
-                  <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  <>
+                    {formatBytes(inputBytes)} →{" "}
+                    <CountUp from={inputBytes} to={outputBytes} format={formatBytes} duration={SUCCESS.count} delay={SUCCESS.stats} />
+                  </>
                 ) : (
                   formatBytes(outputBytes)
                 )}
@@ -458,7 +462,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               )}
               {sizeDelta !== null && Math.abs(sizeDelta) <= 0.01 && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-800">
-                  Already optimized
+                  Your file is unchanged
                 </span>
               )}
             </>
