@@ -277,6 +277,14 @@ const words = (r: Awaited<ReturnType<typeof read>>) => r.pages.map((p) => p.text
     (await failure(() => buildPages([rich, garbage], appendSource(planFor(0, 1), 1, 1), { mode: "organize", names: ["a.pdf", "bad.pdf"] }))).includes("bad.pdf"),
     await failure(() => buildPages([rich, garbage], appendSource(planFor(0, 1), 1, 1), { mode: "organize", names: ["a.pdf", "bad.pdf"] }))
   );
+  // A page tree that holds itself: pdf-lib's walk overflows the stack.
+  const loop = new TextEncoder().encode(
+    "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R 2 0 R] /Count 2 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
+  );
+  for (const mode of ["organize", "delete", "extract"] as const) {
+    const said = await failure(() => buildPages([loop], planFor(0, 1), { mode }));
+    check(`${mode}: a page tree that loops says the file isn't readable`, said.includes(UNREADABLE_MESSAGE), said);
+  }
   check("a page that isn't in the file is refused", (await failure(() => buildPages([rich], planFor(0, 9), { mode: "organize" }))).includes("Invalid page order"));
 }
 
@@ -292,8 +300,15 @@ const words = (r: Awaited<ReturnType<typeof read>>) => r.pages.map((p) => p.text
   let plan = reverseItems(planFor(0, 300));
   plan = removeItems(plan, new Set(plan.filter((_, i) => i % 2).map((p) => p.id)));
   const t = performance.now();
-  const out = await buildPages([long], plan, { mode: "organize" });
+  const heard: [number, string][] = [];
+  const out = await buildPages([long], plan, { mode: "organize", onProgress: (f, label) => heard.push([f, label]) });
   const ms = performance.now() - t;
+  // The bar keeps moving while the pages are moved, and says when it is writing the file.
+  check(
+    "300 pages: progress moves on past reading the file",
+    heard.some(([f, label]) => f > 0.4 && f < 0.9 && label === "Arranging pages…") && heard.at(-1)?.[1] === "Saving…" && heard.every(([f], i) => !i || f >= heard[i - 1][0]),
+    heard
+  );
   const doc = await PDFDocument.load(out);
   check("300 pages: reverse and drop every other one", doc.getPageCount() === 150, doc.getPageCount());
   const first = await pdfjs.getDocument({ data: out.slice(), verbosity: 0 }).promise;
@@ -311,7 +326,7 @@ const words = (r: Awaited<ReturnType<typeof read>>) => r.pages.map((p) => p.text
   const file = new File([rich.slice() as unknown as BlobPart], "guide.pdf", { type: "application/pdf" });
   const saved = await buildPagesFile([file], [planFor(0, 5)[2]], "extract", (_f, label) => steps.push(label));
   check("the save runs here when there is no worker", (await PDFDocument.load(saved)).getPageCount() === 1);
-  check("progress names each step", steps.join("|") === "Reading the PDF…|Copying pages…", steps);
+  check("progress names each step", steps.join("|") === "Reading the PDF…|Copying pages…|Saving…", steps);
   check("cancel before the save starts", (await failure(() => buildPagesFile([file], planFor(0, 5), "organize", undefined, stop.signal))).startsWith("AbortError"));
 }
 

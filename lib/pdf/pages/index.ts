@@ -44,19 +44,23 @@ export async function buildPages(sources: Uint8Array[], plan: PlanItem[], opts: 
     }
   }
   stopIfAborted(signal);
-  onProgress?.(0.4, mode === "extract" ? "Copying pages…" : "Arranging pages…");
+  const step = mode === "extract" ? "Copying pages…" : "Arranging pages…";
+  onProgress?.(0.4, step);
+  // Moving the pages takes most of the time on a long file, then the writing.
+  const moved = (f: number) => onProgress?.(f < 1 ? 0.4 + 0.5 * f : 0.9, f < 1 ? step : "Saving…");
   let out: Uint8Array;
   try {
     out =
       mode === "extract"
-        ? await extractFrom(docs[0], plan.map((p) => (p as { page: number }).page))
+        ? await extractFrom(docs[0], plan.map((p) => (p as { page: number }).page), moved)
         : await composePages(
             docs,
             plan.map((p): ComposedPage =>
               p.kind === "blank"
                 ? { blank: { width: p.width, height: p.height }, rotate: p.rotate }
                 : { source: p.source, page: p.page, rotate: p.rotate }
-            )
+            ),
+            moved
           );
   } catch (err) {
     throw friendlyPdfError(err);

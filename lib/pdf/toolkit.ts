@@ -232,6 +232,17 @@ async function rasterCompress(bytes: Uint8Array, quality: number, ctx: ToolConte
 // ---------------------------------------------------------------------------
 export const FLATTEN_DPI = [100, 150, 200, 300];
 
+/** Pages too big to turn into pictures: the highest resolution that would fit, if there is one. */
+export function tooBigToPicture(pixels: number, dpi: number, max: number): string {
+  // Pixels grow with the square of the resolution.
+  const lower = FLATTEN_DPI.filter((d) => d < dpi && pixels * (d / dpi) ** 2 <= max).at(-1);
+  if (lower) return `These pages are too big to turn into pictures at ${dpi} DPI. Pick ${lower} DPI or less.`;
+  if (Number.isNaN(pixels) && dpi > FLATTEN_DPI[0]) {
+    return "These pictures are too big to put in one file here. Pick a lower resolution, or split the PDF first.";
+  }
+  return "These pages are too many to turn into pictures at once. Split the PDF first, or choose Fields and comments.";
+}
+
 export async function flattenTool(
   files: File[],
   opts: { mode: string; dpi: string; text: string },
@@ -256,12 +267,20 @@ export async function flattenTool(
         // Nothing to flatten, or a file only pdf.js reads: the pictures show it all the same.
       }
     }
-    const { pagesAsImages } = await import("./raster");
+    const { pagesAsImages, MAX_PIXELS, TooManyPixelsError } = await import("./raster");
     try {
-      const out = await pagesAsImages(bytes, { scale: dpi / 72, quality: 0.85, keepText, progress: ctx.progress, signal: ctx.signal });
+      const out = await pagesAsImages(bytes, {
+        scale: dpi / 72,
+        quality: 0.85,
+        keepText,
+        progress: ctx.progress,
+        signal: ctx.signal,
+        maxPixels: MAX_PIXELS,
+      });
       return { blob: pdfBlob(out), filename: suffixed(file, "flattened") };
     } catch (err) {
       if (isAbort(err)) throw err;
+      if (err instanceof TooManyPixelsError) throw new Error(tooBigToPicture(err.pixels, dpi, MAX_PIXELS));
       throw friendlyPdfError(err);
     }
   }

@@ -1,5 +1,6 @@
 import { OCR_LANGUAGES } from "@/lib/pdf/ocr-languages";
 import type { ToolContext, ToolFile } from "@/lib/pdf/toolkit";
+import { readOptions } from "@/lib/pdf/resize/geometry";
 
 /** pdf-lib and pdf.js load when a spell is cast, not with the page. */
 const kit = () => import("@/lib/pdf/toolkit");
@@ -45,6 +46,11 @@ export interface ToolProcessor {
   cancellable?: boolean;
   /** Shows the result for the chosen options before the spell is cast. */
   preview?: "resize";
+  /**
+   * What is wrong with the options as they stand, if anything: shown under
+   * the fields it names as they are typed, and the spell waits until it's fixed.
+   */
+  problem?: (options: Record<string, string>) => { fields: string[]; message: string } | null;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -109,6 +115,15 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
   "resize-pdf": {
     cancellable: true,
     preview: "resize",
+    problem: (o) => {
+      if (o.size !== "custom") return null;
+      try {
+        readOptions(o);
+        return null;
+      } catch (err) {
+        return { fields: ["width", "height"], message: (err as Error).message };
+      }
+    },
     accept: "application/pdf",
     multiple: false,
     minFiles: 1,
@@ -148,7 +163,11 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "auto",
         options: [
-          { value: "auto", label: "Keep each page's own" },
+          {
+            value: "auto",
+            label: "Same as each page",
+            hint: "Pages stay upright or sideways as they are, so the width and height may swap.",
+          },
           { value: "portrait", label: "Portrait" },
           { value: "landscape", label: "Landscape" },
         ],
@@ -159,9 +178,9 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
         type: "select",
         default: "fit",
         options: [
-          { value: "fit", label: "Fit inside, keep proportions" },
-          { value: "fill", label: "Fill the page, crop the edges" },
-          { value: "none", label: "Don't scale, centre it" },
+          { value: "fit", label: "Fit inside", hint: "The whole page shows, as big as it fits, in proportion." },
+          { value: "fill", label: "Fill and crop", hint: "The page covers the sheet; what sticks out is cut off." },
+          { value: "none", label: "Don't scale", hint: "The page keeps its size, centred on the sheet." },
         ],
       },
       {
@@ -464,12 +483,12 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
           },
           {
             value: "annotations",
-            label: "Form fields and comments",
+            label: "Fields and comments",
             hint: "Fields, comments and stamps become part of the page; text stays selectable and links still work.",
           },
           {
             value: "images",
-            label: "Everything, as images",
+            label: "Pages as images",
             hint: "Most secure: each page becomes a picture, so nothing on it can be edited, but the file is bigger and text can't be selected.",
           },
         ],

@@ -5,10 +5,13 @@ process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/b
 // size and, when asked, their text. Awkward files: rotated pages, mixed
 // sizes, owner-password and locked files, long documents, broken files.
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import {
   PDFArray,
+  PDFBool,
   PDFDict,
   PDFDocument,
+  PDFHexString,
   PDFName,
   PDFRawStream,
   PDFStream,
@@ -164,6 +167,23 @@ async function objectsOfKind(bytes: Uint8Array, kinds: string[]): Promise<number
   return n;
 }
 
+/** Every object in the file as text, streams inflated, whether anything points at it or not. */
+async function everything(bytes: Uint8Array): Promise<string> {
+  const doc = await PDFDocument.load(bytes);
+  let out = "";
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    out += obj.toString();
+    if (obj instanceof PDFRawStream) {
+      try {
+        out += Buffer.from(inflateSync(obj.contents)).toString("latin1");
+      } catch {
+        out += Buffer.from(obj.contents).toString("latin1");
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------
@@ -268,11 +288,53 @@ const form = await formPdf();
   check("forms: the XFA copy goes with the form", !(await PDFDocument.load(bytes)).catalog.get(PDFName.of("AcroForm")));
 }
 {
+  // What was flattened away must not stay in the file where nothing points at
+  // it: a comment's attached file, the XFA form data, a field's old picture
+  // and the field's value itself (it is only paint on the page now), also
+  // when another field is kept fillable.
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const ctx = doc.context;
+  const f = doc.getForm();
+  const stale = f.createTextField("stale");
+  stale.setText("OLDVALUE");
+  stale.addToPage(page, { x: 50, y: 700, width: 200, height: 24 });
+  stale.acroField.dict.set(PDFName.of("V"), PDFString.of("NEWVALUE"));
+  f.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True);
+  const file = ctx.register(ctx.flateStream("ATTACHSECRET", { Type: "EmbeddedFile" }));
+  const spec = ctx.register(ctx.obj({ Type: "Filespec", F: PDFString.of("a.txt"), EF: { F: file } }));
+  addAnnot(doc, 0, { Type: "Annot", Subtype: "FileAttachment", Rect: [300, 700, 320, 720], FS: spec, AP: { N: appearance(doc, "0 0 1 rg 0 0 20 20 re f", [0, 0, 20, 20]) } });
+  const datasets = ctx.register(ctx.stream("<xfa:datasets><name>XFASECRET</name></xfa:datasets>"));
+  f.acroForm.dict.set(PDFName.of("XFA"), ctx.obj([PDFString.of("datasets"), datasets]));
+  const withAll = await doc.save({ updateFieldAppearances: false });
+
+  const kept = await PDFDocument.load(withAll);
+  const greek = kept.getForm().createTextField("greek");
+  greek.addToPage(kept.getPage(0), { x: 50, y: 600, width: 200, height: 24 });
+  greek.acroField.dict.set(PDFName.of("V"), PDFHexString.fromText("Καλημέρα"));
+  const withKept = await kept.save({ updateFieldAppearances: false });
+
+  for (const [label, input, scope] of [
+    ["fields and comments", withAll, "annotations"],
+    ["fields only", withAll, "forms"],
+    ["one field kept fillable", withKept, "annotations"],
+  ] as const) {
+    const { bytes } = await flattenPdf(input, scope);
+    const all = await everything(bytes);
+    // Appearances write text as hex strings, so look for both spellings.
+    const hex = all.toUpperCase();
+    const found = (m: string) => all.includes(m) || hex.includes(Buffer.from(m).toString("hex").toUpperCase());
+    const gone = ["OLDVALUE", "(NEWVALUE)", "XFASECRET", ...(scope === "annotations" ? ["ATTACHSECRET"] : [])].filter(found);
+    check(`${label}: nothing removed stays hidden in the file`, gone.length === 0, gone);
+    check(`${label}: the current value is what shows`, /NEWVALUE/.test(await textOf(bytes)));
+  }
+}
+{
   const annotated = await annotatedPdf();
   const r = await settle(flattenPdf(annotated, "forms"));
   check(
     "forms: a file with only comments says how to flatten them",
-    r.error instanceof NothingToFlattenError && /choose Form fields and comments/.test(r.error.message),
+    r.error instanceof NothingToFlattenError && /choose Fields and comments/.test(r.error.message),
     r.error?.message
   );
   const plain = await (async () => {
@@ -281,7 +343,7 @@ const form = await formPdf();
     return d.save();
   })();
   const p = await settle(flattenPdf(plain, "annotations"));
-  check("a file with nothing to flatten says so", p.error instanceof NothingToFlattenError && /no form fields or comments/.test(p.error.message), p.error?.message);
+  check("a file with nothing to flatten says so", p.error instanceof NothingToFlattenError && /no form fields or comments/.test(p.error.message) && /choose Pages as images\./.test(p.error.message), p.error?.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +527,20 @@ if (!canvasMod) {
   );
   const r = await run;
   check("images: cancel stops between pages", r.error?.name === "AbortError" && !labels.includes("Page 5 of 12"), [r.error?.name, labels]);
+
+  // Too many pictures to hold at once: refused before any page is drawn, with a resolution that fits.
+  const big = await PDFDocument.create();
+  for (let i = 0; i < 200; i++) big.addPage([595, 842]);
+  const bigBytes = await big.save();
+  const drawn: string[] = [];
+  const tooBig = await settle(flattenTool([pdfFile(bigBytes)], { mode: "images", dpi: "300", text: "" }, { progress: (_f, label) => drawn.push(label) }));
+  check("images: too many pixels is refused, pointing at a lower resolution", /Pick 200 DPI or less\./.test(tooBig.error?.message ?? ""), tooBig.error?.message);
+  check("images: refused before drawing anything", drawn.length === 0, drawn);
+  const { tooBigToPicture } = await import("../lib/pdf/toolkit.ts");
+  check("images: when no resolution fits, says to split", /Split the PDF first/.test(tooBigToPicture(20_000 * 1e6, 100, 1e9)));
+  const zero = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
+  const none = await settle(flattenTool([pdfFile(zero)], { mode: "images", dpi: "150", text: "" }));
+  check("images: a PDF with no pages says so, and makes no blank page", none.error?.message === "This PDF has no pages.", none.error?.message);
 
   // Owner password only: pdf.js opens it without one.
   const d = await SecurePDFDocument.load(form);

@@ -25,6 +25,24 @@ export interface RasterOptions {
   canvas?: () => HTMLCanvasElement;
   progress?: (fraction: number, label: string) => void;
   signal?: AbortSignal;
+  /**
+   * Refuses work that would hold more than this many pixels of pictures, or
+   * MAX_JPEG_BYTES of them, before anything is drawn: every page's picture
+   * stays in memory until the file is written, and a phone tab runs out.
+   */
+  maxPixels?: number;
+}
+
+/** About 115 A4 pages at 300 DPI, 460 at 150 DPI. */
+export const MAX_PIXELS = 1_000_000_000;
+/** The pictures themselves, as they are made: a busy page compresses far less than a page of text. */
+export const MAX_JPEG_BYTES = 400 * 1024 * 1024;
+
+/** The pictures would be too big to build here; `pixels` is how many there would be (NaN: they compress too little). */
+export class TooManyPixelsError extends Error {
+  constructor(readonly pixels: number) {
+    super("These pages are too big to turn into pictures here.");
+  }
 }
 
 /** A turn for the page between pages, so progress paints and Cancel is heard. */
@@ -35,7 +53,19 @@ export async function pagesAsImages(bytes: Uint8Array, opts: RasterOptions): Pro
   const out = await PDFDocument.create();
   let font: PDFFont | undefined;
   const makeCanvas = opts.canvas ?? (() => document.createElement("canvas"));
+  let made = 0;
   try {
+    if (!loaded.numPages) throw new Error("This PDF has no pages.");
+    if (opts.maxPixels) {
+      // Page sizes only, which pdf.js reads without drawing; stops as soon as it is too much.
+      let pixels = 0;
+      for (let i = 1; i <= loaded.numPages; i++) {
+        stopIfAborted(opts.signal);
+        const vp = await loaded.getPageViewport(i, opts.scale);
+        pixels += vp.width * vp.height;
+        if (pixels > opts.maxPixels) throw new TooManyPixelsError((pixels / i) * loaded.numPages);
+      }
+    }
     for (let i = 1; i <= loaded.numPages; i++) {
       stopIfAborted(opts.signal);
       opts.progress?.((i - 1) / loaded.numPages, `Page ${i} of ${loaded.numPages}`);
@@ -49,6 +79,8 @@ export async function pagesAsImages(bytes: Uint8Array, opts: RasterOptions): Pro
         canvas.width = canvas.height = 0; // release the bitmap now, not at GC time
       }
       stopIfAborted(opts.signal);
+      made += jpeg.length;
+      if (opts.maxPixels && made > MAX_JPEG_BYTES) throw new TooManyPixelsError(NaN);
       const img = await out.embedJpg(jpeg);
       // The displayed size: a page turned by /Rotate comes out upright.
       const page = out.addPage([vp.baseWidth, vp.baseHeight]);
@@ -75,5 +107,6 @@ export async function pagesAsImages(bytes: Uint8Array, opts: RasterOptions): Pro
   } finally {
     loaded.destroy();
   }
-  return out.save();
+  // pdf-lib adds a blank page to a document with none; this one always has its own.
+  return out.save({ addDefaultPage: false });
 }

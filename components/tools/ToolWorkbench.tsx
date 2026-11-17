@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { downloadBlob } from "@/lib/download";
-import { formatBytes } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import type { ToolFile } from "@/lib/pdf/toolkit";
 import {
   CountUp,
@@ -255,7 +255,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   function setOption(key: string, value: string) {
     setOptions((prev) => ({ ...prev, [key]: value }));
+    // A message about the old options would stay after they were fixed.
+    setError(null);
   }
+
+  /** What is wrong with the options, shown under their fields as they change. */
+  const problem = proc.problem?.(options) ?? null;
 
   function visibleFields(): ToolField[] {
     return proc.fields.filter((f) => !f.showIf || options[f.showIf.key] === f.showIf.value);
@@ -264,6 +269,11 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   async function run() {
     if (files.length < proc.minFiles) {
       fail(`Please add at least ${proc.minFiles} file${proc.minFiles > 1 ? "s" : ""}.`);
+      return;
+    }
+    if (problem) {
+      // Said under the field already: take the person there.
+      flow.ref.current?.querySelector<HTMLElement>(`#opt-${problem.fields[0]}`)?.focus();
       return;
     }
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
@@ -554,7 +564,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               >
                 {visibleFields().map((field) => {
                   const hint = fieldHint(field, options[field.key]);
-                  const hintId = hint ? `opt-${field.key}-hint` : undefined;
+                  const invalid = !!problem?.fields.includes(field.key);
+                  const hintId = [hint && `opt-${field.key}-hint`, invalid && "opt-problem"].filter(Boolean).join(" ") || undefined;
                   return (
                   <div key={field.key} className={field.wide ? "sm:col-span-2" : undefined}>
                     {field.type === "checkbox" ? (
@@ -596,7 +607,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         inputMode={field.inputMode}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
-                        className="pointer-coarse:h-11"
+                        aria-invalid={invalid || undefined}
+                        aria-describedby={hintId}
+                        className={cn("pointer-coarse:h-11", invalid && "border-destructive")}
                       />
                     )}
                     {field.type === "password" && (
@@ -646,8 +659,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       </div>
                     )}
                     {hint && (
-                      <p id={hintId} className={`mt-1.5 text-xs text-muted-foreground ${field.type === "checkbox" ? "pl-[30px]" : ""}`}>
+                      <p id={`opt-${field.key}-hint`} className={`mt-1.5 text-xs text-muted-foreground ${field.type === "checkbox" ? "pl-[30px]" : ""}`}>
                         {hint}
+                      </p>
+                    )}
+                    {/* Once, under the last field it is about. */}
+                    {invalid && problem!.fields.at(-1) === field.key && (
+                      <p id="opt-problem" className="mt-1.5 text-xs text-destructive">
+                        {problem!.message}
                       </p>
                     )}
                   </div>

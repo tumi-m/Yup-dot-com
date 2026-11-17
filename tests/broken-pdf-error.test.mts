@@ -54,6 +54,11 @@ check(
   friendlyPdfError(new TypeError("Cannot read properties of undefined (reading 'Pages')")).message === UNREADABLE_MESSAGE
 );
 check("a TypeError names the file", friendlyPdfError(new TypeError("x is undefined"), "a.pdf").message === `a.pdf: ${UNREADABLE_MESSAGE}`);
+check("a stack overflow from a page tree that loops maps", friendlyPdfError(new RangeError("Maximum call stack size exceeded")).message === UNREADABLE_MESSAGE);
+check(
+  "pdf.js's circular page tree maps",
+  friendlyPdfError(Object.assign(new Error("Pages tree contains circular reference."), { name: "UnknownErrorException" })).message === UNREADABLE_MESSAGE
+);
 check("our own messages still pass through", friendlyPdfError(new Error("Pick pages between 1 and 5.")).message === "Pick pages between 1 and 5.");
 
 console.log(`\n${pass}/${total} passed`);

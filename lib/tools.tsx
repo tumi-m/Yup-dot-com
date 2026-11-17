@@ -107,7 +107,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "split-pdf",
     name: "Split PDF",
-    title: "Split PDF: extract pages from a PDF",
+    title: "Split PDF: split a PDF into separate files",
     description: "Split by page ranges or into single pages.",
     icon: Scissors,
     category: "organize",
@@ -124,7 +124,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-purple-100 text-purple-700",
     custom: "pages",
     pages: { mode: "organize" },
-    keywords: "rearrange reorder sort move order reverse insert blank page pages",
+    keywords: "organise organiser organizer rearrange reorder sort move order reverse insert blank page pages",
   },
   {
     slug: "delete-pages",
@@ -136,7 +136,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-rose-100 text-rose-700",
     custom: "pages",
     pages: { mode: "delete" },
-    keywords: "remove pages delete page cut",
+    keywords: "remove pages delete page cut organise",
   },
   {
     slug: "extract-pages",
@@ -148,7 +148,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-sky-100 text-sky-700",
     custom: "pages",
     pages: { mode: "extract" },
-    keywords: "select pages pick pages save pages copy pages pull out",
+    keywords: "select pages pick pages save pages copy pages pull out organise",
   },
   {
     slug: "rotate-pdf",
@@ -163,7 +163,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "resize-pdf",
     name: "Resize PDF",
-    title: "Resize PDF: change the page size to A4, Letter and more",
+    title: "Resize PDF: change page size to A4 or Letter",
     description: "Make every page one size, or put 2 or 4 on a sheet.",
     icon: Scaling,
     category: "organize",
@@ -368,7 +368,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "flatten-pdf",
     name: "Flatten PDF",
-    title: "Flatten PDF: lock form fields and comments into the page",
+    title: "Flatten PDF: lock form fields and comments",
     description: "Make fields and comments part of the page.",
     icon: Layers,
     category: "edit",

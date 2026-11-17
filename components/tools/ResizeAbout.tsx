@@ -4,7 +4,7 @@ import { LIMITS, formatLimitBytes } from "@/lib/limits";
 /** Server-rendered copy under Resize PDF: how it works and questions. */
 const STEPS: [string, string][] = [
   ["Choose a PDF", "Any size, any mix of page sizes."],
-  ["Pick the size", "A4, Letter and the other papers, or your own. The preview shows the first page."],
+  ["Pick the size", "A4, Letter and the other papers, or your own. The preview shows the first sheet."],
   ["Download", "Every page comes out the same size, still sharp."],
 ];
 
@@ -15,11 +15,11 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "What do the fit choices do?",
-    a: "Fit inside makes the page as big as it can be without cutting anything off. Fill the page covers the whole new page and crops what sticks out. Don't scale keeps the page at its size and centres it on the new one.",
+    a: "Fit inside makes the page as big as it can be without cutting anything off. Fill and crop covers the whole new page and crops what sticks out. Don't scale keeps the page at its size and centres it on the new one.",
   },
   {
     q: "My PDF has pages of different sizes. What happens?",
-    a: "They all become the size you pick. With Keep each page's own, landscape pages stay landscape and portrait pages stay portrait.",
+    a: "They all become the size you pick. With Orientation set to Same as each page, landscape pages stay landscape and portrait pages stay portrait.",
   },
   {
     q: "What happens to links, bookmarks, comments and forms?",
@@ -31,7 +31,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Is anything cut off taken out of the file?",
-    a: "No. With Fill the page, what sticks out is hidden, not removed, so someone with the right software could still find it. Don't rely on it to hide anything private.",
+    a: "No. With Fill and crop, what sticks out is hidden, not removed, so someone with the right software could still find it. Don't rely on it to hide anything private.",
   },
 ];
 

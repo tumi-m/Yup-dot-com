@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -83,12 +83,25 @@ interface Source {
   pages: number;
 }
 
+/** The page tools' small buttons, 44px tall on touch screens like the rest of the site. */
+const TOUCH = "pointer-coarse:h-11 pointer-coarse:min-w-11";
+
 const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 async function readPdf(file: File): Promise<LoadedPdf> {
   const { loadForRender } = await import("@/lib/pdf/render");
-  return loadForRender(new Uint8Array(await file.arrayBuffer()));
+  const loaded = await loadForRender(new Uint8Array(await file.arrayBuffer()));
+  try {
+    if (!loaded.numPages) throw new Error("This PDF has no pages.");
+    // A page tree that loops shows its first pages and fails further on:
+    // reaching the last page finds out now, not when the file is saved.
+    await loaded.getPageViewport(loaded.numPages, 1);
+  } catch (err) {
+    loaded.destroy();
+    throw err;
+  }
+  return loaded;
 }
 
 export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: string; tier: Tier }) {
@@ -133,6 +146,10 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   /** Bumps for every file opened, so a slow read can't land after a newer one. */
   const opened = useRef(0);
   const gridRef = useRef<HTMLUListElement>(null);
+  /** The page to take keyboard focus once the grid has drawn it (see PageGrid). */
+  const pendingFocus = useRef<string | null>(null);
+  /** Bumped to draw again, so the grid sees a focus request even for the page already focused. */
+  const [, setFocusTick] = useState(0);
 
   // pdf.js keeps each document (and its worker's memory) until destroyed.
   const sourcesRef = useRef<Source[]>([]);
@@ -214,7 +231,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
       setRangeProblem(null);
       setStatus("ready");
       // The first page takes focus, so arrow keys work straight away.
-      if (hadFocus) requestAnimationFrame(() => gridRef.current?.querySelector<HTMLElement>("[data-page]")?.focus());
+      if (hadFocus) focusPage(first[0]?.id);
     } catch (err) {
       if (id !== opened.current) return;
       fail(friendlyPdfError(err).message);
@@ -276,13 +293,12 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     setNote((prev) => (prev === message ? `${message} ` : message));
   }
 
-  /** Moves keyboard focus to a page once the grid has caught up. */
+  /** Moves keyboard focus to a page once the grid has caught up, scrolling it into view if it isn't drawn. */
   function focusPage(id: string | undefined) {
     if (!id) return;
     setFocusId(id);
-    requestAnimationFrame(() =>
-      gridRef.current?.querySelector<HTMLElement>(`[data-page="${CSS.escape(id)}"]`)?.focus({ preventScroll: false })
-    );
+    pendingFocus.current = id;
+    setFocusTick((t) => t + 1);
   }
 
   function choose(next: ReadonlySet<string>) {
@@ -340,8 +356,11 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     const next = removeItems(plan, ids);
     history.commit(next);
     choose(new Set([...selected].filter((x) => !ids.has(x))));
-    say(`${ids.size === 1 ? "Page" : plural(ids.size, "page")} deleted. Ctrl+Z brings ${ids.size === 1 ? "it" : "them"} back.`);
-    if (gridRef.current?.contains(document.activeElement) || document.activeElement === document.body) {
+    say(`${ids.size === 1 ? "Page" : plural(ids.size, "page")} deleted. Undo brings ${ids.size === 1 ? "it" : "them"} back.`);
+    // The focused page goes, or the picked-page buttons do once nothing is
+    // picked: the next page takes focus instead of the page itself.
+    const active = document.activeElement;
+    if (gridRef.current?.contains(active) || active === document.body || active?.closest("[data-picked-actions]")) {
       focusPage(next[Math.min(first, next.length - 1)]?.id);
     }
   }
@@ -558,6 +577,8 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   const picked = selected.size;
   const working = status === "working";
   const multi = sources.length > 1;
+  /** Delete pages with every page picked: there would be nothing left. */
+  const allGone = mode === "delete" && count > 0 && picked >= count;
   const summary = organize
     ? `${plural(count, "page")}${picked ? ` · ${picked} selected` : ""}`
     : mode === "delete"
@@ -713,18 +734,19 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                     {organize ? (
                       <div className="space-y-2 rounded-2xl border border-border bg-card p-3">
                         <div className="flex flex-wrap gap-1.5">
-                          <Button size="sm" variant="outline" onClick={() => addRef.current?.click()} disabled={adding}>
+                          <Button size="sm" variant="outline" className={TOUCH} onClick={() => addRef.current?.click()} disabled={adding}>
                             {adding ? <Loader2 className="motion-safe:animate-spin" /> : <FilePlus2 />} Add PDF
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => void addBlank()}>
+                          <Button size="sm" variant="outline" className={TOUCH} onClick={() => void addBlank()}>
                             <SquarePlus /> Blank page
                           </Button>
-                          <Button size="sm" variant="outline" onClick={reverse} disabled={count < 2}>
+                          <Button size="sm" variant="outline" className={TOUCH} onClick={reverse} disabled={count < 2}>
                             <ArrowDownUp /> Reverse
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
+                            className={TOUCH}
                             onClick={() => {
                               undoPressed.current = true;
                               undo();
@@ -740,31 +762,32 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                             {summary}
                           </span>
                           {picked > 0 ? (
-                            <Button size="sm" variant="ghost" onClick={() => choose(new Set())}>
+                            <Button size="sm" variant="ghost" className={TOUCH} onClick={() => choose(new Set())}>
                               Clear
                             </Button>
                           ) : (
-                            <Button size="sm" variant="ghost" onClick={() => choose(new Set(plan.map((p) => p.id)))}>
+                            <Button size="sm" variant="ghost" className={TOUCH} onClick={() => choose(new Set(plan.map((p) => p.id)))}>
                               Select all
                             </Button>
                           )}
                         </div>
                         {picked > 0 && (
-                          <div className="flex flex-wrap gap-1.5" data-testid="picked-actions">
-                            <Button size="sm" variant="secondary" onClick={() => rotate(-90)} aria-label="Turn picked pages left">
-                              <RotateCcw /> <span className="max-sm:sr-only">Left</span>
+                          // Words as well as icons, on phones too: an arrow alone could mean move or turn.
+                          <div className="flex flex-wrap gap-1.5" data-testid="picked-actions" data-picked-actions>
+                            <Button size="sm" variant="secondary" className={TOUCH} onClick={() => rotate(-90)} aria-label="Turn picked pages left">
+                              <RotateCcw /> Left
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => rotate(90)} aria-label="Turn picked pages right">
-                              <RotateCw /> <span className="max-sm:sr-only">Right</span>
+                            <Button size="sm" variant="secondary" className={TOUCH} onClick={() => rotate(90)} aria-label="Turn picked pages right">
+                              <RotateCw /> Right
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => move(-1)} aria-label="Move picked pages earlier">
-                              <ArrowLeft /> <span className="max-sm:sr-only">Earlier</span>
+                            <Button size="sm" variant="secondary" className={TOUCH} onClick={() => move(-1)} aria-label="Move picked pages earlier">
+                              <ArrowLeft /> Earlier
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => move(1)} aria-label="Move picked pages later">
-                              <ArrowRight /> <span className="max-sm:sr-only">Later</span>
+                            <Button size="sm" variant="secondary" className={TOUCH} onClick={() => move(1)} aria-label="Move picked pages later">
+                              <ArrowRight /> Later
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => remove()} className="text-destructive" aria-label="Delete picked pages">
-                              <Trash2 /> <span className="max-sm:sr-only">Delete</span>
+                            <Button size="sm" variant="secondary" onClick={() => remove()} className={cn(TOUCH, "text-destructive")} aria-label="Delete picked pages">
+                              <Trash2 /> Delete
                             </Button>
                           </div>
                         )}
@@ -788,19 +811,22 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                         <div className="flex items-center justify-between gap-2">
                           <p
                             id="page-list-note"
-                            className={cn("text-sm", rangeProblem ? "text-destructive" : "tabular-nums text-muted-foreground")}
+                            className={cn("text-sm", rangeProblem || allGone ? "text-destructive" : "tabular-nums text-muted-foreground")}
                             data-testid="page-count"
                           >
-                            {rangeProblem ?? summary}
+                            {rangeProblem ?? (allGone ? "Every page is picked. Keep at least one: a PDF needs a page." : summary)}
                           </p>
                           {picked > 0 ? (
-                            <Button size="sm" variant="ghost" onClick={() => choose(new Set())}>
+                            <Button size="sm" variant="ghost" className={TOUCH} onClick={() => choose(new Set())}>
                               Clear
                             </Button>
                           ) : (
-                            <Button size="sm" variant="ghost" onClick={() => choose(new Set(plan.map((p) => p.id)))}>
-                              Select all
-                            </Button>
+                            // Deleting every page is no use: a PDF needs one.
+                            mode === "extract" && (
+                              <Button size="sm" variant="ghost" className={TOUCH} onClick={() => choose(new Set(plan.map((p) => p.id)))}>
+                                Select all
+                              </Button>
+                            )
                           )}
                         </div>
                       </div>
@@ -808,6 +834,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
 
                     <PageGrid
                       gridRef={gridRef}
+                      pendingFocus={pendingFocus}
                       mode={mode}
                       plan={plan}
                       sources={sources}
@@ -866,8 +893,10 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                       </>
                     ) : (
                       <>
-                        Tap pages to pick them, or type page numbers above.
-                        <span className="hover-none:hidden"> Shift-click picks a run of pages; arrows and Space work too.</span>
+                        <span className="hover-none:hidden">
+                          Click pages to pick them, or type page numbers above. Shift-click picks a run of pages; arrows and Space work too.
+                        </span>
+                        <span className="hidden hover-none:inline">Tap pages to pick them, or type page numbers above.</span>
                       </>
                     )}
                   </p>
@@ -944,13 +973,22 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   );
 }
 
-/** How many pages fit in one row of the grid, read from where they sit. */
+/** How many pages fit in one row of the grid: its column tracks, as laid out. */
 function gridColumns(grid: HTMLElement | null): number {
-  const cells = grid ? Array.from(grid.children) as HTMLElement[] : [];
-  if (!cells.length) return 1;
-  const top = cells[0].offsetTop;
-  const n = cells.findIndex((c) => c.offsetTop !== top);
-  return n < 0 ? cells.length : n;
+  if (!grid) return 1;
+  return Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length);
+}
+
+/** Cells drawn before the grid has been measured: a screenful at four across. */
+const FIRST_CELLS = 48;
+
+/** The cells the grid draws, [start, end), and the row size it reserves for the rest. */
+interface Window {
+  start: number;
+  end: number;
+  cols: number;
+  /** One row of cells and the gap under it, in CSS pixels. */
+  rowH: number;
 }
 
 /** What the thumbnails draw with. Cells don't take it, so a new file redraws thumbnails, not cells. */
@@ -970,8 +1008,15 @@ interface CellActions {
   dragEnd(): void;
 }
 
+/**
+ * The pages as a grid that draws only the rows near the visible part: the
+ * rest is room kept above and below, so the scroll height stays true. A
+ * document of thousands of pages then moves, reverses and undoes at once,
+ * since only a screenful of cells is ever on the page.
+ */
 function PageGrid({
   gridRef,
+  pendingFocus,
   mode,
   plan,
   sources,
@@ -986,6 +1031,8 @@ function PageGrid({
   onDrop,
 }: {
   gridRef: React.RefObject<HTMLUListElement | null>;
+  /** A page to focus once it is drawn; the grid scrolls to it first if it isn't. */
+  pendingFocus: React.RefObject<string | null>;
   mode: PagesMode;
   plan: PlanItem[];
   sources: Source[];
@@ -1066,15 +1113,97 @@ function PageGrid({
   }));
 
   const count = plan.length;
+  const [win, setWin] = useState<Window>(() => ({ start: 0, end: Math.min(count, FIRST_CELLS), cols: 4, rowH: 0 }));
+  /** Which rows are near the visible part, read from the layout. */
+  const measure = useCallback(() => {
+    const ul = gridRef.current;
+    const box = scroller.current;
+    if (!ul || !box) return;
+    const n = latest.current.plan.length;
+    const cols = gridColumns(ul);
+    const first = ul.firstElementChild as HTMLElement | null;
+    const gap = parseFloat(getComputedStyle(ul).rowGap) || 0;
+    setWin((prev) => {
+      const rowH = first ? first.offsetHeight + gap : prev.rowH;
+      if (!rowH) return prev;
+      const rows = Math.ceil(n / cols);
+      const top = box.scrollTop - ul.offsetTop;
+      // A screenful above and below is drawn too, so scrolling never shows a gap.
+      const margin = Math.max(box.clientHeight, 360);
+      const from = Math.max(0, Math.min(rows, Math.floor((top - margin) / rowH)));
+      const to = Math.max(from, Math.min(rows, Math.ceil((top + box.clientHeight + margin) / rowH)));
+      const next = { start: from * cols, end: Math.min(n, to * cols), cols, rowH };
+      return next.start === prev.start && next.end === prev.end && next.cols === prev.cols && next.rowH === prev.rowH ? prev : next;
+    });
+  }, [gridRef]);
+
+  useEffect(() => {
+    const box = scroller.current;
+    if (!box) return;
+    box.addEventListener("scroll", measure, { passive: true });
+    // Wider or narrower: other columns and row heights.
+    const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    resized?.observe(box);
+    return () => {
+      box.removeEventListener("scroll", measure);
+      resized?.disconnect();
+    };
+  }, [measure]);
+
+  // After every change: draw the rows now in view, then focus a page asked for.
+  const tries = useRef(0);
+  const [, setRetry] = useState(0);
+  useLayoutEffect(() => {
+    measure();
+    const id = pendingFocus.current;
+    if (!id) return;
+    const ul = gridRef.current;
+    const box = scroller.current;
+    const cell = ul?.querySelector<HTMLElement>(`[data-page="${CSS.escape(id)}"]`);
+    if (cell) {
+      pendingFocus.current = null;
+      tries.current = 0;
+      cell.focus();
+      return;
+    }
+    const at = plan.findIndex((p) => p.id === id);
+    if (at < 0 || !ul || !box || !win.rowH || ++tries.current > 3) {
+      pendingFocus.current = null;
+      tries.current = 0;
+      return;
+    }
+    // Not drawn: bring its row to the middle, and focus it once that row is drawn.
+    box.scrollTop = ul.offsetTop + Math.floor(at / win.cols) * win.rowH - (box.clientHeight - win.rowH) / 2;
+    measure();
+    setRetry((r) => r + 1);
+  });
+
+  // The window as measured, held to the pages there are now.
+  const start = Math.min(win.start, count);
+  const end = Math.min(Math.max(win.end, start), count);
+  const rows = Math.ceil(count / win.cols);
+  const above = Math.floor(start / win.cols);
+  const below = Math.max(0, rows - above - Math.ceil((end - start) / win.cols));
+  // The page that takes Tab: the focused one if it is drawn, else the first drawn.
+  const focusAt = focusId ? plan.findIndex((p) => p.id === focusId) : -1;
+  const tabAt = focusAt >= start && focusAt < end ? focusAt : start;
   return (
     <div
       ref={scroller}
-      className="max-h-[min(36rem,70vh)] overflow-y-auto rounded-2xl border border-border bg-secondary/40 p-2 sm:p-3"
+      className="relative max-h-[min(36rem,70vh)] overflow-y-auto rounded-2xl border border-border bg-secondary/40 p-2 sm:p-3"
       data-testid="page-grid"
     >
       <Drawing.Provider value={drawing}>
-        <ul ref={gridRef} aria-label="Pages" aria-describedby="page-grid-hint" className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:grid-cols-4 sm:gap-3">
-          {plan.map((item, i) => (
+        <ul
+          ref={gridRef}
+          aria-label="Pages"
+          aria-describedby="page-grid-hint"
+          className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 sm:grid-cols-4 sm:gap-3"
+          style={{ paddingTop: above * win.rowH, paddingBottom: below * win.rowH }}
+        >
+          {plan.slice(start, end).map((item, k) => {
+            const i = start + k;
+            return (
             <PageCell
               key={item.id}
               item={item}
@@ -1082,12 +1211,13 @@ function PageGrid({
               count={count}
               mode={mode}
               selected={selected.has(item.id)}
-              tabStop={focusId ? focusId === item.id : i === 0}
+              tabStop={i === tabAt}
               dragOver={dragOver === item.id}
               from={multi && item.kind === "page" && item.source > 0 ? sources[item.source]?.file.name : undefined}
               actions={actions}
             />
-          ))}
+            );
+          })}
         </ul>
       </Drawing.Provider>
     </div>
@@ -1121,7 +1251,9 @@ const PageCell = memo(function PageCell({
     item.kind === "blank"
       ? "blank page"
       : `${from ? `page ${item.page + 1} of ${from}` : mode === "organize" ? `was page ${item.page + 1}` : ""}`;
-  const label = [`Page ${index + 1} of ${count}`, what, item.rotate ? `turned ${item.rotate}°` : ""].filter(Boolean).join(", ");
+  // Delete and Extract say what picking a page does; Organize picks pages for its buttons.
+  const verb = mode === "delete" ? "Delete page" : mode === "extract" ? "Extract page" : "Page";
+  const label = [`${verb} ${index + 1} of ${count}`, what, item.rotate ? `turned ${item.rotate}°` : ""].filter(Boolean).join(", ");
   const mark = mode === "delete" ? "To delete" : mode === "extract" ? "To extract" : "Selected";
   return (
     <li
@@ -1132,8 +1264,6 @@ const PageCell = memo(function PageCell({
       onDrop={organize ? (e) => actions.drop(e, item.id) : undefined}
       onDragEnd={organize ? actions.dragEnd : undefined}
       className="group relative"
-      // Cells far out of view skip layout and paint.
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 180px" }}
     >
       <button
         type="button"

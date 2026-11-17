@@ -32,6 +32,7 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import { openPdf } from "../open";
+import { dropUnreachable } from "../operations";
 import { stopIfAborted } from "../../abort";
 
 /** What to flatten: fields only, or fields and annotations (comments, highlights, stamps…). */
@@ -480,10 +481,15 @@ export async function flattenDocument(
     }
   }
 
-  // Leave no copy of the old fields and comments in the file.
+  // Leave no copy of the old fields and comments in the file: nor what only
+  // they pointed at, such as an attached file, the XFA data or an old picture.
   for (const ref of new Set(removed)) doc.context.delete(ref);
+  dropUnreachable(doc);
   return report;
 }
+
+/** Where to go when there is nothing to flatten: pictures of the pages work on any file. */
+const WHOLE_PAGE = "To lock the whole page, choose Pages as images.";
 
 /** True when flattening would change nothing: no fields, and (for annotations) nothing but links. */
 function nothingTo(report: FlattenReport, scope: FlattenScope): boolean {
@@ -502,9 +508,9 @@ export async function flattenPdf(
     throw new NothingToFlattenError(
       scope === "forms"
         ? hasAnnotations(doc)
-          ? "This PDF has no form fields. To flatten its comments, choose Form fields and comments."
-          : "This PDF has no form fields to flatten."
-        : "This PDF has no form fields or comments to flatten."
+          ? "This PDF has no form fields. To flatten its comments, choose Fields and comments."
+          : `This PDF has no form fields to flatten. ${WHOLE_PAGE}`
+        : `This PDF has no form fields or comments to flatten. ${WHOLE_PAGE}`
     );
   }
   opts.onProgress?.(1, "Saving…");

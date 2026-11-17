@@ -51,7 +51,7 @@ work with or without an account.
 | **Sample Finder** | Paste a YouTube or TikTok link, or type a song: what it samples, where it was sampled, covers and remixes. Reads only the video's title, so it works while YouTube downloads are paused. Data from MusicBrainz and a hand-checked list. [More below](#sample-finder). |
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
-| **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable. The editor can flatten fields when it saves. |
+| **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable; a run that would make more pictures than a browser tab can hold is turned away first, naming a resolution that fits. What was flattened leaves the file, along with anything only it used (an attached file, XFA data, an old field picture). The editor can flatten fields when it saves. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
 | **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
@@ -328,8 +328,11 @@ deletions only change a list of pages (`lib/pdf/pages/plan.ts`), so they are
 instant and undo is free; the PDF is written once, on save, in a Web Worker
 (`lib/pdf/pages/`). Organize and Delete change the file in place, like the
 editor's page operations; Extract copies the picked pages out, like Split.
-Thumbnails are drawn only near the visible part of the grid, two at a time,
-and let go of their pixels when scrolled away, so a long document stays smooth.
+Only the rows near the visible part of the grid are on the page at all (the
+rest is kept as scroll room), so reversing or undoing on a 20,000-page file
+is instant. Thumbnails are drawn two at a time and let go of their pixels
+when scrolled away. A file with no pages, or a page tree that loops, is
+turned away when it opens.
 
 ## Tests
 

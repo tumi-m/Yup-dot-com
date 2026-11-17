@@ -429,6 +429,28 @@ async function withLinks(rotate = 0) {
   check("2 a sheet: form values flattened onto the sheet", textOf(flatOut.pages[0]).includes("Lerato"), textOf(flatOut.pages[0]));
 }
 
+// --- Pages that share their notes ------------------------------------------------
+{
+  // Two pages whose /Annots is the same list, holding one square note: each
+  // page's note must land where it marked, moved once, not twice.
+  const d = await PDFDocument.create();
+  const p1 = d.addPage([595, 842]);
+  const p2 = d.addPage([595, 842]);
+  const note = d.context.register(d.context.obj({ Type: "Annot", Subtype: "Square", Rect: [100, 100, 200, 200], C: [1, 0, 0] }));
+  const list = d.context.register(d.context.obj([note]));
+  p1.node.set(PDFName.of("Annots"), list);
+  p2.node.set(PDFName.of("Annots"), list);
+  const shared = await d.save();
+  const k = PAPER.a5.width / 595;
+  const want = [100 * k, 100 * k + (PAPER.a5.height - 842 * k) / 2, 200 * k, 200 * k + (PAPER.a5.height - 842 * k) / 2];
+  const one = await read(await resizePdf(shared, opts({ size: "a5" })));
+  const rects = one.pages.map((p) => p.annotations.find((a) => a.subtype === "Square")?.rect ?? []);
+  check("shared notes: each page's note is moved once", rects.length === 2 && rects.every((r) => r.length === 4 && r.every((v, i) => near(v, want[i], 1))), { rects, want });
+  const sheet = await read(await resizePdf(shared, opts({ perSheet: "2" })));
+  const squares = sheet.pages[0].annotations.filter((a) => a.subtype === "Square").map((a) => a.rect[0]);
+  check("shared notes, 2 a sheet: one note on each half", squares.length === 2 && squares.some((x) => x < A4.h / 2) && squares.some((x) => x > A4.h / 2), squares);
+}
+
 // --- A long document, progress and Cancel ---------------------------------------
 {
   const doc = await PDFDocument.create();

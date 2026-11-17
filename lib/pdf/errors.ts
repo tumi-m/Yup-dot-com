@@ -7,7 +7,7 @@ import { isLoadError, loadErrorMessage } from "../load-error";
 
 const ENCRYPTED = /is encrypted|PasswordException|No password given|Incorrect Password/i;
 const UNREADABLE =
-  /No PDF header|Invalid PDF structure|Failed to parse|size is zero bytes|PDF file is empty|Invalid object ref|InvalidPDFException|Expected instance of PDFDict|Missing PDF/i;
+  /No PDF header|Invalid PDF structure|Failed to parse|size is zero bytes|PDF file is empty|Invalid object ref|InvalidPDFException|Expected instance of PDFDict|Missing PDF|circular reference|call stack|too much recursion/i;
 
 export const ENCRYPTED_MESSAGE = "This PDF is password-protected. Unlock it first.";
 export const UNREADABLE_MESSAGE = "This file isn't a readable PDF.";
@@ -26,7 +26,11 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   // pdf-lib opens a file that has a header but no document after it, then
   // fails on the first page lookup with a TypeError ("Cannot read properties
   // of undefined (reading 'Pages')"). Never a message for people.
-  if (name === "InvalidPDFException" || name === "TypeError" || UNREADABLE.test(message)) {
+  // A page tree that holds itself sends pdf-lib round it until the stack
+  // runs out (a RangeError); pdf.js says "Pages tree contains circular
+  // reference." and wraps what it didn't expect as UnknownErrorException.
+  const broken = ["InvalidPDFException", "UnknownErrorException", "TypeError", "RangeError"];
+  if (broken.includes(name) || UNREADABLE.test(message)) {
     return new Error(prefix + UNREADABLE_MESSAGE);
   }
   // pdf-lib's standard fonts: "WinAnsi cannot encode "Ł" (0x0141)".

@@ -187,6 +187,46 @@ function moveAnnotation(doc: PDFDocument, annot: PDFDict, m: Matrix, turned: Set
   }
 }
 
+/** A copy of `obj` down to the objects it points at, which stay shared. */
+function copyDirect(doc: PDFDocument, obj: PDFObject): PDFObject {
+  if (obj instanceof PDFDict) {
+    const out = doc.context.obj({});
+    for (const [key, value] of obj.entries()) out.set(key, copyDirect(doc, value));
+    return out;
+  }
+  if (obj instanceof PDFArray) {
+    const out = doc.context.obj([]);
+    for (let i = 0; i < obj.size(); i++) out.push(copyDirect(doc, obj.get(i)));
+    return out;
+  }
+  return obj;
+}
+
+/**
+ * Makes the page's annotations its own: a list or an annotation another page
+ * already has is copied, so moving it for this page leaves the other one
+ * where it was (and it is never moved twice).
+ */
+function ownAnnotations(doc: PDFDocument, page: PDFPage, seen: Set<PDFObject>) {
+  let annots = page.node.Annots();
+  if (!annots) return;
+  if (seen.has(annots)) {
+    annots = doc.context.obj(annots.asArray());
+    page.node.set(N.Annots, annots);
+  }
+  seen.add(annots);
+  for (let i = 0; i < annots.size(); i++) {
+    const annot = annots.lookup(i);
+    if (!(annot instanceof PDFDict)) continue;
+    if (seen.has(annot)) {
+      const copy = copyDirect(doc, annot) as PDFDict;
+      copy.set(N.P, page.ref);
+      annots.set(i, doc.context.register(copy));
+      seen.add(copy);
+    } else seen.add(annot);
+  }
+}
+
 /** Where a page went: the sheet it is on now and the transform onto it. */
 interface Moved {
   sheet: PDFRef;
@@ -341,7 +381,13 @@ const clipOps = (c: { x: number; y: number; width: number; height: number }) =>
   `${num(c.x)} ${num(c.y)} ${num(c.width)} ${num(c.height)} re W n`;
 
 /** One page onto a sheet of its own, changed where it is. */
-function resizeInPlace(doc: PDFDocument, page: PDFPage, sheet: { width: number; height: number }, p: Placed, turned: Set<PDFStream>): Moved {
+function resizeInPlace(
+  doc: PDFDocument,
+  page: PDFPage,
+  sheet: { width: number; height: number },
+  p: Placed,
+  turned: Set<PDFStream>
+): Moved {
   const { context } = doc;
   const m = placement(page, p);
   const moved: Moved = { sheet: page.ref, m, turned: pageFrame(page).rotation !== 0 };
@@ -399,6 +445,9 @@ export async function resizePdf(
   );
   const moved = new Map<PDFRef, Moved>();
   const turned = new Set<PDFStream>();
+  // Before anything moves, so a copy is taken of the note as it was.
+  const seen = new Set<PDFObject>();
+  for (const page of pages) ownAnnotations(doc, page, seen);
   const { context } = doc;
 
   if (opts.perSheet === 1) {

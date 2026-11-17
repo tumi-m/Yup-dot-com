@@ -35,6 +35,8 @@ export function ResizePreview({ file, options }: { file: File; options: Record<s
       const { loadForRender } = await import("@/lib/pdf/render");
       const pdf = await loadForRender(await file.arrayBuffer());
       loaded = pdf;
+      // The same words the tool says when cast.
+      if (!pdf.numPages) throw new Error("This PDF has no pages.");
       const pages: Source["pages"] = [];
       // Enough pages for the fullest sheet (4 a sheet).
       for (let i = 1; i <= Math.min(4, pdf.numPages) && live; i++) {
@@ -124,6 +126,14 @@ export function ResizePreview({ file, options }: { file: File; options: Record<s
       : `Page 1 of ${source.count}`;
   const from = first ? named(first.width, first.height) : "";
 
+  // Read out once typing stops, not at every keystroke.
+  const words = failed ?? problem ?? (sheet ? `Preview: ${label}, ${perSheet > 1 ? "" : `${from} to `}${size}.` : "");
+  const [spoken, setSpoken] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSpoken(words), 700);
+    return () => clearTimeout(t);
+  }, [words]);
+
   return (
     <motion.div
       initial={ENTER.initial}
@@ -139,7 +149,10 @@ export function ResizePreview({ file, options }: { file: File; options: Record<s
           </p>
         )}
       </div>
-      <div className="min-w-0 text-center text-sm sm:text-left" aria-live="polite">
+      <p className="sr-only" aria-live="polite">
+        {spoken}
+      </p>
+      <div className="min-w-0 text-center text-sm sm:text-left">
         <p className="font-medium">Preview</p>
         {sheet && (
           <>
