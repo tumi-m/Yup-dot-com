@@ -47,7 +47,7 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { fieldHint, fieldShown, PROCESSORS, type ToolField } from "./processors";
+import { fieldHint, fieldShown, problemFields, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { errorFix, percentSmaller, sortPick, takesMessage } from "./file-pick";
@@ -266,6 +266,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** What is wrong with the options (see OptionProblem), and whether it shows yet. */
   const found = proc.problem?.(options) ?? null;
   const problem = found && (found.live || tried) ? found : null;
+  /** The shown fields it is about: marked, and the message goes under the last. */
+  const problemAt = problemFields(problem, proc.fields, options);
 
   /** Enter in a text field casts the spell, as in a form (the panel isn't one: its buttons would submit it). */
   function runOnEnter(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -276,7 +278,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
 
   /** What describes a field: its hint, and the problem when it is about this field. */
   function describedBy(field: ToolField): string | undefined {
-    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, problem?.fields.includes(field.key) && "opt-problem"];
+    const ids = [fieldHint(field, options) && `opt-${field.key}-hint`, problemAt.includes(field.key) && "opt-problem"];
     return ids.filter(Boolean).join(" ") || undefined;
   }
 
@@ -290,7 +292,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       return;
     }
     if (found) {
-      const field = flow.ref.current?.querySelector<HTMLElement>(`#opt-${found.fields[0]}`);
+      const first = problemFields(found, proc.fields, options)[0];
+      const field = first ? flow.ref.current?.querySelector<HTMLElement>(`#opt-${first}`) : null;
       if (!field) {
         fail(found.message);
         return;
@@ -623,7 +626,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               >
                 {visibleFields().map((field) => {
                   const hint = fieldHint(field, options);
-                  const invalid = !!problem?.fields.includes(field.key);
+                  const invalid = problemAt.includes(field.key);
                   const describes = describedBy(field);
                   return (
                   <div key={field.key} className={field.wide ? "sm:col-span-2" : undefined}>
@@ -635,6 +638,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           type="checkbox"
                           checked={options[field.key] === "true"}
                           onChange={(e) => setOption(field.key, e.target.checked ? "true" : "")}
+                          aria-invalid={invalid || undefined}
                           aria-describedby={describes}
                           className="h-5 w-5 shrink-0 cursor-pointer rounded border-input accent-[hsl(var(--primary))]"
                         />
@@ -650,8 +654,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         id={`opt-${field.key}`}
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        aria-invalid={invalid || undefined}
                         aria-describedby={describes}
-                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm"
+                        className="h-10 w-full rounded-lg border border-input bg-background px-3 text-base pointer-coarse:h-11 sm:text-sm aria-[invalid=true]:border-destructive"
                       >
                         {field.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -702,8 +707,9 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                         type="color"
                         value={options[field.key]}
                         onChange={(e) => setOption(field.key, e.target.value)}
+                        aria-invalid={invalid || undefined}
                         aria-describedby={describes}
-                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11"
+                        className="h-10 w-full cursor-pointer rounded-lg border border-input bg-background px-1 pointer-coarse:h-11 aria-[invalid=true]:border-destructive"
                       />
                     )}
                     {field.type === "range" && (
@@ -716,6 +722,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                           step={field.step}
                           value={options[field.key]}
                           aria-valuetext={`${Math.round(Number(options[field.key]) * 100)}%`}
+                          aria-invalid={invalid || undefined}
                           aria-describedby={describes}
                           onChange={(e) => setOption(field.key, e.target.value)}
                           className="h-6 flex-1 accent-[hsl(var(--primary))]"
@@ -731,7 +738,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       </p>
                     )}
                     {/* Once, under the last field it is about; read out when a cast stopped at it in its own field. */}
-                    {invalid && problem!.fields.at(-1) === field.key && (
+                    {invalid && problemAt.at(-1) === field.key && (
                       <p
                         key={tried?.n ?? 0}
                         id="opt-problem"

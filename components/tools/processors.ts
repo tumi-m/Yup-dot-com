@@ -48,10 +48,11 @@ export function fieldShown(field: ToolField, options: Record<string, string>): b
 }
 
 /**
- * What's wrong with the options, said once: under the last field it names,
- * which with the other named fields is marked invalid and described by it.
- * Casting the spell (the button, or Enter in a field) waits while there is one
- * and focuses its first field. A `live` problem is about something typed and
+ * What's wrong with the options, said once: under the last shown field it
+ * names, which with the other shown named fields is marked invalid and
+ * described by it. Casting the spell (the button, or Enter in a field) waits
+ * while there is one and focuses its first shown field, or says it as an error
+ * when none of them is shown. A `live` problem is about something typed and
  * shows as the options change; the rest, like nothing typed yet, would nag, so
  * they show once the spell is cast, until an option changes.
  */
@@ -59,6 +60,12 @@ export interface OptionProblem {
   fields: string[];
   message: string;
   live?: boolean;
+}
+
+/** The fields a problem names that are shown, in the order they show. */
+export function problemFields(problem: OptionProblem | null, fields: ToolField[], options: Record<string, string>): string[] {
+  if (!problem) return [];
+  return fields.filter((f) => problem.fields.includes(f.key) && fieldShown(f, options)).map((f) => f.key);
 }
 
 export interface ToolProcessor {
@@ -514,7 +521,8 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     // The same rules protectTool keeps, checked first so the field can be marked.
     problem: (o) => {
       if (!o.password) return { fields: ["password"], message: "Please enter a password." };
-      if (o.password.length < 4) return { fields: ["password"], message: "Use at least 4 characters.", live: true };
+      // Not said while the first characters are typed, only once the second field is.
+      if (o.password.length < 4) return { fields: ["password"], message: "Use at least 4 characters.", live: !!o.confirm };
       if (o.password !== o.confirm) {
         // Said while typing only once the second one can't become the first.
         const live = !!o.confirm && !o.password.startsWith(o.confirm);

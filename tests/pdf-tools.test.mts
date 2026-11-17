@@ -119,7 +119,8 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
     return p ? `${p.fields.join()}${p.live ? " (live)" : ""}: ${p.message}` : null;
   };
   check("protect: empty password", keyOf({ password: "", confirm: "" }) === "password: Please enter a password.");
-  check("protect: short password", keyOf({ password: "abc", confirm: "abc" }) === "password (live): Use at least 4 characters.");
+  check("protect: short password, said on the cast while only it is typed", keyOf({ password: "s", confirm: "" }) === "password: Use at least 4 characters." && keyOf({ password: "sec", confirm: "" }) === "password: Use at least 4 characters.");
+  check("protect: short password, said at once when the second is typed", keyOf({ password: "abc", confirm: "abc" }) === "password (live): Use at least 4 characters.");
   check("protect: mismatch marks the confirm field", keyOf({ password: "abcd", confirm: "abce" }) === "confirm (live): The passwords don't match.");
   check("protect: no mismatch said while the second is still being typed", keyOf({ password: "abcd", confirm: "ab" }) === "confirm: The passwords don't match." && keyOf({ password: "abcd", confirm: "" }) === "confirm: The passwords don't match.");
   check("protect: fine", keyOf({ password: "abcd", confirm: "abcd" }) === null);
@@ -128,6 +129,13 @@ check("split one: a page not in the PDF is an error", oneOut === "Page 9 isn't i
   const resize = PROCESSORS["resize-pdf"].problem!;
   const custom = resize({ size: "custom", width: "abc", height: "297", unit: "mm" });
   check("resize: a bad custom size marks both fields as it is typed", custom?.fields.join() === "width,height" && !!custom.live, custom);
+  // Only fields that show are marked, in the order they show.
+  const { problemFields } = await import("../components/tools/processors.ts");
+  const sized = PROCESSORS["resize-pdf"].fields;
+  const both = { fields: ["height", "width"], message: "x" };
+  check("problem fields: shown ones, in field order", problemFields(both, sized, { size: "custom" }).join() === "width,height");
+  check("problem fields: none while hidden", problemFields(both, sized, { size: "a4" }).length === 0 && problemFields(null, sized, {}).length === 0);
+  check("problem fields: a hidden one is left out", problemFields({ fields: ["size", "width"], message: "x" }, sized, { size: "a4" }).join() === "size");
   check("resize: a paper size has no problem", resize({ size: "a4", width: "abc", height: "297", unit: "mm" }) === null);
   const flatten = PROCESSORS["flatten-pdf"].fields.find((f) => f.key === "mode")!;
   check("hints: a picked option's hint comes first", fieldHint(flatten, { mode: "images" }) === flatten.options!.find((o) => o.value === "images")!.hint);
