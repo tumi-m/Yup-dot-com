@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { configureWorker } from "./worker";
 import { ownText, paints, showsPictures } from "./page-content";
 import type { OwnText } from "./ocr-layer";
+import type { PageText } from "./parse";
 
 function ensureWorker() {
   configureWorker(pdfjsLib);
@@ -58,6 +59,8 @@ export interface LoadedPdf {
   ) => Promise<void>;
   /** The page's own text pieces and where they sit, in displayed points from the top-left. */
   ownText: (pageNumber: number) => Promise<OwnText[]>;
+  /** The page's text as the parser reads it: lines in reading order, form values included. */
+  readText: (pageNumber: number) => Promise<PageText>;
   /** True when the page shows a picture big enough to hold words. */
   showsPictures: (pageNumber: number) => Promise<boolean>;
   /** True when the page draws anything at all, its fields included. */
@@ -133,6 +136,11 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
     },
     async ownText(pageNumber) {
       return ownText(await doc.getPage(pageNumber));
+    },
+    async readText(pageNumber) {
+      // The parser loads with the first page read, not with every page that renders.
+      const { readPageText } = await import("./parse");
+      return readPageText(await doc.getPage(pageNumber));
     },
     async showsPictures(pageNumber) {
       const page = await doc.getPage(pageNumber);

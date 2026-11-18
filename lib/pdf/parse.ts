@@ -16,6 +16,7 @@
  * it is very good on digital PDFs and does not attempt OCR on scans.
  */
 
+import type { PDFPageProxy } from "pdfjs-dist";
 import { configureWorker } from "./worker";
 import { showsPictures } from "./page-content";
 import { abortError } from "../abort";
@@ -31,6 +32,12 @@ export interface ParsedSpan {
   bold: boolean;
   /** A form field's value, drawn by the viewer rather than the page. */
   field?: boolean;
+  /**
+   * For text that doesn't run left to right as shown (sideways on a turned
+   * page, upside down): where the run starts, from the page's top left, its
+   * direction and its length, so a word in it can be found on the page.
+   */
+  run?: { x: number; y: number; dx: number; dy: number; length: number };
 }
 
 export interface ParsedLine {
@@ -145,16 +152,19 @@ function toSpans(items: RawItem[], viewport: { transform: number[]; height: numb
     // The run's extent across the page; its width is measured along the baseline.
     const run = (size ? dx / size : 1) * item.width * scale;
     const x = va * e + vc * f + ve;
+    const top = vb * e + vd * f + vf;
     const fontName = item.fontName ?? "";
+    const sideways = size > 0 && dx / size < 0.999;
     spans.push({
       text,
       x: Math.min(x, x + run),
-      y: viewport.height - (vb * e + vd * f + vf),
+      y: viewport.height - top,
       width: Math.abs(run),
       height: item.height * scale || fontSize,
       fontSize,
       fontName,
       bold: /bold|black|heavy|semibold/i.test(fontName),
+      ...(sideways ? { run: { x, y: top, dx: dx / size, dy: dy / size, length: item.width * scale } } : {}),
     });
   }
   return spans;
@@ -729,6 +739,42 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
+/** One page's text as the parser reads it, and the page as displayed. */
+export interface PageText {
+  /** Lines in reading order, each with its spans and where they sit. */
+  lines: ParsedLine[];
+  /** Characters of the page's own text; filled-in form values aren't counted. */
+  chars: number;
+  /** The page as displayed (CropBox, /Rotate applied), in points. */
+  width: number;
+  height: number;
+  /** pdf.js's viewport transform at scale 1: PDF user space to displayed points from the top left. */
+  transform: number[];
+  /** Shows a picture big enough to hold words; only looked for by callers that need it. */
+  pictures?: boolean;
+}
+
+/** Reads one pdf.js page: its own text and filled-in form values, in reading order. */
+export async function readPageText(page: PDFPageProxy): Promise<PageText> {
+  const viewport = page.getViewport({ scale: 1 });
+  const content = await page.getTextContent();
+  const spans = toSpans(content.items as unknown as RawItem[], viewport);
+  const chars = spans.reduce((n, s) => n + s.text.trim().length, 0);
+  try {
+    // Before the gutter is found, so the values land in reading order.
+    spans.push(...fieldSpans((await page.getAnnotations({ intent: "display" })) as WidgetAnnotation[], viewport));
+  } catch {
+    // Damaged annotations: the page's own text is still there.
+  }
+  return {
+    lines: linesInReadingOrder(spans, viewport.width),
+    chars,
+    width: viewport.width,
+    height: viewport.height,
+    transform: [...viewport.transform],
+  };
+}
+
 /** Parse a PDF into a structured document tree. */
 export async function parseDocument(
   data: Uint8Array,
@@ -750,10 +796,7 @@ export async function parseDocument(
       throw abortError();
     }
     const page = await doc.getPage(p);
-    const viewport = page.getViewport({ scale: 1 });
-    const content = await page.getTextContent();
-    const spans = toSpans(content.items as unknown as RawItem[], viewport);
-    const chars = spans.reduce((n, s) => n + s.text.trim().length, 0);
+    const { lines, chars } = await readPageText(page);
     totalChars += chars;
     // A scanned page: next to no text of its own, and a picture. A slide or
     // certificate with a short title has no picture, or more text. Pictures
@@ -768,14 +811,6 @@ export async function parseDocument(
         page.cleanup();
       }
     }
-
-    try {
-      // Before the gutter is found, so the values land in reading order.
-      spans.push(...fieldSpans((await page.getAnnotations({ intent: "display" })) as WidgetAnnotation[], viewport));
-    } catch {
-      // Damaged annotations: the page's own text is still there.
-    }
-    const lines = linesInReadingOrder(spans, viewport.width);
     perPage.push({ lines, page: p });
 
     for (const line of lines) {
