@@ -22,6 +22,7 @@ texts ship with each package in `node_modules/<name>/`.
 | fontkit, pdf-lib build (Text and Markdown to PDF) | 1.1.1 | MIT | https://github.com/Hopding/fontkit |
 | UTIF.js, as utif2 (TIFF to PDF) | 4.1.0 | MIT | https://github.com/photopea/UTIF.js |
 | pako (used by fontkit and UTIF.js) | 1.0.11 | MIT and Zlib | https://github.com/nodeca/pako |
+| jsdiff, as diff (Compare PDFs) | 9.0.0 | BSD-3-Clause | https://github.com/kpdecker/jsdiff |
 
 ## Fonts
 
