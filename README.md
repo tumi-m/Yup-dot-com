@@ -323,8 +323,9 @@ an uploaded PDF are detected and overlaid with live inputs for filling.
 Usability work: **undo/redo** (one entry per gesture, not per frame), resize
 handles on every annotation, a **thumbnail sidebar** with drag-to-reorder and
 per-page rotate/insert/delete, a contextual **properties panel**, keyboard
-shortcuts, and toasts. Structural operations bake current annotations first,
-then transform the bytes and re-render.
+shortcuts, and toasts. Page operations keep edits editable: they move with
+their pages, in undo too (`lib/editor/page-map.ts`); only a turned page's edits
+are drawn into it first.
 
 **Organize PDF, Delete Pages and Extract Pages** share one page grid
 (`components/tools/PageOrganizer.tsx`). Moves, turns, blank pages and
