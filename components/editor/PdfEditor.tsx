@@ -226,6 +226,10 @@ export function PdfEditor({
             fieldsAnnounced.current = true;
             const n = fillableCount(fields);
             if (n) toast(`${n} fillable field${n === 1 ? "" : "s"} detected`, "info");
+            // Opened from Fill & Sign: what to do, once it is known whether there is anything to fill in.
+            if (new URLSearchParams(window.location.search).get("sign") === "1") {
+              toast(n ? "Fill in the fields, then choose Signature to sign." : "Choose Signature to sign.", "info");
+            }
           }
         }
       } catch {
@@ -650,7 +654,7 @@ export function PdfEditor({
   };
 
   // Opened from Fill & Sign: show where Signature is (off the side of a
-  // phone's toolbar) and what to do. Nothing opens by itself.
+  // phone's toolbar). Nothing opens by itself; the load says what to do.
   const signHinted = useRef(false);
   useEffect(() => {
     if (!loaded || signHinted.current) return;
@@ -659,8 +663,7 @@ export function PdfEditor({
     document
       .querySelector<HTMLElement>('[data-tool="signature"]')
       ?.scrollIntoView({ inline: "center", block: "nearest", behavior: scrollBehavior() });
-    toast("Fill in the fields, then choose Signature to sign.", "info");
-  }, [loaded, toast]);
+  }, [loaded]);
 
   /** Goes to the page typed in the page box; anything else puts the box back. */
   const goToTyped = () => {
