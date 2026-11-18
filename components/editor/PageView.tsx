@@ -77,6 +77,8 @@ export function PageView({
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A page the document doesn't have (it is being replaced) isn't drawn.
+      if (pageIndex >= loaded.numPages) return;
       const vp = await loaded.getPageViewport(pageIndex + 1, scale);
       if (cancelled) return;
       setSize({ w: vp.width, h: vp.height });

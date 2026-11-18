@@ -102,6 +102,8 @@ export function PdfEditor({
 
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [loaded, setLoaded] = useState<LoadedPdf | null>(null);
+  /** Where a page operation moves to, applied when its document has loaded. */
+  const nextPage = useRef<((current: number) => number) | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(0);
   const [scale, setScale] = useState(1.3);
@@ -212,7 +214,10 @@ export function PdfEditor({
         }
         setLoaded(local);
         setNumPages(local.numPages);
-        setPage((p) => Math.min(p, local!.numPages - 1));
+        // A page operation moves to its page only now: the old document may not have it.
+        const move = nextPage.current;
+        nextPage.current = null;
+        setPage((p) => Math.min(move ? move(p) : p, local!.numPages - 1));
         const fields = await detectFormFields(bytes);
         if (active) {
           setFormFields(fields);
@@ -322,13 +327,14 @@ export function PdfEditor({
    * Runs a page operation on the document. Edits stay edits: they move with
    * their pages (`map`), in every undo step too, and form values stay, as
    * the fields keep their names. Only `bakePage`'s edits are drawn into the
-   * page first: rotation turns the page under them.
+   * page first: rotation turns the page under them. `page` picks the page
+   * shown once the new document has loaded.
    */
   const runStructural = useCallback(
     async (
       transform: (input: Uint8Array) => Promise<Uint8Array>,
       message: string,
-      { map, bakePage }: { map: PageMap; bakePage?: number }
+      { map, bakePage, page }: { map: PageMap; bakePage?: number; page?: (current: number) => number }
     ): Promise<boolean> => {
       if (!bytes || busyRef.current) return false;
       busyRef.current = true;
@@ -344,6 +350,7 @@ export function PdfEditor({
         history.remap(keep);
         const kept = new Set(keep(annotations).map((a) => a.id));
         setSelectedId((id) => (id && kept.has(id) ? id : null));
+        nextPage.current = page ?? null;
         setBytes(new Uint8Array(result));
         toast(message, "success");
         return true;
@@ -362,9 +369,7 @@ export function PdfEditor({
     const order = Array.from({ length: numPages }, (_, i) => i);
     const [moved] = order.splice(from, 1);
     order.splice(to, 0, moved);
-    runStructural((b) => reorderPages(b, order), "Pages reordered.", { map: orderMap(order) }).then(
-      (ok) => ok && setPage(to)
-    );
+    runStructural((b) => reorderPages(b, order), "Pages reordered.", { map: orderMap(order), page: () => to });
   };
 
   /** Asks before a page is deleted; resolves once the dialog has gone. */
@@ -384,9 +389,10 @@ export function PdfEditor({
     });
     if (!yes) return false;
     const map = deleteMap(target);
-    const ok = await runStructural((b) => deletePages(b, [target]), "Page deleted.", { map });
-    if (ok) setPage((p) => pageAfter(p, map, numPages - 1));
-    return ok;
+    return runStructural((b) => deletePages(b, [target]), "Page deleted.", {
+      map,
+      page: (p) => pageAfter(p, map, numPages - 1),
+    });
   };
 
   const handleRotate = (target: number) =>
@@ -398,9 +404,10 @@ export function PdfEditor({
 
   const handleInsertAfter = async (target: number) => {
     const map = insertAfterMap(target);
-    const ok = await runStructural((b) => insertBlankPage(b, target), "Blank page inserted.", { map });
-    if (ok) setPage((p) => pageAfter(p, map, numPages + 1));
-    return ok;
+    return runStructural((b) => insertBlankPage(b, target), "Blank page inserted.", {
+      map,
+      page: (p) => pageAfter(p, map, numPages + 1),
+    });
   };
 
   async function handleMerge(files: FileList | null) {
