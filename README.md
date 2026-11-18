@@ -41,6 +41,7 @@ work with or without an account.
 | **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
+| **Redact PDF** | Black out text and areas for good: draw boxes (mouse, pen, a finger on a box's handles, or the keys), find text with "Mark all" (match case, whole words), or mark every email, phone number, card number (Luhn-checked), South African ID number (birth date and check digit), account-like number or IBAN, and date. A list shows, unticks or removes each mark; long files have page navigation. Each page with a mark is rebuilt as a picture with the marks painted black before it is encoded, its other words kept searchable as invisible text (not those under or next to a mark); pages without marks stay as they are. The file also loses its details and XMP metadata, scripts, attached files, thumbnails, the comments and fields on rebuilt pages, links over a mark, bookmark titles naming redacted text and anything nothing uses. Copies of marked text left unmarked elsewhere are listed first: mark them too, or leave them on purpose. The result is searched (every decoded stream and string, object streams too) and read again by pdf.js before it is offered; if anything redacted is left, nothing is saved. |
 | **PDF → PPTX** | Each page becomes a picture slide (the text isn't editable). |
 | **PPTX → PDF** | Renders PowerPoint slides in the browser as image-based pages with a selectable text layer; hidden slides are skipped and the file is never uploaded. |
 | **Edit PPTX** | Edit slide text, reorder, duplicate or delete slides, then save as PPTX or PDF. In the browser. |
@@ -349,6 +350,23 @@ that would hold more pictures than a tab can is turned away first. Redrawing
 the old content clipped to the box would look the same but keep every word
 in the file, so removing is done with pictures and the page says so.
 
+**Redact PDF** (`components/tools/RedactTool.tsx`, `lib/pdf/redact/`) keeps
+every mark in displayed points from the page's top-left (`marks.ts`, which
+also holds the search, the presets and their checks, and works out which
+text each mark takes away and where unmarked copies of it are). pdf.js gives
+one box per run of text, so where a match sits inside a run is estimated
+from typical letter widths: search marks get a little room round them, and
+words near a box are left out of the searchable layer. Drawing the marked
+pages with the marks painted black needs pdf.js and a canvas, so it runs in
+the page a page at a time (`pictures.ts`); rebuilding the pages, the clean-up
+and a search of every object of the written file run in a Web Worker
+(`index.ts`, `scan.ts`); then the result is opened again with pdf.js and its
+text, comments, fields, bookmarks and details are read, the words under each
+mark looked for, and each mark checked to come out black (`verify.ts`). A
+mode that removes only the text and pictures under the marks and keeps the
+rest of the page as it was is not offered: it can't yet be shown to be safe
+on every kind of font and drawing, and a picture of the page can.
+
 ## Tests
 
 ```bash
@@ -365,7 +383,12 @@ openpyxl), compression (images sized by placement, lossless graphics,
 text and forms kept), resizing (page sizes, where text, links,
 bookmarks and notes land, turned pages, 2 and 4 to a sheet), cropping
 (page boxes, turned and offset pages, what stays and goes, and that removed
-content is gone from the file's streams), pictures to
+content is gone from the file's streams), redaction (text split over TJ
+arrays, hex strings, Type3 and CID fonts, form XObjects, comments'
+appearances, invisible OCR text, pictures of text, turned pages, copies
+elsewhere, metadata, bookmarks, scripts, attachments, forms and links: each
+result searched stream by stream and read back with pdf.js, and the marks
+drawn to check they are black), pictures to
 PDF (multi-page and turned TIFFs rendered by pdf.js, mixed formats, looping
 and lying TIFFs turned away), text and Markdown to PDF (read back with
 pdf.js: wrapping inside the margins, pages, fonts, links, tables), and repair
@@ -667,6 +690,7 @@ pdf-wizard/
 │   ├── pdf/operations.ts         ← pdf-lib page ops
 │   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
 │   ├── pdf/crop/                 ← Crop PDF: the box, page boxes, pictures, white-margin trim
+│   ├── pdf/redact/               ← Redact PDF: marks, presets, pictures, clean-up, the search and check after
 │   ├── pdf/images-to-pdf/        ← Pictures to PDF: formats, browser and TIFF decoding, in a worker
 │   ├── pdf/text-to-pdf/          ← Text and Markdown to PDF: fonts, layout, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
