@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence } from "motion/react";
 import { FilePlus2 } from "lucide-react";
-import { saveLocalDoc, takeHandoff, handoffToFile, fileToHandoff, tryHandoff, STORE_FAILED } from "@/lib/local-store";
-import { ENCRYPTED_MESSAGE, friendlyPdfError } from "@/lib/pdf/errors";
+import { saveLocalDoc, takeHandoff, handoffToFile, STORE_FAILED } from "@/lib/local-store";
+import { friendlyPdfError } from "@/lib/pdf/errors";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { uuid } from "@/lib/utils";
 import { isLoadError, loadErrorMessage } from "@/lib/load-error";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { InlineError } from "@/components/motion/primitives";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
+import { ErrorHelp } from "./ErrorHelp";
 
 /**
  * Opens a PDF in the editor with no account required.
@@ -27,8 +28,8 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [upsell, setUpsell] = useState(false);
-  /** A password-protected file, to take to Unlock PDF. */
-  const [locked, setLocked] = useState<File | null>(null);
+  /** The file the error is about, so the fix (Unlock or Repair PDF) opens with it. */
+  const [failed, setFailed] = useState<File | null>(null);
   const limits = limitsFor(tier);
   const sign = mode === "sign";
   const query = sign ? "?sign=1" : "";
@@ -41,7 +42,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
 
   async function openFile(file: File) {
     setError(null);
-    setLocked(null);
+    setFailed(null);
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setError("Please choose a PDF file.");
       return;
@@ -59,7 +60,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
         pageCount = await getPageCount(bytes);
       } catch (err) {
         if (isLoadError(err)) throw err;
-        // Says which: locked (Unlock PDF opens it) or not a readable PDF.
+        // Says which: locked (Unlock PDF opens it) or not a readable PDF (Repair PDF).
         throw friendlyPdfError(err, file.name);
       }
 
@@ -100,13 +101,14 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
       // The editor's code didn't arrive (offline): the file is fine.
       const message = isLoadError(err) ? loadErrorMessage("the editor") : err instanceof Error ? err.message : "Could not open the editor.";
       setError(message);
-      setLocked(message.endsWith(ENCRYPTED_MESSAGE) ? file : null);
+      setFailed(file);
       setBusy(false);
     }
   }
 
   async function blankDocument() {
     setError(null);
+    setFailed(null);
     setBusy(true);
     try {
       const { PDFDocument } = await import("pdf-lib");
@@ -117,12 +119,6 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
       setError(isLoadError(err) ? loadErrorMessage("the editor") : STORE_FAILED);
       setBusy(false);
     }
-  }
-
-  /** Takes a locked file to Unlock PDF; without room to hand it over, the tool still opens. */
-  async function unlock(file: File) {
-    const handed = await tryHandoff([fileToHandoff(file, file.name)]);
-    router.push(handed ? "/tools/unlock-pdf?handoff=1" : "/tools/unlock-pdf");
   }
 
   // A file handed over from the homepage or another tool opens immediately.
@@ -169,23 +165,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
         {error && (
           <InlineError
             key="error"
-            message={
-              locked ? (
-                // In the text, so on a phone it wraps under the message, as on the other tools.
-                <>
-                  {error}{" "}
-                  <button
-                    type="button"
-                    onClick={() => void unlock(locked)}
-                    className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    Open in Unlock PDF
-                  </button>
-                </>
-              ) : (
-                error
-              )
-            }
+            message={<ErrorHelp message={error} slug={sign ? "sign-pdf" : "edit-pdf"} files={failed ? [failed] : []} />}
           />
         )}
       </AnimatePresence>
