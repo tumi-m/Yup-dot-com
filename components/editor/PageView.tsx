@@ -431,9 +431,10 @@ function FormFieldOverlay({
   }
 
   if (field.kind === "dropdown" || field.kind === "listbox") {
-    // A list box shows as many options as its height holds.
+    // A list box shows as many options as its height holds, the empty one
+    // included. Options are 1.15em tall, so whole rows fill it, none cut off.
     const ownHeight = sideways ? field.width : field.height;
-    const rows = Math.max(2, Math.min(field.options.length, Math.floor(ownHeight / ((field.fontSize || 10) * 1.2))));
+    const rows = Math.max(2, Math.min(field.options.length + 1, Math.floor(ownHeight / ((field.fontSize || 10) * 1.15))));
     return (
       <div {...hold} className="leading-none">
         <select
@@ -442,7 +443,7 @@ function FormFieldOverlay({
           size={field.kind === "listbox" ? rows : undefined}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`h-full w-full rounded-sm px-1 ${shared}`}
+          className={`h-full w-full rounded-sm px-1 [&>option]:h-[1.15em] [&>option]:min-h-0 [&>option]:py-0 ${shared}`}
           data-fit-text
           style={{ ...inner, fontSize }}
         >
