@@ -15,6 +15,7 @@ const SampleFinder = lazy(() => import("./SampleFinder").then((m) => ({ default:
 const SlidesImporter = lazy(() => import("./SlidesImporter").then((m) => ({ default: m.SlidesImporter })));
 const PageOrganizer = lazy(() => import("./PageOrganizer").then((m) => ({ default: m.PageOrganizer })));
 const CropTool = lazy(() => import("./CropTool").then((m) => ({ default: m.CropTool })));
+const RedactTool = lazy(() => import("./RedactTool").then((m) => ({ default: m.RedactTool })));
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
@@ -43,6 +44,8 @@ function panel(spec: PanelSpec, tier: Tier): ReactNode {
       return <PageOrganizer mode={spec.mode} slug={spec.slug} tier={tier} />;
     case "crop":
       return <CropTool slug={spec.slug} tier={tier} />;
+    case "redact":
+      return <RedactTool slug={spec.slug} tier={tier} />;
     case "workbench":
       return <ToolWorkbench slug={spec.slug} tier={tier} />;
   }

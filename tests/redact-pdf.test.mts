@@ -215,7 +215,10 @@ async function brightness(bytes: Uint8Array, page: number, r: Rect): Promise<num
   check("phone numbers", all("phone").join() === "+27 82 123 4567", all("phone"));
   check("card numbers (Luhn-checked)", all("card").join() === "4111 1111 1111 1111", all("card"));
   check("SA ID numbers, and a 13-digit number that isn't one is left", all("id").join() === "8001015009087", all("id"));
-  check("account-like numbers", all("account").includes("62012345678"), all("account"));
+  check("account-like numbers, not a phone number's digits", all("account").join() === "62012345678,1234567890123", all("account"));
+  const phones = marks.addFound([], 0, marks.findOnPage(page, marks.presetById("phone").pattern, marks.presetById("phone").valid), "phone", true);
+  const inside = marks.addFound(phones, 0, [{ text: "82 123", rects: [marks.grow(phones[0].rects[0], -3, -1)] }], "account", true);
+  check("a find inside a mark already there isn't marked again", phones.length === 1 && inside.length === 0);
   check("dates", all("date").join() === "12 March 2024", all("date"));
   const comment = marks.findOnPage(page, marks.presetById("email").pattern)[1];
   check("a match in a comment marks the comment", JSON.stringify(comment.rects) === JSON.stringify([page.notes[0].rect]));
@@ -735,7 +738,7 @@ function pageStringOf(p: import("../lib/pdf/redact/marks.ts").PageText) {
 // --- Registered like the other tools ---------------------------------------------
 {
   const tool = getTool("redact-pdf");
-  check("registered once, under Edit", !!tool && TOOLS.filter((t) => t.slug === "redact-pdf").length === 1 && tool.category === "edit", tool?.category);
+  check("registered once, under Security", !!tool && TOOLS.filter((t) => t.slug === "redact-pdf").length === 1 && tool.category === "security", tool?.category);
   check("its own panel", !!tool && panelSpec(tool).kind === "redact");
   check("search finds it by what people type", ["redact", "black out", "blackout", "censor", "hide text", "remove personal"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "redact-pdf")));
   check("in the sitemap", sitemap().some((u) => u.url.endsWith("/tools/redact-pdf")));

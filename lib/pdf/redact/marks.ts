@@ -413,7 +413,8 @@ export const PRESETS: Preset[] = [
     id: "account",
     label: "Account numbers",
     plural: "account numbers",
-    pattern: new RegExp(`${B}(?:[A-Z]{2}\\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?|${grouped(7, 17)})${E}`, "gu"),
+    // Not straight after a "+": that's a phone number's country code.
+    pattern: new RegExp(`(?<![\\p{L}\\p{N}+])(?:[A-Z]{2}\\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?|\\d{7,17}|\\d{4}(?:[ -]\\d{4}){1,3}(?:[ -]\\d{1,4})?)${E}`, "gu"),
     // Card and ID numbers have their own presets.
     valid: (s) => (/^[A-Z]/.test(s) ? iban(s) : !dateText(s) && !cardNumber(s) && !saIdNumber(s)),
   },
@@ -440,14 +441,16 @@ const rectKey = (r: Rect) => [r.x0, r.y0, r.x1, r.y1].map((n) => Math.round(n)).
 /** Two marks over the same place on the same page are one. */
 export const markKey = (m: Pick<Mark, "page" | "rects">) => `${m.page}:${m.rects.map(rectKey).join(";")}`;
 
-/** `found` as marks, leaving out any already in `marks`. */
+/** `found` as marks, leaving out any already in `marks` or inside a mark there (a phone number already marked isn't an account number too). */
 export function addFound(marks: Mark[], page: number, found: Found[], kind: MarkKind, whole: boolean): Mark[] {
   const seen = new Set(marks.map(markKey));
+  const here = marks.filter((m) => m.page === page).flatMap((m) => m.rects);
   const out: Mark[] = [];
   for (const f of found) {
     const mark: Mark = { id: markId(), page, rects: f.rects, kind, text: f.text, whole, on: true };
     const key = markKey(mark);
     if (seen.has(key)) continue;
+    if (f.rects.every((r) => here.some((h) => overlap(h, r) >= area(r) * 0.8))) continue;
     seen.add(key);
     out.push(mark);
   }

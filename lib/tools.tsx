@@ -49,6 +49,7 @@ import {
   LetterText,
   Heading,
   Wrench,
+  EyeOff,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -78,7 +79,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "redact";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -455,6 +456,19 @@ const ALL_TOOLS: ToolMeta[] = [
     keywords: "decrypt remove password",
   },
   {
+    slug: "redact-pdf",
+    name: "Redact PDF",
+    title: "Redact PDF: black out text and remove it for good",
+    description: "Remove names, numbers and areas for good.",
+    icon: EyeOff,
+    category: "security",
+    tint: "bg-slate-200 text-slate-800",
+    badge: "New",
+    custom: "redact",
+    keywords:
+      "redact redaction black out blackout censor hide text remove personal information sensitive private confidential anonymize anonymise pii gdpr popia names emails phone card id numbers",
+  },
+  {
     slug: "page-numbers",
     name: "Page Numbers",
     title: "Add Page Numbers to a PDF",
@@ -673,6 +687,7 @@ const RELATED: Record<string, string[]> = {
   "crop-pdf": ["resize-pdf", "rotate-pdf", "organize-pdf", "split-pdf"],
   "resize-pdf": ["crop-pdf", "rotate-pdf", "organize-pdf", "compress-pdf"],
   "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
+  "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
 };
 
 /** Four tools to offer under a tool: its own list, else its category's first, then the most used. */
