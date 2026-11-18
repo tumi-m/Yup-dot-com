@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { configureWorker } from "./worker";
 import { ownText, paints, showsPictures } from "./page-content";
 import type { OwnText } from "./ocr-layer";
+import type { PageText } from "./redact/marks";
 
 function ensureWorker() {
   configureWorker(pdfjsLib);
@@ -62,8 +63,12 @@ export interface LoadedPdf {
   showsPictures: (pageNumber: number) => Promise<boolean>;
   /** True when the page draws anything at all, its fields included. */
   paints: (pageNumber: number) => Promise<boolean>;
+  /** The page's text runs, and what its comments and fields say, as Redact PDF marks and checks them. */
+  pageText: (pageNumber: number) => Promise<PageText>;
   /** How many bookmarks and form fields the document has, as pdf.js reads them. */
   extras: () => Promise<{ bookmarks: number; fields: number }>;
+  /** What a reader shows about the document beyond its pages: details, bookmark titles, attachments and scripts. */
+  facts: () => Promise<{ info: Record<string, unknown>; xmp: boolean; bookmarks: string[]; attachments: number; scripts: boolean }>;
   /** Drops what pdf.js keeps of a page once it is done with (decoded pictures, fonts). */
   release: (pageNumber: number) => Promise<void>;
   destroy: () => void;
@@ -146,6 +151,27 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
     async paints(pageNumber) {
       const page = await doc.getPage(pageNumber);
       return paints(page, pdfjsLib.OPS as unknown as Record<string, number>);
+    },
+    async pageText(pageNumber) {
+      const { pageText } = await import("./redact/page-text");
+      return pageText(await doc.getPage(pageNumber));
+    },
+    async facts() {
+      const titles = (items: { title?: string; items?: unknown[] }[] | null): string[] =>
+        (items ?? []).flatMap((item) => [item.title ?? "", ...titles((item.items as { title?: string }[]) ?? [])]);
+      const [meta, outline, attachments, scripts] = await Promise.all([
+        doc.getMetadata().catch(() => null),
+        doc.getOutline().catch(() => null),
+        doc.getAttachments().catch(() => null),
+        doc.getJSActions().catch(() => null),
+      ]);
+      return {
+        info: (meta?.info as Record<string, unknown>) ?? {},
+        xmp: !!meta?.metadata,
+        bookmarks: titles(outline),
+        attachments: Object.keys(attachments ?? {}).length,
+        scripts: !!scripts && Object.keys(scripts).length > 0,
+      };
     },
     async extras() {
       const count = (items: { items?: unknown[] }[] | null): number =>
