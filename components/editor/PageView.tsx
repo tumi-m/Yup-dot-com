@@ -81,7 +81,7 @@ export function PageView({
       if (cancelled) return;
       setSize({ w: vp.width, h: vp.height });
       if (canvasRef.current) {
-        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale, { forms: hasFields });
+        await loaded.renderPage(pageIndex + 1, canvasRef.current, scale, { liveFields: hasFields });
         if (!cancelled) onRendered?.({ width: vp.width, height: vp.height });
       }
     })();
