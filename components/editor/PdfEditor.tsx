@@ -946,7 +946,7 @@ export function PdfEditor({
                 >
                   <ChevronLeft />
                 </Button>
-                <span className="flex items-center gap-1 px-1 text-sm tabular-nums">
+                <span className="flex items-center gap-1 px-1 text-sm tabular-nums max-[359px]:px-0">
                   <input
                     inputMode="numeric"
                     aria-label="Page number"
@@ -965,7 +965,7 @@ export function PdfEditor({
                         setPageDraft(null);
                       }
                     }}
-                    style={{ width: `${String(numPages).length + 2}ch` }}
+                    style={{ width: `${Math.max(3, String(numPages).length + 1)}ch` }}
                     className="h-8 rounded-md border border-input bg-background text-center tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                   <span className="whitespace-nowrap">/ {numPages}</span>
@@ -1005,7 +1005,8 @@ export function PdfEditor({
                 >
                   <ZoomIn />
                 </Button>
-                <Button variant="ghost" size="icon" className={pillButton} onClick={fitWidth} aria-label="Fit width">
+                {/* The narrowest phones leave it out, so the bar fits beside a four-digit page count. */}
+                <Button variant="ghost" size="icon" className={`${pillButton} max-[359px]:hidden`} onClick={fitWidth} aria-label="Fit width">
                   <Maximize />
                 </Button>
               </div>
