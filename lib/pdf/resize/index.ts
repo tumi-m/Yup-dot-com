@@ -41,10 +41,10 @@ import { layout, type Placed, type ResizeOptions } from "./geometry";
 export type { ResizeOptions } from "./geometry";
 
 /** A PDF matrix [a b c d e f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
-type Matrix = [number, number, number, number, number, number];
+export type Matrix = [number, number, number, number, number, number];
 
 /** `a`, then `b`. */
-function then(a: Matrix, b: Matrix): Matrix {
+export function compose(a: Matrix, b: Matrix): Matrix {
   return [
     a[0] * b[0] + a[1] * b[2],
     a[0] * b[1] + a[1] * b[3],
@@ -55,7 +55,7 @@ function then(a: Matrix, b: Matrix): Matrix {
   ];
 }
 
-function invert(m: Matrix): Matrix {
+export function invert(m: Matrix): Matrix {
   const det = m[0] * m[3] - m[1] * m[2];
   return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
 }
@@ -76,7 +76,7 @@ const num = (n: number) => (Math.abs(n) < 1e-9 ? "0" : String(Math.round(n * 100
 
 /** From the page's own space to the sheet, for a page placed at `p` (its rotation turned into the content). */
 function placement(page: PDFPage, p: Placed): Matrix {
-  return then(invert(pageFrame(page).matrix), [p.scale, 0, 0, p.scale, p.x, p.y]);
+  return compose(invert(pageFrame(page).matrix), [p.scale, 0, 0, p.scale, p.x, p.y]);
 }
 
 const N = {
@@ -141,7 +141,7 @@ function moveRect(doc: PDFDocument, arr: PDFArray, m: Matrix): PDFArray | undefi
  * turned has its turn put into the picture, since the page itself is no
  * longer turned.
  */
-function moveAnnotation(doc: PDFDocument, annot: PDFDict, m: Matrix, turned: Set<PDFStream>) {
+export function moveAnnotation(doc: PDFDocument, annot: PDFDict, m: Matrix, turned: Set<PDFStream>) {
   const rect = annot.lookup(N.Rect);
   if (rect instanceof PDFArray) {
     const moved = moveRect(doc, rect, m);
@@ -182,7 +182,7 @@ function moveAnnotation(doc: PDFDocument, annot: PDFDict, m: Matrix, turned: Set
       const old = stream.dict.lookup(N.Matrix);
       const before: Matrix =
         old instanceof PDFArray && old.size() === 6 ? ([0, 1, 2, 3, 4, 5].map((i) => numberAt(old, i) ?? 0) as Matrix) : [1, 0, 0, 1, 0, 0];
-      stream.dict.set(N.Matrix, doc.context.obj(then(before, turn)));
+      stream.dict.set(N.Matrix, doc.context.obj(compose(before, turn)));
     }
   }
 }
@@ -228,7 +228,7 @@ function ownAnnotations(doc: PDFDocument, page: PDFPage, seen: Set<PDFObject>) {
 }
 
 /** Where a page went: the sheet it is on now and the transform onto it. */
-interface Moved {
+export interface Moved {
   sheet: PDFRef;
   m: Matrix;
   turned: boolean;
@@ -239,7 +239,7 @@ interface Moved {
  * same spot on its sheet. One with a position on a page that was turned
  * shows the whole sheet: "top" and "left" no longer mean the same edge.
  */
-function moveDestinations(doc: PDFDocument, moved: Map<PDFRef, Moved>) {
+export function moveDestinations(doc: PDFDocument, moved: Map<PDFRef, Moved>) {
   const done = new Set<PDFArray>();
   const fix = (dest: PDFObject | undefined) => {
     if (!(dest instanceof PDFArray) || done.has(dest)) return;

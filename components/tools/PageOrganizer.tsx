@@ -30,12 +30,16 @@ import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/
 import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
+import { isPdf, readPdf } from "./read-pdf";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
+import { getTool } from "@/lib/tools";
 import { friendlyPdfError } from "@/lib/pdf/errors";
+import { ErrorHelp } from "./ErrorHelp";
+import { takesMessage } from "./file-pick";
 import { DRAWN_AT_ONCE, NEAR_MARGIN, taskLimiter } from "@/lib/editor/thumbnails";
 import { useHistory } from "@/lib/editor/history";
 import type { LoadedPdf } from "@/lib/pdf/render";
@@ -86,23 +90,7 @@ interface Source {
 /** The page tools' small buttons, 44px tall on touch screens like the rest of the site. */
 const TOUCH = "pointer-coarse:h-11 pointer-coarse:min-w-11";
 
-const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-async function readPdf(file: File): Promise<LoadedPdf> {
-  const { loadForRender } = await import("@/lib/pdf/render");
-  const loaded = await loadForRender(new Uint8Array(await file.arrayBuffer()));
-  try {
-    if (!loaded.numPages) throw new Error("This PDF has no pages.");
-    // A page tree that loops shows its first pages and fails further on:
-    // reaching the last page finds out now, not when the file is saved.
-    await loaded.getPageViewport(loaded.numPages, 1);
-  } catch (err) {
-    loaded.destroy();
-    throw err;
-  }
-  return loaded;
-}
 
 export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: string; tier: Tier }) {
   const router = useRouter();
@@ -136,6 +124,8 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   /** Read out after a page action. */
   const [note, setNote] = useState("");
+  /** The file that wouldn't open, for the link to a tool that can help. */
+  const [failedFile, setFailedFile] = useState<File | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
   const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose">();
@@ -194,7 +184,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     if (!list?.length) return;
     const picked = Array.from(list).find(isPdf);
     if (!picked) {
-      fail("Choose a PDF file.");
+      fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.
@@ -210,6 +200,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     history.reset([]);
     setResult(null);
     fail(null);
+    setFailedFile(null);
     setStatus("reading");
     try {
       const loaded = await readPdf(picked);
@@ -234,6 +225,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
       if (hadFocus) focusPage(first[0]?.id);
     } catch (err) {
       if (id !== opened.current) return;
+      setFailedFile(picked);
       fail(friendlyPdfError(err).message);
       if (hadFocus) focusNext.current = "choose";
       setStatus("idle");
@@ -244,7 +236,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
   async function addMore(list: FileList | null) {
     const files = Array.from(list ?? []).filter(isPdf);
     if (!files.length) {
-      if (list?.length) fail("Choose a PDF file.");
+      if (list?.length) fail(takesMessage(getTool(slug)?.name, "application/pdf", true));
       return;
     }
     if (files.some((f) => f.size > limits.maxFileBytes)) {
@@ -265,6 +257,7 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     try {
       for (const file of files) {
         const loaded = await readPdf(file).catch((err) => {
+          setFailedFile(file);
           throw friendlyPdfError(err, file.name);
         });
         if (id !== opened.current) {
@@ -903,7 +896,15 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
                 </motion.div>
               )}
 
-              <AnimatePresence>{error && <InlineError key="error" message={error} shakeKey={errorKey} />}</AnimatePresence>
+              <AnimatePresence>
+                {error && (
+                  <InlineError
+                    key="error"
+                    shakeKey={errorKey}
+                    message={<ErrorHelp message={error} slug={slug} files={failedFile ? [failedFile] : sources.map((s) => s.file)} onLeave={nudge.cancel} />}
+                  />
+                )}
+              </AnimatePresence>
 
               {sources.length > 0 && (
                 <motion.div initial={ENTER.initial} animate={ENTER.animate} exit={FADE_EXIT} className="relative flex flex-col items-center gap-3">

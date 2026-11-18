@@ -178,8 +178,14 @@ function annotationsOf(page: PDFPage): PDFDict[] {
   return out;
 }
 
+/** Takes the widgets no page shows out of the form, and fields left with none. */
+export function dropFieldsOffPages(doc: PDFDocument) {
+  const onPages = new Set(doc.getPages().flatMap(annotationsOf));
+  dropFields(doc, (w) => !onPages.has(w.dict));
+}
+
 /** Takes the widgets `gone` picks out of the form, and fields left with none. */
-function dropFields(doc: PDFDocument, gone: (widget: PDFWidgetAnnotation) => boolean) {
+export function dropFields(doc: PDFDocument, gone: (widget: PDFWidgetAnnotation) => boolean) {
   const acroForm = doc.catalog.getAcroForm();
   if (!acroForm) return;
   try {
@@ -206,7 +212,7 @@ function dropFields(doc: PDFDocument, gone: (widget: PDFWidgetAnnotation) => boo
  * An XFA form draws its own pages, which no longer match once pages move:
  * readers that use it (Acrobat) would show the old ones.
  */
-function dropXfa(doc: PDFDocument) {
+export function dropXfa(doc: PDFDocument) {
   doc.catalog.getAcroForm()?.dict.delete(PDFName.of("XFA"));
   doc.catalog.delete(PDFName.of("NeedsRendering"));
 }
@@ -966,8 +972,7 @@ async function extractPart(
 
   if (kept.size < srcPages.length) {
     dropLinksTo(doc, new Set([gone]));
-    const onPages = new Set(doc.getPages().flatMap(annotationsOf));
-    dropFields(doc, (w) => !onPages.has(w.dict));
+    dropFieldsOffPages(doc);
   }
   copyTags(src, doc, tags, new Set(order.map((i) => srcPages[i].ref)), copy, numbers);
   dropXfa(doc);

@@ -71,6 +71,20 @@ check("batch: a one-file tool keeps its own note", !oneTool.overBatch && oneTool
 check("type: one PDF", takesMessage("Compress PDF", "application/pdf", false) === "Compress PDF takes a PDF.");
 check("type: PDFs", takesMessage("Merge PDF", "application/pdf", true) === "Merge PDF takes PDFs.");
 check("type: images", takesMessage("JPG to PDF", "image/jpeg,image/png", true) === "JPG to PDF takes JPG or PNG images.");
+{
+  // Every picture a page takes is named, whatever its picker offers first.
+  const { PROCESSORS } = await import("../components/tools/processors.ts");
+  const takes = (slug: string) => {
+    const p = PROCESSORS[slug];
+    return takesMessage(slug, p.alsoAccepts ? `${p.accept},${p.alsoAccepts}` : p.accept, p.multiple);
+  };
+  const all = "takes JPG, PNG, WebP, GIF, BMP, TIFF, AVIF, HEIC or SVG images.";
+  check("type: JPG to PDF names every picture", takes("jpg-to-pdf") === `jpg-to-pdf ${all}`, takes("jpg-to-pdf"));
+  check("type: the picture pages too", ["png-to-pdf", "webp-to-pdf", "heic-to-pdf", "tiff-to-pdf", "svg-to-pdf"].every((s) => takes(s) === `${s} ${all}`), takes("png-to-pdf"));
+  check("type: text", takes("txt-to-pdf") === "txt-to-pdf takes a text or Markdown file.", takes("txt-to-pdf"));
+  check("type: Markdown", takes("markdown-to-pdf") === "markdown-to-pdf takes a Markdown or text file.", takes("markdown-to-pdf"));
+  check("type: extensions alone name the picture", takesMessage("X", ".png,.webp", true) === "X takes PNG or WebP images.");
+}
 check("type: videos", takesMessage("Compress Video", "video/mp4,video/quicktime,video/webm,video/x-m4v", false) === "Compress Video takes MP4, MOV or WebM videos.");
 check("type: no name", takesMessage(undefined, "application/pdf", false) === "This tool takes a PDF.");
 
@@ -103,7 +117,9 @@ check("password: Open in Unlock PDF", fixOf(ENCRYPTED_MESSAGE, one, "compress-pd
 check("merge: the named file goes, not the first", fixOf(`locked.pdf: ${ENCRYPTED_MESSAGE}`, two, "merge-pdf") === "unlock-pdf:Open in Unlock PDF:locked.pdf");
 check("merge: no name, no guess", fixOf(ENCRYPTED_MESSAGE, two, "merge-pdf") === null);
 check("not offered on the tool itself", fixOf(ENCRYPTED_MESSAGE, one, "unlock-pdf") === null && fixOf(SCANNED_MESSAGE, one, "ocr-pdf") === null);
-check("nothing for other errors", fixOf(UNREADABLE_MESSAGE, one, "compress-pdf") === null && fixOf(null, one, "compress-pdf") === null);
+check("unreadable: Try Repair PDF", fixOf(UNREADABLE_MESSAGE, one, "compress-pdf") === "repair-pdf:Try Repair PDF:scan.pdf" && fixOf(UNREADABLE_MESSAGE, one, "repair-pdf") === null);
+check("a locked PowerPoint is no PDF to unlock", fixOf("This file is password-protected. Remove the password first.", one, "pptx-to-pdf") === null);
+check("nothing for other errors", fixOf("Pick pages between 1 and 5.", one, "compress-pdf") === null && fixOf(null, one, "compress-pdf") === null);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

@@ -1,7 +1,7 @@
 // A file with a PDF header but no document after it must get the plain
 // "isn't a readable PDF" message, never a raw TypeError.
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { ENCRYPTED_MESSAGE, friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
+import { ENCRYPTED_MESSAGE, friendlyFileError, friendlyPdfError, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
 import { getPageCount } from "../lib/pdf/operations.ts";
 import { protectPdf } from "../lib/pdf/security.ts";
 import { mergeTool, pageNumbersTool, rotateTool, splitTool, unlockTool, watermarkTool } from "../lib/pdf/toolkit.ts";
@@ -92,6 +92,33 @@ check(
 }
 
 check("our own messages still pass through", friendlyPdfError(new Error("Pick pages between 1 and 5.")).message === "Pick pages between 1 and 5.");
+
+// Tools that take pictures or text never say "isn't a readable PDF".
+check("file tools keep their own messages", friendlyFileError(new Error("notes.md: this file is nested too deeply to lay out.")).message === "notes.md: this file is nested too deeply to lay out.");
+check("file tools: a bare library error is said plainly, not as a PDF", !/PDF/.test(friendlyFileError(new RangeError("Maximum call stack size exceeded")).message) && !/Cannot read/.test(friendlyFileError(new TypeError("Cannot read properties of undefined")).message));
+
+// After the message, a link to the tool that can help: never to the page that failed.
+const { errorFix } = await import("../components/tools/file-pick.ts");
+const one = [{ name: "a.pdf" }];
+const fixOf = (message: string | null, slug: string) => errorFix(message, one, slug);
+check("an unreadable PDF points at Repair PDF", fixOf(`a.pdf: ${UNREADABLE_MESSAGE}`, "crop-pdf")?.slug === "repair-pdf" && fixOf(UNREADABLE_MESSAGE, "merge-pdf")?.label === "Try Repair PDF");
+check("Repair PDF doesn't point at itself", fixOf(UNREADABLE_MESSAGE, "repair-pdf") === null);
+check("a locked PDF points at Unlock PDF, from Repair too", fixOf("This PDF is password-protected. Unlock it first.", "crop-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first, then repair it.", "repair-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first.", "unlock-pdf") === null);
+check("other messages get no link", fixOf("Pick pages between 1 and 5.", "split-pdf") === null && fixOf(null, "split-pdf") === null);
+// Merge names the damaged file, and that file is the one taken to Repair PDF.
+const named = errorFix(`b.pdf: ${UNREADABLE_MESSAGE}`, [{ name: "a.pdf" }, { name: "b.pdf" }], "merge-pdf");
+check("merge: the damaged file named goes to Repair PDF", named?.slug === "repair-pdf" && named.file.name === "b.pdf", named);
+// With several files and no name, there's no telling which to send.
+check("several files, no name: no guess", errorFix(UNREADABLE_MESSAGE, [{ name: "a.pdf" }, { name: "b.pdf" }], "organize-pdf") === null);
+
+// The fix is a link: a new tab or window still opens it, and the address shows.
+const { readFileSync } = await import("node:fs");
+const help = readFileSync(new URL("../components/tools/ErrorHelp.tsx", import.meta.url), "utf8");
+check("the fix is a link to the tool", /<Link\s+href=\{`\/tools\/\$\{fix\.slug\}`\}/.test(help) && !/<button/.test(help));
+check("a modifier click is left to the browser", /if \(e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey\) return;\s*e\.preventDefault\(\);/.test(help));
+// Every PDF page words a wrong file the same way.
+const organizer = readFileSync(new URL("../components/tools/PageOrganizer.tsx", import.meta.url), "utf8");
+check("page tools: a wrong file says what the tool takes", !organizer.includes("Choose a PDF file") && (organizer.match(/takesMessage\(getTool\(slug\)\?\.name, "application\/pdf"/g) ?? []).length === 2);
 
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

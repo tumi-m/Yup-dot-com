@@ -17,12 +17,13 @@ import {
   Timer,
   TrendingDown,
   Info,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { downloadBlob } from "@/lib/download";
-import { formatBytes } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import type { ToolFile } from "@/lib/pdf/toolkit";
 import {
   CountUp,
@@ -50,14 +51,17 @@ import {
 import { fieldHint, fieldShown, problemFields, PROCESSORS, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
-import { errorFix, percentSmaller, sortPick, takesMessage } from "./file-pick";
+import { percentSmaller, sortPick, takesFile, takesMessage } from "./file-pick";
 import { limitsFor, formatLimitBytes, type Tier } from "@/lib/limits";
 import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { recordTask, upsellCardDismissed, dismissUpsellCard } from "@/lib/nudge";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
-import { friendlyPdfError } from "@/lib/pdf/errors";
+import { friendlyFileError, friendlyPdfError } from "@/lib/pdf/errors";
+import { ErrorHelp } from "./ErrorHelp";
 import { trackToolUsed } from "@/lib/analytics";
 import { getTool } from "@/lib/tools";
+import { HEIC_MESSAGE, looksHeic } from "@/lib/pdf/images-to-pdf/formats";
+import Link from "next/link";
 
 /** Resize PDF's preview loads with that tool only. */
 const ResizePreview = lazy(() => import("./ResizePreview").then((m) => ({ default: m.ResizePreview })));
@@ -69,10 +73,20 @@ const NEXT_STEPS: Record<string, string[]> = {
   "merge-pdf": ["compress-pdf", "page-numbers", "edit-pdf", "protect-pdf"],
   "ocr-pdf": ["pdf-to-word", "chat-with-pdf", "compress-pdf", "edit-pdf"],
   "jpg-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "png-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "webp-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "heic-to-pdf": ["compress-pdf", "merge-pdf", "ocr-pdf", "edit-pdf"],
+  "tiff-to-pdf": ["ocr-pdf", "compress-pdf", "merge-pdf", "edit-pdf"],
+  "svg-to-pdf": ["merge-pdf", "compress-pdf", "edit-pdf", "protect-pdf"],
+  // Real text already: no OCR.
+  "txt-to-pdf": ["merge-pdf", "protect-pdf", "sign-pdf", "edit-pdf"],
+  "markdown-to-pdf": ["merge-pdf", "protect-pdf", "sign-pdf", "edit-pdf"],
   "unlock-pdf": ["edit-pdf", "compress-pdf", "pdf-to-word", "merge-pdf"],
   "resize-pdf": ["compress-pdf", "page-numbers", "merge-pdf", "protect-pdf"],
   "pdf-to-pptx": ["edit-pptx", "pptx-to-pdf"],
   "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
+  // Pages that came back as pictures can be read again with OCR.
+  "repair-pdf": ["compress-pdf", "ocr-pdf", "edit-pdf", "merge-pdf"],
   // An encrypted result can't be opened by the other tools.
   "protect-pdf": [],
 };
@@ -87,13 +101,6 @@ function nextSteps(slug: string, filename: string): string[] {
   if (name.endsWith(".pptx")) return NEXT_STEPS["pdf-to-pptx"];
   return [];
 }
-
-/** Video files some systems hand over without a type. */
-const VIDEO_EXT: Record<string, RegExp> = {
-  "video/mp4": /\.(mp4|m4v)$/,
-  "video/quicktime": /\.mov$/,
-  "video/webm": /\.webm$/,
-};
 
 type Status = "idle" | "working" | "done";
 
@@ -151,6 +158,21 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** Files were just added: scroll them into view once they render. */
   const bringUp = useRef(false);
 
+  /** False once this browser is known not to open HEIC photos (only Safari does). */
+  const [heicOk, setHeicOk] = useState<boolean | null>(null);
+  const takesHeic = takesFile(proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept, { name: "photo.heic", type: "image/heic" });
+  useEffect(() => {
+    if (!takesHeic) return;
+    let live = true;
+    void import("@/lib/pdf/images-to-pdf/heic-check")
+      .then((m) => m.canOpenHeic())
+      .then((ok) => live && setHeicOk(ok))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [takesHeic]);
+
   /** Shows a message; the same message again shakes again. */
   function fail(message: string | null) {
     setError(message);
@@ -164,22 +186,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   /** Adds the files that fit; false when none could be added. */
   function addFiles(list: FileList | File[] | null): boolean {
     if (!list?.length) return false;
-    const accepted = Array.from(list).filter((f) =>
-      proc.accept.split(",").some((type) => {
-        const t = type.trim();
-        const name = f.name.toLowerCase();
-        // Some browsers and OS share sheets leave `type` empty: fall back to the extension.
-        return (
-          f.type === t ||
-          (t === "application/pdf" && name.endsWith(".pdf")) ||
-          (!f.type && t === "image/jpeg" && /\.jpe?g$/.test(name)) ||
-          (!f.type && t === "image/png" && name.endsWith(".png")) ||
-          ((!f.type || f.type === "application/octet-stream") && VIDEO_EXT[t]?.test(name))
-        );
-      })
-    );
+    const takes = proc.alsoAccepts ? `${proc.accept},${proc.alsoAccepts}` : proc.accept;
+    const taken = Array.from(list).filter((f) => takesFile(takes, f));
+    if (!taken.length) {
+      fail(takesMessage(getTool(slug)?.name, takes, proc.multiple));
+      return false;
+    }
+    // HEIC photos this browser can't open: said now, not after Cast spell.
+    const heic = heicOk === false ? taken.filter(looksHeic) : [];
+    const heicNote = heic.length ? `${heic[0].name}${heic.length > 1 ? ` and ${heic.length - 1} more` : ""}: ${HEIC_MESSAGE}` : null;
+    const accepted = taken.filter((f) => !heic.includes(f));
     if (!accepted.length) {
-      fail(takesMessage(getTool(slug)?.name, proc.accept, proc.multiple));
+      fail(heicNote);
       return false;
     }
     // Limits are an upgrade prompt, never a silent failure.
@@ -203,7 +221,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setEntries(proc.multiple ? [...entries, ...incoming] : incoming.slice(0, 1));
     setStatus("idle");
     setResults([]);
-    fail(message);
+    fail(heicNote ?? message);
     bringUp.current = true;
     return true;
   }
@@ -342,7 +360,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       if (recordTask(tier === "guest")) nudge.arm();
     } catch (err) {
       if (ctl.signal.aborted) return;
-      fail(friendlyPdfError(err).message);
+      // PDF messages only where PDFs go in: a broken .md isn't "a PDF".
+      fail((proc.accept.includes("pdf") ? friendlyPdfError : friendlyFileError)(err).message);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
       // The work view stays, so nothing else lets go of the room kept for the result.
       flow.release();
@@ -407,15 +426,6 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     if (await tryHandoff([fileToHandoff(r.blob, r.filename)])) router.push(`/tools/${nextSlug}?handoff=1`);
     else setNextFailed(nextSlug);
   }
-
-  /** Takes the file the error is about to the tool that fixes it. */
-  async function fixWith(fix: { slug: string; file: File }) {
-    nudge.cancel();
-    // Without room to hand it over, the tool still opens, ready for the file.
-    const handed = await tryHandoff([fileToHandoff(fix.file, fix.file.name)]);
-    router.push(handed ? `/tools/${fix.slug}?handoff=1` : `/tools/${fix.slug}`);
-  }
-  const fix = errorFix(error, files, slug);
 
   // Files handed over from the homepage dropzone or a previous tool.
   useEffect(() => {
@@ -496,6 +506,22 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                   {unchanged ? "Your file is unchanged" : "About the same size"}
                 </span>
               )}
+              {results.length === 1 && results[0].report && (
+                <ul className="w-full max-w-md space-y-1.5 text-left" aria-label="What was done">
+                  {results[0].report.map((line) => (
+                    <li
+                      key={line.text}
+                      className={cn(
+                        "flex items-start gap-1.5 rounded-lg px-2.5 py-1.5",
+                        line.warn ? "bg-amber-100 font-medium text-amber-800" : "bg-secondary text-muted-foreground"
+                      )}
+                    >
+                      {line.warn ? <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden /> : <Check className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />}
+                      {line.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {results.length === 1 && results[0].note && (
                 <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-left font-medium text-amber-800">
                   <Info className="mt-0.5 h-3 w-3 shrink-0" /> {results[0].note}
@@ -571,6 +597,18 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
           onAnimationStart={(def) => def !== EXIT && flow.release()}
           className="space-y-5"
         >
+          {proc.needs === "heic" && heicOk === false && (
+            <p role="status" className="flex items-start gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200" data-testid="heic-unsupported">
+              <Info aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                This browser can&apos;t open HEIC photos. Open this page in Safari, or save the photos as JPG first and use{" "}
+                <Link href="/tools/jpg-to-pdf" className="font-medium underline underline-offset-2">
+                  JPG to PDF
+                </Link>
+                . On an iPhone, Settings &gt; Camera &gt; Formats &gt; Most Compatible takes new photos as JPG.
+              </span>
+            </p>
+          )}
           <ToolDropzone label={`Drop ${proc.multiple ? "files" : "a file"} here`} onFiles={addFiles}>
             <input
               ref={inputRef}
@@ -772,23 +810,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               <InlineError
                 key="error"
                 shakeKey={errorKey}
-                message={
-                  fix ? (
-                    // In the text, so on a phone it wraps under the message instead of squeezing it.
-                    <>
-                      {error}{" "}
-                      <button
-                        type="button"
-                        onClick={() => void fixWith(fix)}
-                        className="tap whitespace-nowrap rounded font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {fix.label}
-                      </button>
-                    </>
-                  ) : (
-                    error
-                  )
-                }
+                message={<ErrorHelp message={error} slug={slug} files={files} onLeave={nudge.cancel} />}
               />
             )}
           </AnimatePresence>

@@ -40,3 +40,17 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   if (/cannot encode/i.test(message)) return new Error(prefix + LETTERS_MESSAGE);
   return err instanceof Error ? err : new Error("Something went wrong.");
 }
+
+/**
+ * For tools that take pictures, text or video rather than PDFs: their own
+ * messages already name the file, and a PDF message would be wrong. A
+ * library's bare TypeError or RangeError still never reaches people.
+ */
+export function friendlyFileError(err: unknown): Error {
+  if (isLoadError(err)) return new Error(loadErrorMessage());
+  const name = (err as { name?: string })?.name ?? "";
+  if (name === "TypeError" || name === "RangeError" || !(err instanceof Error) || !err.message) {
+    return new Error("Something went wrong with this file. Try again, or try another file.");
+  }
+  return err;
+}

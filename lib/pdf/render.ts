@@ -3,7 +3,7 @@
 // The legacy build, for Safari before 17.4 and older iPhones (see worker.ts).
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { configureWorker } from "./worker";
-import { ownText, showsPictures } from "./page-content";
+import { ownText, paints, showsPictures } from "./page-content";
 import type { OwnText } from "./ocr-layer";
 
 function ensureWorker() {
@@ -47,19 +47,25 @@ export interface LoadedPdf {
    * output; exports pass `pixelRatio: 1` so the file doesn't depend on the
    * screen it was made on. Very large pages are scaled down to stay within
    * the browser's canvas limits (beyond them the canvas silently stays blank).
-   * `liveFields`: leave out the fields the editor shows as live inputs, so
-   * their values aren't drawn twice (read-only fields and buttons stay).
+   * `forms` draws form fields into the picture, as pictures of the page that
+   * replace it need. That is pdf.js's default; `liveFields` instead leaves out
+   * the fields the editor shows as live inputs, so their values aren't drawn
+   * twice (read-only fields and buttons stay).
    */
   renderPage: (
     pageNumber: number,
     canvas: HTMLCanvasElement,
     scale: number,
-    opts?: { pixelRatio?: number; liveFields?: boolean }
+    opts?: { pixelRatio?: number; forms?: boolean; liveFields?: boolean }
   ) => Promise<void>;
   /** The page's own text pieces and where they sit, in displayed points from the top-left. */
   ownText: (pageNumber: number) => Promise<OwnText[]>;
   /** True when the page shows a picture big enough to hold words. */
   showsPictures: (pageNumber: number) => Promise<boolean>;
+  /** True when the page draws anything at all, its fields included. */
+  paints: (pageNumber: number) => Promise<boolean>;
+  /** How many bookmarks and form fields the document has, as pdf.js reads them. */
+  extras: () => Promise<{ bookmarks: number; fields: number }>;
   /** Drops what pdf.js keeps of a page once it is done with (decoded pictures, fonts). */
   release: (pageNumber: number) => Promise<void>;
   destroy: () => void;
@@ -111,7 +117,8 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
         const task = page.render({
           canvasContext: ctx,
           viewport,
-          annotationMode: opts?.liveFields ? pdfjsLib.AnnotationMode.ENABLE_FORMS : pdfjsLib.AnnotationMode.ENABLE,
+          annotationMode:
+            opts?.liveFields && !opts.forms ? pdfjsLib.AnnotationMode.ENABLE_FORMS : pdfjsLib.AnnotationMode.ENABLE,
         });
         slot.task = task;
         try {
@@ -138,6 +145,16 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
         // Drop the decoded pictures now; pages to read are rendered afresh.
         page.cleanup();
       }
+    },
+    async paints(pageNumber) {
+      const page = await doc.getPage(pageNumber);
+      return paints(page, pdfjsLib.OPS as unknown as Record<string, number>);
+    },
+    async extras() {
+      const count = (items: { items?: unknown[] }[] | null): number =>
+        (items ?? []).reduce((n, item) => n + 1 + count((item.items as { items?: unknown[] }[]) ?? []), 0);
+      const [outline, fields] = await Promise.all([doc.getOutline().catch(() => null), doc.getFieldObjects().catch(() => null)]);
+      return { bookmarks: count(outline), fields: Object.keys(fields ?? {}).length };
     },
     async release(pageNumber) {
       (await doc.getPage(pageNumber)).cleanup();

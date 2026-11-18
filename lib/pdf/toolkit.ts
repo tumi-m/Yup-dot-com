@@ -22,6 +22,8 @@ export interface ToolFile {
   filename: string;
   /** A short line for the result, e.g. what was left as it was. */
   note?: string;
+  /** Short lines on what was done; `warn` marks what was lost or changed. */
+  report?: { text: string; warn?: boolean }[];
   /** The input handed back as it was, because nothing would make it smaller. */
   unchanged?: boolean;
 }
@@ -319,6 +321,22 @@ export async function flattenTool(
 }
 
 // ---------------------------------------------------------------------------
+// Repair — a damaged file read as far as it goes and written anew; pages that
+// won't copy become pictures (see lib/pdf/repair).
+// ---------------------------------------------------------------------------
+export async function repairTool(files: File[], ctx: ToolContext = {}): Promise<ToolFile> {
+  const { repairPdf, repairLines, NothingRecoveredError, NotAPdfError } = await import("./repair");
+  try {
+    const { bytes, report } = await repairPdf(files[0], { progress: ctx.progress, signal: ctx.signal });
+    return { blob: pdfBlob(bytes), filename: suffixed(files[0], "repaired"), report: repairLines(report) };
+  } catch (err) {
+    // Its own messages already say what happened, plainly.
+    if (isAbort(err) || err instanceof NothingRecoveredError || err instanceof NotAPdfError) throw err;
+    throw friendlyPdfError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PDF -> images
 // ---------------------------------------------------------------------------
 export async function pdfToImagesTool(
@@ -366,7 +384,24 @@ export async function imagesToPdfTool(
 ): Promise<ToolFile> {
   // Decoding, resizing and encoding phone photos takes seconds each: it runs in a worker.
   const { imagesToPdfFile } = await import("./images-to-pdf/off-thread");
-  return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename: "images.pdf" };
+  // One picture keeps its name; several are named for the set.
+  const filename = files.length === 1 ? `${files[0].name.replace(/\.[^.]+$/, "") || "image"}.pdf` : "images.pdf";
+  return { blob: pdfBlob(await imagesToPdfFile(files, opts, ctx.progress, ctx.signal)), filename };
+}
+
+// ---------------------------------------------------------------------------
+// Text and Markdown -> PDF, laid out in an embedded font (lib/pdf/text-to-pdf).
+// Runs in a worker: a long file takes a while.
+// ---------------------------------------------------------------------------
+export async function textToPdfTool(
+  files: File[],
+  opts: Record<string, string>,
+  ctx: ToolContext = {},
+  markdown = false
+): Promise<ToolFile> {
+  const { textFileToPdf } = await import("./text-to-pdf/off-thread");
+  const out = await textFileToPdf(files[0], markdown, opts, ctx.progress, ctx.signal);
+  return { blob: pdfBlob(out.bytes), filename: `${files[0].name.replace(/\.[^.]+$/, "") || "document"}.pdf`, note: out.note };
 }
 
 // ---------------------------------------------------------------------------

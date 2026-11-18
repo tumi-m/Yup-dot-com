@@ -40,6 +40,15 @@ import {
   FileOutput,
   Layers,
   Scaling,
+  Crop,
+  Images,
+  ImageUp,
+  Camera,
+  Layers2,
+  PenTool,
+  LetterText,
+  Heading,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -69,7 +78,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -80,6 +89,8 @@ export interface ToolMeta {
   badge?: string;
   /** Extra words the tools search matches (never shown). */
   keywords?: string;
+  /** Other names people search it by ("Image to PDF"): ranked as its name is. */
+  aliases?: string[];
 }
 
 export const CATEGORY_LABELS: Record<ToolCategory, string> = {
@@ -172,6 +183,18 @@ const ALL_TOOLS: ToolMeta[] = [
     keywords: "page size paper size change size scale fit a4 a3 a5 letter legal tabloid margins n-up 2-up 4-up pages per sheet",
   },
   {
+    slug: "crop-pdf",
+    name: "Crop PDF",
+    title: "Crop PDF: trim margins and cut pages to size",
+    description: "Keep the part of the page you choose.",
+    icon: Crop,
+    category: "organize",
+    tint: "bg-lime-100 text-lime-800",
+    badge: "New",
+    custom: "crop",
+    keywords: "crop cut trim margins white space edges border clip area box pages remove",
+  },
+  {
     slug: "compress-pdf",
     name: "Compress PDF",
     title: "Compress PDF: reduce PDF file size",
@@ -180,6 +203,17 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "optimize",
     tint: "bg-emerald-100 text-emerald-700",
     keywords: "shrink reduce size smaller organise",
+  },
+  {
+    slug: "repair-pdf",
+    name: "Repair PDF",
+    title: "Repair PDF: fix a damaged or corrupt PDF",
+    description: "Recover a PDF that won't open.",
+    icon: Wrench,
+    category: "optimize",
+    tint: "bg-amber-100 text-amber-800",
+    badge: "New",
+    keywords: "repair fix recover restore corrupt corrupted damaged broken file won't open cannot open truncated xref error",
   },
   {
     slug: "pdf-to-jpg",
@@ -194,12 +228,85 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "jpg-to-pdf",
     name: "JPG to PDF",
-    title: "JPG to PDF: convert images to a PDF",
-    description: "Images into one PDF.",
+    title: "JPG to PDF: convert images and photos to PDF",
+    description: "Photos and pictures into one PDF.",
     icon: FileImage,
     category: "convert",
     tint: "bg-orange-100 text-orange-700",
-    keywords: "png jpeg image photo picture",
+    keywords: "png jpeg image photo picture webp gif bmp tiff avif heic svg",
+    aliases: ["Image to PDF", "Picture to PDF", "Photo to PDF", "JPEG to PDF", "Images to PDF"],
+  },
+  {
+    slug: "png-to-pdf",
+    name: "PNG to PDF",
+    title: "PNG to PDF: convert PNG images to a PDF",
+    description: "PNG images into one PDF.",
+    icon: Images,
+    category: "convert",
+    tint: "bg-sky-100 text-sky-800",
+    keywords: "image screenshot picture transparent",
+  },
+  {
+    slug: "webp-to-pdf",
+    name: "WebP to PDF",
+    title: "WebP to PDF: convert WebP images to a PDF",
+    description: "WebP images into one PDF.",
+    icon: ImageUp,
+    category: "convert",
+    tint: "bg-lime-100 text-lime-800",
+    keywords: "image picture web google",
+  },
+  {
+    slug: "heic-to-pdf",
+    name: "HEIC to PDF",
+    title: "HEIC to PDF: convert iPhone photos to a PDF",
+    description: "iPhone photos into one PDF.",
+    icon: Camera,
+    category: "convert",
+    tint: "bg-zinc-200 text-zinc-800",
+    keywords: "heif iphone ipad apple ios photo picture",
+  },
+  {
+    slug: "tiff-to-pdf",
+    name: "TIFF to PDF",
+    title: "TIFF to PDF: convert TIFF scans and faxes to a PDF",
+    description: "Every page of a TIFF into one PDF.",
+    icon: Layers2,
+    category: "convert",
+    tint: "bg-stone-200 text-stone-800",
+    keywords: "tif scan scanner fax multipage image",
+  },
+  {
+    slug: "svg-to-pdf",
+    name: "SVG to PDF",
+    title: "SVG to PDF: convert SVG graphics to a PDF",
+    description: "SVG logos, icons and drawings into a PDF.",
+    icon: PenTool,
+    category: "convert",
+    tint: "bg-fuchsia-100 text-fuchsia-700",
+    keywords: "vector logo icon drawing graphic illustrator inkscape",
+  },
+  {
+    slug: "txt-to-pdf",
+    name: "TXT to PDF",
+    title: "TXT to PDF: convert text files to PDF",
+    description: "A text file as a tidy, printable PDF.",
+    icon: LetterText,
+    category: "convert",
+    tint: "bg-slate-200 text-slate-800",
+    keywords: "text plain notepad log code notes csv tsv json xml yaml",
+    aliases: ["Text to PDF", "Log to PDF", "CSV to PDF"],
+  },
+  {
+    slug: "markdown-to-pdf",
+    name: "Markdown to PDF",
+    title: "Markdown to PDF: convert .md files to PDF",
+    description: "Headings, lists, tables and code, laid out as a PDF.",
+    icon: Heading,
+    category: "convert",
+    tint: "bg-indigo-100 text-indigo-700",
+    keywords: "md readme notes documentation github",
+    aliases: ["MD to PDF"],
   },
   {
     slug: "pdf-to-text",
@@ -547,6 +654,42 @@ export const TOOLS: ToolMeta[] = YOUTUBE_ENABLED ? ALL_TOOLS : ALL_TOOLS.filter(
 
 export function getTool(slug: string): ToolMeta | undefined {
   return TOOLS.find((t) => t.slug === slug);
+}
+
+/**
+ * "More tools" for the pages whose category neighbours aren't the next step:
+ * text and Markdown point at each other, pictures at other picture formats
+ * (not PDF to JPG, the opposite way), Crop at the other page-shape tools.
+ */
+const RELATED: Record<string, string[]> = {
+  "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
+  "markdown-to-pdf": ["txt-to-pdf", "pdf-to-markdown", "pdf-to-text", "merge-pdf"],
+  "jpg-to-pdf": ["png-to-pdf", "heic-to-pdf", "tiff-to-pdf", "compress-pdf"],
+  "png-to-pdf": ["jpg-to-pdf", "webp-to-pdf", "svg-to-pdf", "compress-pdf"],
+  "webp-to-pdf": ["jpg-to-pdf", "png-to-pdf", "svg-to-pdf", "compress-pdf"],
+  "heic-to-pdf": ["jpg-to-pdf", "png-to-pdf", "webp-to-pdf", "compress-pdf"],
+  "tiff-to-pdf": ["jpg-to-pdf", "ocr-pdf", "png-to-pdf", "compress-pdf"],
+  "svg-to-pdf": ["png-to-pdf", "jpg-to-pdf", "webp-to-pdf", "merge-pdf"],
+  "crop-pdf": ["resize-pdf", "rotate-pdf", "organize-pdf", "split-pdf"],
+  "resize-pdf": ["crop-pdf", "rotate-pdf", "organize-pdf", "compress-pdf"],
+  "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
+};
+
+/** Four tools to offer under a tool: its own list, else its category's first, then the most used. */
+export function relatedTools(slug: string): ToolMeta[] {
+  const tool = getTool(slug);
+  if (!tool) return [];
+  const popular = ["merge-pdf", "compress-pdf", "pdf-to-word", "edit-pdf", "ocr-pdf", "sign-pdf"];
+  const picks = [
+    ...(RELATED[slug] ?? []),
+    ...TOOLS.filter((t) => t.category === tool.category).map((t) => t.slug),
+    ...popular,
+  ];
+  return [...new Set(picks)]
+    .filter((s) => s !== slug)
+    .map((s) => getTool(s))
+    .filter((t): t is ToolMeta => !!t)
+    .slice(0, 4);
 }
 
 export const WORKBENCH_TOOLS = TOOLS.filter((t) => !t.editor);

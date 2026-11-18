@@ -1,7 +1,7 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { addFiles, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
+import { addFiles, handoffType, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
 import { LIMITS } from "../lib/limits.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
@@ -78,6 +78,15 @@ check("only a big one: the files there are kept as they are", onlyBig.files.leng
 const fresh = takePdfs("guest", [a], [big, b], false);
 check("starting afresh: only the ones that fit", fresh.files.length === 1 && fresh.files[0] === b && fresh.tooBig[0] === big);
 check("pro: nothing turned away", takePdfs("pro", [], [a, big], false).tooBig.length === 0);
+
+// iPhone photos, WebP, TIFF and SVG are pictures too, handed over with their own type.
+const heic = { name: "IMG_0001.HEIC", type: "" };
+const svg = { name: "logo.svg", type: "image/svg+xml" };
+check("HEIC with no type: HEIC to PDF, which says up front if the browser can't open it", heroActions("pdf", [heic]).join() === "heic-to-pdf");
+check("mixed picture formats: JPG to PDF", heroActions("pdf", [jpg, svg, { name: "a.webp", type: "image/webp" }, { name: "fax.tif", type: "" }]) === IMAGE_ACTIONS);
+check("handoff: an untyped HEIC goes as image/heic", handoffType(heic) === "image/heic", handoffType(heic));
+check("handoff: an untyped TIFF goes as image/tiff", handoffType({ name: "scan.TIFF", type: "" }) === "image/tiff");
+check("handoff: JPG to PDF takes what it is handed", ["image/heic", "image/tiff", "image/svg+xml", "image/webp"].every((t) => PROCESSORS["jpg-to-pdf"].accept.includes(t)));
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

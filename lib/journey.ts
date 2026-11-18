@@ -16,14 +16,23 @@ export function choiceFromHash(hash: string): JourneyChoice | null {
   return (JOURNEY_CHOICES as string[]).includes(key) ? (key as JourneyChoice) : null;
 }
 
-export type DroppedKind = "pdf" | "image" | "pptx" | "legacy-slides" | "other";
+export type DroppedKind = "pdf" | "image" | "text" | "pptx" | "legacy-slides" | "other";
+
+/** The pictures JPG to PDF takes (lib/pdf/images-to-pdf/formats.ts). */
+const IMAGE_NAME = /\.(png|jpe?g|jfif|webp|gif|bmp|tiff?|avif|heic|heif|svg)$/;
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif", "image/heic", "image/heif", "image/svg+xml"];
+
+/** Text and Markdown files, which TXT and Markdown to PDF lay out. */
+const TEXT_NAME = /\.(txt|text|log|csv|tsv|md|markdown|mdown|mkd)$/;
+export const MARKDOWN_NAME = /\.(md|markdown|mdown|mkd)$/i;
 
 /** Classifies a file by extension first (browsers often leave `type` empty for Office files). */
 export function fileKind(file: { name: string; type?: string }): DroppedKind {
   const name = file.name.toLowerCase();
   const type = (file.type ?? "").toLowerCase();
   if (name.endsWith(".pdf") || type === "application/pdf") return "pdf";
-  if (/\.(png|jpe?g)$/.test(name) || type === "image/png" || type === "image/jpeg") return "image";
+  if (IMAGE_NAME.test(name) || IMAGE_TYPES.includes(type)) return "image";
+  if (TEXT_NAME.test(name) || type === "text/plain" || type === "text/markdown" || type === "text/x-markdown") return "text";
   if (name.endsWith(".pptx") || type === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
     return "pptx";
   }
@@ -36,7 +45,7 @@ export function fileKind(file: { name: string; type?: string }): DroppedKind {
 /** Which branch a set of dropped files should open, or null if none fit. */
 export function choiceForFiles(files: { name: string; type?: string }[]): JourneyChoice | null {
   const kinds = files.map(fileKind);
-  if (kinds.some((k) => k === "pdf" || k === "image")) return "pdf";
+  if (kinds.some((k) => k === "pdf" || k === "image" || k === "text")) return "pdf";
   if (kinds.some((k) => k === "pptx" || k === "legacy-slides")) return "pptx";
   return null;
 }

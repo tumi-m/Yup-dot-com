@@ -1,5 +1,33 @@
 import { formatLimitBytes } from "@/lib/limits";
-import { ENCRYPTED_MESSAGE } from "@/lib/pdf/errors";
+import { ENCRYPTED_MESSAGE, UNREADABLE_MESSAGE } from "@/lib/pdf/errors";
+import { FORMAT_NAMES, formatsIn } from "@/lib/pdf/images-to-pdf/formats";
+
+/** Types some systems hand over without naming them (an empty type, or "application/octet-stream"). */
+const BY_NAME: Record<string, RegExp> = {
+  "application/pdf": /\.pdf$/,
+  "image/jpeg": /\.jpe?g$/,
+  "image/png": /\.png$/,
+  "video/mp4": /\.(mp4|m4v)$/,
+  "video/quicktime": /\.mov$/,
+  "video/webm": /\.webm$/,
+};
+
+/**
+ * True when a tool's accept list ("image/png,.heic,…") takes the file: by
+ * its type, or by its name where the list names the extension or where the
+ * browser left the type out (share sheets and some OS pickers do).
+ */
+export function takesFile(accept: string, file: { name: string; type: string }): boolean {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  const untyped = !type || type === "application/octet-stream";
+  return accept.split(",").some((entry) => {
+    const t = entry.trim().toLowerCase();
+    if (!t) return false;
+    if (t.startsWith(".")) return name.endsWith(t);
+    return type === t || (t === "application/pdf" && name.endsWith(".pdf")) || (untyped && !!BY_NAME[t]?.test(name));
+  });
+}
 
 /**
  * Sorts the files of one pick or drop (already filtered to types the tool
@@ -54,18 +82,33 @@ export function sortPick(
   };
 }
 
+/** "a, b or c" */
+const either = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}` : names[0]);
+
 /** What a tool takes, for a file it can't: "Merge PDF takes PDFs." */
 export function takesMessage(toolName: string | undefined, accept: string, multiple: boolean): string {
-  const types = accept.split(",").map((t) => t.trim());
-  const what = types.every((t) => t === "application/pdf")
+  // Types say what kind of file; extensions only repeat them.
+  const types = accept
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t && !t.startsWith("."));
+  const images = formatsIn(accept).map((f) => FORMAT_NAMES[f]);
+  // Text and Markdown, in the order the list gives them.
+  const texts = [...new Set(types.map((t) => (t === "text/plain" ? "text" : /markdown/.test(t) ? "Markdown" : "")).filter(Boolean))];
+  const all = (test: (t: string) => boolean) => types.length > 0 && types.every(test);
+  const what = all((t) => t === "application/pdf")
     ? multiple
       ? "PDFs"
       : "a PDF"
-    : types.every((t) => t.startsWith("image/"))
-      ? "JPG or PNG images"
-      : types.every((t) => t.startsWith("video/"))
+    : images.length && types.every((t) => t.startsWith("image/"))
+      ? `${either(images)} images`
+      : all((t) => t.startsWith("video/"))
         ? "MP4, MOV or WebM videos"
-        : null;
+        : texts.length && all((t) => t.startsWith("text/"))
+          ? multiple
+            ? `${either(texts)} files`
+            : `a ${either(texts)} file`
+          : null;
   return what ? `${toolName ?? "This tool"} takes ${what}.` : "That file type isn't supported here.";
 }
 
@@ -94,8 +137,9 @@ export function percentSmaller(sizeDelta: number): number {
 
 /**
  * The tool that fixes what a tool's error says, and the file to take there:
- * the one the message names ("a.pdf: …"), or the only one. Null when there
- * is none, or when that tool is the one already open.
+ * the one the message names ("a.pdf: …"), or the only one. Repair PDF for a
+ * file that won't read, Unlock PDF for a locked one, OCR PDF for a scan.
+ * Null when there is none, or when that tool is the one already open.
  */
 export function errorFix<F extends { name: string }>(
   message: string | null,
@@ -105,7 +149,10 @@ export function errorFix<F extends { name: string }>(
   if (!message) return null;
   const file = files.find((f) => message.startsWith(`${f.name}: `)) ?? (files.length === 1 ? files[0] : undefined);
   if (!file) return null;
-  if (message.endsWith(ENCRYPTED_MESSAGE) && slug !== "unlock-pdf") return { slug: "unlock-pdf", label: "Open in Unlock PDF", file };
+  if (message.endsWith(UNREADABLE_MESSAGE) && slug !== "repair-pdf") return { slug: "repair-pdf", label: "Try Repair PDF", file };
+  // Repair PDF's own wording ("…Unlock it first, then repair it.") counts too;
+  // a locked PowerPoint ("This file is password-protected…") is no PDF to unlock.
+  if (message.includes(ENCRYPTED_MESSAGE.replace(/\.$/, "")) && slug !== "unlock-pdf") return { slug: "unlock-pdf", label: "Open in Unlock PDF", file };
   if (message.includes("scanned PDF") && slug !== "ocr-pdf") return { slug: "ocr-pdf", label: "Run OCR PDF", file };
   return null;
 }
