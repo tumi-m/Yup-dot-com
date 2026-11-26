@@ -46,7 +46,7 @@ export interface ParsedMediaUrl {
   index?: number;
   /** TikTok: the @username in the link, if any. */
   user?: string;
-  /** TikTok: a vm/vt/t short link, expanded on the server. `canonical` is the short link. */
+  /** TikTok: a vm/vt/t short link; Instagram: a /share/ link. Expanded on the server; `canonical` is the short link. */
   short?: boolean;
 }
 
@@ -98,14 +98,20 @@ export function parseMediaUrl(input: string): ParsedMediaUrl | null {
     return e ? { platform: "tiktok", id: e[1], canonical: `https://www.tiktok.com/@_/video/${e[1]}` } : null;
   }
   if (host === "instagram.com") {
-    const m = url.pathname.match(/^\/(?:[\w.]{1,30}\/)?(?:p|reels?|tv)\/([A-Za-z0-9_-]{5,60})\/?/);
-    if (!m) return null;
+    // The app's share links (/share/reel/…, /share/p/…, /share/…) carry their
+    // own code, not the post's: they're followed on the server, like TikTok's.
+    const share = url.pathname.match(/^\/share\/(?:(p|reels?)\/)?([A-Za-z0-9_-]{5,60})\/?$/);
+    if (share) {
+      return { platform: "instagram", id: share[2], short: true, canonical: `https://www.instagram.com/share/${share[1] ? `${share[1]}/` : ""}${share[2]}/` };
+    }
+    const code = instagramPostCode(url.pathname);
+    if (!code) return null;
     const n = Number(url.searchParams.get("img_index"));
     const index = Number.isInteger(n) && n >= 1 && n <= 20 ? n : undefined;
     return {
       platform: "instagram",
-      id: m[1],
-      canonical: `https://www.instagram.com/p/${m[1]}/${index ? `?img_index=${index}` : ""}`,
+      id: code,
+      canonical: `https://www.instagram.com/p/${code}/${index ? `?img_index=${index}` : ""}`,
       ...(index ? { index } : {}),
     };
   }
@@ -121,6 +127,15 @@ export function parseMediaUrl(input: string): ParsedMediaUrl | null {
     };
   }
   return null;
+}
+
+/**
+ * The shortcode in an Instagram post's path: /p/, /reel/, /reels/ or /tv/,
+ * after an optional username. Not "share" (the app's short links) and not
+ * /reels/audio/ (a sound's page).
+ */
+export function instagramPostCode(pathname: string): string | null {
+  return pathname.match(/^\/(?!share\/)(?:[\w.]{1,30}\/)?(?:p|reels?|tv)\/(?!audio\/)([A-Za-z0-9_-]{5,60})\/?/)?.[1] ?? null;
 }
 
 function yt(id: string): ParsedMediaUrl {

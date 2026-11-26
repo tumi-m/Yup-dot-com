@@ -22,7 +22,7 @@
  * limiting downloads and to try again later; nothing else would get through.
  * Each failed resolve logs one line with every step's outcome.
  */
-import { cleanTitle } from "../media";
+import { cleanTitle, instagramPostCode } from "../media";
 import type { XVariant } from "../x-video";
 import { DirectResolveError, type DirectVideo, type Fetcher } from "./types";
 
@@ -256,6 +256,33 @@ function fromEmbed(media: Json): Json {
     owner: media.owner,
     edge_media_to_caption: media.edge_media_to_caption,
   };
+}
+
+/**
+ * Follows an app share link (instagram.com/share/…) to the shortcode of the
+ * post it shares, staying on instagram.com. A login wall or a limit on the
+ * way is Instagram refusing the server, as for posts.
+ */
+export async function expandInstagramShare(link: string, fetcher: Fetcher = fetch): Promise<string> {
+  let current = link;
+  try {
+    for (let hop = 0; hop < 3; hop++) {
+      const res = await fetcher(current, { headers: PAGE_HEADERS, redirect: "manual", signal: AbortSignal.timeout(REQUEST_MS), cache: "no-store" });
+      await res.body?.cancel().catch(() => {});
+      if (refusal(res)) throw new DirectResolveError("blocked");
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) throw new DirectResolveError(res.ok || res.status === 404 ? "not-found" : "unreachable");
+      const next = new URL(location, current);
+      if (!/^(www\.)?instagram\.com$/.test(next.hostname)) throw new DirectResolveError("not-found");
+      const code = instagramPostCode(next.pathname);
+      if (code) return code;
+      current = next.toString();
+    }
+  } catch (err) {
+    if (err instanceof DirectResolveError) throw err;
+    throw new DirectResolveError("unreachable");
+  }
+  throw new DirectResolveError("not-found");
 }
 
 /** One step's outcome, for the log line. */

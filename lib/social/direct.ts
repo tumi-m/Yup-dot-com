@@ -5,7 +5,7 @@
  */
 import type { ParsedMediaUrl } from "../media";
 import { isAllowedVideoUrl, resolveXVideo, XResolveError, xFilename } from "../x-video";
-import { isAllowedInstagramUrl, resolveInstagram } from "./instagram";
+import { expandInstagramShare, isAllowedInstagramUrl, resolveInstagram } from "./instagram";
 import { isAllowedTikTokUrl, resolveTikTok } from "./tiktok";
 import { DirectResolveError, type DirectFailure, type DirectPlatform, type DirectVideo, type Fetcher } from "./types";
 
@@ -53,7 +53,7 @@ export async function resolveDirect(media: ParsedMediaUrl, fetcher: Fetcher = fe
     case "tiktok":
       return resolveTikTok({ id: media.id, user: media.user ?? null, short: media.short ? media.canonical : null }, fetcher);
     case "instagram":
-      return resolveInstagram(media.id, fetcher, media.index);
+      return resolveInstagram(media.short ? await expandInstagramShare(media.canonical, fetcher) : media.id, fetcher, media.index);
     default:
       throw new DirectResolveError("not-found");
   }
