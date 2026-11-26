@@ -184,6 +184,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   /** Set after a quota 429: the day's downloads are spent. */
   const [limit, setLimit] = useState<{ upgrade: boolean } | null>(null);
   const [starting, setStarting] = useState(false);
+  /** A thumbnail that failed to load, so the box stays plain instead of showing a broken image. */
+  const [badThumb, setBadThumb] = useState<string | null>(null);
   /** "Smaller file": re-encode in this tab. Offered only where the browser can make H.264. */
   const [canShrink, setCanShrink] = useState(false);
   const [smaller, setSmaller] = useState(false);
@@ -790,9 +792,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
           >
             <div className="flex gap-3 p-4 sm:gap-4 sm:p-5">
               <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-xl bg-secondary sm:h-24 sm:w-40">
-                {info.thumbnail && (
+                {info.thumbnail && info.thumbnail !== badThumb && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={info.thumbnail} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                  <img
+                    src={info.thumbnail}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    // Signed CDN links expire and some refuse other sites: the grey box stays.
+                    onError={() => setBadThumb(info.thumbnail ?? null)}
+                    className="h-full w-full object-cover"
+                  />
                 )}
                 {duration(info.duration) && (
                   <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1.5 py-0.5 text-[11px] font-medium text-white sm:bottom-1.5 sm:right-1.5">
@@ -806,14 +815,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 </p>
                 {info.uploader && <p className="mt-1 truncate text-sm text-muted-foreground">{info.uploader}</p>}
                 {info.music && !info.music.original ? (
-                  <p className="mt-1 truncate text-xs text-muted-foreground" data-testid="media-music">
-                    <span aria-hidden>♪ </span>
-                    {info.music.title}
-                    {info.music.author ? ` — ${info.music.author}` : ""} ·{" "}
+                  // On a narrow screen the link goes under the song rather than out of sight.
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground" data-testid="media-music">
+                    <span className="max-w-full truncate">
+                      <span aria-hidden>♪ </span>
+                      {info.music.title}
+                      {info.music.author ? ` — ${info.music.author}` : ""}
+                    </span>
                     <Link
                       href={musicHref(info.music)}
                       onClick={() => info.music && markSent(musicHref(info.music))}
-                      className={cn("rounded font-semibold text-primary hover:underline", focusRing)}
+                      className={cn("-my-1 shrink-0 whitespace-nowrap rounded py-1 font-semibold text-primary hover:underline", focusRing)}
                     >
                       Find samples
                     </Link>
@@ -851,7 +863,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       }}
                       onKeyDown={radioKeys}
                       className={cn(
-                        "relative flex h-11 items-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors disabled:opacity-40",
+                        "relative flex h-11 items-center gap-1.5 whitespace-nowrap rounded-lg px-4 text-sm font-medium transition-colors disabled:opacity-40 max-[359px]:px-3",
                         focusRing,
                         kind === k ? "text-foreground" : "text-muted-foreground"
                       )}
@@ -861,7 +873,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       )}
                       {/* Above every pill, so the pill never covers a label it passes. */}
                       <span className="relative z-[1] flex items-center gap-1.5">
-                        {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
+                        {/* Left out on the narrowest phones, so both labels fit on one line. */}
+                        {k === "mp4" ? <Film className="h-4 w-4 max-[359px]:hidden" /> : <Music2 className="h-4 w-4 max-[359px]:hidden" />}
                         {k.toUpperCase()} {k === "mp4" ? "video" : "audio"}
                       </span>
                     </button>
@@ -901,7 +914,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                               }
                               title={!q.available ? "Not available for this video" : q.locked ? "Pro" : undefined}
                               className={cn(
-                                "relative flex flex-col items-center justify-center rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-35",
+                                "relative flex flex-col items-center justify-center whitespace-nowrap rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-35 max-[359px]:px-1",
                                 sized ? "h-14" : "h-11",
                                 focusRing,
                                 // Same sliding pill as the format toggle; the
@@ -1108,7 +1121,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
             <h2 ref={focusRef("ready")} tabIndex={-1} className="mx-auto mt-5 rounded-lg px-2 text-2xl font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Your download has started
             </h2>
-            <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground">
+            <p className="mx-auto mt-1 w-full max-w-sm truncate text-sm text-muted-foreground">
               {file.name}
               {file.size ? ` · ${formatBytes(file.size)}` : ""}
               {file.size && file.was ? ` · ${Math.round((1 - file.size / file.was) * 100)}% smaller` : ""}
