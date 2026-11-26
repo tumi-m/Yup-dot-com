@@ -51,6 +51,7 @@ import {
   Wrench,
   FileDiff,
   EyeOff,
+  ScanLine,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -80,7 +81,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -237,6 +238,19 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-orange-100 text-orange-700",
     keywords: "png jpeg image photo picture webp gif bmp tiff avif heic svg",
     aliases: ["Image to PDF", "Picture to PDF", "Photo to PDF", "JPEG to PDF", "Images to PDF"],
+  },
+  {
+    slug: "scan-to-pdf",
+    name: "Scan to PDF",
+    title: "Scan to PDF: scan documents with your phone camera",
+    description: "Photograph pages with your phone and get one tidy PDF.",
+    icon: ScanLine,
+    category: "convert",
+    tint: "bg-teal-100 text-teal-800",
+    badge: "New",
+    custom: "scan",
+    keywords: "scanner scan document paper camera phone mobile photo receipt letter form contract notes whiteboard flatten perspective crop black white",
+    aliases: ["PDF Scanner", "Document Scanner", "Camera to PDF", "Scan Document"],
   },
   {
     slug: "png-to-pdf",
@@ -704,6 +718,7 @@ const RELATED: Record<string, string[]> = {
   "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
   "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
   "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
+  "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],
 };
 
 /** Four tools to offer under a tool: its own list, else its category's first, then the most used. */

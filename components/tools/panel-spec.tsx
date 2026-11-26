@@ -14,6 +14,7 @@ export type PanelSpec =
   | { kind: "crop"; slug: string }
   | { kind: "compare"; slug: string }
   | { kind: "redact"; slug: string }
+  | { kind: "scan"; slug: string }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -29,6 +30,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "crop") return { kind: "crop", slug: tool.slug };
   if (tool.custom === "compare") return { kind: "compare", slug: tool.slug };
   if (tool.custom === "redact") return { kind: "redact", slug: tool.slug };
+  if (tool.custom === "scan") return { kind: "scan", slug: tool.slug };
   return { kind: "workbench", slug: tool.slug };
 }
 
