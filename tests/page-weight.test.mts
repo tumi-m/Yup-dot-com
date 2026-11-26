@@ -63,18 +63,18 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|CompareTool)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all eleven panels lazily",
-  lazy.join() === "CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
+  "ToolPanel loads all twelve panels lazily",
+  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
   lazy
 );
 
 // Heavy libraries load when used, not with the panel.
-const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|marked|utif2|@pdf-lib\/fontkit|@\/lib\/pdf\/text-to-pdf\/.*|@\/lib\/pdf\/images-to-pdf\/(index|off-thread|tiff|decode)|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
+const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|marked|utif2|@pdf-lib\/fontkit|@\/lib\/pdf\/text-to-pdf\/.*|@\/lib\/pdf\/images-to-pdf\/(index|off-thread|tiff|decode)|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|compare\/index|compare\/diff|compare\/run|compare\/off-thread|compare\/exports|compare\/mark|compare\/report|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|diff|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
 for (const file of [
   "components/tools/ToolWorkbench.tsx",
   "components/tools/processors.ts",
@@ -89,6 +89,8 @@ for (const file of [
   "components/tools/PageOrganizer.tsx",
   "components/tools/ResizePreview.tsx",
   "components/tools/CropTool.tsx",
+  "components/tools/CompareTool.tsx",
+  "components/tools/CompareView.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
@@ -103,6 +105,8 @@ check("the text converter loads with the tool only", /await import\("\.\/text-to
 // Resize PDF's preview lays pages out with plain numbers: the layout code never brings pdf-lib.
 check("resize layout has no imports", staticImports(src("lib/pdf/resize/geometry.ts"), /./).length === 0);
 // Crop PDF's box and keys load with the page; they only bring the page-list reader.
+// Compare PDFs' page view loads with the page; the diff (and jsdiff) come with the comparison.
+check("the compare view's logic imports no code", ["marks", "pixels", "view"].every((f) => staticImports(src(`lib/pdf/compare/${f}.ts`), /./).length === 0));
 check("crop geometry imports only the page-list reader", staticImports(src("lib/pdf/crop/geometry.ts"), /./).join() === "../pages/plan");
 // The Sample Finder's page never carries the hand-checked list or the server's MusicBrainz code.
 {

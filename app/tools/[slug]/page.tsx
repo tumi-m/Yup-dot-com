@@ -21,6 +21,7 @@ import { FlattenAbout } from "@/components/tools/FlattenAbout";
 import { CropAbout } from "@/components/tools/CropAbout";
 import { ConvertAbout } from "@/components/tools/ConvertAbout";
 import { RepairAbout } from "@/components/tools/RepairAbout";
+import { CompareAbout } from "@/components/tools/CompareAbout";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -86,6 +87,7 @@ export default async function ToolPage({
           {tool.slug === "crop-pdf" && <CropAbout />}
           <ConvertAbout slug={tool.slug} />
           {tool.slug === "repair-pdf" && <RepairAbout />}
+          {tool.slug === "compare-pdf" && <CompareAbout />}
 
           <RelatedTools slug={tool.slug} />
         </div>

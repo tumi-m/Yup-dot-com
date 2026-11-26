@@ -49,6 +49,7 @@ import {
   LetterText,
   Heading,
   Wrench,
+  FileDiff,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -78,7 +79,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -483,6 +484,19 @@ const ALL_TOOLS: ToolMeta[] = [
     keywords: "flatten flattened form fields fillable annotations comments lock non-editable read-only print acroform",
   },
   {
+    slug: "compare-pdf",
+    name: "Compare PDFs",
+    title: "Compare PDFs: see what changed between two versions",
+    description: "See what changed between two versions.",
+    icon: FileDiff,
+    category: "edit",
+    tint: "bg-orange-100 text-orange-800",
+    badge: "New",
+    custom: "compare",
+    keywords: "compare comparison diff difference differences changes changed versions revision redline track changes contract side by side overlay check two files",
+    aliases: ["Compare PDF", "PDF Compare", "Diff PDF", "PDF Diff"],
+  },
+  {
     slug: "edit-pdf",
     name: "Edit PDF",
     title: "Edit PDF: annotate, draw, and add text",
@@ -659,7 +673,8 @@ export function getTool(slug: string): ToolMeta | undefined {
 /**
  * "More tools" for the pages whose category neighbours aren't the next step:
  * text and Markdown point at each other, pictures at other picture formats
- * (not PDF to JPG, the opposite way), Crop at the other page-shape tools.
+ * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
+ * Compare at reading and editing the text it found.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -673,6 +688,7 @@ const RELATED: Record<string, string[]> = {
   "crop-pdf": ["resize-pdf", "rotate-pdf", "organize-pdf", "split-pdf"],
   "resize-pdf": ["crop-pdf", "rotate-pdf", "organize-pdf", "compress-pdf"],
   "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
+  "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
 };
 
 /** Four tools to offer under a tool: its own list, else its category's first, then the most used. */

@@ -56,6 +56,7 @@ work with or without an account.
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable; a run that would make more pictures than a browser tab can hold is turned away first, naming a resolution that fits. What was flattened leaves the file, along with anything only it used (an attached file, XFA data, an old field picture). The editor can flatten fields when it saves. |
+| **Compare PDFs** | Two drop zones, the original and the changed version (swap them with one button). Every word of both is compared over the whole document, so text moved to another page shows as one move and a page added or taken out in the middle leaves the rest paired. Ligatures, odd spaces and words broken over a line end are evened out first; form values count. Changes are marked on the pages, side by side in one scroll: struck through in red where taken out, underlined in green where put in, a dashed line for moves, a dashed box for pictures, so they read without colour. A list with next and previous (N and P keys), an overlay with a swipe slider and a pixel Difference view. Pages without text are compared by how they look; a tick does every page. Downloads: a report PDF and both files with the changes as comments. Up to 200 pages a file free, 2,000 with Pro. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
 | **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
@@ -339,6 +340,19 @@ is instant. Thumbnails are drawn two at a time and let go of their pixels
 when scrolled away. A file with no pages, or a page tree that loops, is
 turned away when it opens.
 
+**Compare PDFs** (`components/tools/CompareTool.tsx`, `CompareView.tsx`,
+`lib/pdf/compare/`) reads each page with the parser (`readPageText` in
+`lib/pdf/parse.ts`), one page at a time in the page, since pdf.js parses in
+its own worker. The words keep their page and box (`words.ts`); jsdiff's
+Myers diff runs over the whole document in a Web Worker (`diff.ts`), and on
+two long, very different files it lines up lines first when it runs out of
+time. Pages are paired by the words they share (`pages.ts`). Pages with no
+text are drawn and compared pixel by pixel in the page (`pixels.ts`, `run.ts`),
+a pair at a time with progress and Cancel; the report (laid out by Markdown to
+PDF) and the marked copies (highlight, strike-out, underline, square and note
+annotations, `mark.ts`) are written in the worker. OCR isn't run on scans:
+the page says so and points at OCR PDF.
+
 **Crop PDF** (`components/tools/CropTool.tsx`, `lib/pdf/crop/`) keeps the box
 as margins measured on the page as shown (`geometry.ts`), and maps them
 through `lib/pdf/page-frame.ts`, so turned pages and MediaBoxes that don't
@@ -369,7 +383,10 @@ bookmarks and notes land, turned pages, 2 and 4 to a sheet), cropping
 content is gone from the file's streams), pictures to
 PDF (multi-page and turned TIFFs rendered by pdf.js, mixed formats, looping
 and lying TIFFs turned away), text and Markdown to PDF (read back with
-pdf.js: wrapping inside the margins, pages, fonts, links, tables), and repair
+pdf.js: wrapping inside the margins, pages, fonts, links, tables), comparing
+(moves across pages, pages added and taken out, rewrapped and hyphenated text,
+300-page files, and the marked copies' annotations landing on the changed
+words on turned, sideways, offset and mixed-size pages), and repair
 (files broken on purpose in each way real files break, each result opened
 by both pdf-lib and pdf.js). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
@@ -648,6 +665,7 @@ pdf-wizard/
 │   │   ├── EditorLaunch.tsx      ← Uploads a PDF into the editor
 │   │   ├── PageOrganizer.tsx     ← Page grid for Organize PDF, Delete and Extract pages
 │   │   ├── CropTool.tsx          ← Crop PDF: page preview, the box, margins, trim
+│   │   ├── CompareTool.tsx       ← Compare PDFs: two files, the changes, side by side and overlay
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -668,6 +686,7 @@ pdf-wizard/
 │   ├── pdf/operations.ts         ← pdf-lib page ops
 │   ├── pdf/pages/                ← Page tools: the page list (plan.ts) and the save, in a worker
 │   ├── pdf/crop/                 ← Crop PDF: the box, page boxes, pictures, white-margin trim
+│   ├── pdf/compare/              ← Compare PDFs: words, diff, page pairs, pixels, report, marked copies
 │   ├── pdf/images-to-pdf/        ← Pictures to PDF: formats, browser and TIFF decoding, in a worker
 │   ├── pdf/text-to-pdf/          ← Text and Markdown to PDF: fonts, layout, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
