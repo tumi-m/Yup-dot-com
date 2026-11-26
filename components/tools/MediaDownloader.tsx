@@ -36,8 +36,10 @@ import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/foc
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
   linkIn,
+  mediaLinkProblem,
   parseMediaUrl,
   parsePlaylistUrl,
+  PLATFORM_ASK,
   PLATFORM_LABEL,
   PLATFORM_PLACEHOLDER,
   YOUTUBE_ENABLED,
@@ -264,7 +266,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     const parsed = parseMediaUrl(target);
     if (!parsed) {
       // A playlist link is offered the playlist tool instead (see below the input).
-      if (!playlist) setError(`Paste a ${PLATFORM_LABEL[config.platform]} video link.`);
+      if (!playlist) setError(mediaLinkProblem(target) ?? PLATFORM_ASK[config.platform]);
       return;
     }
     const seq = ++lookupSeq.current;

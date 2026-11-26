@@ -215,6 +215,49 @@ export const PLATFORM_LABEL: Record<MediaPlatform, string> = {
   instagram: "Instagram",
 };
 
+/** What a downloader asks for when the box holds something else. */
+export const PLATFORM_ASK: Record<MediaPlatform, string> = {
+  youtube: "Paste a YouTube video link.",
+  x: "Paste an X (Twitter) post link.",
+  tiktok: "Paste a TikTok video link.",
+  instagram: "Paste an Instagram Reel or post link.",
+};
+
+/**
+ * Why a link the downloaders can't take was turned away, when there's more
+ * to say than "paste a video link": a story, a profile or channel, a photo
+ * post, a sound's page, a live broadcast. Null for anything else.
+ */
+export function mediaLinkProblem(input: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(input.trim().replace(/^(?!https?:\/\/)/i, "https://"));
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
+  const path = url.pathname;
+  if (host === "instagram.com") {
+    if (/^\/stories\//.test(path)) return "Stories can't be saved. Paste a Reel or post link.";
+    if (/^\/reels?\/audio\//.test(path)) return "That's a sound's page. Paste a Reel or post link.";
+    if (/^\/(?!(?:reels?|explore|accounts|direct)\/?$)[\w.]{1,30}\/?$/.test(path)) return "That's a profile. Paste a Reel or post link.";
+  }
+  if (host === "tiktok.com") {
+    if (/^\/@[\w.-]+\/photo\/\d+/.test(path)) return "That's a photo post, so it has no video.";
+    if (/^\/@[\w.-]+\/live\/?$/.test(path)) return "Live videos can't be saved.";
+    if (/^\/music\//.test(path)) return "That's a sound's page. Paste one video's link.";
+    if (/^\/@[\w.-]+\/?$/.test(path)) return "That's a profile. Paste one video's link.";
+  }
+  if (host === "x.com" || host === "twitter.com") {
+    if (/^\/i\/(?:broadcasts|spaces)\//.test(path)) return "Live broadcasts and Spaces can't be saved.";
+    if (/^\/(?!(?:home|explore|search|notifications|messages|settings|compose|i)\/?$)\w{1,15}\/?$/.test(path)) return "That's a profile. Paste one post's link.";
+  }
+  if (host === "youtube.com" && /^\/(?:@[^/]+|channel\/|c\/|user\/)/.test(path) && !url.searchParams.has("v")) {
+    return "That's a channel. Paste one video's link.";
+  }
+  return null;
+}
+
 /** What to type in the link box, per platform. */
 export const PLATFORM_PLACEHOLDER: Record<MediaPlatform, string> = {
   youtube: "youtu.be/…",

@@ -34,5 +34,34 @@ const post = (path: string, body: unknown) =>
   check("and the worker is never asked", workerCalls === 0, `${workerCalls} calls`);
 }
 
+// Links the downloaders can't take say what they are.
+{
+  const { mediaLinkProblem, parseMediaUrl, PLATFORM_ASK } = await import("../lib/media.ts");
+  const said: [string, RegExp | null][] = [
+    ["https://www.instagram.com/stories/someone/3456789012345678901/", /^Stories can't be saved/],
+    ["https://www.instagram.com/reels/audio/1234567890123/", /sound's page/],
+    ["https://www.instagram.com/natgeo/", /profile/],
+    ["https://www.instagram.com/reels/", null],
+    ["https://www.tiktok.com/@liftsalot/photo/7300000000000000002", /photo post/],
+    ["https://www.tiktok.com/@liftsalot/live", /Live videos/],
+    ["https://www.tiktok.com/music/Stronger-6800000000000000001", /sound's page/],
+    ["https://www.tiktok.com/@liftsalot", /profile/],
+    ["https://x.com/NASA", /profile/],
+    ["https://x.com/home", null],
+    ["https://x.com/i/broadcasts/1yNGaYzLbPzKj", /broadcasts/],
+    ["https://www.youtube.com/@channel", /channel/],
+    ["https://example.com/video.mp4", null],
+    ["not a link", null],
+  ];
+  for (const [link, want] of said) {
+    const got = mediaLinkProblem(link);
+    check(`${link} → ${want ?? "nothing special"}`, want ? !!got && want.test(got) && parseMediaUrl(link) === null : got === null, String(got));
+  }
+  check("each downloader asks with the right article", Object.values(PLATFORM_ASK).every((m) => !/\ba (?:[AEIOU]|X\b)/.test(m)), JSON.stringify(PLATFORM_ASK));
+  const info = await import("../app/api/media/info/route.ts");
+  const res = await info.POST(post("/api/media/info", { url: "https://www.instagram.com/stories/someone/3456789012345678901/" }));
+  check("the preview route says it too", res.status === 400 && /^Stories/.test((await res.json()).error));
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

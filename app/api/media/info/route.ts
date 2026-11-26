@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cleanTitle, maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
+import { cleanTitle, maxHeightFor, mediaLinkProblem, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
 import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
 import { DirectResolveError, failureMessage, FETCH_UA, grantHeaders, isAllowedMediaUrl, isDirectPlatform, resolveDirect } from "@/lib/social/direct";
@@ -12,6 +12,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const bodySchema = z.object({ url: z.string().min(4).max(2000) });
+const PASTE_A_LINK = YOUTUBE_ENABLED ? "Paste a YouTube, X, TikTok or Instagram video link." : "Paste an X, TikTok or Instagram video link.";
 
 /** Preview a link: title, thumbnail, duration, and which qualities this tier can take. */
 export async function POST(request: Request) {
@@ -22,7 +23,8 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const media = parsed.success ? parseMediaUrl(parsed.data.url) : null;
   if (!media) {
-    return Response.json({ error: "Paste an X, TikTok or Instagram video link." }, { status: 400 });
+    const problem = parsed.success ? mediaLinkProblem(parsed.data.url) : null;
+    return Response.json({ error: problem ?? PASTE_A_LINK }, { status: 400 });
   }
   const { user, tier } = await resolveTier();
   if (!(await claimMediaLookup(usageSubject(request, user)))) {
