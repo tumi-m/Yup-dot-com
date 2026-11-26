@@ -1,15 +1,13 @@
 import type { NextConfig } from "next";
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import secretScan from "./lib/secret-scan.cjs";
+import { CAMERA_PAGES, permissionsPolicy } from "./lib/permissions-policy";
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  {
-    key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=()",
-  },
+  { key: "Permissions-Policy", value: permissionsPolicy() },
   {
     key: "Strict-Transport-Security",
     value: "max-age=63072000; includeSubDomains; preload",
@@ -37,6 +35,8 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
+      // Later rules win for the same header: the camera, on Scan to PDF only.
+      ...CAMERA_PAGES.map((source) => ({ source, headers: [{ key: "Permissions-Policy", value: permissionsPolicy(true) }] })),
       {
         // Version-stamped by scripts/copy-vendor.mjs, so safe to cache forever.
         source: "/vendor/:path*",
