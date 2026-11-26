@@ -796,13 +796,15 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                 )}
               </AnimatePresence>
 
+              {/* Stacked on a phone, side by side from sm: flex-1 only there, or the
+                  stacked button's height collapses to its text's. */}
               <div className="flex flex-col gap-2 sm:flex-row">
                 {running ? (
-                  <Button size="lg" variant="secondary" className="flex-1" onClick={stop}>
+                  <Button size="lg" variant="secondary" className="sm:flex-1" onClick={stop}>
                     <Square className="fill-current" /> Stop
                   </Button>
                 ) : (
-                  <Button size="lg" className="flex-1 shadow-lg shadow-primary/25" onClick={downloadSelected} disabled={!pending || limitHit}>
+                  <Button size="lg" className="shadow-lg shadow-primary/25 sm:flex-1" onClick={downloadSelected} disabled={!pending || limitHit}>
                     <Download />
                     {pending === entries.length ? "Download all" : pending ? `Download ${pending}` : "Download"}
                     <span className="text-sm font-normal">· {kind === "mp3" ? "MP3" : `${height}p`}</span>
