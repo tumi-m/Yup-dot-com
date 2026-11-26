@@ -158,7 +158,7 @@ function textTool(markdown: boolean): ToolProcessor {
     alsoAccepts: markdown ? TEXT_ACCEPT : MARKDOWN_ACCEPT,
     multiple: false,
     minFiles: 1,
-    note: "Writes Latin, Greek and Cyrillic letters. Chinese, Japanese, Korean, Arabic and Hebrew aren't supported yet.",
+    note: "Writes Latin, Greek, Cyrillic and Devanagari letters. Chinese, Japanese, Korean, Arabic and Hebrew aren't supported yet.",
     fields: [
       {
         key: "pageSize",

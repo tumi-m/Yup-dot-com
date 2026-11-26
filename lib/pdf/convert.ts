@@ -36,22 +36,36 @@ const HEADINGS = [
 
 const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: "BFBFBF" };
 
+export interface DocxOptions {
+  /** The text's language (a BCP 47 tag), so Word spell-checks it and picks fonts for it. */
+  lang?: string;
+  /** Every paragraph and table laid out right to left (an Arabic, Hebrew, Persian or Urdu document). */
+  rtl?: boolean;
+}
+
+/** Letters of right-to-left scripts. */
+const RTL_LETTER = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}]/u;
+/** Scripts Word sets with its East Asian fonts. */
+const EAST_ASIAN = /^(zh|ja|ko)\b/i;
+
 /** A run of text, set right to left when it is Arabic or Hebrew. */
-function run(text: string, bold?: boolean): TextRun {
-  return new TextRun({ text, bold, rightToLeft: isRtl(text) || undefined });
+function run(text: string, bold: boolean | undefined, o: DocxOptions): TextRun {
+  const rightToLeft = o.rtl ? RTL_LETTER.test(text) : isRtl(text);
+  const language = o.lang ? (o.rtl ? { bidirectional: o.lang } : EAST_ASIAN.test(o.lang) ? { eastAsia: o.lang } : { value: o.lang }) : undefined;
+  return new TextRun({ text, bold, rightToLeft: rightToLeft || undefined, language });
 }
 
 /** Right-to-left paragraph layout (Arabic, Hebrew), so it aligns and wraps from the right. */
-function direction(text: string): { bidirectional?: boolean } {
-  return isRtl(text) ? { bidirectional: true } : {};
+function direction(text: string, o: DocxOptions): { bidirectional?: boolean } {
+  return o.rtl || isRtl(text) ? { bidirectional: true } : {};
 }
 
-function wordTable(table: TableBlock): Table {
+function wordTable(table: TableBlock, o: DocxOptions): Table {
   const columns = Math.max(1, ...table.rows.map((r) => r.length));
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     // Rows run from the right in an Arabic or Hebrew table.
-    visuallyRightToLeft: isRtl(table.rows.flat().join(" ")) || undefined,
+    visuallyRightToLeft: o.rtl || isRtl(table.rows.flat().join(" ")) || undefined,
     rows: table.rows.map(
       (row, rowIndex) =>
         new TableRow({
@@ -67,8 +81,8 @@ function wordTable(table: TableBlock): Table {
               shading: rowIndex === 0 ? { fill: "EDE9FE" } : undefined,
               children: [
                 new Paragraph({
-                  ...direction(row[c] ?? ""),
-                  children: [run(row[c] ?? "", rowIndex === 0)],
+                  ...direction(row[c] ?? "", o),
+                  children: [run(row[c] ?? "", rowIndex === 0, o)],
                 }),
               ],
             })
@@ -78,7 +92,8 @@ function wordTable(table: TableBlock): Table {
   });
 }
 
-export function buildDocx(doc: ParsedDocument, title?: string): Document {
+export function buildDocx(doc: ParsedDocument, title?: string, options: DocxOptions = {}): Document {
+  const o = options;
   const children: (Paragraph | Table)[] = [];
   let listInstance = 0;
 
@@ -88,8 +103,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
         children.push(
           new Paragraph({
             heading: HEADINGS[Math.min(5, block.level - 1)],
-            ...direction(block.text),
-            children: [run(block.text)],
+            ...direction(block.text, o),
+            children: [run(block.text, undefined, o)],
           })
         );
         break;
@@ -98,8 +113,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
           new Paragraph({
             style: "Normal",
             spacing: { after: 160 },
-            ...direction(block.text),
-            children: [run(block.text)],
+            ...direction(block.text, o),
+            children: [run(block.text, undefined, o)],
           })
         );
         break;
@@ -109,8 +124,8 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
         for (const item of block.items) {
           children.push(
             new Paragraph({
-              ...direction(item),
-              children: [run(item)],
+              ...direction(item, o),
+              children: [run(item, undefined, o)],
               ...(block.ordered
                 ? { numbering: { reference: "ordered", level: 0, instance: listInstance } }
                 : { bullet: { level: 0 } }),
@@ -119,7 +134,7 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
         }
         break;
       case "table":
-        children.push(wordTable(block));
+        children.push(wordTable(block, o));
         children.push(new Paragraph({ style: "Normal", children: [] }));
         break;
     }
@@ -165,12 +180,12 @@ export function buildDocx(doc: ParsedDocument, title?: string): Document {
   });
 }
 
-export async function toDocxBlob(doc: ParsedDocument, title?: string): Promise<Blob> {
-  return Packer.toBlob(buildDocx(doc, title));
+export async function toDocxBlob(doc: ParsedDocument, title?: string, options?: DocxOptions): Promise<Blob> {
+  return Packer.toBlob(buildDocx(doc, title, options));
 }
 
-export async function toDocxBytes(doc: ParsedDocument, title?: string): Promise<Uint8Array> {
-  return new Uint8Array(await Packer.toArrayBuffer(buildDocx(doc, title)));
+export async function toDocxBytes(doc: ParsedDocument, title?: string, options?: DocxOptions): Promise<Uint8Array> {
+  return new Uint8Array(await Packer.toArrayBuffer(buildDocx(doc, title, options)));
 }
 
 // ---------------------------------------------------------------------------

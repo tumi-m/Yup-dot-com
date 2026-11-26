@@ -1,9 +1,10 @@
 /**
- * The fonts Text and Markdown to PDF write with: Noto Sans and Noto Sans
- * Mono (SIL Open Font License 1.1), embedded so accented Latin, Greek and
- * Cyrillic come out right in any viewer. Each style ships as small files per
- * alphabet (@fontsource's subsets); only those the text uses are fetched and
- * embedded, and only the letters it uses go into the PDF.
+ * The fonts Text and Markdown to PDF and Translate PDF write with: Noto Sans
+ * and Noto Sans Mono (SIL Open Font License 1.1), embedded so accented
+ * Latin, Greek, Cyrillic and Devanagari come out right in any viewer. Each
+ * style ships as small files per alphabet (@fontsource's subsets); only
+ * those the text uses are fetched and embedded, and only the letters it
+ * uses go into the PDF.
  *
  * Letters no file has (Chinese, Japanese, Korean, Arabic, Hebrew, emoji…) are
  * left out and counted, so the result can say so instead of printing boxes.
@@ -42,7 +43,18 @@ export const SUBSET_RANGES: [string, [number, number][]][] = [
   ["cyrillic", [[0x0301, 0x0301], [0x0400, 0x045f], [0x0490, 0x0491], [0x04b0, 0x04b1], [0x2116, 0x2116]]],
   ["cyrillic-ext", [[0x0460, 0x052f], [0x1c80, 0x1c8a], [0x20b4, 0x20b4], [0x2de0, 0x2dff], [0xa640, 0xa69f], [0xfe2e, 0xfe2f]]],
   ["vietnamese", [[0x0102, 0x0103], [0x0110, 0x0111], [0x0128, 0x0129], [0x0168, 0x0169], [0x01a0, 0x01a1], [0x01af, 0x01b0], [0x0300, 0x0301], [0x0303, 0x0304], [0x0308, 0x0309], [0x0323, 0x0323], [0x0329, 0x0329], [0x1ea0, 0x1ef9], [0x20ab, 0x20ab]]],
+  ["devanagari", [[0x0900, 0x097f], [0x1cd0, 0x1cf9], [0x200c, 0x200d], [0x20a8, 0x20a8], [0x20b9, 0x20b9], [0x20f0, 0x20f0], [0x25cc, 0x25cc], [0xa830, 0xa839], [0xa8e0, 0xa8ff], [0x11b00, 0x11b09]]],
 ];
+
+/** Alphabets Noto Sans Mono has no file for: its faces fall back to Noto Sans for them. */
+export const NO_MONO = new Set(["devanagari"]);
+
+/**
+ * Alphabets whose letters change shape and order with their neighbours
+ * (conjuncts, vowel signs before the consonant): their files keep fontkit's
+ * shaping, and their text is measured as shaped.
+ */
+const SHAPED = new Set(["devanagari"]);
 
 const FILE_STEM: Record<Face, (subset: string) => string> = {
   regular: (s) => `noto-sans-${s}-400-normal.woff`,
@@ -86,14 +98,46 @@ function directGlyphs(font: PDFFont) {
   });
 }
 
+/**
+ * fontkit's Indic shaper was compiled for regenerator-runtime and calls a
+ * global `regeneratorRuntime` for its one generator (the syllable matcher),
+ * which nothing defines here. This is the part of it that generator uses:
+ * `mark`, and `wrap` stepping the compiled state machine through `next`
+ * and `stop`.
+ */
+export function provideGeneratorRuntime() {
+  const g = globalThis as { regeneratorRuntime?: unknown };
+  if (g.regeneratorRuntime) return;
+  type Context = { prev: number; next: number | string; done: boolean; rval: unknown; stop(): unknown };
+  g.regeneratorRuntime = {
+    mark: <F>(fn: F) => fn,
+    wrap(step: (context: Context) => unknown) {
+      const context: Context = { prev: 0, next: 0, done: false, rval: undefined, stop: () => ((context.done = true), context.rval) };
+      const iterator = {
+        next() {
+          if (context.done) return { value: undefined, done: true };
+          const value = step(context);
+          return { value, done: context.done };
+        },
+        [Symbol.iterator]: () => iterator,
+      };
+      return iterator;
+    },
+  };
+}
+
 const inRanges =(cp: number, ranges: [number, number][]) => ranges.some(([a, b]) => cp >= a && cp <= b);
 const MARK = /\p{M}/u;
+/** Zero-width joiners and the like: they stay in their neighbours' font, where shaping needs them. */
+const FORMAT = /\p{Cf}/u;
 
 interface Loaded {
   file: string;
   glyphs: { hasGlyphForCodePoint(cp: number): boolean; glyphForCodePoint(cp: number): { advanceWidth: number }; unitsPerEm: number };
   font?: PDFFont;
   bytes: Uint8Array;
+  /** Drawn with fontkit's shaping (SHAPED), so measured as shaped too. */
+  shaped: boolean;
 }
 
 /** A run of text in one font; `font` is null for letters none of the fonts has. */
@@ -134,7 +178,8 @@ export class FontBook {
   private file(name: string): Promise<Loaded | null> {
     let p = this.files.get(name);
     if (!p) {
-      p = this.load(name).then((bytes) => ({ file: name, bytes, glyphs: fontkit.create(bytes) as unknown as Loaded["glyphs"] }));
+      const shaped = [...SHAPED].some((subset) => name.includes(`-${subset}-`));
+      p = this.load(name).then((bytes) => ({ file: name, bytes, glyphs: fontkit.create(bytes) as unknown as Loaded["glyphs"], shaped }));
       this.files.set(name, p);
     }
     return p;
@@ -142,7 +187,8 @@ export class FontBook {
 
   /** The files of `face` that may hold `cp`, in order. */
   private candidates(face: Face, cp: number): string[] {
-    return SUBSET_RANGES.filter(([, ranges]) => inRanges(cp, ranges)).map(([s]) => FILE_STEM[face](s));
+    const mono = face === "mono" || face === "monoBold";
+    return SUBSET_RANGES.filter(([s, ranges]) => inRanges(cp, ranges) && !(mono && NO_MONO.has(s))).map(([s]) => FILE_STEM[face](s));
   }
 
   private async resolve(face: Face, cp: number): Promise<Loaded | null> {
@@ -174,7 +220,8 @@ export class FontBook {
       const used = loaded && [...this.pick.values()].some((m) => [...m.values()].includes(loaded));
       if (loaded && used && !loaded.font) {
         loaded.font = await this.doc.embedFont(loaded.bytes, { subset: true, features: { liga: false, clig: false, dlig: false, calt: false } });
-        directGlyphs(loaded.font);
+        if (loaded.shaped) provideGeneratorRuntime();
+        else directGlyphs(loaded.font);
       }
     }
   }
@@ -187,7 +234,7 @@ export class FontBook {
     for (const ch of text) {
       const cp = ch.codePointAt(0)!;
       let font = map?.get(cp) ?? null;
-      if (prev && font !== prev && MARK.test(ch) && prev.glyphs.hasGlyphForCodePoint(cp)) font = prev;
+      if (prev && font !== prev && (MARK.test(ch) || FORMAT.test(ch)) && prev.glyphs.hasGlyphForCodePoint(cp)) font = prev;
       const last = out[out.length - 1];
       if (last && last.font === font) last.text += ch;
       else out.push({ text: ch, font });
@@ -202,6 +249,10 @@ export class FontBook {
     for (const run of this.runs(text, face)) {
       if (!run.font) continue;
       const font = run.font;
+      if (font.shaped && font.font) {
+        units += font.font.widthOfTextAtSize(run.text, 1000);
+        continue;
+      }
       let cache = this.advance.get(font);
       if (!cache) this.advance.set(font, (cache = new Map()));
       let sum = 0;

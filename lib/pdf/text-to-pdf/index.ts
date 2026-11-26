@@ -28,12 +28,12 @@ export function missingNote(book: FontBook): string | undefined {
   if (!book.missing) return undefined;
   const sample = [...book.missingSample].join(" ");
   const count = book.missing === 1 ? "1 character" : `${book.missing.toLocaleString("en-US")} characters`;
-  return `Left out ${count} the font doesn't have (${sample}). It covers Latin, Greek and Cyrillic letters.`;
+  return `Left out ${count} the font doesn't have (${sample}). It covers Latin, Greek, Cyrillic and Devanagari letters.`;
 }
 
 /** Turned away before layout: nothing in the file could be drawn. */
 export function noLettersMessage(sample: string): string {
-  return `none of this text can be drawn (for example ${sample}). The font covers Latin, Greek and Cyrillic letters; Chinese, Japanese, Korean, Arabic and Hebrew aren't supported yet.`;
+  return `none of this text can be drawn (for example ${sample}). The font covers Latin, Greek, Cyrillic and Devanagari letters; Chinese, Japanese, Korean, Arabic and Hebrew aren't supported yet.`;
 }
 
 /** Throws when no letter of the text can be drawn (all Chinese, say): an empty PDF helps no one. */
