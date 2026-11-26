@@ -128,8 +128,8 @@ export default function PrivacyPage() {
           YouTube&apos;s public oEmbed service for the video&apos;s title, channel and thumbnail; for a TikTok link it
           opens the public post as described above. We then search MusicBrainz, run by the MetaBrainz Foundation, using
           only the artist and song title. Your IP address is never sent to MusicBrainz. We keep looked-up songs and their
-          connections, not who looked them up, for up to 30 days, so repeat lookups are fast. Thumbnails load straight
-          from YouTube or TikTok.
+          connections for up to 30 days, and each video&apos;s title and channel (and a TikTok&apos;s sound) for 7 days,
+          never who looked them up, so repeat lookups are fast. Thumbnails load straight from YouTube or TikTok.
         </p>
 
         <h3>Daily limits</h3>
@@ -268,7 +268,8 @@ export default function PrivacyPage() {
             <strong>Daily limit counters</strong>: usually up to 40 days.
           </li>
           <li>
-            <strong>Sample Finder cache</strong>: songs looked up and their connections, never who asked, up to 30 days.
+            <strong>Sample Finder cache</strong>: songs looked up and their connections, up to 30 days; the title and
+            channel of videos read (and a TikTok&apos;s sound), 7 days; never who asked.
           </li>
           <li>
             <strong>Messages to us</strong>: as long as we need them to help you, and no more than two years.
