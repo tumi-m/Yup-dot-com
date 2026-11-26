@@ -197,6 +197,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       live = false;
     };
   }, []);
+  /** Set when a link lookup has run a few seconds. */
+  const [slowLookup, setSlowLookup] = useState(false);
+  useEffect(() => {
+    if (phase !== "loading") return;
+    const timer = window.setTimeout(() => setSlowLookup(true), 4000);
+    return () => {
+      window.clearTimeout(timer);
+      setSlowLookup(false);
+    };
+  }, [phase]);
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
   const blobUrl = useRef<string | null>(null);
@@ -555,7 +565,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       if (!alive.current || signal.aborted) return;
       if (Date.now() > deadline) {
         cancelJob();
-        return fail("This download is taking too long. Try a lower quality.");
+        return fail(kind === "mp3" ? "This download is taking too long. Try again later." : "This download is taking too long. Try a lower quality.");
       }
       const r = await fetch(`${workerUrl}/jobs/${created.id}`, { cache: "no-store", signal }).catch(() => null);
       const s = await r?.json().catch(() => null);
@@ -720,6 +730,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 {loading ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
                 {loading ? "Reading link…" : "Get video"}
               </Button>
+            </div>
+            {/* A slow answer (a waking download server, a busy site) says what it's waiting for. */}
+            <div aria-live="polite">
+              <AnimatePresence initial={false}>
+                {loading && slowLookup && (
+                  <motion.p key="slow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground" data-testid="lookup-slow">
+                    Still waiting for {PLATFORM_LABEL[detected?.platform ?? config.platform]}. This can take up to a minute.
+                  </motion.p>
+                )}
+              </AnimatePresence>
             </div>
             <AnimatePresence>
               {playlist && (
