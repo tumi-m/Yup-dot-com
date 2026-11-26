@@ -33,6 +33,19 @@ check("and nowhere else", !/https:\/\/\*(\s|$)|\shttps:(\s|$)|\*(\s|$)/.test(dir
   check("the media worker is named only while YouTube is on", cspSettings().mediaWorkerUrl === undefined);
   env.NEXT_PUBLIC_ENABLE_YOUTUBE = "1";
   check("and is when it is", cspSettings().mediaWorkerUrl === "https://media.example.com");
+  // Download links name the worker as workerConfig() reads it: a value
+  // without a scheme, or with http, must be allowed as the https address.
+  env.MEDIA_WORKER_SECRET = "csp-test";
+  const { workerConfig } = await import("../lib/media-server.ts");
+  for (const raw of ["media.example.com", "http://media.example.com/", " https://media.example.com\n"]) {
+    env.MEDIA_WORKER_URL = raw;
+    const config = workerConfig();
+    const allowed = contentSecurityPolicy("x", { ...prod, mediaWorkerUrl: cspSettings().mediaWorkerUrl }).split("; ").find((d) => d.startsWith("connect-src "))?.split(" ") ?? [];
+    check(`the worker the download links name is allowed (${JSON.stringify(raw)})`, config.ok && config.url === "https://media.example.com" && allowed.includes("https://media.example.com"), JSON.stringify({ config, allowed }));
+  }
+  env.MEDIA_WORKER_URL = "http://localhost:8080";
+  check("a local worker keeps http", cspSettings().mediaWorkerUrl === "http://localhost:8080");
+  delete env.MEDIA_WORKER_SECRET;
   delete env.MEDIA_WORKER_URL;
   delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;
 }
