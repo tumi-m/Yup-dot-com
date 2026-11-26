@@ -13,7 +13,9 @@ import {
   rgb,
   type PDFRef,
 } from "pdf-lib";
-import type { Annotation } from "@/lib/editor/types";
+import type { Annotation, TextEditAnnotation } from "@/lib/editor/types";
+import type { TextEditReport } from "./edit-text/apply";
+import type { FontFiles } from "./text-to-pdf/fonts";
 import { embedImage } from "./embed-image";
 import { drawFields } from "./forms";
 import { drawOrientedImage, imageSize, jpegOrientation, orientedSize, sniffImage } from "./images";
@@ -161,6 +163,10 @@ function addRawAnnotation(
 export interface BakeOptions {
   /** Adds the "Made with PDF Wizard" mark (Free edits; lib/pdf/watermark.ts). */
   watermark?: boolean;
+  /** Told what text edits did: which old words were taken out, which only covered, and the fonts used. */
+  onTextEdits?: (report: TextEditReport) => void;
+  /** Where Noto Sans comes from for letters the standard fonts lack (the browser fetches /vendor). */
+  fonts?: FontFiles;
 }
 
 /**
@@ -178,6 +184,13 @@ export async function bakeAnnotations(
   options: BakeOptions = {}
 ): Promise<Uint8Array> {
   const doc = await openPdf(bytes);
+  // Existing text first: it changes the page's own content, which the rest is drawn over.
+  const edits = annotations.filter((a): a is TextEditAnnotation => a.type === "edit");
+  if (edits.length) {
+    const { applyTextEdits } = await import("./edit-text/apply");
+    const report = await applyTextEdits(doc, edits, { fonts: options.fonts });
+    options.onTextEdits?.(report);
+  }
   const helvetica = await doc.embedFont(StandardFonts.Helvetica);
   const helveticaBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const pages = doc.getPages();
@@ -201,7 +214,7 @@ export async function bakeAnnotations(
   // otherwise they land shifted on offset boxes and sideways on rotated pages.
   const byPage = new Map<number, Annotation[]>();
   for (const ann of annotations) {
-    if (!pages[ann.page]) continue;
+    if (!pages[ann.page] || ann.type === "edit") continue;
     byPage.set(ann.page, [...(byPage.get(ann.page) ?? []), ann]);
   }
 
