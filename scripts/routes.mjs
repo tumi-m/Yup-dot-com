@@ -35,6 +35,7 @@ export const PRIVATE_PAGES = ["/dashboard", "/editor/[id]", "/settings/billing",
 /** Routes that answer anyone. */
 export const PUBLIC_ROUTES = [
   "/api/ai/chat", // GET: the visitor's own answers left today
+  "/api/ai/translate", // GET: whether translation runs, and the visitor's own characters left today
   "/api/prices",
   "/icon.svg",
   "/opengraph-image",

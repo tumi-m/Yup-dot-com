@@ -817,6 +817,11 @@ Variables** and redeploy:
 | `AI_LIMIT_<TIER>_UNANSWERED` | Optional. Unanswered AI questions a day that are given back (default: the tier's daily allowance; `0` = none) |
 | `AI_BURST_PER_MINUTE` | Optional. AI requests per minute per user or guest (default 6) |
 | `AI_GLOBAL_DAILY_LIMIT` | Optional. AI answers per day across the whole site (default 3000) |
+| `OLLAMA_TRANSLATE_MODEL` | Optional. The model Translate PDF uses, on the same host with the same key. Default: `OLLAMA_MODEL`'s |
+| `TRANSLATE_LIMIT_<TIER>_DAY` | Optional. Characters translated per day for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 15000/60000/400000/400000; guest `0` requires an account) |
+| `TRANSLATE_LIMIT_<TIER>_UNANSWERED` | Optional. Translation requests a day that brought nothing back and are given back (default 10) |
+| `TRANSLATE_BURST_PER_MINUTE` | Optional. Translation requests per minute per user or guest (default 30) |
+| `TRANSLATE_GLOBAL_DAILY_LIMIT` | Optional. Translation requests per day across the whole site, each up to 3,000 characters (default 3000) |
 | `NEXT_PUBLIC_LEGAL_NAME` | Legal pages: the person or company responsible (POPIA "responsible party", shown as the Information Officer) |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Legal and contact pages: where privacy, refund and copyright requests go |
 | `NEXT_PUBLIC_BUSINESS_ADDRESS` | Legal and contact pages: physical address (Paystack and POPIA expect one) |
