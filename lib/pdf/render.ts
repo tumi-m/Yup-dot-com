@@ -33,6 +33,9 @@ export function canvasRatio(width: number, height: number, wanted: number): numb
   return wanted * Math.min(1, fit);
 }
 
+/** The pdf.js document behind each loaded file, for reading one file's page beside another's. */
+const documents = new WeakMap<LoadedPdf, pdfjsLib.PDFDocumentProxy>();
+
 const canvasSlots = new WeakMap<
   HTMLCanvasElement,
   { generation: number; task: { cancel: () => void } | null; done: Promise<void> }
@@ -68,8 +71,13 @@ export interface LoadedPdf {
   showsPictures: (pageNumber: number) => Promise<boolean>;
   /** True when the page draws anything at all, its fields included. */
   paints: (pageNumber: number) => Promise<boolean>;
-  /** The page's text runs, and what its comments and fields say, as Redact PDF marks and checks them. */
-  pageText: (pageNumber: number) => Promise<RedactText>;
+  /**
+   * The page's text runs, and what its comments and fields say, as Redact PDF
+   * marks and checks them. `wide`: the same file with its boxes made very
+   * large, so text outside the visible area is read too. `exact`: each
+   * letter placed with the font's own widths (reads the page's drawing).
+   */
+  pageText: (pageNumber: number, opts?: { wide?: LoadedPdf | null; exact?: boolean }) => Promise<RedactText>;
   /** How many bookmarks and form fields the document has, as pdf.js reads them. */
   extras: () => Promise<{ bookmarks: number; fields: number }>;
   /** What a reader shows about the document beyond its pages: details, bookmark titles, attachments and scripts. */
@@ -86,7 +94,7 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
   const bytes = data instanceof Uint8Array ? data.slice() : new Uint8Array(data.slice(0));
   const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
 
-  return {
+  const api: LoadedPdf = {
     numPages: doc.numPages,
     async getPageViewport(pageNumber, scale) {
       const page = await doc.getPage(pageNumber);
@@ -163,9 +171,14 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
       const page = await doc.getPage(pageNumber);
       return paints(page, pdfjsLib.OPS as unknown as Record<string, number>);
     },
-    async pageText(pageNumber) {
+    async pageText(pageNumber, opts) {
       const { pageText } = await import("./redact/page-text");
-      return pageText(await doc.getPage(pageNumber));
+      const wideDoc = opts?.wide ? documents.get(opts.wide) : undefined;
+      const wide = wideDoc && pageNumber <= wideDoc.numPages ? await wideDoc.getPage(pageNumber) : undefined;
+      return pageText(await doc.getPage(pageNumber), {
+        wide,
+        exact: opts?.exact ? { ops: pdfjsLib.OPS as unknown as Record<string, number>, noAnnotations: pdfjsLib.AnnotationMode.DISABLE } : undefined,
+      });
     },
     async facts() {
       const titles = (items: { title?: string; items?: unknown[] }[] | null): string[] =>
@@ -197,4 +210,6 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
       doc.destroy();
     },
   };
+  documents.set(api, doc);
+  return api;
 }

@@ -42,7 +42,7 @@ work with or without an account.
 | **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |
-| **Redact PDF** | Black out text and areas for good: draw boxes (mouse, pen, a finger on a box's handles, or the keys), find text with "Mark all" (match case, whole words), or mark every email, phone number, card number (Luhn-checked), South African ID number (birth date and check digit), account-like number or IBAN, and date. A list shows, unticks or removes each mark; long files have page navigation. Each page with a mark is rebuilt as a picture with the marks painted black before it is encoded, its other words kept searchable as invisible text (not those under or next to a mark); pages without marks stay as they are. The file also loses its details and XMP metadata, scripts, attached files, thumbnails, the comments and fields on rebuilt pages, links over a mark, bookmark titles naming redacted text and anything nothing uses. Copies of marked text left unmarked elsewhere are listed first: mark them too, or leave them on purpose. The result is searched (every decoded stream and string, object streams too) and read again by pdf.js before it is offered; if anything redacted is left, nothing is saved. |
+| **Redact PDF** | Black out text and areas for good: draw boxes (mouse, pen, a finger on a box's handles, or the keys), find text with "Mark all" (match case, whole words), or mark every email, phone number, card number (Luhn-checked), South African ID number (birth date and check digit), account-like number or IBAN, and date. A list shows, unticks or removes each mark; long files have page navigation. Each page with a mark is rebuilt as a picture with the marks painted black before it is encoded, its other words kept searchable as invisible text (not those under or next to a mark); pages without marks stay as they are. The file also loses its details and XMP metadata, scripts, attached files, thumbnails, the comments and fields on rebuilt pages, links over a mark, bookmark titles naming redacted text and anything nothing uses. Text a crop hides is found too, and marking it rebuilds its page from what shows. Copies of marked text left unmarked elsewhere are listed first: mark them too, or leave them on purpose. Up to 100 pages with marks at once free, 1,000 with Pro. The result is searched (every decoded stream and string, object streams too) and read again by pdf.js before it is offered; if anything redacted is left, nothing is saved. |
 | **PDF → PPTX** | Each page becomes a picture slide (the text isn't editable). |
 | **PPTX → PDF** | Renders PowerPoint slides in the browser as image-based pages with a selectable text layer; hidden slides are skipped and the file is never uploaded. |
 | **Edit PPTX** | Edit slide text, reorder, duplicate or delete slides, then save as PPTX or PDF. In the browser. |
@@ -58,7 +58,7 @@ work with or without an account.
 | **Page Numbers** | Insert page numbers with position & format options. |
 | **Watermark** | Stamp diagonal text across every page. |
 | **Flatten PDF** | Make form fields, or fields and comments, part of the page so they can't be edited, keeping text selectable and links working; or turn every page into a picture (100–300 DPI), optionally keeping its text searchable; a run that would make more pictures than a browser tab can hold is turned away first, naming a resolution that fits. What was flattened leaves the file, along with anything only it used (an attached file, XFA data, an old field picture). The editor can flatten fields when it saves. |
-| **Compare PDFs** | Two drop zones, the original and the changed version (swap them with one button). Every word of both is compared over the whole document, so text moved to another page shows as one move and a page added or taken out in the middle leaves the rest paired. Ligatures, odd spaces and words broken over a line end are evened out first; form values count. Changes are marked on the pages, side by side in one scroll: struck through in red where taken out, underlined in green where put in, a dashed line for moves, a dashed box for pictures, so they read without colour. A list with next and previous (N and P keys), an overlay with a swipe slider and a pixel Difference view. Pages without text are compared by how they look; a tick does every page. Downloads: a report PDF and both files with the changes as comments. Up to 200 pages a file free, 2,000 with Pro. |
+| **Compare PDFs** | Two drop zones, the original and the changed version (swap them with one button). Every word of both is compared over the whole document, so text moved to another page shows as one move and a page added or taken out in the middle leaves the rest paired. Ligatures, odd spaces and words broken over a line end are evened out first; form values count. Changes are marked on the pages, side by side in one scroll: struck through in red where taken out, underlined in green where put in, a dashed line for moves, a dashed box for pictures, so they read without colour; on a phone one file's pages show at a time. A list with next and previous (N and P keys while focus is in the comparison), an overlay with a swipe slider and a pixel Difference view. Pages without text are compared by how they look; a tick does every page. Downloads: a report PDF and both files with the changes as comments. Up to 200 pages a file free, 2,000 with Pro. |
 | **Edit PDF** | Full editor: whiteout, shapes, notes, links, form fields. |
 | **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
 
@@ -370,15 +370,25 @@ in the file, so removing is done with pictures and the page says so.
 every mark in displayed points from the page's top-left (`marks.ts`, which
 also holds the search, the presets and their checks, and works out which
 text each mark takes away and where unmarked copies of it are). pdf.js gives
-one box per run of text, so where a match sits inside a run is estimated
-from typical letter widths: search marks get a little room round them, and
-words near a box are left out of the searchable layer. Drawing the marked
+one box per run of text, so the pages a search or preset finds something on
+are read again with each letter placed by the font's own widths, character
+and word spacing and kerning, from the page's drawing operations
+(`page-text.ts`); until then letters are shared out by typical widths. Search
+marks get a little room round them, and before a page is painted each one
+grows along its line over any ink it cuts, up to an em, so no part of a
+letter shows; words near a box are left out of the searchable layer. pdf.js
+leaves out text outside a page's visible area (a crop hides it, but it is
+still in the file), so text is also read from a copy whose page boxes are
+made very large: what it finds there is marked "outside the visible page",
+and marking it rebuilds the page from what shows. Drawing the marked
 pages with the marks painted black needs pdf.js and a canvas, so it runs in
 the page a page at a time (`pictures.ts`); rebuilding the pages, the clean-up
 and a search of every object of the written file run in a Web Worker
 (`index.ts`, `scan.ts`); then the result is opened again with pdf.js and its
 text, comments, fields, bookmarks and details are read, the words under each
-mark looked for, and each mark checked to come out black (`verify.ts`). A
+mark looked for (outside the visible area too), and each mark checked to
+come out black (`verify.ts`). Up to 100 pages with marks are rebuilt at once
+free, 1,000 with Pro. A
 mode that removes only the text and pictures under the marks and keeps the
 rest of the page as it was is not offered: it can't yet be shown to be safe
 on every kind of font and drawing, and a picture of the page can.

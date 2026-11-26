@@ -16,12 +16,15 @@ export const PDF_ACTIONS = [
   "split-pdf",
   "organize-pdf",
   "protect-pdf",
+  "redact-pdf",
 ];
 /**
  * Several PDFs: only tools that take them all. Any other tool would keep the
  * first and quietly drop the rest.
  */
 export const MULTI_ACTIONS = ["merge-pdf"];
+/** Exactly two PDFs: they can be compared too, the first as the original. */
+export const TWO_ACTIONS = ["merge-pdf", "compare-pdf"];
 export const IMAGE_ACTIONS = ["jpg-to-pdf"];
 /** Pictures all of one format with a page of its own go there, named for it. */
 const FORMAT_PAGES: [RegExp, string][] = [
@@ -42,7 +45,7 @@ export const MIXED_ACTIONS: string[] = [];
 export const PPTX_ACTIONS = ["pptx-to-pdf", "edit-pptx"];
 
 /** Tools handed every file; the others get the first. */
-export const TAKES_ALL = ["merge-pdf", "jpg-to-pdf", ...FORMAT_PAGES.map(([, slug]) => slug)];
+export const TAKES_ALL = ["merge-pdf", "compare-pdf", "jpg-to-pdf", ...FORMAT_PAGES.map(([, slug]) => slug)];
 
 export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: string }[]): string[] {
   if (mode === "pptx") return PPTX_ACTIONS;
@@ -56,7 +59,7 @@ export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: s
   // The text tools take one file: the first, Markdown or not.
   if (files.length > 0 && texts === files.length) return MARKDOWN_NAME.test(files[0].name) || /markdown/.test(files[0].type) ? MARKDOWN_ACTIONS : TEXT_ACTIONS;
   if (images > 0 || texts > 0) return MIXED_ACTIONS;
-  return files.length > 1 ? MULTI_ACTIONS : PDF_ACTIONS;
+  return files.length === 2 ? TWO_ACTIONS : files.length > 1 ? MULTI_ACTIONS : PDF_ACTIONS;
 }
 
 /**

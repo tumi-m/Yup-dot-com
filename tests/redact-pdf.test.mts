@@ -35,7 +35,8 @@ const marks = await import("../lib/pdf/redact/marks.ts");
 const { redactPdf } = await import("../lib/pdf/redact/index.ts");
 const { redactFile } = await import("../lib/pdf/redact/off-thread.ts");
 const { findLeaks, stringsIn } = await import("../lib/pdf/redact/scan.ts");
-const { redactDocument, readText, RedactionLeakError } = await import("../lib/pdf/redact/run.ts");
+const { redactDocument, readText, placeExactly, openWide, RedactionLeakError } = await import("../lib/pdf/redact/run.ts");
+const { growToInk } = await import("../lib/pdf/redact/pictures.ts");
 const { verifyRedaction } = await import("../lib/pdf/redact/verify.ts");
 const { loadForRender } = await import("../lib/pdf/render.ts");
 const { TOOLS, getTool, relatedTools } = await import("../lib/tools.tsx");
@@ -733,6 +734,145 @@ function pageStringOf(p: import("../lib/pdf/redact/marks.ts").PageText) {
     const r = await readAll(bigRun.value.bytes);
     check("a long document: 150 pages, the number gone, other pages' text kept", r.pages.length === 150 && !/8001015009087/.test(r.pages[120].text) && r.pages[3].text === "Page 4 plain", r.pages[120].text);
   }
+}
+
+// --- Marks fit fonts whose widths aren't Helvetica's -----------------------------------
+/** Pixels of the needle's colour (pure red) on a page as drawn at 3 pixels to the point. */
+async function redPixels(bytes: Uint8Array, page = 0): Promise<number> {
+  const loaded = await loadForRender(bytes);
+  try {
+    const c = canvas();
+    await loaded.renderPage(page + 1, c, 3, { pixelRatio: 1 });
+    const { data } = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+    let n = 0;
+    for (let p = 0; p < data.length; p += 4) if (data[p] > 170 && data[p + 1] < 90 && data[p + 2] < 90) n++;
+    return n;
+  } finally {
+    loaded.destroy();
+  }
+}
+{
+  // Noto Sans: wider letters than Helvetica, and punctuation much wider, so a run's length shared out by Helvetica's widths lands a letter or more out.
+  const NOTO = "./node_modules/@fontsource/noto-sans/files/noto-sans-latin-400-normal.woff";
+  const make = async (before: string, number: string, after: string) => {
+    const doc = await PDFDocument.create();
+    doc.registerFontkit(fontkit);
+    const font = await doc.embedFont(readFileSync(NOTO), { subset: true });
+    const page = doc.addPage([420, 200]);
+    // One line, one run for pdf.js: the number is only a change of colour.
+    const ops: string[] = [];
+    const key = page.node.newFontDictionary("F1", font.ref);
+    const hex = (t: string) => font.encodeText(t).toString();
+    ops.push(`BT /${key} 12 Tf 20 120 Td 0 g ${hex(before)} Tj 1 0 0 rg ${hex(number)} Tj 0 g ${hex(after)} Tj ET`);
+    page.pushOperators(...[]);
+    const stream = doc.context.flateStream(ops.join("\n"));
+    page.node.set(PDFName.of("Contents"), doc.context.register(stream));
+    const x0 = 20 + font.widthOfTextAtSize(before, 12);
+    return { bytes: await doc.save(), x0, x1: x0 + font.widthOfTextAtSize(number, 12) };
+  };
+  for (const [name, before, after] of [
+    ["symbols", "Ref #@%&*!!!!!!!!!!!!!!!!!! ", " ;;;;;;;;;;;;;;;;;;;;"],
+    ["dot leaders", "Card number ............................ ", ""],
+  ] as const) {
+    const { bytes, x0, x1 } = await make(before, "4111 1111 1111 1111".replace(name === "symbols" ? / /g : /^$/, ""), after);
+    check(`${name}: the fixture draws the number in red`, (await redPixels(bytes)) > 200);
+    const { loaded, pages } = await textOf(bytes);
+    try {
+      const guessed = preset(pages, "card");
+      const g = guessed[0]?.rects[0];
+      if (name === "symbols") check(`${name}: by Helvetica's widths alone the mark misses part of the number`, !!g && (g.x0 > x0 + 0.5 || g.x1 < x1 - 0.5), { g, x0, x1 });
+      await placeExactly(loaded, pages, [0]);
+      const exact = preset(pages, "card");
+      const r = exact[0]?.rects[0];
+      check(`${name}: read with the font's widths, the mark covers the whole number`, exact.length === 1 && !!r && r.x0 <= x0 && r.x1 >= x1 && r.x0 > x0 - 4 && r.x1 < x1 + 4, { r, x0, x1 });
+      const plan = marks.planNeedles(pages, exact);
+      const done = await settle(redactDocument(new Blob([bytes as Uint8Array<ArrayBuffer>]), { marks: exact, needles: plan.needles, dpi: 150, keepText: true }, { loaded, canvas }));
+      check(`${name}: no red pixel of the number is left in the result`, !!done.value && (await redPixels(done.value.bytes)) === 0, done.error?.message ?? (done.value && (await redPixels(done.value.bytes))));
+      // A mark that stops inside a letter grows over the rest of it before it is painted.
+      const short = { ...exact[0], id: marks.markId(), rects: [{ ...r!, x1: r!.x1 - 3 }] };
+      const cut = await settle(redactDocument(new Blob([bytes as Uint8Array<ArrayBuffer>]), { marks: [short], needles: plan.needles, dpi: 150, keepText: true }, { loaded, canvas }));
+      check(`${name}: a mark cut short inside the last digit still leaves no red`, !!cut.value && (await redPixels(cut.value.bytes)) === 0, cut.error?.message ?? (cut.value && (await redPixels(cut.value.bytes))));
+    } finally {
+      loaded.destroy();
+    }
+  }
+  check("a mark grows over the ink it cuts, not along an underline", (() => {
+    const c = canvasMod.createCanvas(100, 40);
+    const ctx = c.getContext("2d") as unknown as CanvasRenderingContext2D;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, 100, 40);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(10, 10, 30, 12);
+    // An underline the whole way along doesn't count as ink.
+    ctx.fillRect(0, 20, 100, 1);
+    const grown = growToInk(ctx, { x0: 15, y0: 8, x1: 35, y1: 24 }, 1);
+    return grown.x0 === 10 && grown.x1 === 40 && grown.y0 === 8 && grown.y1 === 24;
+  })());
+}
+
+// --- Text a crop hides --------------------------------------------------------------
+{
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  // An embedded font: its strings are glyph numbers, so only a reader finds the words, not a search of the bytes.
+  const font = await doc.embedFont(readFileSync(FONTS + "LiberationSans-Regular.ttf"), { subset: true });
+  doc.addPage([400, 400]).drawText("Client: Zanele Mokoena, 12 Main Road", { x: 40, y: 300, size: 14, font });
+  const p2 = doc.addPage([400, 400]);
+  p2.drawText("Summary kept on the cropped page", { x: 40, y: 300, size: 14, font });
+  p2.drawText("Footer cut off by a crop: Zanele Mokoena, ID 8001015009087", { x: 20, y: 60, size: 11, font });
+  // The top half only, as Crop PDF leaves it.
+  p2.setMediaBox(0, 200, 400, 200);
+  p2.setCropBox(0, 200, 400, 200);
+  const p3 = doc.addPage([300, 300]);
+  // A line that runs off the page's right edge: the name is past it.
+  p3.drawText("The secret word is plain and then Zanele", { x: 40, y: 150, size: 14, font });
+  p3.setCropBox(0, 0, 200, 300);
+  const bytes = await doc.save();
+
+  const plain = await readAll(bytes);
+  check("the fixture: no reader shows the name on page 2", !/Zanele/.test(plain.pages[1].text));
+  const loaded = await loadForRender(bytes);
+  const wide = await openWide(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+  try {
+    check("a widened copy can be read", !!wide);
+    const pages = await readText(loaded, { wide });
+    check("text outside the visible area is read apart from what shows", pages.get(1)!.hidden!.some((r) => /Zanele Mokoena/.test(r.str)) && !pages.get(1)!.runs.some((r) => /Zanele/.test(r.str)));
+    const found = search(pages, "Zanele Mokoena");
+    check("search finds it there too, as a mark with nothing to paint", found.length === 2 && found[1].page === 1 && found[1].hidden === true && found[1].rects.length === 0, found.map((m) => [m.page, m.hidden]));
+    check("…named so in the list", /outside the visible page/.test(marks.markLabel(found[1])));
+    const word = search(pages, "Zanele");
+    check("a match past the page's edge, in a line that starts on it, is outside the visible area too", word.some((m) => m.page === 2 && m.hidden), word.map((m) => [m.page, m.hidden]));
+
+    // Only the copy that shows marked: the one a crop hides is a copy to decide about.
+    const plan = marks.planNeedles(pages, [found[0]]);
+    check("the copies prompt lists the hidden copy, said to be outside the visible area", plan.copies.some((c) => c.page === 1 && c.hidden), plan.copies);
+    for (const n of plan.needles) n.allowed = {};
+    const refused = await settle(redactDocument(new Blob([bytes as Uint8Array<ArrayBuffer>]), { marks: [found[0]], needles: plan.needles, dpi: 100, keepText: true }, { loaded, canvas }));
+    check("left unmarked, the check after finds it and says where", refused.error instanceof RedactionLeakError && /outside the visible area of page 2/.test(refused.error.message), refused.error?.message);
+
+    const all = [...found, ...word.filter((m) => m.page === 2)];
+    const both = marks.planNeedles(pages, all);
+    const done = await settle(redactDocument(new Blob([bytes as Uint8Array<ArrayBuffer>]), { marks: all, needles: both.needles, dpi: 100, keepText: true }, { loaded, canvas }));
+    check("marked, the pages with hidden copies are rebuilt and the check passes", !!done.value && done.value.report.pages === 3, done.error?.message);
+    if (done.value) {
+      const out = await loadForRender(done.value.bytes);
+      const outWide = await openWide(new Blob([done.value.bytes as Uint8Array<ArrayBuffer>]));
+      const text = await readText(out, { wide: outWide });
+      out.destroy();
+      outWide?.destroy();
+      check("…and nothing of the name is left, outside the visible area or in it", [...text.values()].every((t) => !/Zanele/.test(marks.allText(t))));
+      check("…while what shows on page 2 is still searchable", /Summary kept/.test(marks.allText(text.get(1)!)));
+    }
+  } finally {
+    loaded.destroy();
+    wide?.destroy();
+  }
+}
+
+// --- Plan limits -------------------------------------------------------------------
+{
+  const { LIMITS } = await import("../lib/limits.ts");
+  check("pages rebuilt at once have a limit per plan, higher with Pro", LIMITS.guest.redactPages === LIMITS.free.redactPages && LIMITS.pro.redactPages > LIMITS.free.redactPages && LIMITS.team.redactPages === LIMITS.pro.redactPages);
 }
 
 // --- Registered like the other tools ---------------------------------------------

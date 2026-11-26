@@ -7,7 +7,7 @@
  */
 import { stopIfAborted } from "../../abort";
 import { workerJob } from "../../worker-job";
-import { redactPdf, type RedactJob, type RedactReport } from "./index";
+import { redactPdf, widenBoxes, type RedactJob, type RedactReport } from "./index";
 import type { Reply, Request } from "./worker";
 
 export async function redactFile(
@@ -32,5 +32,26 @@ export async function redactFile(
   const reply = await workerJob<Exclude<Reply, { type: "progress" }>>(worker, { bytes, job } satisfies Request, [bytes.buffer], onProgress, signal);
   if (!reply) return here();
   if (reply.type === "done") return { bytes: reply.bytes, report: reply.report };
-  throw new Error(reply.message);
+  if (reply.type === "error") throw new Error(reply.message);
+  throw new Error("The file couldn't be redacted.");
+}
+
+/** The file with its pages' boxes made very large, to read text a crop hides (index.ts widenBoxes), written in the worker. */
+export async function widenFile(file: Blob, signal?: AbortSignal): Promise<Uint8Array> {
+  const here = async () => {
+    stopIfAborted(signal);
+    return widenBoxes(new Uint8Array(await file.arrayBuffer()));
+  };
+  if (typeof window === "undefined" || typeof Worker === "undefined") return here();
+  let worker: Worker;
+  try {
+    worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  } catch {
+    return here();
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const reply = await workerJob<Exclude<Reply, { type: "progress" }>>(worker, { bytes, widen: true } satisfies Request, [bytes.buffer], undefined, signal);
+  if (!reply) return here();
+  if (reply.type === "wide") return reply.bytes;
+  throw new Error(reply.type === "error" ? reply.message : "The file couldn't be read.");
 }

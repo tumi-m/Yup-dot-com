@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, EXIT, FADE_EXIT, HANDOFF, InlineError, NOTICE_T, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
-import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, settleSlot, settleTarget, scrollBehavior, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
 import { QrCode } from "./QrCode";
@@ -159,7 +159,7 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
   const [note, setNote] = useState("");
   const [dragging, setDragging] = useState<number | null>(null);
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
-  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "progress" | "start" | "shutter" | "editor" | "add" | `page-${number}`>();
+  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "progress" | "start" | "shutter" | "editor" | "add" | `page-${number}` | `earlier-${number}` | `later-${number}`>();
   const flow = useHeightLock<HTMLDivElement>();
   const job = useRef<AbortController | null>(null);
   const ids = useRef(0);
@@ -187,6 +187,29 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
     const policy = (document as Document & { featurePolicy?: { allowsFeature(f: string): boolean } }).featurePolicy;
     if (!policy || !policy.allowsFeature("camera")) window.location.replace(window.location.href);
   }, [slug]);
+
+  // A new view (editor, tray, camera) is brought into sight with its focus: the one before can be much longer, and focus moves without scrolling.
+  const shownView = useRef(view);
+  useEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    const root = flow.ref.current;
+    if (!root) return;
+    const top = root.getBoundingClientRect().top;
+    // The editor and the camera start at the top of the screen, so their buttons are in reach.
+    if (view.kind !== "pages") {
+      const target = settleTarget(top, window.scrollY, window.innerHeight);
+      if (target !== null) window.scrollTo({ top: target, behavior: scrollBehavior() });
+      return;
+    }
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement) || !root.contains(el)) return;
+    const r = el.getBoundingClientRect();
+    if (r.top >= 80 && r.bottom <= window.innerHeight) return;
+    // The tray's top when that keeps the focused control on screen, else the control itself.
+    const target = settleTarget(r.bottom - top + 96 <= window.innerHeight ? top : r.top, window.scrollY, window.innerHeight);
+    if (target !== null) window.scrollTo({ top: target, behavior: scrollBehavior() });
+  }, [view, flow.ref]);
 
   function say(message: string) {
     setNote((prev) => (prev === message ? `${message} ` : message));
@@ -357,7 +380,8 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
     setView({ kind: "pages" });
   }
 
-  function move(id: number, by: number) {
+  /** `button`: moved with a Move button, which keeps focus unless the page reached the end it points to; then the other one has it. */
+  function move(id: number, by: number, button?: "earlier" | "later") {
     const from = pages.findIndex((p) => p.id === id);
     const to = Math.max(0, Math.min(pages.length - 1, from + by));
     if (from < 0 || to === from) return;
@@ -366,6 +390,8 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
     list.splice(to, 0, page);
     setPages(list);
     say(`Page moved to ${to + 1} of ${list.length}.`);
+    if (button === "earlier") focusNext.current = to === 0 ? `later-${id}` : `earlier-${id}`;
+    if (button === "later") focusNext.current = to === list.length - 1 ? `earlier-${id}` : `later-${id}`;
   }
 
   function dropOn(targetId: number) {
@@ -690,7 +716,7 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <Button ref={focusRef("start")} size="sm" variant="secondary" className="pointer-coarse:h-11" onClick={() => openCameraView()} disabled={adding}>
-                        <Camera /> {camera ? "Scan more" : takePhotoLabel}
+                        {camera || phone ? <Camera /> : <ImagePlus />} {camera ? "Scan more" : takePhotoLabel}
                       </Button>
                       <Button ref={focusRef("add")} size="sm" variant="outline" className="pointer-coarse:h-11" onClick={pickPhotos} disabled={adding}>
                         {adding ? <Loader2 className="motion-safe:animate-spin" /> : <ImagePlus />} Add photos
@@ -758,7 +784,8 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
                             size="sm"
                             variant="ghost"
                             className="h-9 w-9 p-0 pointer-coarse:h-11 pointer-coarse:w-11"
-                            onClick={() => move(p.id, -1)}
+                            ref={focusRef(`earlier-${p.id}`)}
+                            onClick={() => move(p.id, -1, "earlier")}
                             disabled={i === 0}
                             aria-label={`Move page ${i + 1} earlier`}
                           >
@@ -768,7 +795,8 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
                             size="sm"
                             variant="ghost"
                             className="h-9 w-9 p-0 pointer-coarse:h-11 pointer-coarse:w-11"
-                            onClick={() => move(p.id, 1)}
+                            ref={focusRef(`later-${p.id}`)}
+                            onClick={() => move(p.id, 1, "later")}
                             disabled={i === pages.length - 1}
                             aria-label={`Move page ${i + 1} later`}
                           >
@@ -933,7 +961,8 @@ function StartPanel({
   const buttons = (
     <div className="flex flex-wrap justify-center gap-2">
       <Button ref={startRef} className="h-11" onClick={onCamera} disabled={adding} data-testid="open-camera">
-        <Camera /> {camera === false ? (phone ? "Take a photo" : "Choose photos") : phone ? "Open camera" : "Use webcam"}
+        {/* With no camera on a computer it opens the file picker, and looks it. */}
+        {camera === false && !phone ? <ImagePlus /> : <Camera />} {camera === false ? (phone ? "Take a photo" : "Choose photos") : phone ? "Open camera" : "Use webcam"}
       </Button>
       {(camera !== false || phone) && (
         <Button variant="outline" className="h-11" onClick={onPhotos} disabled={adding} data-testid="choose-photos">
@@ -1236,7 +1265,7 @@ function PageEditor({
     return () => clearTimeout(t);
   }, [spoken, quad, commit]);
 
-  const maxH = typeof window === "undefined" ? MAX_VIEW_HEIGHT : Math.min(MAX_VIEW_HEIGHT, Math.round(window.innerHeight * 0.55));
+  const maxH = typeof window === "undefined" ? MAX_VIEW_HEIGHT : Math.min(MAX_VIEW_HEIGHT, Math.round(window.innerHeight * 0.5));
   const scale = width ? Math.min(width / page.photo.width, maxH / page.photo.height) : 0;
   const w = page.photo.width * scale;
   const h = page.photo.height * scale;
@@ -1290,12 +1319,13 @@ function PageEditor({
     { x: 0, y: 1 },
   ];
 
+  // On a phone the buttons come straight after the photo, with the preview and filters below them; from sm up, in the order they are read.
   return (
-    <motion.section initial={ENTER.initial} animate={ENTER.animate} className="space-y-4" aria-labelledby="scan-edit-title" data-testid="editor">
+    <motion.section initial={ENTER.initial} animate={ENTER.animate} className="flex flex-col gap-4" aria-labelledby="scan-edit-title" data-testid="editor">
       <p className="sr-only" aria-live="polite">
         {spoken}
       </p>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <div className="order-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 sm:order-none">
         <h2 id="scan-edit-title" ref={headingRef} tabIndex={-1} className="whitespace-nowrap text-lg font-semibold outline-none">
           Page {index + 1}
           <span className="font-normal text-muted-foreground"> of {count}</span>
@@ -1305,8 +1335,8 @@ function PageEditor({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div ref={wrap} className="flex min-w-0 justify-center rounded-2xl border border-border bg-secondary/40 p-2">
+      <div className="contents sm:order-none sm:grid sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] sm:gap-3">
+        <div ref={wrap} className="order-2 flex min-w-0 justify-center rounded-2xl border border-border bg-secondary/40 p-2 sm:order-none">
           {scale > 0 ? (
             <div data-photo className="relative touch-none select-none" style={{ width: w, height: h }} onPointerMove={moveTo} onPointerUp={drop} onPointerCancel={drop}>
               <canvas ref={photoCanvas} aria-hidden className="block !h-full !w-full rounded" />
@@ -1348,17 +1378,18 @@ function PageEditor({
             </div>
           )}
         </div>
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-secondary/40 p-2">
+        <div className="order-5 flex flex-col items-center justify-center rounded-2xl border border-border bg-secondary/40 p-2 sm:order-none">
           <canvas ref={previewCanvas} width={0} height={0} aria-label={`Page ${index + 1} as it will look`} role="img" className="block max-h-[40vh] max-w-full bg-white shadow-md sm:max-h-[520px]" data-testid="preview" />
           <p className="mt-1.5 text-xs text-muted-foreground">As it will look</p>
         </div>
       </div>
-      <p id="scan-corner-hint" className="text-center text-xs text-muted-foreground">
+      {/* Read out with each corner; on a phone the line above says it already, and the buttons stay in view. */}
+      <p id="scan-corner-hint" className="order-3 -mt-1 text-center text-xs text-muted-foreground max-sm:sr-only sm:order-none">
         <span className="hover-none:hidden">Drag the corners, or Tab to one and use the arrow keys (Shift moves further).</span>
         <span className="hidden hover-none:inline">Drag the round handles onto the page&apos;s corners.</span>
       </p>
 
-      <div className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="order-6 space-y-3 rounded-2xl border border-border bg-card p-4 sm:order-none">
         <Pills<ScanFilter> name="scan-filter" legend="Filter" value={page.filter} options={FILTERS} onChange={(f) => onChange({ filter: f }, pixels ?? undefined)} />
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" className="pointer-coarse:h-11" onClick={() => turn(-90)}>
@@ -1378,7 +1409,7 @@ function PageEditor({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="order-4 flex flex-wrap items-center justify-between gap-2 sm:order-none" data-testid="editor-actions">
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" className="h-11" onClick={onRetake}>
             <Camera /> Retake
@@ -1401,7 +1432,8 @@ function PageEditor({
             </>
           ) : (
             <Button className="h-11" onClick={onDone} data-testid="edit-done">
-              <Check /> {fresh ? "Done" : "Save"}
+              {/* Changes apply as they are made: this only closes the page. */}
+              <Check /> Done
             </Button>
           )}
         </div>

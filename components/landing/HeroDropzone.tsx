@@ -14,7 +14,7 @@ import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { formatLimitBytes, LIMITS, limitsFor, type Tier } from "@/lib/limits";
 import { acceptFor, ALL_FORMATS } from "@/lib/pdf/images-to-pdf/formats";
-import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL, tooBigFor } from "./hero-actions";
+import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL, TWO_ACTIONS, tooBigFor } from "./hero-actions";
 
 const ACCEPT = {
   pdf: `application/pdf,${acceptFor(ALL_FORMATS)},text/plain,text/markdown,.txt,.md,.markdown`,
@@ -306,7 +306,7 @@ export function HeroDropzone({
             })}
           </div>
           {tooBigNote}
-          {!held.length && actions === MULTI_ACTIONS && (
+          {!held.length && (actions === MULTI_ACTIONS || actions === TWO_ACTIONS) && (
             <p className="mt-3 text-center text-xs text-muted-foreground">Other tools take one PDF at a time.</p>
           )}
           {!held.length && actions === MIXED_ACTIONS && (

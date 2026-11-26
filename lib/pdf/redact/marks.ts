@@ -8,9 +8,11 @@
  * visible box with /Rotate applied), as pdf.js shows the page.
  *
  * pdf.js gives each run of text one box, not one per letter. Where a match
- * starts and ends inside a run is worked out from typical letter widths, so
- * search marks are padded a little; the page preview shows exactly what
- * will be painted, and the result is checked for the text afterwards.
+ * starts and ends inside a run comes from the font's own letter widths once
+ * the page's drawing has been read (page-text.ts), and from typical widths
+ * until then. Search marks are padded a little either way; the page preview
+ * shows what will be painted, and the result is checked for the text
+ * afterwards.
  */
 
 export interface Rect {
@@ -32,6 +34,8 @@ export interface TextRun {
   eol: boolean;
   /** Every letter is as wide as the next. */
   mono?: boolean;
+  /** Where each UTF-16 unit starts and ends along the line, from the font's own widths: x for lines across, y for lines down. */
+  spans?: [number, number][];
 }
 
 /** Text a comment, link or form field holds, and where it sits. */
@@ -43,6 +47,12 @@ export interface NoteText {
 export interface PageText {
   runs: TextRun[];
   notes: NoteText[];
+  /** Text drawn wholly outside the visible area (cropped off): no reader shows it, but it is in the file. */
+  hidden?: TextRun[];
+  /** The runs' letters are placed with the font's own widths. */
+  exact?: boolean;
+  /** The page as shown, in points: a match wholly off it is text outside the visible area too. */
+  size?: { width: number; height: number };
 }
 
 export type PresetId = "email" | "phone" | "card" | "id" | "account" | "date";
@@ -60,6 +70,10 @@ export interface Mark {
   whole: boolean;
   /** Ticked in the list: blacked out when the file is made. */
   on: boolean;
+  /** Text outside the visible area: nothing to paint, but its page is rebuilt from what shows, which leaves it out. */
+  hidden?: boolean;
+  /** Found in a comment, link or field: the box is the whole of it, painted as it is. */
+  note?: boolean;
 }
 
 export interface SearchOptions {
@@ -115,12 +129,16 @@ function widthOf(code: number): number {
   return 556;
 }
 
-/** A box for each UTF-16 unit of `run.str`, shared out along the run in proportion to typical widths. */
+/** A box for each UTF-16 unit of `run.str`: where the font puts it, or shared out along the run in proportion to typical widths. */
 export function letterBoxes(run: TextRun): Rect[] {
   const { str, rect, flow } = run;
   const n = str.length;
   if (!n) return [];
   if (flow === "angled") return Array.from({ length: n }, () => rect);
+  if (run.spans?.length === n) {
+    const across = flow === "right" || flow === "left";
+    return run.spans.map(([a, b]) => (across ? { x0: a, y0: rect.y0, x1: b, y1: rect.y1 } : { x0: rect.x0, y0: a, x1: rect.x1, y1: b }));
+  }
   const widths = Array.from(str, () => 0);
   for (let i = 0; i < n; i++) widths[i] = run.mono ? (str.charCodeAt(i) >= 0xdc00 && str.charCodeAt(i) <= 0xdfff ? 0 : 1) : widthOf(str.charCodeAt(i));
   const total = widths.reduce((a, b) => a + b, 0) || 1;
@@ -253,23 +271,34 @@ export function queryPattern(query: string, opts: SearchOptions = {}): RegExp | 
   return new RegExp(body, opts.matchCase ? "gu" : "giu");
 }
 
-/** A match on a page: the text and the boxes round it. */
+/** A match on a page: the text and the boxes round it (none for text outside the visible area). */
 export interface Found {
   text: string;
   rects: Rect[];
+  hidden?: boolean;
+  note?: boolean;
 }
 
 /** Everything `pattern` matches on a page: in its text, and in its comments and fields. */
 export function findOnPage(page: PageText, pattern: RegExp, valid: (match: string) => boolean = () => true, s = pageString(page)): Found[] {
   const out: Found[] = [];
+  const view = page.size && { x0: 0, y0: 0, x1: page.size.width, y1: page.size.height };
   for (const m of s.text.matchAll(pattern)) {
     if (!m[0].trim() || !valid(m[0])) continue;
     const rects = boxesFor(page, s, m.index!, m.index! + m[0].length);
-    if (rects.length) out.push({ text: m[0].replace(/\s+/g, " ").trim(), rects });
+    const text = m[0].replace(/\s+/g, " ").trim();
+    // In a line that runs off the page, past where it is cut.
+    if (view && rects.length && !rects.some((r) => touches(r, view))) out.push({ text, rects: [], hidden: true });
+    else if (rects.length) out.push({ text, rects });
   }
   for (const note of page.notes) {
     for (const m of note.text.matchAll(pattern)) {
-      if (m[0].trim() && valid(m[0])) out.push({ text: m[0].replace(/\s+/g, " ").trim(), rects: [note.rect] });
+      if (m[0].trim() && valid(m[0])) out.push({ text: m[0].replace(/\s+/g, " ").trim(), rects: [note.rect], note: true });
+    }
+  }
+  if (page.hidden?.length) {
+    for (const m of pageString({ runs: page.hidden, notes: [] }).text.matchAll(pattern)) {
+      if (m[0].trim() && valid(m[0])) out.push({ text: m[0].replace(/\s+/g, " ").trim(), rects: [], hidden: true });
     }
   }
   return out;
@@ -438,8 +467,9 @@ let counter = 0;
 export const markId = () => `m${Date.now().toString(36)}${(counter++).toString(36)}`;
 
 const rectKey = (r: Rect) => [r.x0, r.y0, r.x1, r.y1].map((n) => Math.round(n)).join(",");
-/** Two marks over the same place on the same page are one. */
-export const markKey = (m: Pick<Mark, "page" | "rects">) => `${m.page}:${m.rects.map(rectKey).join(";")}`;
+/** Two marks over the same place on the same page are one; text outside the visible area has no place, so it is told apart by what it says. */
+export const markKey = (m: Pick<Mark, "page" | "rects" | "hidden" | "text">) =>
+  m.hidden ? `${m.page}:hidden:${normal(m.text)}` : `${m.page}:${m.rects.map(rectKey).join(";")}`;
 
 /** `found` as marks, leaving out any already in `marks` or inside a mark there (a phone number already marked isn't an account number too). */
 export function addFound(marks: Mark[], page: number, found: Found[], kind: MarkKind, whole: boolean): Mark[] {
@@ -448,9 +478,11 @@ export function addFound(marks: Mark[], page: number, found: Found[], kind: Mark
   const out: Mark[] = [];
   for (const f of found) {
     const mark: Mark = { id: markId(), page, rects: f.rects, kind, text: f.text, whole, on: true };
+    if (f.hidden) mark.hidden = true;
+    if (f.note) mark.note = true;
     const key = markKey(mark);
     if (seen.has(key)) continue;
-    if (f.rects.every((r) => here.some((h) => overlap(h, r) >= area(r) * 0.8))) continue;
+    if (!f.hidden && f.rects.every((r) => here.some((h) => overlap(h, r) >= area(r) * 0.8))) continue;
     seen.add(key);
     out.push(mark);
   }
@@ -521,8 +553,9 @@ export function squeezedIn(text: string, n: Pick<Needle, "text">): boolean {
   return s.length >= SQUEEZED_MIN && squeezed(text).includes(s);
 }
 
-/** All the text pdf.js reads on a page, its comments and fields included, as one string to count needles in. */
-export const allText = (page: PageText) => [pageString(page).text, ...page.notes.map((n) => n.text)].join("\n");
+/** All the text pdf.js reads on a page, its comments, fields and text outside the visible area included, as one string to count needles in. */
+export const allText = (page: PageText) =>
+  [pageString(page).text, ...page.notes.map((n) => n.text), page.hidden?.length ? pageString({ runs: page.hidden, notes: [] }).text : ""].join("\n");
 
 /** What a mark takes away, as text to look for afterwards: what was found, or the words under a box. */
 export function markText(mark: Mark, page: PageText | undefined): string {
@@ -535,6 +568,10 @@ export interface Copy {
   text: string;
   page: number;
   rects: Rect[];
+  /** Outside the visible area of its page. */
+  hidden?: boolean;
+  /** In a comment, link or field. */
+  note?: boolean;
 }
 
 /**
@@ -553,17 +590,20 @@ export function planNeedles(pages: Map<number, PageText>, marks: Mark[]): { need
     if (!byText.has(key)) byText.set(key, { text, whole: m.kind === "box" || m.whole, allowed: {} });
   }
   const copies: Copy[] = [];
-  const covered = (page: number, rects: Rect[]) =>
-    rects.every((r) => on.some((m) => m.page === page && m.rects.some((mr) => overlap(mr, r) >= area(r) * 0.5 || inside(centre(r), mr))));
+  const covered = (page: number, f: Found) =>
+    // A page with any mark is rebuilt from what shows: nothing outside the visible area stays.
+    f.hidden
+      ? on.some((m) => m.page === page)
+      : f.rects.every((r) => on.some((m) => m.page === page && m.rects.some((mr) => overlap(mr, r) >= area(r) * 0.5 || inside(centre(r), mr))));
   for (const needle of byText.values()) {
     const pattern = queryPattern(needle.text, { wholeWord: needle.whole })!;
     for (const [page, text] of pages) {
       const found = findOnPage(text, pattern);
       let left = 0;
       for (const f of found) {
-        if (covered(page, f.rects)) continue;
+        if (covered(page, f)) continue;
         left++;
-        copies.push({ text: needle.text, page, rects: f.rects });
+        copies.push(f.hidden ? { text: needle.text, page, rects: [], hidden: true } : { text: needle.text, page, rects: f.rects, note: f.note });
       }
       // Counted the way the result will be: so the check after compares like with like.
       const total = countIn(allText(text), needle);
@@ -582,7 +622,7 @@ export function redactedName(name: string): string {
 /** How a mark is named in the list. */
 export function markLabel(mark: Mark): string {
   if (mark.kind === "box") return mark.text ? `Box: ${clip(mark.text)}` : "Box";
-  return clip(mark.text);
+  return mark.hidden ? `${clip(mark.text)} (outside the visible page)` : clip(mark.text);
 }
 
 const clip = (s: string, n = 48) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);

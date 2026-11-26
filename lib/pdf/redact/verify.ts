@@ -26,7 +26,8 @@ export interface VerifyInput {
 
 const inside = (x: number, y: number, r: Rect) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 
-export async function verifyRedaction(loaded: LoadedPdf, input: VerifyInput, opts: CanvasOptions = {}): Promise<Leak[]> {
+/** `wide`: the result widened (run.ts openWide), so text outside the visible area is read too. */
+export async function verifyRedaction(loaded: LoadedPdf, input: VerifyInput, opts: CanvasOptions & { wide?: LoadedPdf | null } = {}): Promise<Leak[]> {
   const leaks: Leak[] = [];
   if (loaded.numPages !== input.pageCount) return [{ text: "", where: "The redacted file lost pages" }];
 
@@ -44,12 +45,18 @@ export async function verifyRedaction(loaded: LoadedPdf, input: VerifyInput, opt
   for (let i = 0; i < loaded.numPages; i++) {
     stopIfAborted(opts.signal);
     if (i % 10 === 0) opts.progress?.(i / loaded.numPages, `Checking page ${i + 1}…`);
-    const page = await loaded.pageText(i + 1);
+    const page = await loaded.pageText(i + 1, { wide: opts.wide });
     const text = allText(page);
+    const shown = allText({ runs: page.runs, notes: page.notes });
     for (const n of input.needles) {
       const allowed = n.allowed[i] ?? 0;
-      if (countIn(text, n) > allowed || (!allowed && squeezedIn(text, n))) leaks.push({ text: n.text, where: `on page ${i + 1}` });
+      if (countIn(text, n) > allowed || (!allowed && squeezedIn(text, n))) {
+        // Said plainly when no reader shows it: nothing on the page would explain it.
+        const seen = countIn(shown, n) > allowed || (!allowed && squeezedIn(shown, n));
+        leaks.push({ text: n.text, where: seen ? `on page ${i + 1}` : `outside the visible area of page ${i + 1} (a crop hides it)` });
+      }
     }
+    await opts.wide?.release(i + 1);
     const rects = marked.get(i);
     if (!rects) continue;
     // Nothing readable under a mark: no word, no comment or link.

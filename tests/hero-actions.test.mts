@@ -1,7 +1,7 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { addFiles, handoffType, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
+import { addFiles, handoffType, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, TWO_ACTIONS, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
 import { LIMITS } from "../lib/limits.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
@@ -17,6 +17,8 @@ const jpg = { name: "b.jpg", type: "image/jpeg" };
 
 const several = heroActions("pdf", [pdf, pdf, pdf]);
 check("several PDFs: only tools that take them all", several.every((s) => TAKES_ALL.includes(s) && PROCESSORS[s]?.multiple), several);
+const two = heroActions("pdf", [pdf, pdf]);
+check("two PDFs: only tools that take them both", two.every((s) => TAKES_ALL.includes(s) && (PROCESSORS[s]?.multiple || s === "compare-pdf")), two);
 check("several PDFs: Merge PDF offered", several.includes("merge-pdf"), several);
 // A PDF and a photo used to offer Merge PDF, which dropped the photo and
 // then asked for at least 2 files.
@@ -40,9 +42,14 @@ check("one PDF: every PDF tool", heroActions("pdf", [pdf]) === PDF_ACTIONS);
 check("one image: JPG to PDF", heroActions("pdf", [jpg]) === IMAGE_ACTIONS);
 check("PPTX: the slide tools", heroActions("pptx", [{ name: "s.pptx", type: "" }]) === PPTX_ACTIONS);
 
-check("every tool handed all files takes several", TAKES_ALL.every((s) => PROCESSORS[s]?.multiple), TAKES_ALL);
+// Compare PDFs has a page of its own and takes exactly two: the original and the changed version.
+const takesTwo = (s: string) => s === "compare-pdf";
+check("every tool handed all files takes several", TAKES_ALL.every((s) => PROCESSORS[s]?.multiple || takesTwo(s)), TAKES_ALL);
+check("two PDFs: Merge PDF and Compare PDFs", heroActions("pdf", [pdf, pdf]) === TWO_ACTIONS && TWO_ACTIONS.includes("compare-pdf") && TWO_ACTIONS.includes("merge-pdf"));
+check("three PDFs: no Compare, it takes two", !heroActions("pdf", [pdf, pdf, pdf]).includes("compare-pdf"));
+check("one PDF: Redact PDF is offered", PDF_ACTIONS.includes("redact-pdf"));
 const slugs = new Set(TOOLS.map((t) => t.slug));
-const unknown = [...PDF_ACTIONS, ...MULTI_ACTIONS, ...IMAGE_ACTIONS, ...PPTX_ACTIONS].filter((s) => !slugs.has(s));
+const unknown = [...PDF_ACTIONS, ...MULTI_ACTIONS, ...TWO_ACTIONS, ...IMAGE_ACTIONS, ...PPTX_ACTIONS].filter((s) => !slugs.has(s));
 check("every offered tool exists", unknown.length === 0, unknown);
 
 // One PDF, then another: the second joins the first, so Merge PDF is offered.
@@ -52,7 +59,7 @@ const a = file("a.pdf");
 const b = file("b.pdf");
 const joined = addFiles([a], [b]);
 check("a second PDF joins the first", joined.length === 2 && joined[0] === a && joined[1] === b, joined.map((f) => f.name));
-check("two PDFs, one at a time: Merge PDF", heroActions("pdf", joined) === MULTI_ACTIONS);
+check("two PDFs, one at a time: Merge PDF and Compare PDFs", heroActions("pdf", joined) === TWO_ACTIONS);
 check("the same file again counts once", addFiles([a, b], [file("b.pdf")]).length === 2);
 check("the same file twice in one pick counts once", addFiles([], [a, file("a.pdf")]).length === 1);
 check("nothing new keeps the list as it is", addFiles([a], [file("a.pdf")]).length === 1 && addFiles([a], [file("a.pdf")])[0] === a);
@@ -72,7 +79,7 @@ check("exactly the limit is fine", tooBigFor("guest", [file("edge.pdf", LIMITS.g
 const joinBig = takePdfs("guest", [a], [b, big], true);
 check("one too big joining: the others stay", joinBig.files.length === 2 && joinBig.files[0] === a && joinBig.files[1] === b, joinBig.files.map((f) => f.name));
 check("one too big joining: named", joinBig.tooBig.length === 1 && joinBig.tooBig[0] === big);
-check("two that fit then one too big: Merge PDF stays", heroActions("pdf", joinBig.files) === MULTI_ACTIONS);
+check("two that fit then one too big: Merge PDF stays", heroActions("pdf", joinBig.files).includes("merge-pdf"));
 const onlyBig = takePdfs("guest", [a, b], [big], true);
 check("only a big one: the files there are kept as they are", onlyBig.files.length === 2 && onlyBig.tooBig[0] === big);
 const fresh = takePdfs("guest", [a], [big, b], false);

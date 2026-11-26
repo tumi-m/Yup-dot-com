@@ -49,7 +49,7 @@ export async function RedactAbout() {
     ...FAQ,
     {
       q: "Is my file uploaded?",
-      a: `No. It is redacted and checked in your browser and never leaves your device. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} with Pro.`,
+      a: `No. It is redacted and checked in your browser and never leaves your device. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} and ${LIMITS.free.redactPages} pages with marks at a time free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} and ${LIMITS.pro.redactPages.toLocaleString("en-US")} with Pro.`,
     },
   ];
   const jsonLd = {

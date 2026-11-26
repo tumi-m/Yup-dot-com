@@ -115,12 +115,13 @@ export function CompareTool({ slug, tier }: { slug: string; tier: Tier }) {
     setStatus("idle");
   }
 
-  async function openOn(side: Side, picked: File) {
+  /** `together`: placed with the other file at once; what to say is returned, to be said once for both. */
+  async function openOn(side: Side, picked: File, together = false): Promise<string | null> {
     // Limits are an upgrade prompt, never a silent failure.
     if (picked.size > limits.maxFileBytes) {
       setUpsell("file-size");
       fail(`${picked.name}: files up to ${formatLimitBytes(limits.maxFileBytes)} on your plan.`);
-      return;
+      return null;
     }
     const id = ++opened.current[side];
     const hadFocus = !!flow.ref.current?.contains(document.activeElement);
@@ -129,25 +130,28 @@ export function CompareTool({ slug, tier }: { slug: string; tier: Tier }) {
       const loaded = await readPdf(picked);
       if (id !== opened.current[side]) {
         loaded.destroy();
-        return;
+        return null;
       }
       if (loaded.numPages > limits.comparePages) {
         loaded.destroy();
         setUpsell("pages");
         fail(`${picked.name} has ${plural(loaded.numPages, "page")}. Compare PDFs reads up to ${plural(limits.comparePages, "page")} a file on your plan.`);
-        return;
+        return null;
       }
       sourcesRef.current[side]?.loaded.destroy();
       setSources((s) => ({ ...s, [side]: { file: picked, loaded, pages: loaded.numPages } }));
+      const message = `${SIDE_LABEL[side]}: ${picked.name}, ${plural(loaded.numPages, "page")}.`;
       if (hadFocus) focusNext.current = side === "a" ? "file-a" : "file-b";
-      else say(`${SIDE_LABEL[side]}: ${picked.name}, ${plural(loaded.numPages, "page")}.`);
+      if (together) return message;
+      if (!hadFocus) say(message);
     } catch (err) {
-      if (id !== opened.current[side]) return;
+      if (id !== opened.current[side]) return null;
       fail(friendlyPdfError(err, picked.name).message, picked);
       if (hadFocus) focusNext.current = side === "a" ? "choose-a" : "choose-b";
     } finally {
       if (id === opened.current[side]) setReading((r) => ({ ...r, [side]: false }));
     }
+    return null;
   }
 
   function open(list: FileList | File[] | null, side: Side) {
@@ -159,8 +163,13 @@ export function CompareTool({ slug, tier }: { slug: string; tier: Tier }) {
     }
     leaveResult();
     fail(null);
-    for (const { side: to, file } of placeFiles(pdfs, side)) void openOn(to, file);
-    if (list.length > 2) say("Two files are compared at a time: the first two were taken.");
+    const placed = placeFiles(pdfs, side);
+    const extra = list.length > 2 ? "Two files are compared at a time: the first two were taken." : "";
+    // Two files at once are read out together: a second message would replace the first.
+    void Promise.all(placed.map(({ side: to, file }) => openOn(to, file, placed.length > 1))).then((said) => {
+      const text = [...said.filter(Boolean), extra].filter(Boolean).join(" ");
+      if (text) say(text);
+    });
   }
 
   function remove(side: Side) {

@@ -1,13 +1,14 @@
 /**
  * Runs redactPdf in a Web Worker so the page stays responsive on long
- * documents (see off-thread.ts).
+ * documents (see off-thread.ts), and makes the widened copy the text is read
+ * from.
  */
 import type { ProgressReply } from "../../worker-job";
 import { friendlyPdfError } from "../errors";
-import { redactPdf, type RedactJob, type RedactReport } from "./index";
+import { redactPdf, widenBoxes, type RedactJob, type RedactReport } from "./index";
 
-export type Request = { bytes: Uint8Array; job: RedactJob };
-export type Reply = ProgressReply | { type: "done"; bytes: Uint8Array; report: RedactReport } | { type: "error"; message: string };
+export type Request = { bytes: Uint8Array; job: RedactJob } | { bytes: Uint8Array; widen: true };
+export type Reply = ProgressReply | { type: "done"; bytes: Uint8Array; report: RedactReport } | { type: "wide"; bytes: Uint8Array } | { type: "error"; message: string };
 
 const scope = globalThis as unknown as {
   onmessage: ((e: MessageEvent<Request>) => void) | null;
@@ -16,6 +17,11 @@ const scope = globalThis as unknown as {
 
 scope.onmessage = async ({ data }) => {
   try {
+    if ("widen" in data) {
+      const bytes = await widenBoxes(data.bytes);
+      scope.postMessage({ type: "wide", bytes }, [bytes.buffer as ArrayBuffer]);
+      return;
+    }
     const { bytes, report } = await redactPdf(data.bytes, data.job, (fraction, label) => scope.postMessage({ type: "progress", fraction, label }));
     scope.postMessage({ type: "done", bytes, report }, [bytes.buffer as ArrayBuffer]);
   } catch (err) {

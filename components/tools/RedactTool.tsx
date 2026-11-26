@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { ENTER, EXIT, FADE_EXIT, HANDOFF, InlineError, NOTICE_T, PROGRESS_HOLD_MS } from "@/components/motion/primitives";
 import { ProgressBar, ProgressPercent, WorkingGlyph } from "@/components/motion/Progress";
-import { resultFloor, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
+import { resultFloor, scrollBehavior, settleSlot, useFocusNext, useHeightLock } from "@/components/motion/focus";
 import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@/components/upsell/Upsell";
 import { SuccessCard } from "./SuccessCard";
 import { isPdf, readPdf } from "./read-pdf";
@@ -103,15 +103,25 @@ function listPages(pages: number[]): string {
 }
 
 /** Copies of marked text no mark covers, a line per text: what someone should decide about before redacting. */
-function copyLines(copies: Copy[]): { text: string; pages: number[]; count: number }[] {
-  const byText = new Map<string, { text: string; pages: number[]; count: number }>();
+function copyLines(copies: Copy[]): { text: string; pages: number[]; hidden: number[]; count: number }[] {
+  const byText = new Map<string, { text: string; pages: number[]; hidden: number[]; count: number }>();
   for (const c of copies) {
-    const line = byText.get(c.text) ?? { text: c.text, pages: [], count: 0 };
+    const line = byText.get(c.text) ?? { text: c.text, pages: [], hidden: [], count: 0 };
     line.pages.push(c.page);
+    if (c.hidden) line.hidden.push(c.page);
     line.count++;
     byText.set(c.text, line);
   }
   return [...byText.values()];
+}
+
+/** Where a line's copies are, saying which no reader shows: “on page 2, outside the visible area (a crop hides it)”. */
+function copyPlaces(line: { pages: number[]; hidden: number[] }): string {
+  const many = new Set(line.pages).size > 1;
+  const where = `on ${many ? "pages" : "page"} ${listPages(line.pages)}`;
+  if (!line.hidden.length) return where;
+  if (line.hidden.length === line.pages.length) return `${where}, outside the visible area (a crop hides it)`;
+  return `${where} (on ${new Set(line.hidden).size > 1 ? "pages" : "page"} ${listPages(line.hidden)} outside the visible area)`;
 }
 
 /** What a finished job also took out, in words. */
@@ -171,7 +181,10 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
   const [, setTextVersion] = useState(0);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
-  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose" | "file" | "copies">();
+  const { next: focusNext, focusRef } = useFocusNext<"done" | "run" | "choose" | "file" | "copies" | "drop" | "keep" | `remove:${string}`>();
+  const findRef = useRef<HTMLInputElement>(null);
+  /** Asking before the file and its marks are thrown away. */
+  const [confirmDrop, setConfirmDrop] = useState(false);
   const flow = useHeightLock<HTMLDivElement>();
   /** The running job; aborted on Cancel, on a new file and when the page goes away. */
   const job = useRef<AbortController | null>(null);
@@ -180,6 +193,10 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
   const opened = useRef(0);
   /** Each page's text once read: for searching, for what a box covers, and for the check. */
   const texts = useRef(new Map<number, PageText>());
+  /** The page shown's text, read on its own as it is shown: what shows only, for the words under a box. */
+  const shown = useRef(new Map<number, PageText>());
+  /** The file with its boxes made very large, to read the text a crop hides: made once a search or Redact needs it. */
+  const wide = useRef<Promise<LoadedPdf | null> | null>(null);
   /** A mark to focus once its page is shown. */
   const focusMark = useRef<string | null>(null);
 
@@ -190,6 +207,7 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
       job.current?.abort();
       textJob.current?.abort();
       sourceRef.current?.loaded.destroy();
+      void wide.current?.then((w) => w?.destroy());
     },
     []
   );
@@ -202,12 +220,12 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
       .getPageViewport(current + 1, 1)
       .then((vp) => live && setView({ width: vp.width, height: vp.height }))
       .catch((err) => live && fail(friendlyPdfError(err).message));
-    if (!texts.current.has(current)) {
+    if (!texts.current.has(current) && !shown.current.has(current)) {
       source.loaded
         .pageText(current + 1)
         .then((t) => {
           if (!live || sourceRef.current !== source) return;
-          texts.current.set(current, t);
+          shown.current.set(current, t);
           setTextVersion((v) => v + 1);
         })
         .catch(() => {});
@@ -232,9 +250,39 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     reading$.current = null;
     sourceRef.current?.loaded.destroy();
     sourceRef.current = null;
+    void wide.current?.then((w) => w?.destroy());
+    wide.current = null;
     texts.current = new Map();
+    shown.current = new Map();
     setSource(null);
     setReading(null);
+    setConfirmDrop(false);
+  }
+
+  function getWide(): Promise<LoadedPdf | null> {
+    const from = sourceRef.current;
+    if (!from) return Promise.resolve(null);
+    wide.current ??= import("@/lib/pdf/redact/run")
+      .then(({ openWide }) => openWide(from.file))
+      .then((w) => {
+        // The file was closed meanwhile.
+        if (sourceRef.current !== from) {
+          w?.destroy();
+          return null;
+        }
+        return w;
+      })
+      .catch(() => null);
+    return wide.current;
+  }
+
+  /** Marks fit their text: the pages they are on are read again with each letter where the font puts it. */
+  async function placeOn(pages: Map<number, PageText>, which: number[], opts: { signal?: AbortSignal; progress?: (fraction: number, label: string) => void } = {}) {
+    const from = sourceRef.current;
+    const todo = which.filter((p) => !pages.get(p)?.exact);
+    if (!from || !todo.length) return;
+    const { placeExactly } = await import("@/lib/pdf/redact/run");
+    await placeExactly(from.loaded, pages, todo, { wide: await getWide(), ...opts });
   }
 
   async function open(list: FileList | File[] | null) {
@@ -298,8 +346,10 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     pending = (async () => {
       try {
         const { readText } = await import("@/lib/pdf/redact/run");
+        if (source.pages > 20) setReading({ fraction: 0, label: "Reading the file…" });
         const out = await readText(source.loaded, {
           have: texts.current,
+          wide: await getWide(),
           signal: ctl.signal,
           progress: (fraction, label) => source.pages > 20 && !ctl.signal.aborted && setReading({ fraction, label }),
         });
@@ -324,8 +374,25 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
   async function markAll(pattern: RegExp, kind: Mark["kind"], whole: boolean, valid: ((s: string) => boolean) | undefined, what: { none: string; some: (n: number, pages: number) => string }) {
     fail(null);
     setCopies(null);
+    const from = source;
     const pages = await allText();
-    if (!pages) return;
+    if (!pages || sourceRef.current !== from) return;
+    // The pages with matches are read again so the marks fit their letters.
+    const hits = [...pages].filter(([, text]) => findOnPage(text, pattern, valid).length).map(([page]) => page);
+    const ctl = new AbortController();
+    textJob.current = ctl;
+    try {
+      await placeOn(pages, hits, { signal: ctl.signal, progress: (fraction, label) => hits.length > 20 && !ctl.signal.aborted && setReading({ fraction, label }) });
+    } catch (err) {
+      if (!isAbort(err) && !ctl.signal.aborted) fail(friendlyPdfError(err).message);
+      return;
+    } finally {
+      if (textJob.current === ctl) {
+        textJob.current = null;
+        setReading(null);
+      }
+    }
+    if (sourceRef.current !== from) return;
     const added: Mark[] = [];
     const all = [...marksRef.current];
     for (const [page, text] of [...pages].sort((a, b) => a[0] - b[0])) {
@@ -373,7 +440,7 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
 
   /** A box mark's text is the words under it, worked out again when it moves. */
   function boxText(page: number, rects: Rect[]) {
-    const t = texts.current.get(page);
+    const t = texts.current.get(page) ?? shown.current.get(page);
     return t ? wordsUnder(t, rects) : "";
   }
 
@@ -391,7 +458,7 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     setCopies(null);
   }
 
-  function removeMark(id: string, focusAfter?: "list" | "page") {
+  function removeMark(id: string, focusAfter: "list" | "page") {
     const index = marks.findIndex((m) => m.id === id);
     const gone = marks[index];
     setMarks((list) => list.filter((m) => m.id !== id));
@@ -402,7 +469,21 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     if (focusAfter === "page") {
       const next = marks.find((m, i) => i !== index && m.page === gone?.page);
       if (next) focusMark.current = next.id;
+    } else {
+      // In the list: the next row's Remove, else the one before, else Find.
+      const at = sorted.findIndex((m) => m.id === id);
+      const next = sorted[at + 1] ?? sorted[at - 1];
+      if (next) focusNext.current = `remove:${next.id}`;
+      else focusFind();
     }
+  }
+
+  /** Back to Find once the list is empty: it is far above by then, so it is brought into view. */
+  function focusFind() {
+    const el = findRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: "center", behavior: scrollBehavior() });
   }
 
   function toggleMark(id: string, on: boolean) {
@@ -422,14 +503,25 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     setCopies(null);
     setFound("");
     say("All marks removed.");
+    focusFind();
   }
 
   const ticked = marks.filter((m) => m.on);
 
   /** `copies`: what to do with unmarked copies of marked text, once asked. */
+  /** Too many pages to rebuild on this plan: said, with the upgrade, before any work. */
+  function overLimit(list: Mark[]): boolean {
+    const n = new Set(list.filter((m) => m.on).map((m) => m.page)).size;
+    if (n <= limits.redactPages) return false;
+    setUpsell("redact-pages");
+    fail(`${plural(n, "page has", "pages have")} marks. Redact PDF rebuilds up to ${plural(limits.redactPages, "page")} at once on your plan: untick some, or redact the file in parts.`);
+    return true;
+  }
+
   async function run(choice?: "mark" | "leave") {
     if (!source) return;
     if (!ticked.length) return fail(marks.length ? "Tick at least one mark to redact." : "Mark something to redact first: draw a box, search, or pick what to find.");
+    if (overLimit(ticked)) return;
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "run";
     const wasCopies = !!document.activeElement?.closest("[data-copies]");
     flow.lock(resultFloor());
@@ -443,13 +535,21 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     try {
       // Every page's text: copies elsewhere are found, and the check after knows what to look for.
       const { readText, redactDocument, RedactionLeakError } = await import("@/lib/pdf/redact/run");
+      setProgress({ fraction: 0, label: "Reading the file…" });
       const pages = await readText(source.loaded, {
         have: texts.current,
+        wide: await getWide(),
         signal: ctl.signal,
         progress: (fraction, label) => !ctl.signal.aborted && setProgress({ fraction: fraction * 0.1, label }),
       });
       let list = marksRef.current;
       let plan = planNeedles(pages, list);
+      // Copies the person may mark too are placed by the font's widths first.
+      const loose = plan.copies.filter((c) => !c.hidden && !pages.get(c.page)?.exact).map((c) => c.page);
+      if (loose.length) {
+        await placeOn(pages, loose, { signal: ctl.signal });
+        plan = planNeedles(pages, list);
+      }
       if (plan.copies.length && !choice) {
         // Decided by the person, not guessed: back to the marks with the copies listed.
         setCopies(plan.copies);
@@ -462,10 +562,16 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
         const extra: Mark[] = [];
         for (const c of plan.copies) {
           const origin = list.find((m) => m.on && m.text.trim().toLowerCase() === c.text.trim().toLowerCase());
-          extra.push(...addFound([...list, ...extra], c.page, [{ text: c.text, rects: c.rects }], "search", origin?.whole ?? true));
+          extra.push(...addFound([...list, ...extra], c.page, [{ text: c.text, rects: c.rects, hidden: c.hidden, note: c.note }], "search", origin?.whole ?? true));
         }
         list = [...list, ...extra];
         setMarks(list);
+        if (overLimit(list)) {
+          setCopies(null);
+          flow.release();
+          setStatus("ready");
+          return;
+        }
         plan = planNeedles(pages, list);
       }
       // Copies are left only when the person said so; otherwise none may stay.
@@ -608,8 +714,10 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
                   </span>
                   <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-emerald-100 px-2.5 py-1 text-left font-medium text-emerald-800" data-testid="redact-checked">
                     <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0" />
-                    Checked: the redacted text isn&apos;t anywhere in the new file. {result.report.pages === 1 ? "The page with marks is now a picture" : "The pages with marks are now pictures"} with the marks
-                    painted black. Also removed: {removedText(result.report)}.
+                    {/* Copies left on purpose are still in the file: the check can only promise what was marked. */}
+                    {result.left.length > 0 ? "Checked: what you marked is gone from the new file." : "Checked: the redacted text isn't anywhere in the new file."}{" "}
+                    {result.report.pages === 1 ? "The page with marks is now a picture" : "The pages with marks are now pictures"} with the marks painted black. Also removed:{" "}
+                    {removedText(result.report)}.
                   </span>
                   {result.left.length > 0 && (
                     <span className="inline-flex max-w-full items-start gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-left font-medium text-amber-800">
@@ -698,16 +806,40 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
                       {formatBytes(source.file.size)} · {plural(source.pages, "page")}
                     </p>
                   </div>
-                  {!working && (
+                  {!working && !confirmDrop && (
                     <button
-                      onClick={reset}
+                      ref={focusRef("drop")}
+                      onClick={() => {
+                        // Marks take work to make: one click doesn't throw them away.
+                        if (!marks.length) return reset();
+                        setConfirmDrop(true);
+                        focusNext.current = "keep";
+                      }}
                       className="tap rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={`Remove ${source.file.name}`}
+                      data-testid="redact-drop"
                     >
                       <X className="h-4 w-4" />
                     </button>
                   )}
                 </motion.div>
+              )}
+
+              {source && confirmDrop && !working && (
+                <div role="group" aria-labelledby="redact-drop-q" className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm" data-testid="redact-drop-confirm">
+                  <p id="redact-drop-q" className="mr-auto">
+                    Remove the file and its {plural(marks.length, "mark")}?
+                  </p>
+                  <Button ref={focusRef("keep")} type="button" variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => {
+                    setConfirmDrop(false);
+                    focusNext.current = "drop";
+                  }}>
+                    Keep them
+                  </Button>
+                  <Button type="button" variant="destructive" size="sm" className="pointer-coarse:h-11" onClick={reset} data-testid="redact-drop-yes">
+                    Remove
+                  </Button>
+                </div>
               )}
 
               {!source && (
@@ -733,6 +865,7 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
                         </label>
                         <div className="flex gap-2">
                           <Input
+                            ref={findRef}
                             id="redact-find"
                             value={query}
                             onChange={(e) => {
@@ -897,8 +1030,9 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
                                 size="sm"
                                 variant="ghost"
                                 className="h-9 w-9 shrink-0 p-0 text-muted-foreground pointer-coarse:h-11 pointer-coarse:w-11"
+                                ref={focusRef(`remove:${m.id}`)}
                                 aria-label={`Remove ${markLabel(m)}, page ${m.page + 1}`}
-                                onClick={() => removeMark(m.id)}
+                                onClick={() => removeMark(m.id, "list")}
                               >
                                 <X />
                               </Button>
@@ -967,12 +1101,12 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
                         .slice(0, 5)
                         .map((c) => (
                           <li key={c.text}>
-                            “{c.text.length > 48 ? `${c.text.slice(0, 47)}…` : c.text}”: {c.count === 1 ? "once" : `${c.count} times`}, on {new Set(c.pages).size > 1 ? "pages" : "page"}{" "}
-                            {listPages(c.pages)}
+                            “{c.text.length > 48 ? `${c.text.slice(0, 47)}…` : c.text}”: {c.count === 1 ? "once" : `${c.count} times`}, {copyPlaces(c)}
                           </li>
                         ))}
                     </ul>
                     {copyLines(copies).length > 5 && <p>And {copyLines(copies).length - 5} more.</p>}
+                    {copies.some((c) => c.hidden) && <p>Marking text outside the visible area rebuilds its page from what shows, which leaves it out.</p>}
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={() => void run("mark")} data-testid="mark-copies">
                         Mark them too and redact

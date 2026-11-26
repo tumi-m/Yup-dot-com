@@ -71,10 +71,26 @@ function useWidth<T extends HTMLElement>() {
   return { ref, width };
 }
 
+/** True below Tailwind's sm breakpoint, where two pages side by side are too small to read. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
+
+type Show = "both" | Side;
+
 /**
  * The comparison on screen: the list of changes with next and previous
- * (N and P on the keyboard), the pages side by side in one scroll (so they
- * scroll together), and an overlay of one pair of pages with a swipe or the
+ * (N and P on the keyboard, while focus is in the comparison), the pages
+ * side by side in one scroll (so they scroll together; one file at a time
+ * on a phone), and an overlay of one pair of pages with a swipe or the
  * pixel difference.
  */
 export function CompareView({ compared, a, b, reduce }: { compared: Compared; a: Doc; b: Doc; reduce: boolean }) {
@@ -85,6 +101,10 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
   const [pair, setPair] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [said, setSaid] = useState("");
+  const narrow = useNarrow();
+  /** Which file's pages show on a phone: the changed version until picked. */
+  const [onPhone, setOnPhone] = useState<Show>("b");
+  const show: Show = narrow ? onPhone : "both";
   const marksA = useMemo(() => marksByPage(marksFor("a", changes, docA.words)), [changes, docA]);
   const marksB = useMemo(() => marksByPage(marksFor("b", changes, docB.words)), [changes, docB]);
   const list = useRef<HTMLOListElement>(null);
@@ -97,6 +117,9 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
       if (i < 0 || i >= changes.length) return;
       setSelected(i);
       setPair(pairOfChange(changes[i], pairs));
+      // One file showing: the one the change is in.
+      if (changes[i].kind === "removed") setOnPhone((s) => (s === "b" ? "a" : s));
+      else if (changes[i].kind === "added") setOnPhone((s) => (s === "a" ? "b" : s));
       // Read out even when the same change is picked again.
       const text = describeChange(changes[i], i, changes.length);
       setSaid((prev) => (prev === text ? `${text} ` : text));
@@ -105,21 +128,17 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
     [changes, pairs]
   );
 
-  // N and P step through the changes, unless typing in a field.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.closest("input, textarea, select, [contenteditable=true]") || t.closest("[role=dialog]"))) return;
-      const key = e.key.toLowerCase();
-      if (key !== "n" && key !== "p") return;
-      if (!changes.length) return;
-      e.preventDefault();
-      pick(stepChange(selected, changes.length, key === "n" ? 1 : -1));
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [changes.length, selected, pick]);
+  // N and P step through the changes while focus is in the comparison (not the whole page: a stray key elsewhere doesn't move it), unless typing in a field.
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.closest("input, textarea, select, [contenteditable=true]") || t.closest("[role=dialog]"))) return;
+    const key = e.key.toLowerCase();
+    if (key !== "n" && key !== "p") return;
+    if (!changes.length) return;
+    e.preventDefault();
+    pick(stepChange(selected, changes.length, key === "n" ? 1 : -1));
+  };
 
   // A picked change comes into view: in the list, then on the pages.
   useEffect(() => {
@@ -137,7 +156,7 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
 
   const count = changes.length;
   return (
-    <section aria-labelledby="compare-changes" className="space-y-4" data-testid="compare-view">
+    <section aria-labelledby="compare-changes" className="space-y-4" data-testid="compare-view" onKeyDown={onKey}>
       <p className="sr-only" aria-live="polite">
         {said}
       </p>
@@ -187,7 +206,7 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
                 </li>
               ))}
             </ol>
-            <p className="mt-2 hidden text-xs text-muted-foreground hover-hover:block">Keys: N for the next change, P for the previous one.</p>
+            <p className="mt-2 hidden text-xs text-muted-foreground hover-hover:block">Keys, in the list or the pages: N for the next change, P for the previous one.</p>
           </>
         ) : (
           <p className="mt-2 flex items-start gap-2 text-sm text-muted-foreground" data-testid="no-differences">
@@ -210,6 +229,19 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
             { value: "overlay", label: "Overlay" },
           ]}
         />
+        {view === "side" && narrow && (
+          <Segmented<Show>
+            name="compare-show"
+            legend="Show"
+            value={onPhone}
+            onChange={setOnPhone}
+            options={[
+              { value: "a", label: SIDE_LABEL.a },
+              { value: "b", label: SIDE_LABEL.b },
+              { value: "both", label: "Both" },
+            ]}
+          />
+        )}
         {view === "side" && (
           <Segmented<string>
             name="compare-zoom"
@@ -241,6 +273,7 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
           marksB={marksB}
           selected={selected}
           zoom={zoom}
+          show={show}
           onPick={pick}
         />
       ) : (
@@ -262,6 +295,7 @@ export function CompareView({ compared, a, b, reduce }: { compared: Compared; a:
   );
 }
 
+/** A change in the list. Words only a screen reader hears say which text was taken out and which put in, so the button's name doesn't run them together. */
 function ChangeRow({ change: c, index, selected, onPick }: { change: Change; index: number; selected: boolean; onPick: () => void }) {
   const Icon = KIND_ICON[c.kind];
   const page = (n: number | null) => (n === null ? "–" : String(n + 1));
@@ -287,9 +321,13 @@ function ChangeRow({ change: c, index, selected, onPick }: { change: Change; ind
         ) : (
           <>
             {c.oldText && c.kind !== "moved" && (
-              <del className="rounded bg-red-100 px-0.5 text-red-900 decoration-red-700 decoration-2 dark:bg-red-950 dark:text-red-100">{clip(c.oldText)}</del>
+              <>
+                <span className="sr-only">Taken out: </span>
+                <del className="rounded bg-red-100 px-0.5 text-red-900 decoration-red-700 decoration-2 dark:bg-red-950 dark:text-red-100">{clip(c.oldText)}</del>
+              </>
             )}
             {c.oldText && c.newText && c.kind !== "moved" && <span aria-hidden> → </span>}
+            {c.newText && c.kind !== "moved" && <span className="sr-only">{c.oldText ? ". Put in: " : "Put in: "}</span>}
             {c.newText && (
               <ins className={cn("rounded px-0.5 underline decoration-2 underline-offset-2", c.kind === "moved" ? "bg-blue-100 text-blue-900 decoration-dashed decoration-blue-700 dark:bg-blue-950 dark:text-blue-100" : "bg-emerald-100 text-emerald-900 decoration-emerald-700 dark:bg-emerald-950 dark:text-emerald-100")}>
                 {clip(c.newText)}
@@ -298,11 +336,17 @@ function ChangeRow({ change: c, index, selected, onPick }: { change: Change; ind
           </>
         )}
         <span className="mt-0.5 block text-xs text-muted-foreground">
+          {c.kind !== "changed" && c.kind !== "moved" && c.kind !== "picture" && <span className="sr-only">. </span>}
           {c.kind === "added"
             ? `Changed version, page ${page(c.newPage)}`
             : c.kind === "removed"
               ? `Original, page ${page(c.oldPage)}`
-              : `Page ${page(c.oldPage)} → page ${page(c.newPage)}`}
+              : (
+                <>
+                  <span className="sr-only">. </span>Page {page(c.oldPage)} <span aria-hidden>→</span>
+                  <span className="sr-only">to</span> page {page(c.newPage)}
+                </>
+              )}
         </span>
       </span>
     </button>
@@ -364,11 +408,12 @@ interface PagesProps {
   onPick: (change: number) => void;
 }
 
-/** Both files' pages in one scroll, paired row by row, so they always scroll together. */
-function SideBySide({ scroller, zoom, ...p }: PagesProps & { scroller: React.RefObject<HTMLDivElement | null>; zoom: number }) {
+/** Both files' pages in one scroll, paired row by row, so they always scroll together; or one file's (`show`), a page across the width. */
+function SideBySide({ scroller, zoom, show, ...p }: PagesProps & { scroller: React.RefObject<HTMLDivElement | null>; zoom: number; show: Show }) {
   const { ref, width } = useWidth<HTMLDivElement>();
+  const both = show === "both";
   // Two columns with a gap, each row's pages at one scale so their sizes compare.
-  const column = Math.max(60, (width * zoom - 24) / 2);
+  const column = both ? Math.max(60, (width * zoom - 24) / 2) : Math.max(60, width * zoom - 16);
   return (
     <div ref={ref} className="w-full">
       <div
@@ -380,9 +425,9 @@ function SideBySide({ scroller, zoom, ...p }: PagesProps & { scroller: React.Ref
         data-testid="side-by-side"
       >
         <div style={{ width: zoom > 1 ? width * zoom : undefined }}>
-          <div className="sticky top-0 z-20 grid grid-cols-2 gap-2 border-b border-border bg-card/95 px-2 py-1.5 text-xs font-semibold backdrop-blur">
-            <span className="text-rose-700 dark:text-rose-300">{SIDE_LABEL.a}</span>
-            <span className="text-emerald-700 dark:text-emerald-300">{SIDE_LABEL.b}</span>
+          <div className={cn("sticky top-0 z-20 grid gap-2 border-b border-border bg-card/95 px-2 py-1.5 text-xs font-semibold backdrop-blur", both ? "grid-cols-2" : "grid-cols-1")}>
+            {show !== "b" && <span className="text-rose-700 dark:text-rose-300">{SIDE_LABEL.a}</span>}
+            {show !== "a" && <span className="text-emerald-700 dark:text-emerald-300">{SIDE_LABEL.b}</span>}
           </div>
           {width > 0 &&
             p.pairs.map((pair, n) => {
@@ -391,9 +436,13 @@ function SideBySide({ scroller, zoom, ...p }: PagesProps & { scroller: React.Ref
               const scale = column / Math.max(infoA?.width ?? 0, infoB?.width ?? 0, 1);
               const height = Math.max((infoA?.height ?? 0) * scale, (infoB?.height ?? 0) * scale);
               return (
-                <div key={n} data-pair={n} className="grid grid-cols-2 items-start gap-2 px-2 py-2">
-                  <PageCell side="a" loaded={p.a} page={pair.a} info={infoA} scale={scale} rowHeight={height} marks={pair.a !== null ? p.marksA.get(pair.a) : undefined} selected={p.selected} root={scroller} onPick={p.onPick} other={pair.b} />
-                  <PageCell side="b" loaded={p.b} page={pair.b} info={infoB} scale={scale} rowHeight={height} marks={pair.b !== null ? p.marksB.get(pair.b) : undefined} selected={p.selected} root={scroller} onPick={p.onPick} other={pair.a} />
+                <div key={n} data-pair={n} className={cn("grid items-start gap-2 px-2 py-2", both ? "grid-cols-2" : "grid-cols-1")}>
+                  {show !== "b" && (
+                    <PageCell side="a" loaded={p.a} page={pair.a} info={infoA} scale={scale} rowHeight={height} marks={pair.a !== null ? p.marksA.get(pair.a) : undefined} selected={p.selected} root={scroller} onPick={p.onPick} other={pair.b} />
+                  )}
+                  {show !== "a" && (
+                    <PageCell side="b" loaded={p.b} page={pair.b} info={infoB} scale={scale} rowHeight={height} marks={pair.b !== null ? p.marksB.get(pair.b) : undefined} selected={p.selected} root={scroller} onPick={p.onPick} other={pair.a} />
+                  )}
                 </div>
               );
             })}

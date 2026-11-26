@@ -237,6 +237,24 @@ export async function redactPdf(
   return { bytes: out, report };
 }
 
+/** How far a widened page reaches each way, in points: far past where any content is drawn. */
+const WIDE = 1_000_000;
+
+/**
+ * A copy of the file with every page's boxes made very large, only for
+ * reading: pdf.js leaves out text outside a page's visible area (a crop
+ * hides it, but it is still in the file), and in this copy nothing is
+ * outside. Text keeps its place in the page's own space, so it is measured
+ * against the real page.
+ */
+export async function widenBoxes(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await openPdf(bytes);
+  for (const page of doc.getPages()) {
+    for (const key of ["MediaBox", "CropBox"]) page.node.set(PDFName.of(key), doc.context.obj([-WIDE, -WIDE, WIDE, WIDE]));
+  }
+  return doc.save({ updateFieldAppearances: false });
+}
+
 /** How many fields the removed widgets belonged to. */
 function countGoneFields(widgets: Set<PDFDict>): number {
   const fields = new Set<PDFDict>();

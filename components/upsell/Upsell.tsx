@@ -19,7 +19,7 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -33,6 +33,10 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
   pages: {
     title: "Too many pages to compare",
     body: (t) => `Free: ${LIMITS[t].comparePages} pages a file. Pro: ${LIMITS.pro.comparePages.toLocaleString("en-US")}.`,
+  },
+  "redact-pages": {
+    title: "Too many pages to redact at once",
+    body: (t) => `Free: ${LIMITS[t].redactPages} pages with marks at a time. Pro: ${LIMITS.pro.redactPages.toLocaleString("en-US")}.`,
   },
   ai: {
     title: "Daily AI limit reached",
