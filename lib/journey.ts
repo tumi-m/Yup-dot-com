@@ -3,7 +3,7 @@
  * which branch a dropped file or a URL hash belongs to, and where each
  * pasted link can go. Kept free of React so it can be unit tested.
  */
-import { linkIn, parseMediaUrl, parsePlaylistUrl, YOUTUBE_ENABLED } from "./media";
+import { linkIn, mediaLinkProblem, parseMediaUrl, parsePlaylistUrl, YOUTUBE_ENABLED } from "./media";
 import { finderForLink } from "./samples/links";
 
 export type JourneyChoice = "pdf" | "pptx" | "slides" | "media";
@@ -163,5 +163,6 @@ export function mediaNote(input: string, youtube: boolean = YOUTUBE_ENABLED): st
 export function mediaHint(input: string, youtube: boolean = YOUTUBE_ENABLED): string {
   const link = linkIn(input);
   if (!youtube && !parseMediaUrl(link) && parsePlaylistUrl(link)) return "Paste one song's link to find its samples.";
-  return "Paste a YouTube, X, TikTok or Instagram video link.";
+  // A story, a profile, a photo post…: said as the tools say it.
+  return mediaLinkProblem(link) ?? "Paste a YouTube, X, TikTok or Instagram video link.";
 }
