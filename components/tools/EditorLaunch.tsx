@@ -19,9 +19,10 @@ import { ErrorHelp } from "./ErrorHelp";
  * Opens a PDF in the editor with no account required.
  * Signed-in users get the document in their cloud library; everyone else
  * edits on-device (IndexedDB), exactly like PDFescape's free online editor.
- * Fill & Sign (`mode: "sign"`) opens the same editor, pointed at signing.
+ * Fill & Sign (`mode: "sign"`) opens the same editor, pointed at signing;
+ * Edit PDF text (`mode: "text"`) opens it in Edit text.
  */
-export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
+export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" | "text" }) {
   const router = useRouter();
   const params = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,7 +33,8 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
   const [failed, setFailed] = useState<File | null>(null);
   const limits = limitsFor(tier);
   const sign = mode === "sign";
-  const query = sign ? "?sign=1" : "";
+  const text = mode === "text";
+  const query = sign ? "?sign=1" : text ? "?mode=text" : "";
 
   async function openLocal(bytes: Uint8Array, name: string, pageCount: number) {
     const id = uuid();
@@ -133,7 +135,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
   return (
     <div className="space-y-4">
       <ToolDropzone
-        label={busy ? "Opening the editor…" : sign ? "Drop a PDF to fill and sign" : "Drop a PDF to start editing"}
+        label={busy ? "Opening the editor…" : sign ? "Drop a PDF to fill and sign" : text ? "Drop a PDF to change its text" : "Drop a PDF to start editing"}
         dragLabel="Release to open"
         busy={busy}
         onFiles={(files) => files[0] && openFile(files[0])}
@@ -153,8 +155,8 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
           <Button className="h-11" onClick={() => inputRef.current?.click()} disabled={busy}>
             Choose PDF
           </Button>
-          {/* A blank page has nothing to fill in or sign. */}
-          {!sign && (
+          {/* A blank page has nothing to fill in, sign or change. */}
+          {!mode && (
             <Button variant="outline" className="h-11" onClick={blankDocument} disabled={busy}>
               <FilePlus2 /> Blank page
             </Button>
@@ -165,7 +167,7 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" }) {
         {error && (
           <InlineError
             key="error"
-            message={<ErrorHelp message={error} slug={sign ? "sign-pdf" : "edit-pdf"} files={failed ? [failed] : []} />}
+            message={<ErrorHelp message={error} slug={sign ? "sign-pdf" : text ? "edit-pdf-text" : "edit-pdf"} files={failed ? [failed] : []} />}
           />
         )}
       </AnimatePresence>
