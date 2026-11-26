@@ -183,6 +183,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [wantedLocked, setWantedLocked] = useState(false);
   /** Set after a quota 429: the day's downloads are spent. */
   const [limit, setLimit] = useState<{ upgrade: boolean } | null>(null);
+  /** Downloads left today, as the last download link said. */
+  const [left, setLeft] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   /** A thumbnail that failed to load, so the box stays plain instead of showing a broken image. */
   const [badThumb, setBadThumb] = useState<string | null>(null);
@@ -391,6 +393,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       else setError(data?.error ?? (res ? "Couldn't start the download." : "You're offline. Check your connection."));
       return;
     }
+    setLeft(typeof data.remaining === "number" ? data.remaining : null);
     const ctl = new AbortController();
     op.current = ctl;
     setProgress({ value: 0, stage: data.mode === "worker" ? "queued" : data.mode === "convert" ? "fetching" : "downloading" });
@@ -1147,6 +1150,12 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
               {file.size && file.was ? ` · ${Math.round((1 - file.size / file.was) * 100)}% smaller` : ""}
             </p>
             {file.note && <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">{file.note}</p>}
+            {/* Said before the day's last one is used, not only once it's gone. */}
+            {left !== null && left <= 2 && (
+              <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground" data-testid="downloads-left">
+                {left === 0 ? "No downloads left today." : `${left} ${left === 1 ? "download" : "downloads"} left today.`}
+              </p>
+            )}
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button size="lg" variant="outline" onClick={saveAgain} disabled={starting}>
                 {starting ? <Loader2 className="motion-safe:animate-spin" /> : <Download />} Download again
