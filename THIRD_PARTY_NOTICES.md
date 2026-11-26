@@ -22,6 +22,7 @@ texts ship with each package in `node_modules/<name>/`.
 | fontkit, pdf-lib build (Text and Markdown to PDF) | 1.1.1 | MIT | https://github.com/Hopding/fontkit |
 | UTIF.js, as utif2 (TIFF to PDF) | 4.1.0 | MIT | https://github.com/photopea/UTIF.js |
 | pako (used by fontkit and UTIF.js) | 1.0.11 | MIT and Zlib | https://github.com/nodeca/pako |
+| uqr (QR code on Scan to PDF, after Project Nayuki's QR generator) | 0.1.3 | MIT | https://github.com/unjs/uqr |
 
 ## Fonts
 

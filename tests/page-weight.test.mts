@@ -57,13 +57,13 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|ScanTool)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all eleven panels lazily",
-  lazy.join() === "CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,SlidesImporter,ToolWorkbench",
+  "ToolPanel loads all twelve panels lazily",
+  lazy.join() === "CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench",
   lazy
 );
 
@@ -83,6 +83,8 @@ for (const file of [
   "components/tools/PageOrganizer.tsx",
   "components/tools/ResizePreview.tsx",
   "components/tools/CropTool.tsx",
+  "components/tools/ScanTool.tsx",
+  "components/tools/QrCode.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
@@ -98,6 +100,14 @@ check("the text converter loads with the tool only", /await import\("\.\/text-to
 check("resize layout has no imports", staticImports(src("lib/pdf/resize/geometry.ts"), /./).length === 0);
 // Crop PDF's box and keys load with the page; they only bring the page-list reader.
 check("crop geometry imports only the page-list reader", staticImports(src("lib/pdf/crop/geometry.ts"), /./).join() === "../pages/plan");
+// Scan to PDF's page brings its corner search, warp and filters, but not
+// pdf-lib, the JPEG codec or the QR encoder: those load when used.
+{
+  const files = ["components/tools/ScanTool.tsx", "components/tools/QrCode.tsx", ...["camera", "detect", "filters", "geometry", "page", "photo", "warp"].map((f) => `lib/pdf/scan/${f}.ts`)];
+  const heavy = files.flatMap((f) => staticImports(src(f), /pdf-lib|image-codec$|^uqr$|scan\/(build|run|off-thread|worker)$|^@\/lib\/pdf\/(ocr|ocr-layer)$/).map((m) => `${f}: ${m}`));
+  check("Scan to PDF's page code has no heavy top-level imports", heavy.length === 0, heavy);
+  check("the QR encoder loads on demand", /import\("uqr"\)/.test(src("components/tools/QrCode.tsx")));
+}
 // The Sample Finder's page never carries the hand-checked list or the server's MusicBrainz code.
 {
   const files = ["components/tools/SampleFinder.tsx", ...readdirSync(new URL("../components/tools/samples", import.meta.url)).map((f) => `components/tools/samples/${f}`)];
