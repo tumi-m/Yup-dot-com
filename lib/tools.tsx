@@ -555,6 +555,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-red-100 text-red-700",
     custom: "media",
     media: { platform: "youtube", kind: "mp4", defaultHeight: 720 },
+    keywords: "shorts video downloader",
   },
   {
     slug: "youtube-1080p",
@@ -589,6 +590,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-orange-100 text-orange-700",
     custom: "media",
     media: { platform: "youtube", kind: "mp3" },
+    keywords: "shorts music song sound",
   },
   {
     slug: "youtube-playlist",
@@ -610,6 +612,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-zinc-200 text-zinc-800",
     custom: "media",
     media: { platform: "x", kind: "mp4", defaultHeight: 720 },
+    keywords: "tweet gif video downloader",
   },
   {
     slug: "x-to-mp3",
@@ -621,6 +624,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-sky-100 text-sky-800",
     custom: "media",
     media: { platform: "x", kind: "mp3" },
+    keywords: "tweet sound music",
   },
   {
     slug: "tiktok-to-mp4",
@@ -632,6 +636,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-cyan-100 text-cyan-800",
     custom: "media",
     media: { platform: "tiktok", kind: "mp4", defaultHeight: 720 },
+    keywords: "video downloader",
   },
   {
     slug: "tiktok-to-mp3",
@@ -643,6 +648,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-pink-100 text-pink-700",
     custom: "media",
     media: { platform: "tiktok", kind: "mp3" },
+    aliases: ["TikTok audio", "TikTok sound", "TikTok music"],
   },
   {
     slug: "instagram-to-mp4",
@@ -654,6 +660,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-gradient-to-br from-fuchsia-100 to-amber-100 text-fuchsia-700",
     custom: "media",
     media: { platform: "instagram", kind: "mp4", defaultHeight: 720 },
+    keywords: "ig insta reel reels video downloader",
   },
   {
     slug: "instagram-to-mp3",
@@ -665,18 +672,19 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-amber-100 text-amber-800",
     custom: "media",
     media: { platform: "instagram", kind: "mp3" },
+    keywords: "ig insta reel reels sound music",
   },
   {
     slug: "sample-finder",
     name: "Sample Finder",
     title: "Sample Finder: see what samples a song uses",
-    description: "Paste a YouTube link or type a song.",
+    description: "Paste a YouTube or TikTok link, or type a song.",
     icon: Disc3,
     category: "media",
     tint: "bg-violet-100 text-violet-800",
     badge: "New",
     custom: "samples",
-    keywords: "sample samples sampled interpolation cover covers remix music song",
+    keywords: "sample samples sampled interpolation cover covers remix music song who sampled",
   },
   {
     slug: "compress-video",
@@ -686,6 +694,8 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Shrink,
     category: "media",
     tint: "bg-emerald-100 text-emerald-800",
+    keywords: "compressor reduce shrink size smaller mp4 mov webm",
+    aliases: ["Video Compressor", "Reduce Video Size"],
   },
 ];
 
@@ -719,15 +729,24 @@ const RELATED: Record<string, string[]> = {
   "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
   "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
   "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],
+  // A song's samples, then its sound from the sites people find songs on.
+  "sample-finder": ["youtube-to-mp3", "tiktok-to-mp3", "instagram-to-mp3", "x-to-mp3"],
 };
 
-/** Four tools to offer under a tool: its own list, else its category's first, then the most used. */
+/**
+ * Four tools to offer under a tool: its own list, else (for a downloader)
+ * the same site's other downloaders, then its category's first, then the
+ * most used.
+ */
 export function relatedTools(slug: string): ToolMeta[] {
   const tool = getTool(slug);
   if (!tool) return [];
   const popular = ["merge-pdf", "compress-pdf", "pdf-to-word", "edit-pdf", "ocr-pdf", "sign-pdf"];
+  const platform = tool.media?.platform;
   const picks = [
     ...(RELATED[slug] ?? []),
+    // X to MP4 offers X to MP3 before the four YouTube pages that lead the category.
+    ...(platform ? TOOLS.filter((t) => t.media?.platform === platform || (platform === "youtube" && t.custom === "playlist")).map((t) => t.slug) : []),
     ...TOOLS.filter((t) => t.category === tool.category).map((t) => t.slug),
     ...popular,
   ];

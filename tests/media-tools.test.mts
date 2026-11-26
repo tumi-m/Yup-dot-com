@@ -63,5 +63,20 @@ const post = (path: string, body: unknown) =>
   check("the preview route says it too", res.status === 400 && /^Stories/.test((await res.json()).error));
 }
 
+// "More tools" and the tools search.
+{
+  const { relatedTools, TOOLS } = await import("../lib/tools.tsx");
+  const { filterTools } = await import("../components/tool-filter.ts");
+  const related = (slug: string) => relatedTools(slug).map((t) => t.slug);
+  for (const [page, sibling] of [["x-to-mp4", "x-to-mp3"], ["tiktok-to-mp3", "tiktok-to-mp4"], ["instagram-to-mp4", "instagram-to-mp3"]]) {
+    check(`more tools under ${page} start with ${sibling}`, related(page)[0] === sibling, related(page).join());
+  }
+  check("the Sample Finder offers ways to save a song's sound", related("sample-finder").slice(0, 3).every((s) => s.endsWith("-to-mp3")), related("sample-finder").join());
+  const found = (q: string) => filterTools(TOOLS, "all", q).map((t) => t.slug);
+  for (const [q, first] of [["tweet", "x-to-mp4"], ["ig reel", "instagram-to-mp4"], ["tiktok sound", "tiktok-to-mp3"], ["tiktok audio", "tiktok-to-mp3"], ["video compressor", "compress-video"], ["reduce video size", "compress-video"], ["who sampled", "sample-finder"]]) {
+    check(`search: '${q}' lists ${first} first`, found(q)[0] === first, found(q).join());
+  }
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);
