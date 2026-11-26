@@ -13,6 +13,7 @@ export type PanelSpec =
   | { kind: "pages"; mode: NonNullable<ToolMeta["pages"]>["mode"]; slug: string }
   | { kind: "crop"; slug: string }
   | { kind: "compare"; slug: string }
+  | { kind: "redact"; slug: string }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -27,6 +28,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "pages" && tool.pages) return { kind: "pages", mode: tool.pages.mode, slug: tool.slug };
   if (tool.custom === "crop") return { kind: "crop", slug: tool.slug };
   if (tool.custom === "compare") return { kind: "compare", slug: tool.slug };
+  if (tool.custom === "redact") return { kind: "redact", slug: tool.slug };
   return { kind: "workbench", slug: tool.slug };
 }
 
