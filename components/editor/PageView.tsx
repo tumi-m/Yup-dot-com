@@ -3,11 +3,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { LoadedPdf } from "@/lib/pdf/render";
-import type { Annotation, ToolId, ToolSettings } from "@/lib/editor/types";
+import type { Annotation, TextEditAnnotation, ToolId, ToolSettings } from "@/lib/editor/types";
 import { DRAG_TOOLS } from "@/lib/editor/types";
 import { createAnnotation, createCentred, resizeDraft, finishDraft } from "@/lib/editor/factory";
 import { pageTouchAction } from "@/lib/editor/canvas";
 import { radioStep, radioTabStops } from "@/lib/editor/keyboard";
+import { ringColor, runStep, runTransform } from "@/lib/editor/text-edit";
+import type { EditableRun } from "@/lib/pdf/edit-text/types";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
 
@@ -32,6 +34,16 @@ export function PageView({
   onPlacementUsed,
   onRendered,
   placeNow,
+  runsOn = false,
+  focusRuns = 0,
+  autoFocusRuns = false,
+  onOpenRun,
+  onRunFocus,
+  onRemoveRun,
+  onCancelEdit,
+  onLockedRun,
+  onRunsRead,
+  onCommit,
 }: {
   loaded: LoadedPdf;
   pageIndex: number;
@@ -55,6 +67,26 @@ export function PageView({
   onRendered?: (size: { width: number; height: number }) => void;
   /** Bumped to place the current tool's item in the middle of the view (keyboard). */
   placeNow: number;
+  /** Edit text: the page's text is shown to choose from. */
+  runsOn?: boolean;
+  /** Bumped to move focus to the page's text (Edit text chosen with the keyboard). */
+  focusRuns?: number;
+  /** Focus goes to the page's text once it is read (the page was turned to from the text). */
+  autoFocusRuns?: boolean;
+  /** A run has focus: its edit, if it has one, is the one selected. */
+  onRunFocus?: (run: EditableRun) => void;
+  /** Escape in changed text: the edit as it was when entered (it goes if that changes nothing). */
+  onCancelEdit?: (ann: TextEditAnnotation) => void;
+  /** Delete on a run: its words are taken away. */
+  onRemoveRun?: (run: EditableRun, background: string) => void;
+  /** A run chosen to change, with the page's colour round it: the id of the edit to type in. */
+  onOpenRun?: (run: EditableRun, background: string) => string | null;
+  /** A run chosen that can't be changed here. */
+  onLockedRun?: (run: EditableRun) => void;
+  /** The page's text has been read (none on a scan). */
+  onRunsRead?: (runs: EditableRun[]) => void;
+  /** Changed text: each change is its own undo step, a burst of typing one. */
+  onCommit?: (next: Annotation, continuous?: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +100,16 @@ export function PageView({
   const focusNew = useRef<string | null>(null);
   const hint = useId();
   const textHint = useId();
+  const runHint = useId();
+  const lockHint = useId();
+  /** The page's text runs, read once Edit text is on, for the document they were read from. */
+  const [read, setRead] = useState<{ of: LoadedPdf; runs: EditableRun[] } | null>(null);
+  const runs = read?.of === loaded ? read.runs : null;
+  /** The run Tab stops on: the last one focused. */
+  const [activeRun, setActiveRun] = useState(0);
+  const runsFocused = useRef(focusRuns);
+  const wantRunFocus = useRef(autoFocusRuns);
+  const readRuns = useRef(false);
   const pageFields = formFields.filter((f) => f.page === pageIndex);
   // Fields shown as inputs are left off the canvas. They are found after the
   // first render, so the page is drawn again once they are.
@@ -93,6 +135,109 @@ export function PageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, pageIndex, scale, hasFields]);
 
+  // Edit text: read the page's runs once it is on.
+  useEffect(() => {
+    if (!runsOn || runs || pageIndex >= loaded.numPages) return;
+    let live = true;
+    readRuns.current = true;
+    loaded.textRuns(pageIndex + 1).then(
+      (r) => {
+        if (!live) return;
+        setRead({ of: loaded, runs: r });
+        onRunsRead?.(r);
+      },
+      () => {
+        if (!live) return;
+        setRead({ of: loaded, runs: [] });
+        onRunsRead?.([]);
+      }
+    );
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, pageIndex, runsOn, runs]);
+
+  // Leaving the page lets go of what reading its text kept (its drawing operations).
+  useEffect(
+    () => () => {
+      if (readRuns.current) loaded.release(pageIndex + 1).catch(() => {});
+    },
+    [loaded, pageIndex]
+  );
+
+  // Edit text chosen with the keyboard: focus goes to the page's text once it is read.
+  useEffect(() => {
+    if (focusRuns !== runsFocused.current) {
+      runsFocused.current = focusRuns;
+      wantRunFocus.current = true;
+    }
+    if (!wantRunFocus.current || !runs?.length) return;
+    wantRunFocus.current = false;
+    focusRun(Math.min(activeRun, runs.length - 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRuns, runs]);
+
+  function focusRun(i: number) {
+    layerRef.current?.querySelector<HTMLElement>(`[data-run-index="${i}"]`)?.focus({ preventScroll: false });
+  }
+
+  /** The page's colour just outside a run, from the page as drawn. */
+  function background(run: EditableRun): string {
+    const canvas = canvasRef.current;
+    if (!canvas || !size) return "#ffffff";
+    const perPoint = (canvas.width / size.w) * scale;
+    const pad = Math.max(1.5, run.size * 0.12);
+    const x0 = Math.max(0, Math.floor((run.box.x - pad) * perPoint));
+    const y0 = Math.max(0, Math.floor((run.box.y - pad) * perPoint));
+    const x1 = Math.min(canvas.width, Math.ceil((run.box.x + run.box.width + pad) * perPoint));
+    const y1 = Math.min(canvas.height, Math.ceil((run.box.y + run.box.height + pad) * perPoint));
+    if (x1 - x0 < 1 || y1 - y0 < 1) return "#ffffff";
+    try {
+      // Copied to a small canvas first: reading the page's own canvas back slows its drawing.
+      const copy = document.createElement("canvas");
+      copy.width = x1 - x0;
+      copy.height = y1 - y0;
+      const c = copy.getContext("2d", { willReadFrequently: true });
+      if (!c) return "#ffffff";
+      c.drawImage(canvas, x0, y0, copy.width, copy.height, 0, 0, copy.width, copy.height);
+      const img = c.getImageData(0, 0, copy.width, copy.height);
+      return ringColor(img.data, img.width, img.height);
+    } catch {
+      return "#ffffff";
+    }
+  }
+
+  /** Opens a run to type in: its edit takes focus, its words selected. */
+  function openRun(run: EditableRun) {
+    if (run.locked) {
+      onLockedRun?.(run);
+      return;
+    }
+    let id: string | null = null;
+    flushSync(() => {
+      id = onOpenRun?.(run, background(run)) ?? null;
+    });
+    if (!id) return;
+    const input = layerRef.current?.querySelector<HTMLInputElement>(`[data-ann-id="${CSS.escape(id)}"] input`);
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.select();
+  }
+
+  /** Enter or Escape in changed text: back to its run (Edit text) or to the edit itself. */
+  function leaveEdit(ann: TextEditAnnotation, how: "done" | "cancel", reverted?: Annotation) {
+    const layer = layerRef.current;
+    const target = runsOn
+      ? layer?.querySelector<HTMLElement>(`[data-run-key="${CSS.escape(ann.run.key)}"]`)
+      : layer?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(ann.id)}"] [data-ann-focus]`);
+    target?.focus({ preventScroll: true });
+    if (how === "cancel") {
+      if (onCancelEdit && reverted?.type === "edit") onCancelEdit(reverted);
+      else onSelect(null);
+    }
+  }
+
   function toPoints(e: React.PointerEvent) {
     const rect = layerRef.current!.getBoundingClientRect();
     return {
@@ -102,7 +247,7 @@ export function PageView({
   }
 
   function handlePointerDown(e: React.PointerEvent) {
-    if (tool === "select") {
+    if (tool === "select" || tool === "edit-text") {
       // A finger may be starting a swipe that scrolls the page: deselect on
       // lift, and not when the swipe takes over (pointercancel).
       if (e.pointerType !== "mouse") tap.current = { x: 0, y: 0, pointerId: e.pointerId };
@@ -194,7 +339,7 @@ export function PageView({
     if (pending && pending.pointerId === e.pointerId) {
       tap.current = null;
       if (e.type !== "pointerup") return;
-      if (tool === "select") onSelect(null);
+      if (tool === "select" || tool === "edit-text") onSelect(null);
       else place(pending.x, pending.y);
       return;
     }
@@ -211,7 +356,7 @@ export function PageView({
 
   const editable = tool === "select";
   const cursor =
-    tool === "select" ? "default" : tool === "text" ? "text" : "crosshair";
+    tool === "select" || tool === "edit-text" ? "default" : tool === "text" ? "text" : "crosshair";
 
   return (
     <div className="relative inline-block">
@@ -251,6 +396,12 @@ export function PageView({
           <span id={textHint} hidden>
             Enter edits the text. Arrow keys move it, Alt+arrow keys resize it, Delete removes it.
           </span>
+          <span id={runHint} hidden>
+            Enter changes this text. Arrow keys go to the next or previous text on the page.
+          </span>
+          <span id={lockHint} hidden>
+            This text can&apos;t be changed here.
+          </span>
 
           {annotations.map((ann) => (
             <AnnotationView
@@ -258,16 +409,64 @@ export function PageView({
               ann={ann}
               scale={scale}
               page={{ width: size.w / scale, height: size.h / scale }}
-              describedBy={ann.type === "text" || ann.type === "note" ? textHint : hint}
+              describedBy={ann.type === "edit" ? undefined : ann.type === "text" || ann.type === "note" ? textHint : hint}
               selected={selectedId === ann.id}
-              interactive={editable}
+              interactive={editable || (runsOn && ann.type === "edit")}
+              // With Edit text on, its run is the Tab stop.
+              tabStop={!(runsOn && ann.type === "edit")}
               onSelect={() => onSelect(ann.id)}
               onChange={onChange}
               onCommitStart={onCommitStart}
               onCommitEnd={onCommitEnd}
               onDelete={() => onDelete(ann.id)}
+              onCommit={onCommit}
+              onLeave={ann.type === "edit" ? (how, reverted) => leaveEdit(ann, how, reverted) : undefined}
             />
           ))}
+
+          {/* Edit text: each run of the page's text, to choose with a click, a tap or the keys. */}
+          {runsOn && runs && runs.length > 0 && (
+            <div role="group" aria-label={`Text on page ${pageIndex + 1}`} className="pointer-events-none absolute inset-0 z-[15]">
+              {runs.map((run, i) => (
+                <div key={run.key} className="absolute left-0 top-0 h-0 w-0" style={{ transform: runTransform(run, scale), transformOrigin: "0 0" }}>
+                  <button
+                    type="button"
+                    data-run-key={run.key}
+                    data-run-index={i}
+                    tabIndex={i === Math.min(activeRun, runs.length - 1) ? 0 : -1}
+                    aria-label={run.text.length > 80 ? `${run.text.slice(0, 80)}…` : run.text}
+                    aria-describedby={run.locked ? lockHint : runHint}
+                    onFocus={() => {
+                      setActiveRun(i);
+                      onRunFocus?.(run);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => openRun(run)}
+                    onKeyDown={(e) => {
+                      if (e.altKey || e.ctrlKey || e.metaKey) return;
+                      if ((e.key === "Delete" || e.key === "Backspace") && !run.locked) {
+                        // This run's words, not whatever was selected before.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onRemoveRun?.(run, background(run));
+                        return;
+                      }
+                      const next = runStep(e.key, i, runs.length);
+                      if (next === null) return;
+                      e.preventDefault();
+                      focusRun(next);
+                    }}
+                    className={`pointer-events-auto absolute rounded-[2px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
+                      run.locked
+                        ? "cursor-not-allowed hover:outline-dashed hover:outline-1 hover:outline-slate-400"
+                        : "cursor-text hover:bg-sky-400/15 hover:outline hover:outline-1 hover:outline-sky-500/70 focus-visible:bg-sky-400/15"
+                    }`}
+                    style={{ left: run.x0, top: -run.ascent * run.size, width: run.x1 - run.x0, height: (run.ascent - run.descent) * run.size }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           {draft && (
             <AnnotationView

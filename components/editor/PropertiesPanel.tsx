@@ -1,9 +1,12 @@
 "use client";
 
 import { cloneElement, useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
 import { X } from "lucide-react";
-import type { Annotation } from "@/lib/editor/types";
+import type { Annotation, TextEditAnnotation } from "@/lib/editor/types";
 import { annotationLabel } from "@/lib/editor/types";
+import { COVERED } from "@/lib/editor/text-edit";
+import { fontLabel, guessFont, undrawable } from "@/lib/pdf/edit-text/fonts";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -102,6 +105,8 @@ export function PropertiesPanel({
             </label>
           </>
         )}
+
+        {annotation.type === "edit" && <EditFields annotation={annotation} onChange={onChange} />}
 
         {annotation.type === "note" && (
           <Field label="Colour" group>
@@ -319,13 +324,105 @@ export function PropertiesPanel({
           </>
         )}
 
-        <div className="border-t border-border pt-4">
-          <Button variant="destructive" size="sm" className="w-full" onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
+        {annotation.type === "edit" ? (
+          // Taking the words away is a change; putting the old ones back drops the edit.
+          <div className="grid gap-2 border-t border-border pt-4">
+            <Button
+              variant="destructive"
+              size="sm"
+              className="w-full pointer-coarse:h-11"
+              onClick={() => onChange({ ...annotation, text: "" })}
+              aria-disabled={!annotation.text}
+            >
+              Remove text
+            </Button>
+            <Button variant="outline" size="sm" className="w-full pointer-coarse:h-11" onClick={onDelete}>
+              Restore original
+            </Button>
+          </div>
+        ) : (
+          <div className="border-t border-border pt-4">
+            <Button variant="destructive" size="sm" className="w-full" onClick={onDelete}>
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+const SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
+
+/** Size, style and colour of changed text, the font it will be in, and whether the old words go. */
+function EditFields({
+  annotation,
+  onChange,
+}: {
+  annotation: TextEditAnnotation;
+  onChange: (next: Annotation, continuous?: boolean) => void;
+}) {
+  const run = annotation.run;
+  const own = Math.round(run.size * 2) / 2;
+  const sizes = [...new Set([...SIZES, own, annotation.fontSize])].sort((a, b) => a - b);
+  const guess = guessFont(run.font, annotation.text, annotation.bold, annotation.italic);
+  const original = fontLabel(run.font.name);
+  const lost = undrawable(annotation.text);
+  return (
+    <>
+      <Field label="Font size">
+        <select
+          value={annotation.fontSize}
+          onChange={(e) => onChange({ ...annotation, fontSize: Number(e.target.value) })}
+          className="h-9 w-full rounded-md border border-input bg-background px-2 pointer-coarse:h-11"
+        >
+          {sizes.map((s) => (
+            <option key={s} value={s}>
+              {s}pt{s === own ? " (as it was)" : ""}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 pointer-coarse:py-2">
+          <input type="checkbox" checked={annotation.bold} onChange={(e) => onChange({ ...annotation, bold: e.target.checked })} />
+          Bold
+        </label>
+        <label className="flex items-center gap-2 pointer-coarse:py-2">
+          <input type="checkbox" checked={annotation.italic} onChange={(e) => onChange({ ...annotation, italic: e.target.checked })} />
+          Italic
+        </label>
+      </div>
+      <Field label="Colour">
+        <input
+          type="color"
+          value={annotation.color}
+          onChange={(e) => onChange({ ...annotation, color: e.target.value }, true)}
+          className="h-9 w-full cursor-pointer rounded-md border border-input bg-background px-1 pointer-coarse:h-11"
+        />
+      </Field>
+      <div className="space-y-2 text-xs text-muted-foreground">
+        <p>
+          Font: <span className="font-medium text-foreground">{guess.name}</span>
+          {guess.own
+            ? " (the file's own, if it has every letter you type)"
+            : guess.name.split(" ")[0] !== original.split(" ")[0]
+              ? `, the closest standard font to ${original}`
+              : ""}
+          {guess.noto ? ", with Noto Sans for letters it lacks" : ""}.
+        </p>
+        {lost.length > 0 && <p className="text-amber-700">These letters can&apos;t be drawn here and will be left out: {lost.slice(0, 8).join(" ")}</p>}
+        {run.cover && (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-900">
+            The old words will be covered, not removed: {COVERED[run.cover]}. To remove them for good, use{" "}
+            <Link href="/tools/redact-pdf" className="font-medium underline underline-offset-2">
+              Redact PDF
+            </Link>
+            .
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 

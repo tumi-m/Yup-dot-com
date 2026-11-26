@@ -21,6 +21,7 @@ import {
   CircleDot,
   ChevronDownSquare,
   Keyboard,
+  TextCursor,
 } from "lucide-react";
 import type { ToolId, ToolSettings } from "@/lib/editor/types";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ const GROUPS: { name: string; tools: ToolDef[] }[] = [
   {
     name: "Text",
     tools: [
+      { id: "edit-text", icon: TextCursor, label: "Edit text", key: "E" },
       { id: "text", icon: Type, label: "Add text", key: "T" },
       { id: "note", icon: StickyNote, label: "Sticky note", key: "N" },
     ],

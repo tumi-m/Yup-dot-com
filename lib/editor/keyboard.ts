@@ -4,6 +4,7 @@ import type { DetectedField } from "@/lib/pdf/forms";
 /** Single-key tool shortcuts (V for Select, T for Add text, ...). */
 export const TOOL_SHORTCUTS: Record<string, ToolId> = {
   v: "select",
+  e: "edit-text",
   t: "text",
   n: "note",
   h: "highlight",
@@ -136,6 +137,7 @@ export function annotationName(ann: Annotation): string {
   };
   let detail = "";
   if (ann.type === "text" || ann.type === "note") detail = snippet(ann.text);
+  else if (ann.type === "edit") detail = snippet(ann.text || ann.run.text);
   else if (ann.type === "field") detail = ann.name;
   else if (ann.type === "link") detail = ann.targetPage !== null ? `to page ${ann.targetPage + 1}` : snippet(ann.url);
   return `${annotationLabel(ann)}${detail ? `: ${detail}` : ""}, page ${ann.page + 1}`;

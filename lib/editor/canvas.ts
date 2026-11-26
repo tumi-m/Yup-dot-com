@@ -5,11 +5,12 @@
 import type { ToolId } from "./types";
 
 /**
- * touch-action for the page layer. With the Select tool a swipe scrolls the
- * page; drawing and placing tools take every touch for themselves.
+ * touch-action for the page layer. With the Select tool, or Edit text, a
+ * swipe scrolls the page; drawing and placing tools take every touch for
+ * themselves.
  */
 export function pageTouchAction(tool: ToolId): "pan-x pan-y" | "none" {
-  return tool === "select" ? "pan-x pan-y" : "none";
+  return tool === "select" || tool === "edit-text" ? "pan-x pan-y" : "none";
 }
 
 /**
