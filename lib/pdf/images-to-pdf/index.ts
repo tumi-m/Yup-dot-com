@@ -15,7 +15,7 @@ import { sniffFormat, type ImageFormat } from "./formats";
 import { tiffPages } from "./tiff";
 
 export interface ImagesToPdfOptions {
-  /** "fit" (a page the size of each picture) or "a4". */
+  /** "fit" (a page the size of each picture), "a4" or "letter". */
   pageSize: string;
   /** In points. */
   margin: string;
@@ -35,6 +35,7 @@ export type ImageInput = File | DecodedImage;
 export type Decoder = (bytes: Uint8Array, format: ImageFormat, name: string, want?: Want) => Promise<Frame>;
 
 const A4 = { w: 595.28, h: 841.89 };
+const LETTER = { w: 612, h: 792 };
 const MAX_PAGE_PT = 14400;
 /** PDF's smallest page side: viewers may refuse a page smaller than 3 units. */
 const MIN_PAGE_PT = 3;
@@ -47,8 +48,8 @@ const browserDecoder: Decoder = (bytes, format, name, want) =>
 /** Lossy photo formats: what they decode to is never worth keeping lossless. */
 const LOSSY = new Set<ImageFormat>(["webp", "avif", "heic"]);
 
-/** Where a picture of `shown` size goes: the page's size and the rectangle it fills. */
-function layout(opts: ImagesToPdfOptions, shown: { width: number; height: number }) {
+/** Where a picture of `shown` size goes: the page's size and the rectangle it fills (Scan to PDF lays out its pages with it too). */
+export function layout(opts: ImagesToPdfOptions, shown: { width: number; height: number }) {
   const margin = Number(opts.margin) || 0;
   let size: [number, number];
   let rect: { x: number; y: number; width: number; height: number };
@@ -74,8 +75,9 @@ function layout(opts: ImagesToPdfOptions, shown: { width: number; height: number
     print = Math.min(1, strip ? A4.w / shortSide : A4.h / longSide);
   } else {
     // A wide picture gets a landscape sheet.
+    const sheet = opts.pageSize === "letter" ? LETTER : A4;
     const landscape = shown.width > shown.height;
-    const [pw, ph] = landscape ? [A4.h, A4.w] : [A4.w, A4.h];
+    const [pw, ph] = landscape ? [sheet.h, sheet.w] : [sheet.w, sheet.h];
     size = [pw, ph];
     const maxW = pw - margin * 2;
     const maxH = ph - margin * 2;
