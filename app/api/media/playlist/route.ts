@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cleanTitle, isYoutubeId, maxHeightFor, parsePlaylistUrl, QUALITIES, youtubeWatchUrl } from "@/lib/media";
+import { cleanTitle, isYoutubeId, maxHeightFor, parsePlaylistUrl, QUALITIES, YOUTUBE_ENABLED, youtubeWatchUrl } from "@/lib/media";
 import { callWorker, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { resolveTier } from "@/lib/tier";
 import { refuseCrossSite } from "@/lib/cross-site";
@@ -21,6 +21,10 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const playlist = parsed.success ? parsePlaylistUrl(parsed.data.url) : null;
   if (!playlist) return Response.json({ error: "Paste a YouTube playlist link." }, { status: 400 });
+  // Paused like single videos (/api/media/info): no lists from the worker either.
+  if (!YOUTUBE_ENABLED) {
+    return Response.json({ error: "YouTube downloads are paused for now. X, TikTok and Instagram work." }, { status: 503 });
+  }
 
   const config = workerConfig();
   if (!config.ok) {
