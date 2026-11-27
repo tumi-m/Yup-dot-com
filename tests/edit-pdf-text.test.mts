@@ -226,6 +226,8 @@ function rawPage(doc: PDFDocument, size: [number, number], ops: string, resource
   check("the colour round a run is the commonest on its border", ringColor(grey, 10, 6) === "#f0e6c8", ringColor(grey, 10, 6));
   check("see-through canvas is white paper", ringColor(new Uint8ClampedArray(4 * 4 * 4), 4, 4) === "#ffffff");
   check("keys move between runs and stop at the ends", runStep("ArrowDown", 0, 3) === 1 && runStep("ArrowRight", 2, 3) === 2 && runStep("ArrowUp", 0, 3) === 0 && runStep("Home", 2, 3) === 0 && runStep("End", 0, 3) === 2 && runStep("a", 0, 3) === null);
+  const { familyOf } = await import("../lib/pdf/edit-text/runs.ts");
+  check("serif fonts LibreOffice and others embed are serif", ["ABCDEF+Caladea-Regular", "Gelasio-Bold", "CrimsonPro-Regular", "Bookman Old Style", "SitkaText"].every((n) => familyOf(n) === "serif") && familyOf("ABCDEF+Carlito-Regular") === "sans");
   check("standard fonts by kind, weight and slant", standardFont("serif", true, true) === "Times-BoldItalic" && standardFont("sans", false, true) === "Helvetica-Oblique" && standardFont("mono", true, false) === "Courier-Bold" && standardFont("serif", false, false) === "Times-Roman");
   check("font names for people", fontLabel("ABCDEF+Calibri-Bold") === "Calibri Bold" && fontLabel("Times-Roman") === "Times" && fontLabel("ArialMT") === "Arial", [fontLabel("ABCDEF+Calibri-Bold"), fontLabel("ArialMT")]);
   check("letters no font here draws", undrawable("Łódź 中文 😀 Ωmega").join("") === "中文😀", undrawable("Łódź 中文 😀 Ωmega"));

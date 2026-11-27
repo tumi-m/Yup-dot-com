@@ -45,7 +45,8 @@ interface FontObj {
   descent?: number;
 }
 
-const SERIF = /times|serif|roman|georgia|garamond|cambria|palatino|book ?antiqua|baskerville|minion|caslon|century|didot|bodoni|charter|constantia|libertine|tinos|merriweather|lora|playfair|cmr\d|lmroman|nimbusrom/i;
+// Caladea and Gelasio are LibreOffice's stand-ins for Cambria and Georgia: a Word file saved as PDF there uses them.
+const SERIF = /times|serif|roman|georgia|garamond|cambria|caladea|gelasio|palatino|book ?antiqua|bookman|baskerville|minion|caslon|century|didot|bodoni|charter|constantia|libertine|tinos|merriweather|lora|playfair|crimson|cormorant|sabon|bembo|plantin|utopia|perpetua|calisto|cochin|hoefler|sitka|iowan|spectral|literata|charis|gentium|vollkorn|alegreya|cardo|domine|rockwell|cmr\d|lmroman|nimbusrom/i;
 const MONO = /courier|mono|consol|menlo|inconsolata|lucida ?console|cmtt|lmmono|nimbusmon|code/i;
 
 /** The kind of letters a font draws, from its name and what pdf.js read of its flags. */
