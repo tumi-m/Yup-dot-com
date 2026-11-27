@@ -51,6 +51,8 @@ export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text")
   if (kind === "translate") return "h-[308px] sm:h-[276px]";
   // The drop zone's upload note wraps to two lines on a phone.
   if (kind === "office") return "h-[348px] sm:h-[332px]";
+  // A phone gets the camera button and its tip; a computer the QR code beside the drop zone.
+  if (kind === "scan") return "h-[324px] sm:h-[312px]";
   return "h-[292px]";
 }
 
