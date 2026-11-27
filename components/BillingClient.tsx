@@ -348,16 +348,24 @@ export function TeamSeats({
             required
             placeholder="colleague@company.co.za"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              // An answer about the last email isn't about this one.
+              setError(null);
+            }}
             aria-label="Member email"
+            aria-describedby={error ? "team-error" : undefined}
           />
-          <Button type="submit" disabled={busy !== null}>
+          {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+          <Button type="submit" aria-disabled={busy !== null || undefined}>
             {busy === "add" ? <Loader2 className="motion-safe:animate-spin" /> : <UserPlus />}
             Add
           </Button>
         </form>
       )}
-      <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
+      <div id="team-error">
+        <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
+      </div>
       <p className="mt-3 text-xs text-muted-foreground">
         {ended
           ? "Your Team plan has ended. These emails get Team again if you renew it, so remove any you no longer want."

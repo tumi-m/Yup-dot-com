@@ -1,5 +1,5 @@
 // Log in, sign up, Forgot password, the new password page, Manage
-// subscription and Extend disabled their button while they worked. A
+// subscription, Extend and Add (team seats) disabled their button while they worked. A
 // disabled button drops the focus it has, so after "Wrong email or password"
 // (or any answer) a keyboard user was back at the top of the page. They are
 // aria-disabled now (focus stays, a second press does nothing), and the
@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ExtendButtons, ManageBillingButton } from "../components/BillingClient.tsx";
+import { ExtendButtons, ManageBillingButton, TeamSeats } from "../components/BillingClient.tsx";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail: unknown = "") {
@@ -28,6 +28,10 @@ check("new password: the error is tied to the fields, and a mismatch marks the s
 
 const billing = src("components/BillingClient.tsx");
 check("Manage subscription and Extend aren't disabled while they work", !/(?<!aria-)disabled=\{loading/.test(billing) && /if \(loading\) return;/.test(billing) && /if \(loading !== null\) return;/.test(billing));
+check("team seats: Add keeps focus while it works, and a new email clears the last answer",
+  /aria-disabled=\{busy !== null \|\| undefined\}>\s*\{busy === "add"/.test(billing) && /setEmail\(e\.target\.value\);\s*\/\/[^\n]*\n\s*setError\(null\);/.test(billing));
+const seats = renderToStaticMarkup(createElement(TeamSeats, { ownerEmail: "o@x.co", initialMembers: [], seats: 5 }));
+check("team seats: the email field points at the error's place", /id="team-error"/.test(seats) && !/ disabled=""/.test(seats));
 const manage = renderToStaticMarkup(createElement(ManageBillingButton));
 const extend = renderToStaticMarkup(createElement(ExtendButtons, { plan: "pro" }));
 check("and both render enabled at rest", !/ (aria-)?disabled=/.test(manage) && !/ (aria-)?disabled=/.test(extend), { manage, extend });
