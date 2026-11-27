@@ -15,6 +15,19 @@ RUN echo "yt-dlp refresh: $YTDLP_REFRESH" \
  && deno --version
 COPY worker.py .
 
+# ---------------------------------------------------------------------------
+# HTML to PDF (render.py). Chromium's headless shell, the build the pinned
+# Playwright expects, with the system libraries it needs (and the fonts
+# Playwright adds for Chinese, Japanese, Thai and emoji), plus Noto for most
+# other scripts. Adds about 600 MB; give the worker 1 GB of memory or more.
+# ---------------------------------------------------------------------------
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN python -m playwright install --with-deps --only-shell chromium \
+ && apt-get update && apt-get install -y --no-install-recommends fonts-noto-core \
+ && rm -rf /var/lib/apt/lists/*
+COPY render.py .
+# --------------------------------------------------------------------------- end HTML to PDF
+
 # Run as an unprivileged user.
 RUN useradd --create-home worker
 USER worker
