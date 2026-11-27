@@ -53,6 +53,8 @@ const MONO = /courier|mono|consol|menlo|inconsolata|lucida ?console|cmtt|lmmono|
 export function familyOf(name: string, fallback?: string): Family {
   const plain = name.replace(/^[A-Z]{6}\+/, "");
   if (fallback === "monospace" || MONO.test(plain)) return "mono";
+  // "Sans" first: Alegreya Sans and PT Sans are no serifs, whatever else their name says.
+  if (/sans/i.test(plain)) return "sans";
   if (fallback === "serif" || SERIF.test(plain)) return "serif";
   return "sans";
 }
