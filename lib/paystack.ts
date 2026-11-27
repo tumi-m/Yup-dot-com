@@ -140,9 +140,13 @@ export function fetchSubscription(cfg: PaystackConfig, code: string) {
   return call<Record<string, unknown>>(cfg, "GET", `/subscription/${encodeURIComponent(code)}`);
 }
 
-/** The refunds made on a transaction (by its reference). */
+/**
+ * Recent refunds. Paystack documents no filter by transaction (only perPage,
+ * page, from and to): the caller must keep only the items naming its payment.
+ * `transaction` is sent anyway, and the largest page asked for.
+ */
 export function listRefunds(cfg: PaystackConfig, reference: string) {
-  return call<Record<string, unknown>[]>(cfg, "GET", `/refund?transaction=${encodeURIComponent(reference)}`);
+  return call<Record<string, unknown>[]>(cfg, "GET", `/refund?transaction=${encodeURIComponent(reference)}&perPage=100`);
 }
 
 /** Hosted page where the customer updates their card or cancels. */

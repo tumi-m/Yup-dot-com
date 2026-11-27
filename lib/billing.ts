@@ -828,14 +828,20 @@ export async function applyRefund(data: Json, deps: EventDeps): Promise<EventRes
   // The refund names only the payment: Paystack says what it was.
   const tx = await deps.paystack.transaction(reference);
   const paid = Number(tx.amount);
-  // Several partial refunds can add up to the whole payment: Paystack lists them.
+  // Several partial refunds can add up to the whole payment. Paystack's
+  // refund list isn't filtered by transaction (only pages and dates), so it
+  // may hold every customer's latest refunds: only those naming this payment
+  // (by reference, or by the verified transaction's id) count. None matching
+  // (say, on a page not fetched): this refund alone.
   let refunded = Number(data.amount) || 0;
   if (deps.paystack.refunds) {
     try {
       const all = await deps.paystack.refunds(reference);
+      const txId = typeof tx.id === "number" || typeof tx.id === "string" ? String(tx.id) : null;
       const total = (Array.isArray(all) ? all : [])
-        .filter((r) => !r?.status || r.status === "processed")
-        .reduce((sum, r) => sum + (Number(r?.amount) || 0), 0);
+        .filter((r) => r?.transaction_reference === reference || (txId !== null && r?.transaction != null && String(r.transaction) === txId))
+        .filter((r) => r.status === "processed")
+        .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
       refunded = Math.max(refunded, total);
     } catch (err) {
       console.error("paystack refunds lookup failed; going by this refund alone", reference, err instanceof Error ? err.message : err);

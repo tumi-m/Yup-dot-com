@@ -47,6 +47,12 @@ function setup() {
   };
   const kept: (DuplicateStart & { code: string | null })[] = [];
   const refundsMade = new Map<string, number[]>();
+  /** Other customers' refunds on the same page (set per case). */
+  let others: Record<string, unknown>[] = [];
+  /** Page one only: refunds past it aren't fetched. */
+  let pageSize = 50;
+  const refundPage = () =>
+    [...others, ...[...refundsMade].flatMap(([reference, amounts]) => amounts.map((amount) => ({ transaction_reference: reference, amount, status: "processed" })))].slice(0, pageSize);
   // Paystack: the transactions it knows, and the subscriptions it was asked to stop.
   const transactions = new Map<string, Record<string, unknown>>();
   const stopped: string[] = [];
@@ -60,7 +66,9 @@ function setup() {
         return tx;
       },
       async disableSubscription(code, token) { stopped.push(`${code}/${token}`); },
-      async refunds(reference) { return (refundsMade.get(reference) ?? []).map((amount) => ({ amount, status: "processed" })); },
+      // Paystack's list isn't filtered by transaction: it is the integration's
+      // latest refunds, everyone's, newest first, a page at a time.
+      async refunds() { return refundPage(); },
     },
   };
   const deliver = (event: string, data: unknown) => {
@@ -77,7 +85,7 @@ function setup() {
     return deliver("refund.processed", { status: "processed", transaction_reference: reference, amount: String(amount), currency: "ZAR", customer: { email: "u@x.co" }, ...extra });
   };
   const plan = () => resolveAccess({ own: row, emailVerified: true, teamOwners: [] }, clock).plan;
-  return { row, deps, deliver, pay, refund, plan, stopped, kept, at: (iso: string) => (clock = new Date(iso)) };
+  return { row, deps, deliver, pay, refund, plan, stopped, kept, setOthers: (o: Record<string, unknown>[]) => (others = o), setPageSize: (n: number) => (pageSize = n), refundsMade, at: (iso: string) => (clock = new Date(iso)) };
 }
 const ref = (c: string) => "pw_" + c.repeat(24);
 const once = (reference: string, plan: "pro" | "team", months: 1 | 12, amount: number, paidAt: string) => ({
@@ -247,6 +255,41 @@ const firstCharge = (reference: string, paidAt: string) => ({
   check("half refunded: access unchanged", half.status === "ignored" && s.plan() === "pro");
   const rest = await s.refund(ref("n"), 2500, { id: 2 });
   check("the rest refunded: together a full refund, the month comes off", rest.status === "applied" && s.plan() === "free", rest);
+}
+
+// ---------- Other customers' refunds in Paystack's list ----------
+// The list has no filter by transaction: a big refund to someone else must
+// not make this partial refund look full.
+{
+  const s = setup();
+  await s.pay({ ...once(ref("o"), "pro", 12, 49000, "2026-11-01T08:00:00Z"), id: 7001 });
+  s.setOthers([
+    { transaction_reference: "T_someone_else", transaction: 9999, amount: 199000, status: "processed" },
+    { transaction_reference: ref("p"), transaction: 9998, amount: 49000, status: "processed" },
+  ]);
+  const part = await s.refund(ref("o"), 10000);
+  check("others' refunds (larger than this payment) don't count: still partial", part.status === "ignored" && s.plan() === "pro", part);
+  s.setOthers([
+    { transaction_reference: "T_someone_else", transaction: 9999, amount: 199000, status: "processed" },
+    { transaction: 7001, amount: 39000, status: "processed" },
+    { transaction_reference: ref("o"), transaction: 7001, amount: 5000, status: "pending" },
+  ]);
+  const byId = await s.refund(ref("o"), 39000);
+  check("refunds matched by the payment's transaction id add up (pending ones don't count)", byId.status === "applied" && s.plan() === "free", byId);
+}
+{
+  const s = setup();
+  await s.pay(once(ref("q"), "pro", 1, 4900, "2026-11-01T08:00:00Z"));
+  s.at("2026-11-02T08:00:00Z");
+  await s.refund(ref("q"), 2400, { id: 1 });
+  // Fifty other refunds since push this payment's first part to page two, which isn't fetched.
+  s.setOthers(Array.from({ length: 50 }, (_, i) => ({ transaction_reference: `T_other_${i}`, amount: 100000, status: "processed" })));
+  const second = await s.refund(ref("q"), 2500, { id: 2 });
+  check("this payment's earlier refund on a page not fetched: this refund alone, still partial", second.status === "ignored" && s.plan() === "pro", second);
+  s.setOthers([{ transaction_reference: "T_other", amount: 100000, status: "processed" }]);
+  s.setPageSize(1);
+  const none = await s.refund(ref("q"), 4900, { id: 3 });
+  check("no matching item in the list: this refund alone decides (here, in full)", none.status === "applied" && s.plan() === "free", none);
 }
 
 // The month of a term: the same calendar months it was bought for.
