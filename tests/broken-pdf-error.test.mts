@@ -104,7 +104,9 @@ check("file tools: a bare library error is said plainly, not as a PDF", !/PDF/.t
   const { MEMORY_MESSAGE, UNREAD_MESSAGE } = await import("../lib/pdf/errors.ts");
   const oom = new RangeError("Array buffer allocation failed");
   check("out of memory: said as memory, the file named", friendlyPdfError(oom, "big.pdf").message === `big.pdf: ${MEMORY_MESSAGE}`);
-  check("out of memory: other wordings too", [new RangeError("Invalid array length"), new RangeError("Invalid typed array length: 4000000000"), new RangeError("Out of memory")].every((e) => friendlyPdfError(e).message === MEMORY_MESSAGE));
+  check("out of memory: other wordings too", [new RangeError("Out of memory"), new RangeError("WebAssembly.Memory(): could not allocate memory: allocation failed")].every((e) => friendlyPdfError(e).message === MEMORY_MESSAGE));
+  // A broken file's sizes make lengths no array can have: that's the file, not memory.
+  check("impossible lengths stay a broken file", [new RangeError("Invalid array length"), new RangeError("Invalid typed array length: -1"), new RangeError("Invalid typed array length: 4000000000"), new RangeError("Array buffer length must be a non-negative integer")].every((e) => friendlyPdfError(e).message === UNREADABLE_MESSAGE));
   check("a looping file is still unreadable, not memory", friendlyPdfError(new RangeError("Maximum call stack size exceeded")).message === UNREADABLE_MESSAGE);
   const gone = Object.assign(new Error("The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired."), { name: "NotReadableError" });
   const moved = Object.assign(new Error("A requested file or directory could not be found at the time an operation was processed."), { name: "NotFoundError" });

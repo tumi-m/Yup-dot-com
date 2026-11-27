@@ -20,9 +20,11 @@ export const MEMORY_MESSAGE = "This device ran out of memory for this file. Clos
 /** The picked file is gone or changed (moved, deleted, a cloud file not downloaded). */
 export const UNREAD_MESSAGE = "Couldn't read this file. Choose it again.";
 
-// V8 and other engines when an ArrayBuffer or array can't be made that big.
-// Not "Maximum call stack size exceeded", which is a looping file.
-const OUT_OF_MEMORY = /allocation failed|out of memory|Invalid (typed )?array length|Array buffer|too large to allocate/i;
+// Engines when memory for an ArrayBuffer or array can't be had ("Array
+// buffer allocation failed", "Out of memory"). Not "Invalid array length" or
+// a negative typed array length, which a broken file's numbers cause, nor
+// "Maximum call stack size exceeded", which is a looping file.
+const OUT_OF_MEMORY = /allocation failed|out of memory/i;
 
 /**
  * The browser couldn't hold or read the file, rather than the file being
