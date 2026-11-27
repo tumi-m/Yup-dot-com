@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
-import { MIN_PASSWORD_LENGTH, PASSWORD_HINT, authFailure } from "@/components/auth-redirect";
+import { MIN_PASSWORD_LENGTH, PASSWORD_HINT, newPasswordFailure } from "@/components/auth-redirect";
 
 const MISMATCH = "The passwords don't match.";
 
@@ -21,15 +21,19 @@ export function PasswordForm({ next }: { next?: string }) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The field the error is about, marked aria-invalid. */
+  const [invalid, setInvalid] = useState<"new" | "confirm" | null>(null);
   const [saved, setSaved] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
     setError(null);
+    setInvalid(null);
     setSaved(false);
     if (password !== confirm) {
       setError(MISMATCH);
+      setInvalid("confirm");
       return;
     }
     setBusy(true);
@@ -40,9 +44,9 @@ export function PasswordForm({ next }: { next?: string }) {
       setPassword("");
       setConfirm("");
     } catch (err) {
-      // With Supabase's "Secure password change" on, an older session must log in again first.
-      const reauth = err instanceof Error && ((err as { code?: string }).code === "reauthentication_needed" || /reauthenticat/i.test(err.message));
-      setError(reauth ? "To change your password, log out and log in again first (or use Forgot password)." : authFailure(err));
+      const { message, field } = newPasswordFailure(err);
+      setError(message);
+      setInvalid(field);
     } finally {
       setBusy(false);
     }
@@ -60,6 +64,7 @@ export function PasswordForm({ next }: { next?: string }) {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={MIN_PASSWORD_LENGTH}
+          aria-invalid={invalid === "new" || undefined}
           aria-describedby={error ? "new-password-hint password-error" : "new-password-hint"}
           autoComplete="new-password"
         />
@@ -78,7 +83,7 @@ export function PasswordForm({ next }: { next?: string }) {
           required
           minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
-          aria-invalid={error === MISMATCH || undefined}
+          aria-invalid={invalid === "confirm" || undefined}
           aria-describedby={error ? "password-error" : undefined}
         />
       </div>

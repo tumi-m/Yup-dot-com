@@ -55,7 +55,10 @@ check("a failed reset link that knew where to go back still says to ask again", 
 // Rate limits, and answers that would tell whether an email has an account.
 const tooMany = new AuthApiError("email rate limit exceeded", 429, "over_email_send_rate_limit");
 check("too many emails: says what to do, in plain words", /^Too many emails/.test(authFailure(tooMany)) && /try again/.test(authFailure(tooMany)), authFailure(tooMany));
-check("the site-wide email limit is still shown on Forgot password", !revealsAccount(tooMany, "reset"));
+// An unknown email is never sent anything, so it never meets the project's
+// email limit either: on Forgot password that limit means "this account exists".
+check("the site-wide email limit gets the usual reset message too", revealsAccount(tooMany, "reset"));
+check("…but is said on log in, where it says nothing about the account", !revealsAccount(tooMany, "login"));
 const wait = new AuthApiError("For security purposes, you can only request this after 47 seconds.", 429, "over_email_send_rate_limit");
 check("the wait for one address (only real accounts get it) shows the usual reset message", revealsAccount(wait, "reset"));
 const taken = new AuthApiError("User already registered", 422, "user_already_exists");
@@ -65,8 +68,8 @@ const wrong = authFailure(new AuthApiError("Invalid login credentials", 400, "in
 const unconfirmed = authFailure(new AuthApiError("Email not confirmed", 400, "email_not_confirmed"));
 check("log in: a wrong password and an unconfirmed email get the same answer", wrong === unconfirmed && /Wrong email or password/.test(wrong), { wrong, unconfirmed });
 const weak = "Password should be at least 10 characters.";
-check("other errors are kept", authFailure(new AuthApiError(weak, 422, "weak_password")) === weak);
-check("something that isn't an error", authFailure("nope") === "Something went wrong.");
+check("a weak password says the rule", authFailure(new AuthApiError(weak, 422, "weak_password")) === "Use at least 10 characters, with letters and numbers.");
+check("something that isn't an error", authFailure("nope") === "Something went wrong. Try again.");
 
 if (failed) {
   console.log(`\n${failed} check(s) failed`);

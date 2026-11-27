@@ -18,6 +18,7 @@ import {
   resetLinkTarget,
   revealsAccount,
   safeRedirect,
+  submitState,
 } from "@/components/auth-redirect";
 import { Captcha, TURNSTILE_SITE_KEY } from "@/components/Captcha";
 import { track } from "@/lib/analytics";
@@ -53,10 +54,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     if (linkError) setError(linkError);
   }, [otherPage]);
 
+  const configured = isSupabaseConfigured();
+  const submit = submitState({ configured, loading, captcha: !!TURNSTILE_SITE_KEY, token: captchaToken });
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // The button is only aria-disabled while this runs, so Enter can still submit.
-    if (loading) return;
+    // The button is only aria-disabled while this runs or the check waits, so Enter can still submit.
+    if (submit.blocked) return;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -130,7 +134,6 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     }
   }
 
-  const configured = isSupabaseConfigured();
   const field = "h-11";
 
   return (
@@ -234,14 +237,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
 
           {configured && <Captcha onToken={setCaptchaToken} resetKey={captchaReset} />}
 
-          {/* aria-disabled while working, not disabled: a disabled button drops
-              the focus it has, and keyboard users would start again from the top. */}
-          <Button
-            type="submit"
-            className="h-11 w-full"
-            disabled={!configured || (!!TURNSTILE_SITE_KEY && !captchaToken)}
-            aria-disabled={loading || undefined}
-          >
+          {/* aria-disabled while working or waiting for the security check (see submitState). */}
+          <Button type="submit" className="h-11 w-full" disabled={submit.disabled} aria-disabled={submit.ariaDisabled || undefined}>
             {loading && <Loader2 className="motion-safe:animate-spin" />}
             {isSignup ? "Sign up" : isReset ? "Send link" : "Log in"}
           </Button>

@@ -16,15 +16,18 @@ function check(name: string, ok: boolean, detail: unknown = "") {
 }
 const src = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
+// What the button does while working or waiting for the security check is
+// submitState's (tests/auth-errors.test.mts); the form must use all of it.
 const auth = src("components/AuthForm.tsx");
-check("auth form: the submit button isn't disabled while it works", !/(?<!aria-)disabled=\{loading/.test(auth) && /aria-disabled=\{loading \|\| undefined\}/.test(auth));
-check("auth form: a second submit while working does nothing", /if \(loading\) return;/.test(auth));
+check("auth form: the submit button takes submitState's disabled and aria-disabled",
+  /disabled=\{submit\.disabled\} aria-disabled=\{submit\.ariaDisabled \|\| undefined\}/.test(auth) && !/(?<!aria-)disabled=\{loading/.test(auth));
+check("auth form: a press while it is blocked does nothing", /if \(submit\.blocked\) return;/.test(auth));
 check("auth form: the error has an id the fields point to", /id="auth-error"/.test(auth) && (auth.match(/"auth-error"/g) ?? []).length >= 3);
 
 const password = src("components/PasswordForm.tsx");
 check("new password: the button keeps focus while saving", !/(?<!aria-)disabled=\{busy\}/.test(password) && /aria-disabled=\{busy \|\| undefined\}/.test(password) && /if \(busy\) return;/.test(password));
 check("new password: the error is tied to the fields, and a mismatch marks the second one",
-  /id="password-error"/.test(password) && /aria-invalid=\{error === MISMATCH/.test(password));
+  /id="password-error"/.test(password) && /aria-invalid=\{invalid === "confirm"/.test(password) && /aria-invalid=\{invalid === "new"/.test(password));
 
 const billing = src("components/BillingClient.tsx");
 check("Manage subscription and Extend aren't disabled while they work", !/(?<!aria-)disabled=\{loading/.test(billing) && /if \(loading\) return;/.test(billing) && /if \(loading !== null\) return;/.test(billing));
