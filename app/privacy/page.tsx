@@ -399,6 +399,10 @@ export default function PrivacyPage() {
             <strong>pw.editor.shortcuts</strong> (browser storage) remembers whether the editor&apos;s one-key shortcuts
             are on.
           </li>
+          <li>
+            <strong>pdfw-web-pdf-options</strong> (browser storage) remembers the page size, margins and other options
+            you last chose in HTML to PDF.
+          </li>
         </ul>
         {GA_ID ? (
           <>
