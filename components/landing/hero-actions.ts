@@ -18,6 +18,7 @@ export const PDF_ACTIONS = [
   "organize-pdf",
   "protect-pdf",
   "redact-pdf",
+  "translate-pdf",
 ];
 /**
  * Several PDFs: only tools that take them all. Any other tool would keep the

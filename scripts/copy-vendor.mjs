@@ -71,17 +71,21 @@ copy(join(pkgDir("@jsquash/jpeg"), "codec", "enc", "mozjpeg_enc.wasm"), join(out
 copy(join(pkgDir("@jsquash/jpeg"), "codec", "dec", "mozjpeg_dec.wasm"), join(out, "jsquash-jpeg", jsquash, "mozjpeg_dec.wasm"));
 
 // Noto Sans and Noto Sans Mono (SIL Open Font License 1.1) for Text and
-// Markdown to PDF (lib/pdf/text-to-pdf/fonts.ts): each style split by
-// alphabet, so a text only fetches the files it needs. The licence goes with them.
+// Markdown to PDF and Translate PDF (lib/pdf/text-to-pdf/fonts.ts): each
+// style split by alphabet, so a text only fetches the files it needs. Mono
+// has no Devanagari. The licence goes with them.
 const SUBSETS = ["latin", "latin-ext", "greek", "greek-ext", "cyrillic", "cyrillic-ext", "vietnamese"];
-const noto = { "@fontsource/noto-sans": ["400-normal", "700-normal", "400-italic", "700-italic"], "@fontsource/noto-sans-mono": ["400-normal", "700-normal"] };
+const noto = {
+  "@fontsource/noto-sans": { styles: ["400-normal", "700-normal", "400-italic", "700-italic"], subsets: [...SUBSETS, "devanagari"] },
+  "@fontsource/noto-sans-mono": { styles: ["400-normal", "700-normal"], subsets: SUBSETS },
+};
 const fontVersions = [];
-for (const [pkg, styles] of Object.entries(noto)) {
+for (const [pkg, { styles, subsets }] of Object.entries(noto)) {
   const family = pkg.split("/")[1];
   const v = version(pkg);
   fontVersions.push(`${family} ${v}`);
   const dir = join(out, family, v);
-  for (const subset of SUBSETS) {
+  for (const subset of subsets) {
     for (const style of styles) {
       const file = `${family}-${subset}-${style}.woff`;
       copy(join(pkgDir(pkg), "files", file), join(dir, file));

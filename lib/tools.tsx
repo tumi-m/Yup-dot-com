@@ -53,6 +53,7 @@ import {
   EyeOff,
   ScanLine,
   TextCursor,
+  Languages,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -82,7 +83,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -369,6 +370,20 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: FileText,
     category: "convert",
     tint: "bg-blue-100 text-blue-700",
+  },
+  {
+    slug: "translate-pdf",
+    name: "Translate PDF",
+    title: "Translate PDF: translate a document into another language",
+    description: "Translate a PDF into another language, as Word and PDF.",
+    icon: Languages,
+    category: "convert",
+    tint: "bg-gradient-to-br from-sky-100 to-violet-100 text-sky-800",
+    badge: "AI",
+    custom: "translate",
+    keywords:
+      "translate translation translator translating language languages foreign english afrikaans zulu isizulu xhosa isixhosa sotho sesotho tswana setswana sepedi tsonga xitsonga swati siswati venda tshivenda ndebele isindebele french portuguese spanish german arabic chinese hindi swahili document",
+    aliases: ["PDF Translator", "Document Translator", "Translate Document", "Translate a PDF"],
   },
   {
     slug: "pdf-to-excel",
@@ -718,7 +733,8 @@ export function getTool(slug: string): ToolMeta | undefined {
  * text and Markdown point at each other, pictures at other picture formats
  * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
  * Compare at reading and editing the text it found, the two editors at each
- * other and at Redact PDF, which removes what covering only hides.
+ * other and at Redact PDF, which removes what covering only hides, and
+ * Translate at the other tools that read a document's text.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -737,6 +753,7 @@ const RELATED: Record<string, string[]> = {
   "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],
   "edit-pdf-text": ["edit-pdf", "redact-pdf", "sign-pdf", "compress-pdf"],
   "edit-pdf": ["edit-pdf-text", "sign-pdf", "compress-pdf", "redact-pdf"],
+  "translate-pdf": ["chat-with-pdf", "pdf-to-word", "ocr-pdf", "compress-pdf"],
 };
 
 /** Four tools to offer under a tool: its own list, else its category's first, then the most used. */

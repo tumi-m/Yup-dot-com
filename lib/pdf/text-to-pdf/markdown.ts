@@ -22,7 +22,8 @@ import { assertDrawable, breathe, missingNote, type Progress, type TextPdf } fro
 
 type Align = "left" | "center" | "right";
 
-type Block =
+/** The document as the layout draws it; Translate PDF builds these too (lib/pdf/translate/pdf.ts). */
+export type Block =
   | { kind: "text"; spans: Span[]; indent: number; before: number; after: number; marker?: Span[]; markerWidth?: number; keep?: boolean; quote: number[] }
   | { kind: "code"; lines: string[]; size: number; indent: number; before: number; after: number; quote: number[] }
   | { kind: "rule"; indent: number; before: number; after: number; quote: number[] }
@@ -300,7 +301,7 @@ class Builder {
 // ---------------------------------------------------------------------------
 
 /** Draws the blocks. Spacing between blocks is the larger of the two sides' asks. */
-async function draw(writer: Writer, book: FontBook, blocks: Block[], onProgress?: Progress, signal?: AbortSignal) {
+export async function draw(writer: Writer, book: FontBook, blocks: Block[], onProgress?: Progress, signal?: AbortSignal) {
   let after = 0;
   let open: number[] = [];
   for (const [i, block] of blocks.entries()) {

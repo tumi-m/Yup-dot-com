@@ -34,7 +34,7 @@ const IMAGE_FAQ = [
 const TEXT_FAQ = [
   {
     q: "Which letters and languages work?",
-    a: "Latin letters with any accents, Greek and Cyrillic, in an embedded font that every PDF reader shows the same. Chinese, Japanese, Korean, Arabic, Hebrew and Indian scripts aren't supported yet: those letters are left out, and the result says how many.",
+    a: "Latin letters with any accents, Greek, Cyrillic and Devanagari (Hindi, Marathi, Nepali), in an embedded font that every PDF reader shows the same. Chinese, Japanese, Korean, Arabic, Hebrew and other Indian scripts aren't supported yet: those letters are left out, and the result says how many.",
   },
   {
     q: "Can I change how it looks?",

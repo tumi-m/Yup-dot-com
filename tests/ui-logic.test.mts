@@ -135,7 +135,8 @@ const finds: [string, string][] = [
   ["merge pdf online free", "merge-pdf"],
 ];
 for (const [q, slug] of finds) check(`search "${q}" finds ${slug}`, found(q).includes(slug), found(q));
-check("search: 'word' doesn't find the password tools", found("word").join() === "pdf-to-word", found("word"));
+// Translate PDF writes Word files too, so it may follow.
+check("search: 'word' doesn't find the password tools", found("word")[0] === "pdf-to-word" && !found("word").some((s) => s === "protect-pdf" || s === "unlock-pdf"), found("word"));
 check("search: 'remove password' is only Unlock PDF", found("remove password").join() === "unlock-pdf", found("remove password"));
 // The tool a search names comes first; the others keep catalogue order.
 check("search: 'sign' lists Fill & Sign first", found("sign")[0] === "sign-pdf", found("sign"));
