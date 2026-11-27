@@ -58,8 +58,13 @@ check(
 check("x-to-mp4 is a media panel", panelSpec(TOOLS.find((t) => t.slug === "x-to-mp4")!).kind === "media");
 check("each panel kind reserves its height", kinds.every(([, s]) => /^h-\[/.test(placeholderSize(s.kind))));
 // Scan to PDF had the default height, 32 px short on a phone and 20 on a
-// computer, so the page jumped when its panel arrived.
-check("Scan to PDF reserves its own height", placeholderSize("scan") === "h-[324px] sm:h-[312px]");
+// computer, so the page jumped when its panel arrived. It lays out by the
+// pointer, so its room does too: narrow phones, phones, tablets, and a mouse.
+{
+  const scan = placeholderSize("scan");
+  const touch = "[@media(hover:none)_and_(pointer:coarse)";
+  check("Scan to PDF reserves its own height, by pointer and width", scan.startsWith("h-[610px] ") && scan.includes(" sm:h-[312px]") && scan.includes(`${touch}]:h-[340px]`) && scan.includes(`${touch}_and_(min-width:380px)]:h-[324px]`) && scan.includes(`${touch}_and_(min-width:480px)]:h-[252px]`), scan);
+}
 check("panel specs are plain data (server → client)", kinds.every(([, s]) => JSON.stringify(JSON.parse(JSON.stringify(s))) === JSON.stringify(s)));
 
 // The tool page itself never imports a panel; ToolPanel loads each on demand.

@@ -41,6 +41,13 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   return { kind: "workbench", slug: tool.slug };
 }
 
+const SCAN_HEIGHT = [
+  "h-[610px] min-[420px]:h-[552px] sm:h-[312px]",
+  "[@media(hover:none)_and_(pointer:coarse)]:h-[340px]",
+  "[@media(hover:none)_and_(pointer:coarse)_and_(min-width:380px)]:h-[324px]",
+  "[@media(hover:none)_and_(pointer:coarse)_and_(min-width:480px)]:h-[252px]",
+].join(" ");
+
 /** Rendered heights of each kind of tool panel before a file is chosen. */
 export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text"): string {
   // Fill & Sign and Edit PDF text have no Blank page button under Choose PDF on phones.
@@ -51,8 +58,11 @@ export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text")
   if (kind === "translate") return "h-[308px] sm:h-[276px]";
   // The drop zone's upload note wraps to two lines on a phone.
   if (kind === "office") return "h-[348px] sm:h-[332px]";
-  // A phone gets the camera button and its tip; a computer the QR code beside the drop zone.
-  if (kind === "scan") return "h-[324px] sm:h-[312px]";
+  // Scan to PDF lays out by the pointer, as the tool does (a finger and no
+  // hover: the camera button and its tip, which wraps below 380 px, and a
+  // shorter panel on a tablet); with a mouse, the QR code card sits beside
+  // the drop zone from sm up and above it in a narrow window.
+  if (kind === "scan") return SCAN_HEIGHT;
   return "h-[292px]";
 }
 
