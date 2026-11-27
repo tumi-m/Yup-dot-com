@@ -585,33 +585,69 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
 
   const overlaps = (c: Cell, anchor: Cell[], slack: number) =>
     anchor.some((a) => c.x <= a.right + slack && c.right >= a.x - slack);
+  const slackAt = (k: number) => Math.max(2, lines[k].fontSize * 0.25);
+  // The anchor column each cell sits under, or null unless each sits under one of its own.
+  const columnsOf = (cells: Cell[], anchor: Cell[], slack: number): number[] | null => {
+    const cols = cells.map((c) => {
+      const under = anchor.flatMap((a, k) => (overlaps(c, [a], slack) ? [k] : []));
+      return under.length === 1 ? under[0] : -1;
+    });
+    return cols.every((k, n) => k >= 0 && cols.indexOf(k) === n) ? cols : null;
+  };
 
   while (i < lines.length) {
     if (cellRows[i].length < 2) {
       i++;
       continue;
     }
-    // Extend while subsequent rows have a comparable number of aligned columns.
-    let j = i + 1;
     const anchor = cellRows[i];
-    while (j < lines.length && cellRows[j].length >= 2) {
-      const slack = Math.max(2, lines[j].fontSize * 0.25);
-      const aligned = cellRows[j].filter((c) => overlaps(c, anchor, slack)).length;
+    const isRow = (k: number) => {
+      if (cellRows[k].length < 2) return false;
+      const slack = slackAt(k);
+      const aligned = cellRows[k].filter((c) => overlaps(c, anchor, slack)).length;
       // Each anchor column may only be claimed once, or one wide cell could
       // "align" with everything.
-      const claimed = anchor.filter((a) => cellRows[j].some((c) => overlaps(c, [a], slack))).length;
-      if (Math.min(aligned, claimed) < Math.min(2, cellRows[j].length)) break;
-      j++;
+      const claimed = anchor.filter((a) => cellRows[k].some((c) => overlaps(c, [a], slack))).length;
+      return Math.min(aligned, claimed) >= Math.min(2, cellRows[k].length);
+    };
+    // A cell's words wrapped onto a line of their own ("Website landing" /
+    // "page"): fewer cells, each under a column, close below the line above.
+    const isWrap = (k: number) =>
+      cellRows[k].length < anchor.length &&
+      lines[k - 1].y - lines[k].y <= lines[k].fontSize * 1.6 &&
+      columnsOf(cellRows[k], anchor, slackAt(k)) !== null;
+    // Extend while subsequent rows have a comparable number of aligned
+    // columns, taking wrapped lines along when the table goes on below them.
+    const rows: Cell[][] = [anchor];
+    const wraps: { row: number; line: number }[] = [];
+    let j = i + 1;
+    while (j < lines.length) {
+      if (isRow(j)) {
+        rows.push(cellRows[j++]);
+        continue;
+      }
+      // A line or two: more is text beside the table, not a cell's words.
+      let k = j;
+      while (k < lines.length && k - j < 2 && isWrap(k)) k++;
+      if (k === j || k === lines.length || !isRow(k)) break;
+      for (; j < k; j++) wraps.push({ row: rows.length - 1, line: j });
     }
     // Require at least two rows to call it a table.
-    if (j - i >= 2) {
-      const rows = cellRows.slice(i, j).map((r) => r.map((c) => c.text));
+    if (rows.length >= 2) {
       const width = Math.max(...rows.map((r) => r.length));
-      tables.push({
-        start: i,
-        end: j,
-        rows: rows.map((r) => [...r, ...Array(width - r.length).fill("")]),
+      // A short row (a total under the last columns) goes under the columns it stands in.
+      const texts = rows.map((r) => {
+        const cols = r.length < anchor.length ? columnsOf(r, anchor, slackAt(i)) : null;
+        if (!cols) return [...r.map((c) => c.text), ...Array(width - r.length).fill("")];
+        const row = Array(width).fill("");
+        r.forEach((c, n) => (row[cols[n]] = c.text));
+        return row;
       });
+      for (const { row, line } of wraps) {
+        const cols = columnsOf(cellRows[line], anchor, slackAt(line))!;
+        cellRows[line].forEach((c, n) => (texts[row][cols[n]] = joinLines([texts[row][cols[n]], c.text])));
+      }
+      tables.push({ start: i, end: j, rows: texts });
       i = j;
     } else {
       i++;
