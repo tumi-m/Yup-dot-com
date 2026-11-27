@@ -234,12 +234,17 @@ const check = (name: string, ok: boolean, detail = "") => {
     for (let i = 0; i < 40; i++) p.drawText(`Clause ${n}.${i} The tenant shall keep the premises clean and in good repair at all times.`, { x: 40, y: 770 - i * 16, size: 10, font: f });
     if (n < 3) p.drawText(`Balance carried forward ${(n + 1) * 1000}.00`, { x: 40, y: 45, size: 10, font: f });
     p.drawText("Initials: Tenant ______ Landlord ______", { x: 40, y: 30, size: 10, font: f });
+    // Small and in the same place on every page: bold, so the document's own; plain, so a footer.
+    p.drawText(`Part ${n}: signed copies only`, { x: 40, y: 20, size: 7, font: b });
+    p.drawText(`Printed 27/11/2026 page ${n}`, { x: 400, y: 8, size: 7, font: f });
   }
   const md = toMarkdown(await parseDocument(await d.save()));
   const count = (s: string) => md.split(s).length - 1;
   check("bold section titles at the top of each page stay", count("Section ") === 3, md.slice(0, 200));
   check("balances carried and brought forward stay", count("carried forward") === 2 && count("brought forward") === 2);
   check("a line to initial on every page stays", count("Initials: Tenant") === 3);
+  check("a small bold line on every page stays", count("signed copies only") === 3, md.slice(-300));
+  check("a small plain footer on every page goes", count("Printed 27/11") === 0);
 }
 
 // A statement whose table header is repeated at the very top of each page:

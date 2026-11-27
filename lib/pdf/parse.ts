@@ -916,6 +916,16 @@ function runningLines(pages: { lines: ParsedLine[]; height: number }[], bodySize
   return found;
 }
 
+/** True when pdf.js's font `id` on this page is a bold, black or heavy one (its loaded font's flags and name). */
+function boldFont(page: PDFPageProxy, id: string): boolean {
+  try {
+    const font = page.commonObjs.get(id) as { name?: string; bold?: boolean; black?: boolean } | null;
+    return !!font && (!!font.bold || !!font.black || /bold|black|heavy|semibold|demibold/i.test(font.name ?? ""));
+  } catch {
+    return false;
+  }
+}
+
 /** Parse a PDF into a structured document tree. */
 export async function parseDocument(
   data: Uint8Array,
@@ -971,6 +981,20 @@ export async function parseDocument(
 
   const bodySize = median(allSizes);
   const running = runningLines(perPage, bodySize);
+  // Bold lines are the document's own however they repeat. The span's font
+  // name is pdf.js's id for it: its real name and weight are read once the
+  // page's fonts are loaded, for the few pages with a line to drop.
+  for (const p of new Set(perPage.filter(({ lines }) => lines.some((l) => running.has(l))).map((x) => x.page))) {
+    try {
+      const page = await doc.getPage(p);
+      await page.getOperatorList();
+      for (const line of perPage[p - 1].lines) {
+        if (running.has(line) && line.spans.some((s) => boldFont(page, s.fontName))) running.delete(line);
+      }
+    } catch {
+      // Fonts that can't be read: the line is judged by its size and place alone.
+    }
+  }
   const blocks: Block[] = [];
   for (const { lines, page } of perPage) {
     const pageBlocks = buildBlocks(lines.filter((line) => !running.has(line)), bodySize, page);
