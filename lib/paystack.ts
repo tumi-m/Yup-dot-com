@@ -26,7 +26,16 @@ export interface PaystackConfig {
   secretKey: string;
   fetch?: typeof fetch;
   baseUrl?: string;
+  /** Tests: a shorter wait than PAYSTACK_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
+
+/**
+ * How long a call to Paystack may take, body included. Without a limit a
+ * Paystack that never answers kept Checkout spinning (every plan button
+ * disabled) until the platform killed the function minutes later.
+ */
+export const PAYSTACK_TIMEOUT_MS = 15_000;
 
 export function paystackConfigFromEnv(): PaystackConfig | null {
   const secretKey = process.env.PAYSTACK_SECRET_KEY?.trim();
@@ -53,6 +62,7 @@ export function planForCode(
 
 async function call<T>(cfg: PaystackConfig, method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const f = cfg.fetch ?? globalThis.fetch;
+  const signal = AbortSignal.timeout(cfg.timeoutMs ?? PAYSTACK_TIMEOUT_MS);
   let res: Response;
   try {
     res = await f(`${cfg.baseUrl ?? PAYSTACK_API}${path}`, {
@@ -63,11 +73,14 @@ async function call<T>(cfg: PaystackConfig, method: "GET" | "POST", path: string
       },
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      signal,
     });
   } catch {
     throw new PaystackError("Payment provider unreachable.", 502);
   }
   const json = (await res.json().catch(() => null)) as { status?: boolean; message?: string; data?: T } | null;
+  // The answer was cut off by the wait: unreachable, not a refusal.
+  if (signal.aborted) throw new PaystackError("Payment provider unreachable.", 502);
   if (!res.ok || !json?.status) {
     throw new PaystackError(json?.message || `Paystack error ${res.status}`, res.status >= 500 ? 502 : res.status);
   }

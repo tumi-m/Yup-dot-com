@@ -12,7 +12,7 @@ import {
 import { formatPrice, prepaidPrice, toSubunit, PLANS, TEAM_SEATS, formatBillingDate } from "../lib/plans.ts";
 import {
   initializeTransaction, subscriptionManageLink, verifyTransaction, planForCode, isOurReference,
-  newReference, PaystackError, ONCE_OFF_CHANNELS, SUBSCRIPTION_CHANNELS,
+  newReference, PaystackError, ONCE_OFF_CHANNELS, SUBSCRIPTION_CHANNELS, PAYSTACK_TIMEOUT_MS,
 } from "../lib/paystack.ts";
 
 const results: boolean[] = [];
@@ -399,6 +399,27 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   err = null;
   try { await verifyTransaction({ ...cfg, fetch: fake(() => "throw") }, "pw_1"); } catch (e) { err = e; }
   check("network failure → PaystackError 502", err instanceof PaystackError && err.status === 502);
+  // A Paystack that never answers kept checkout spinning until the platform
+  // killed the function: each call now gives up after a wait.
+  const hang = (async (_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as typeof fetch;
+  const slowBody = (async (_url: string | URL | Request, init?: RequestInit) =>
+    new Response(new ReadableStream({ start: (c) => init?.signal?.addEventListener("abort", () => c.error(init.signal!.reason)) }), { status: 200 })) as typeof fetch;
+  // AbortSignal.timeout doesn't keep Node running (a server does): this test needs a timer that does.
+  const keepAlive = setInterval(() => {}, 1000);
+  for (const [what, f] of [["no answer", hang], ["an answer that never ends", slowBody]] as const) {
+    const t0 = Date.now();
+    err = null;
+    try {
+      await initializeTransaction({ ...cfg, fetch: f, timeoutMs: 50 }, {
+        email: "u@x.co", amount: 4900, reference: ref, callbackUrl: "https://pdf.example/settings/billing?ref=" + ref,
+        metadata: {}, channels: SUBSCRIPTION_CHANNELS,
+      });
+    } catch (e) { err = e; }
+    check(`Paystack gives ${what} → PaystackError 502 after the wait`, err instanceof PaystackError && err.status === 502 && Date.now() - t0 < 2000, err instanceof PaystackError ? "" : String(err));
+  }
+  clearInterval(keepAlive);
+  check("the wait is seconds, not minutes", PAYSTACK_TIMEOUT_MS >= 5000 && PAYSTACK_TIMEOUT_MS <= 30_000);
   check("plan codes map both ways only for known codes", planForCode("PLN_team", CODES) === "team" && planForCode("PLN_x", CODES) === null && planForCode(null, CODES) === null);
   check("references: ours are recognised, others not", isOurReference(ref) && !isOurReference("T_123") && !isOurReference("pw_../x"));
 }
