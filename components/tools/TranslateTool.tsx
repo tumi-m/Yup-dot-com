@@ -700,7 +700,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                   >
                     {error.login && (
                       <Link href={`/login?redirect=/tools/${slug}`} className="font-semibold underline">
-                        Sign in
+                        Log in
                       </Link>
                     )}
                   </InlineError>

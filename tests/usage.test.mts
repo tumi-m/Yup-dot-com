@@ -242,7 +242,7 @@ const claims = async (n: number, subject: string, tier: Tier, store: UsageStore,
   check("ai: free gets 10 a day", f.filter((x) => x.ok).length === 10 && !f[10].ok);
 
   const off = await claimAiAnswer("ip:x", "guest", { store, env: { AI_GUEST_DAILY_LIMIT: "0" } as unknown as NodeJS.ProcessEnv });
-  check("ai: AI_GUEST_DAILY_LIMIT=0 requires sign-in", !off.ok && off.status === 401 && /Sign in/.test(off.error));
+  check("ai: AI_GUEST_DAILY_LIMIT=0 requires sign-in", !off.ok && off.status === 401 && /Log in/.test(off.error));
 }
 {
   // Burst: 6 a minute, even with daily answers left.

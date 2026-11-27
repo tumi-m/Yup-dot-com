@@ -340,7 +340,7 @@ export async function claimAiAnswer(subject: string, tier: Tier, opts: { env?: N
   const upgrade = tier !== "pro" && tier !== "team";
   const spent = { ok: false as const, status: 429, error: "You've used today's AI answers.", upgrade, reason: "ai" };
   if (policy.day <= 0) {
-    return tier === "guest" ? { ok: false, status: 401, error: "Sign in to use the AI assistant." } : spent;
+    return tier === "guest" ? { ok: false, status: 401, error: "Log in to use Chat with PDF." } : spent;
   }
 
   const taken: UsageWindow[] = [];
@@ -462,7 +462,7 @@ export async function claimTranslation(
   const limit = Math.floor(policy.day / unit);
   if (limit <= 0) {
     return tier === "guest"
-      ? { ok: false, status: 401, error: "Sign in to translate documents." }
+      ? { ok: false, status: 401, error: "Log in to translate documents." }
       : { ok: false, status: 429, error: TRANSLATE_SPENT_MESSAGE, upgrade, reason: "translate" };
   }
   const units = Math.max(1, Math.ceil(chars / unit));

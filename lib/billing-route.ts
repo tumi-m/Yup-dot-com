@@ -23,6 +23,6 @@ export async function billingContext(
     return json({ error: "Payments aren't set up yet." }, 503);
   }
   const account = await getAccount();
-  if (!account) return json({ error: "Sign in first." }, 401);
+  if (!account) return json({ error: "Log in first." }, 401);
   return { account, paystack: paystack ?? { secretKey: "" } };
 }

@@ -21,7 +21,7 @@ export type CheckoutRequest =
 
 /**
  * The session ended while the page was open (signed out in another tab, or
- * it ran out), so the server answered "Sign in first.", a dead end: log in,
+ * it ran out), so the server answered "Log in first.", a dead end: log in,
  * then back to this page.
  */
 function toLogin(): null {
@@ -212,7 +212,7 @@ export function PaymentReturn({ reference }: { reference: string }) {
         )}
         {state === "other-account" && (
           <p className="font-medium">
-            This payment belongs to a different account. Sign in with the account you paid from.
+            This payment belongs to a different account. Log in with the account you paid from.
           </p>
         )}
         {state === "second-subscription" && (
@@ -391,7 +391,7 @@ export function TeamSeats({
       <p className="mt-3 text-xs text-muted-foreground">
         {ended
           ? "Your Team plan has ended. These emails get Team again if you renew it, so remove any you no longer want."
-          : "Ask them to sign in with this email."}
+          : "Ask them to log in with this email."}
       </p>
     </div>
   );

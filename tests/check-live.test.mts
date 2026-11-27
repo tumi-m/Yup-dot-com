@@ -160,8 +160,8 @@ const site = await listen((req, res) => {
     // The Bootlegger mistake: the data ships with the page, behind a login screen.
     return send(200, "text/html", html(`<form>Log in</form><script>self.__next_f.push(["{\\"email\\":\\"bob@gmail.com\\",\\"paystack_customer_code\\":\\"CUS_bobbob1234\\"}"])</script>`));
   }
-  if (path === "/api/billing/team") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Sign in first."}` : `{"members":["carol@gmail.com"]}`, "api");
-  if (path === "/api/billing/verify") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Sign in first."}` : `{"status":"paid","plan":"pro"}`, "api");
+  if (path === "/api/billing/team") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Log in first."}` : `{"members":["carol@gmail.com"]}`, "api");
+  if (path === "/api/billing/verify") return send(safe ? 401 : 200, "application/json", safe ? `{"error":"Log in first."}` : `{"status":"paid","plan":"pro"}`, "api");
   // POST only: a GET gets 405 (one that answers would be a route left open).
   if (path === "/api/access/redeem") return send(safe ? 405 : 200, "application/json", safe ? "" : `{"plan":"team","days":365}`, "api");
   if (path === "/security.txt") return send(308, "text/plain", "", "static", { location: "/.well-known/security.txt" });

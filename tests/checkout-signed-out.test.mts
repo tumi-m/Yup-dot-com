@@ -1,6 +1,6 @@
 // With Pricing or Billing open after the session ended (signed out in
 // another tab, or it ran out), Upgrade, Pay once, Extend and Manage
-// subscription answered "Sign in first." in the card, with the header still
+// subscription answered "Log in first." in the card, with the header still
 // showing Dashboard: a dead end. They now go to log in, and back to the page.
 import { loginHref } from "../components/auth-redirect.ts";
 
@@ -12,7 +12,7 @@ function check(name: string, ok: boolean, detail: unknown = "") {
 
 const location = { href: "http://localhost/pricing?currency=EUR", pathname: "/pricing", search: "?currency=EUR" };
 Object.assign(globalThis, { window: { location } });
-let answer: { status: number; body: unknown } = { status: 401, body: { error: "Sign in first." } };
+let answer: { status: number; body: unknown } = { status: 401, body: { error: "Log in first." } };
 globalThis.fetch = (async () => new Response(JSON.stringify(answer.body), { status: answer.status })) as typeof fetch;
 const { startCheckout } = await import("../components/BillingClient.tsx");
 
