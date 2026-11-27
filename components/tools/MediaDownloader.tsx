@@ -119,6 +119,8 @@ function writeSmaller(on: boolean) {
 /** Give up on a stuck worker job rather than spinning forever. */
 const POLL_DEADLINE_MS = 20 * 60 * 1000;
 const POLL_MAX_FAILURES = 6;
+/** Lookup answers that mean the link itself is wrong: not found, gone or unreadable. */
+const LINK_STATUSES = [400, 404, 410, 422];
 
 /** An error whose message is ours and safe to show as is. */
 class Shown extends Error {}
@@ -177,6 +179,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [height, setHeight] = useState<number>(config.defaultHeight ?? 720);
   const [error, setError] = useState<string | null>(null);
   /** A link that goes with one error message (shown only while that message is). */
+  /** The error is about the link itself, so the field is marked with it. */
+  const [linkError, setLinkError] = useState(false);
   const [errorLink, setErrorLink] = useState<{ message: string; href: string } | null>(null);
   /** `detail` replaces the stage's label on screen (not for screen readers, who hear stage changes only). */
   const [progress, setProgress] = useState<{ value: number; stage: string; detail?: string }>({ value: 0, stage: "queued" });
@@ -286,6 +290,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       if (!playlist) {
         const problem = mediaLinkProblem(target, kind);
         setError(problem ?? PLATFORM_ASK[config.platform]);
+        setLinkError(true);
         // A photo post's sound: the Sample Finder reads it, so the message links there.
         const photo = problem === PHOTO_POST_SOUND ? tiktokPhotoLink(target) : null;
         if (photo) setErrorLink({ message: problem!, href: finderForLink(`https://www.tiktok.com/@${photo.user}/photo/${photo.id}`) });
@@ -307,6 +312,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     if (!alive.current || seq !== lookupSeq.current) return;
     if (!res?.ok) {
       setError(data?.error ?? (res ? "Couldn't read that link." : "You're offline. Check your connection."));
+      // Not a busy site, a switched-off service or being offline: those aren't the link's fault.
+      setLinkError(!!res && LINK_STATUSES.includes(res.status));
       if (!auto) focusNext.current = "url";
       flow.release();
       setPhase("input");
@@ -343,6 +350,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       if (text) setUrl(linkIn(text));
     } catch {
       setError(pasteBlockedMessage());
+      setLinkError(false);
     }
   }
 
@@ -718,11 +726,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   id="media-url"
                   ref={focusRef("url")}
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setError(null);
+                  }}
                   readOnly={loading}
-                  // An error under the form is about this link while the form shows.
-                  aria-invalid={error ? true : undefined}
-                  aria-describedby={error ? "media-error" : undefined}
+                  aria-invalid={error && linkError ? true : undefined}
+                  aria-describedby={error && linkError ? "media-error" : undefined}
                   placeholder={PLATFORM_PLACEHOLDER[config.platform]}
                   inputMode="url"
                   autoComplete="off"
