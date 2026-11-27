@@ -13,12 +13,13 @@
  * again, on every request the page makes.
  */
 import "server-only";
+import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { z } from "zod";
 import { refuseCrossSite } from "./cross-site";
 import { limitsFor, type Tier } from "./limits";
-import { signToken, WORKER_CONFIG_HELP, type WorkerConfig } from "./media-server";
-import { newGrantRef } from "./media-refund";
+import { signToken, verifyToken, WORKER_CONFIG_HELP, type WorkerConfig } from "./media-server";
+import { grantRef, newGrantRef, REFUND_GRACE_SECONDS, type GrantRef } from "./media-refund";
 import {
   WEB_PDF_BURST_MESSAGE,
   WEB_PDF_BUSY_MESSAGE,
@@ -26,6 +27,9 @@ import {
   claimWebPdfLink,
   consumeWebPdf,
   dailyLeft,
+  periodStart,
+  refundWebPdf,
+  usageStore,
   usageSubject,
   type UsageStore,
 } from "./usage";
@@ -62,6 +66,15 @@ const bodySchema = z.discriminatedUnion("mode", [
 ]);
 
 const NO_STORE = { "Cache-Control": "no-store" };
+
+/**
+ * The grants' key, derived from the shared secret (media-worker/render.py
+ * derives the same), so a page grant never passes for a download or a
+ * conversion grant, or the other way round.
+ */
+export function renderKey(secret: string): string {
+  return createHmac("sha256", secret).update("pdf-wizard/render-grant/v1").digest("base64url");
+}
 
 /**
  * What a grant says, in the short keys media-worker/render.py reads: k the
@@ -150,6 +163,75 @@ export async function handleWebPdfLink(request: Request, deps: WebPdfDeps): Prom
   // Spent here, so a race at the limit is still refused.
   const claim = await consumeWebPdf(subject, tier, { env: deps.env, store: deps.store });
   if (!claim.ok) return claim.reason === "quota" ? spent() : fail(503, WEB_PDF_BUSY_MESSAGE, { reason: "busy" });
-  const token = signToken(webPdfGrant(page, body.options, limits.webPdfPages, { s: subject, c: newGrantRef(), t: made }), config.secret);
+  const token = signToken(webPdfGrant(page, body.options, limits.webPdfPages, { s: subject, c: newGrantRef(), t: made }), renderKey(config.secret));
   return Response.json({ workerUrl: config.url, token, remaining: claim.remaining, pages: limits.webPdfPages }, { headers: NO_STORE });
+}
+
+/* ------------------------------------------------------------------ */
+/* Refunds                                                             */
+/* ------------------------------------------------------------------ */
+
+/** Tries a day one person or guest address is given back. */
+export const WEB_PDF_REFUNDS_PER_DAY = 10;
+
+export type RenderVerdict = "refundable" | "kept" | "unknown";
+
+/**
+ * Voids the grant at the worker (it can no longer start a job) and asks how
+ * it ended. "refundable": the worker never started it, or the page never
+ * loaded (refused by our address rules, not found, refused the connection,
+ * answered with an error, or our own failure), or it was cancelled before
+ * the page was opened. Anything that held a browser (a site that never
+ * answered, a page that loaded and was then too big, too slow or used too
+ * much memory, or a cancel after it opened) is kept: giving those back would
+ * let anyone tie the worker up for free. A worker that doesn't answer, or
+ * restarted since the grant, may have run it: "unknown", kept.
+ */
+export async function askRenderWorker(workerUrl: string, secret: string, ref: GrantRef, fetcher: typeof fetch = fetch): Promise<RenderVerdict> {
+  let res: Response;
+  try {
+    res = await fetcher(`${workerUrl}/render/refs/${encodeURIComponent(ref.c)}/void`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(10_000),
+      cache: "no-store",
+    });
+  } catch {
+    return "unknown";
+  }
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok || !body || typeof body.used !== "boolean") return "unknown";
+  if (!body.used) return typeof body.since === "number" && body.since < ref.t ? "refundable" : "unknown";
+  return body.status === "error" && body.refundable === true ? "refundable" : "kept";
+}
+
+export interface WebPdfRefundDeps {
+  config: () => WorkerConfig;
+  store?: UsageStore;
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+/**
+ * POST /api/render/refund: gives a try back when the worker says it never
+ * loaded the page (askRenderWorker), once per grant, on the day it was
+ * counted, at most WEB_PDF_REFUNDS_PER_DAY a day for one person.
+ */
+export async function handleWebPdfRefund(request: Request, deps: WebPdfRefundDeps): Promise<Response> {
+  const refused = refuseCrossSite(request);
+  if (refused) return refused;
+  const config = deps.config();
+  const parsed = z.object({ token: z.string().min(10).max(4000) }).safeParse(await request.json().catch(() => null));
+  if (!parsed.success || !config.ok) return Response.json({ refunded: false }, { status: 400, headers: NO_STORE });
+  const payload = verifyToken<Record<string, unknown>>(parsed.data.token, renderKey(config.secret), REFUND_GRACE_SECONDS);
+  const ref = payload?.k === "render" ? grantRef(payload) : null;
+  if (!ref) return Response.json({ refunded: false }, { status: 400, headers: NO_STORE });
+  const now = (deps.now ?? Date.now)();
+  const store = deps.store ?? usageStore();
+  const verdict = await askRenderWorker(config.url, config.secret, ref, deps.fetch);
+  if (verdict !== "refundable") return Response.json({ refunded: false }, { status: 409, headers: NO_STORE });
+  // After midnight that day's allowance is gone anyway.
+  if (periodStart("day", ref.t * 1000) !== periodStart("day", now)) return Response.json({ refunded: false }, { headers: NO_STORE });
+  const refunded = await refundWebPdf(store, ref.s, ref.c, WEB_PDF_REFUNDS_PER_DAY);
+  return Response.json({ refunded }, { headers: NO_STORE });
 }

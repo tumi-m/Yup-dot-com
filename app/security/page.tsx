@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BUSINESS, SECURITY_EMAIL } from "@/lib/business";
 import { LegalPage, Section } from "@/components/legal/LegalPage";
 import { OFFICE_ENABLED } from "@/lib/office";
+import { HTML_TO_PDF_ENABLED } from "@/lib/web-pdf";
 
 // Its own title and description on shared links too, not the home page's.
 export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
@@ -31,6 +32,13 @@ export default function SecurityPage() {
             <li>
               Word to PDF and Excel to PDF upload the file to our conversion server, which checks it, converts it with
               macros off and no links followed, and deletes it with the PDF as soon as the PDF is sent back.
+            </li>
+          )}
+          {HTML_TO_PDF_ENABLED && (
+            <li>
+              HTML to PDF sends the web address, or the HTML you upload or paste (not the file&apos;s name), to our server,
+              which opens it in a browser with no cookies or sign-in that can&apos;t reach private or local network
+              addresses, and deletes the PDF as soon as it is sent back.
             </li>
           )}
           <li>

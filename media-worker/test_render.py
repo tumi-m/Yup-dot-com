@@ -27,6 +27,9 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 os.environ.setdefault("RENDER_LOAD_SECONDS", "6")
+# Secrets that must never reach the browser's (or its driver's) environment.
+os.environ["MEDIA_WORKER_SECRET"] = "render-test-secret-do-not-leak"
+os.environ["YTDLP_PROXY"] = "http://user:proxy-password-do-not-leak@proxy.test:1"
 os.environ.setdefault("RENDER_MAX_SECONDS", "25")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import render  # noqa: E402
@@ -201,6 +204,12 @@ def public_handler(port_of):
             if route == "/js-away":
                 to = path.split("to=", 1)[1]
                 return self.send(page("Stays", f'<h1>Stays put</h1><script>setTimeout(() => {{ location.href = "{to}"; }}, 50);</script>'))
+            if route == "/memory":
+                # Typed arrays live outside JavaScript's heap: only the memory watch stops this.
+                body = ('<h1 id=h>x</h1><script>const keep = []; let n = 0;'
+                        'try { for (; n < 12; n++) { const b = new Uint8Array(256 * 1024 * 1024); for (let i = 0; i < b.length; i += 4096) b[i] = 1; keep.push(b); } } catch (e) {}'
+                        'h.textContent = "allocated MB " + n * 256;</script>')
+                return self.send(page("Memory", body))
             if route == "/elsewhere":
                 return self.send(page("Elsewhere", "<h1>Navigated away</h1>"))
             self.send(b"not found", status=404, ctype="text/plain")
@@ -301,12 +310,12 @@ def url(path: str, host: str = "public.test", port: int | None = None) -> str:
     return f"http://{host}:{port or PORTS['public']}{path}"
 
 
-def run_job(target=None, html=None, name=None, options=None, pages=100, wait=40.0):
+def run_job(target=None, html=None, options=None, pages=100, wait=40.0):
     grant = {"k": "render", "m": "html" if html is not None else "url", "o": options or {"f": "a4", "g": "small", "b": 1, "p": "screen"}, "x": pages}
     if target:
         grant["u"] = target
     started = time.monotonic()
-    job = render.service.submit(grant, html, name)
+    job = render.service.submit(grant, html)
     while job["status"] == "working" and time.monotonic() - started < wait:
         time.sleep(0.1)
     job["elapsed"] = time.monotonic() - started
@@ -370,16 +379,31 @@ class AddressTests(unittest.TestCase):
     def test_grants(self):
         html = "<p>hi</p>"
         good = {"k": "render", "m": "html", "n": len(html), "d": hashlib.sha256(html.encode()).hexdigest()}
-        self.assertIsNone(render._grant_problem(good, html, "a.html"))
-        self.assertIsNotNone(render._grant_problem({**good, "d": "0" * 64}, html, None))
-        self.assertIsNotNone(render._grant_problem(good, html + " ", None))
-        self.assertIsNotNone(render._grant_problem({**good, "k": "mp4"}, html, None))
-        self.assertIsNone(render._grant_problem({"k": "render", "m": "url", "u": "https://example.com/"}, None, None))
+        self.assertIsNone(render._grant_problem(good, html))
+        self.assertIsNotNone(render._grant_problem({**good, "d": "0" * 64}, html))
+        self.assertIsNotNone(render._grant_problem(good, html + " "))
+        self.assertIsNotNone(render._grant_problem({**good, "k": "mp4"}, html))
+        self.assertIsNone(render._grant_problem({"k": "render", "m": "url", "u": "https://example.com/"}, None))
         for bad in ["file:///etc/passwd", "ftp://example.com/", "javascript:alert(1)", "https://user:pw@example.com/", "data:text/html,hi", "chrome://settings"]:
             with self.subTest(url=bad):
-                self.assertIsNotNone(render._grant_problem({"k": "render", "m": "url", "u": bad}, None, None))
+                self.assertIsNotNone(render._grant_problem({"k": "render", "m": "url", "u": bad}, None))
         big = "x" * (render.MAX_HTML + 1)
-        self.assertIsNotNone(render._grant_problem({**good, "n": len(big), "d": hashlib.sha256(big.encode()).hexdigest()}, big, None))
+        self.assertIsNotNone(render._grant_problem({**good, "n": len(big), "d": hashlib.sha256(big.encode()).hexdigest()}, big))
+
+    def test_grants_have_their_own_key(self):
+        import base64
+        import hmac as _hmac
+        import json as _json
+
+        def sign(payload, key):
+            body = base64.urlsafe_b64encode(_json.dumps(payload).encode()).rstrip(b"=").decode()
+            sig = base64.urlsafe_b64encode(_hmac.new(key, body.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+            return f"{body}.{sig}"
+        payload = {"k": "render", "m": "url", "u": "https://example.com/", "e": time.time() + 60}
+        self.assertIsNotNone(render.verify_grant(sign(payload, render.GRANT_KEY))[0])
+        # Signed with the shared secret itself, as download grants are: refused.
+        self.assertEqual(render.verify_grant(sign(payload, render.SECRET)), (None, "bad-signature"))
+        self.assertEqual(render.verify_grant(sign({**payload, "e": time.time() - 1}, render.GRANT_KEY)), (None, "expired"))
 
 
 async def socks_connect(port: int, host: str, target_port: int, request: bytes | None = None):
@@ -656,6 +680,62 @@ class BrowserTests(unittest.TestCase):
         second = self.ready(run_job(url("/storage")))
         self.assertEqual((first["filename"], second["filename"]), ("visit 1.pdf", "visit 1.pdf"))
 
+    def test_memory_is_capped(self):
+        before = render.service.memory_kills
+        job = self.failed(run_job(url("/memory")), "more memory than we allow")
+        self.assertGreater(render.service.memory_kills, before)
+        self.assertFalse(job.get("refundable"))
+        # The browser is still there for the next page.
+        self.ready(run_job(url("/ok")))
+        self.assertEqual(render.health()["renderMemoryMb"], render.MAX_MEMORY_MB)
+
+    def test_no_secret_in_the_browser_environment(self):
+        self.ready(run_job(url("/ok")))
+        seen = 0
+        for pid in render._descendants(os.getpid()):
+            try:
+                with open(f"/proc/{pid}/environ", "rb") as f:
+                    env = f.read()
+            except OSError:
+                continue
+            seen += 1
+            self.assertNotIn(b"render-test-secret-do-not-leak", env, pid)
+            self.assertNotIn(b"proxy-password-do-not-leak", env, pid)
+        self.assertGreater(seen, 2)  # the driver, Chromium and its renderers
+        self.assertEqual(os.environ["MEDIA_WORKER_SECRET"], "render-test-secret-do-not-leak")
+
+    def test_what_is_given_back(self):
+        H = PORTS["hostile"]
+        self.assertTrue(self.failed(run_job(f"http://127.0.0.1:{H}/"), "private")["refundable"])
+        self.assertTrue(self.failed(run_job("http://nowhere.test/"), "couldn't find")["refundable"])
+        self.assertTrue(self.failed(run_job(url("/auth")), "sign-in")["refundable"])
+        self.assertTrue(self.failed(run_job(url("/redirect?to=http://169.254.169.254/")), "private")["refundable"])
+        # It held a browser while it waited: kept.
+        self.assertFalse(self.failed(run_job(url("/hang-headers")), "too long")["refundable"])
+        self.assertNotIn("refundable", self.ready(run_job(url("/ok"))))
+
+    def test_queued_only_when_waiting(self):
+        def stages(job):
+            seen = []
+            while job["status"] == "working":
+                if not seen or seen[-1] != job["stage"]:
+                    seen.append(job["stage"])
+                time.sleep(0.02)
+            return seen
+        idle = render.service.submit({"k": "render", "m": "url", "u": url("/ok"), "o": {}, "x": 5}, None)
+        self.assertNotIn("queued", stages(idle))
+        busy = [render.service.submit({"k": "render", "m": "url", "u": url("/hang-headers"), "o": {}, "x": 5}, None) for _ in range(render.MAX_CONCURRENT)]
+        time.sleep(0.5)
+        waiting = render.service.submit({"k": "render", "m": "url", "u": url("/ok"), "o": {}, "x": 5}, None)
+        time.sleep(0.3)
+        self.assertEqual(waiting["stage"], "queued")
+        for j in busy:
+            render.service.cancel(j)
+        stages(waiting)
+        self.assertEqual(waiting["status"], "ready", waiting.get("error"))
+        # Cancelled after the page was opened: kept.
+        self.assertTrue(all(j["refundable"] is False for j in busy))
+
     def test_sign_in_pages(self):
         self.failed(run_job(url("/auth")), "needs a sign-in")
         self.assertFalse(any("Authorization" in h for _, p, h in PUBLIC.hits if p == "/auth"))
@@ -669,8 +749,8 @@ class BrowserTests(unittest.TestCase):
                 f'<img src="http://127.0.0.1:{H}/img.png"><img src="{url("/pixel.png?pasted=1")}"><img src="local.png">'
                 f'<iframe src="file:///etc/passwd"></iframe><script>fetch("http://169.254.169.254/").catch(() => {{}});</script>'
                 f'<meta http-equiv="refresh" content="0;url={url("/elsewhere")}">')
-        job = self.ready(run_job(html=html, name="My page.html"))
-        self.assertEqual(job["filename"], "My page.pdf")
+        job = self.ready(run_job(html=html))
+        self.assertEqual(job["filename"], "Pasted.pdf")
         time.sleep(0.3)
         self.assertIn("/pixel.png?pasted=1", PUBLIC.paths())
         self.assertNotIn("/elsewhere", PUBLIC.paths())
@@ -682,7 +762,7 @@ class BrowserTests(unittest.TestCase):
 
     def test_cancel(self):
         started = time.monotonic()
-        job = render.service.submit({"k": "render", "m": "url", "u": url("/hang-headers"), "o": {}, "x": 10}, None, None)
+        job = render.service.submit({"k": "render", "m": "url", "u": url("/hang-headers"), "o": {}, "x": 10}, None)
         time.sleep(1)
         render.service.cancel(job)
         while time.monotonic() - started < 10 and "finished" not in job:

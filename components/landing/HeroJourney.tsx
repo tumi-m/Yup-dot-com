@@ -51,6 +51,7 @@ import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
 import { takePdfs } from "./hero-actions";
 import { OFFICE_ENABLED, officeToolFor } from "@/lib/office";
+import { dropHint, HTML_TO_PDF_ENABLED, isHtmlFile } from "@/lib/web-pdf";
 import { fileToHandoff, tryHandoff } from "@/lib/local-store";
 import type { Tier } from "@/lib/limits";
 
@@ -153,7 +154,15 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
         );
         return;
       }
-      setDropError(OFFICE_ENABLED ? "Drop a PDF, image, text, Word, Excel or PPTX file." : "Drop a PDF, image, text file or PPTX.");
+      // An HTML file goes to HTML to PDF, the first one only.
+      if (HTML_TO_PDF_ENABLED && isHtmlFile(files[0])) {
+        setDropError(null);
+        void tryHandoff([fileToHandoff(files[0], files[0].name)]).then((ok) =>
+          ok ? router.push("/tools/html-to-pdf?handoff=1") : setDropError("Couldn't open that file here. Open it from the tool's page.")
+        );
+        return;
+      }
+      setDropError(dropHint(OFFICE_ENABLED, HTML_TO_PDF_ENABLED));
       return;
     }
     setDropError(null);

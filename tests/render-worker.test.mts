@@ -21,11 +21,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { signToken } from "../lib/media-server.ts";
-import { webPdfGrant } from "../lib/web-pdf-route.ts";
+import { renderKey, webPdfGrant } from "../lib/web-pdf-route.ts";
 import { DEFAULT_OPTIONS, type WebPdfOptions } from "../lib/web-pdf.ts";
 
 const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const SECRET = "render-test-" + Math.random().toString(36).slice(2);
+// Page grants are signed with their own key, as the route signs them.
+const KEY = renderKey(SECRET);
 const results: boolean[] = [];
 const check = (name: string, ok: boolean, extra = "") => {
   results.push(ok);
@@ -102,10 +104,10 @@ for (let i = 0; i < 100; i++) {
 let refs = 0;
 const ref = () => ({ s: "ip:test", c: `grant-render-${String(++refs).padStart(4, "0")}`, t: Math.floor(Date.now() / 1000) });
 const urlToken = (u: string, options: Partial<WebPdfOptions> = {}, pages = 50) =>
-  signToken(webPdfGrant({ u }, { ...DEFAULT_OPTIONS, ...options }, pages, ref()), SECRET);
+  signToken(webPdfGrant({ u }, { ...DEFAULT_OPTIONS, ...options }, pages, ref()), KEY);
 const htmlToken = (html: string, pages = 50) => {
   const data = Buffer.from(html);
-  return signToken(webPdfGrant({ n: data.length, d: createHash("sha256").update(data).digest("hex") }, DEFAULT_OPTIONS, pages, ref()), SECRET);
+  return signToken(webPdfGrant({ n: data.length, d: createHash("sha256").update(data).digest("hex") }, DEFAULT_OPTIONS, pages, ref()), KEY);
 };
 
 async function start(body: Record<string, unknown>) {
@@ -173,9 +175,9 @@ try {
 
   // Pasted HTML.
   const pasted = `<title>Pasted</title><h1>Pasted HTML — élève</h1><img src="http://127.0.0.1:${hostilePort}/pixel"><iframe src="file://${join(dir, "secret.txt")}"></iframe>`;
-  const html = await run({ token: htmlToken(pasted), html: pasted, name: "Lesson plan.html" });
+  const html = await run({ token: htmlToken(pasted), html: pasted });
   const htmlText = html.pdf ? await text(html.pdf) : null;
-  check("pasted HTML comes back as a PDF, named after its file", html.state?.status === "ready" && html.state.filename === "Lesson plan.pdf" && !!htmlText && htmlText.text.includes("Pasted HTML — élève"), JSON.stringify(html.state));
+  check("pasted HTML comes back as a PDF, named after its title (no file name is sent)", html.state?.status === "ready" && html.state.filename === "Pasted.pdf" && !!htmlText && htmlText.text.includes("Pasted HTML — élève"), JSON.stringify(html.state));
   check("and nothing local or private was read into it", !!htmlText && !htmlText.text.includes(MARKER) && !htmlText.text.includes("SECRET"), htmlText?.text);
   check("HTML that isn't what the grant was made for is refused", (await start({ token: htmlToken(pasted), html: pasted + " " })).status === 400);
   const tooBig = "x".repeat(5 * 1024 * 1024 + 1);
@@ -197,18 +199,40 @@ try {
   check("a grant edited to another address is refused", (await start({ token: swapped })).status === 401);
   const wrong = await start({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, ref()), "wrong") });
   check("a grant signed with another secret is refused as such", wrong.status === 401 && wrong.body.code === "bad-signature", JSON.stringify(wrong.body));
-  const expired = await start({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, ref()), SECRET, -5) });
+  const expired = await start({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, ref()), KEY, -5) });
   check("an expired grant is refused as expired", expired.status === 401 && expired.body.code === "expired", JSON.stringify(expired.body));
   const video = await start({ token: signToken({ u: site("/article"), k: "mp4", h: 720 }, SECRET) });
-  check("a video download grant can't make a PDF", video.status === 400, JSON.stringify(video.body));
-  const credentials = await start({ token: signToken({ ...webPdfGrant({ u: "http://user:pw@example.com/" }, DEFAULT_OPTIONS, 50, ref()) }, SECRET) });
+  check("a video download grant can't make a PDF (another key)", video.status === 401 && video.body.code === "bad-signature", JSON.stringify(video.body));
+  const shared = await start({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, ref()), SECRET) });
+  check("a page grant signed with the shared secret itself is refused", shared.status === 401, JSON.stringify(shared.body));
+  const otherKind = await start({ token: signToken({ u: site("/article"), k: "mp4", h: 720 }, KEY) });
+  check("a grant of another kind under the page key is refused", otherKind.status === 400, JSON.stringify(otherKind.body));
+  const credentials = await start({ token: signToken({ ...webPdfGrant({ u: "http://user:pw@example.com/" }, DEFAULT_OPTIONS, 50, ref()) }, KEY) });
   check("an address with a user name and password is refused", credentials.status === 400, JSON.stringify(credentials.body));
-  const fileUrl = await start({ token: signToken({ ...webPdfGrant({ u: "file:///etc/passwd" }, DEFAULT_OPTIONS, 50, ref()) }, SECRET) });
+  const fileUrl = await start({ token: signToken({ ...webPdfGrant({ u: "file:///etc/passwd" }, DEFAULT_OPTIONS, 50, ref()) }, KEY) });
   check("a file:// address is refused", fileUrl.status === 400, JSON.stringify(fileUrl.body));
   const once = urlToken(site("/article"));
   const first = await start({ token: once });
   const second = await start({ token: once });
   check("one grant, one PDF", first.status === 202 && second.status === 409 && second.body.code === "used", JSON.stringify(second.body));
+
+  // Refunds: the worker voids a grant and says how its job ended.
+  const voidRef = (c: string, auth = `Bearer ${SECRET}`) =>
+    fetch(`${W}/render/refs/${c}/void`, { method: "POST", headers: { Authorization: auth } }).then(async (r) => ({ status: r.status, body: (await r.json()) as Record<string, any> }));
+  check("voiding needs the shared secret", (await voidRef("grant-render-none", "Bearer wrong")).status === 401);
+  const never = await voidRef("grant-render-none");
+  check("a grant never used reads as unused, with when the worker started", never.status === 200 && never.body.used === false && typeof never.body.since === "number", JSON.stringify(never.body));
+  const voidedGrant = { s: "ip:test", c: "grant-render-none", t: Math.floor(Date.now() / 1000) };
+  const late = await start({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, voidedGrant), KEY) });
+  check("a voided grant can't start a job afterwards", late.status === 409, JSON.stringify(late.body));
+  const blockedRef = ref();
+  await run({ token: signToken(webPdfGrant({ u: site("/to-private") }, DEFAULT_OPTIONS, 50, blockedRef), KEY) });
+  const blockedVoid = await voidRef(blockedRef.c);
+  check("a page our rules refused is given back", blockedVoid.body.used === true && blockedVoid.body.status === "error" && blockedVoid.body.refundable === true, JSON.stringify(blockedVoid.body));
+  const madeRef = ref();
+  await run({ token: signToken(webPdfGrant({ u: site("/article") }, DEFAULT_OPTIONS, 50, madeRef), KEY) });
+  const madeVoid = await voidRef(madeRef.c);
+  check("a PDF that was made isn't", madeVoid.body.used === true && madeVoid.body.status === "ready" && madeVoid.body.refundable === false, JSON.stringify(madeVoid.body));
 
   // Cancel.
   const slow = await start({ token: urlToken(site("/slow")) });

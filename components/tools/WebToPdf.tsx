@@ -18,7 +18,7 @@ import { trackToolUsed } from "@/lib/analytics";
 import { pasteBlockedMessage } from "@/lib/clipboard";
 import { LIMITS, type Tier } from "@/lib/limits";
 import { linkIn } from "@/lib/media";
-import { fileToHandoff, tryHandoff } from "@/lib/local-store";
+import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/local-store";
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { cn, formatBytes } from "@/lib/utils";
 import {
@@ -147,12 +147,28 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
   const abort = useRef<AbortController | null>(null);
   /** The worker's job, so Cancel (or leaving) can stop it. */
   const job = useRef<{ workerUrl: string; id: string } | null>(null);
+  /** The run's grant until it has a PDF: a try that fails may be given back. */
+  const grantToken = useRef<string | null>(null);
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
   const { next: focusNext, focusRef } = useFocusNext<"input" | "progress" | "done">();
   const flow = useHeightLock<HTMLDivElement>();
 
   // Options from the last visit, and the paper this visitor's country uses.
   useEffect(() => setOptions(loadOptions()), []);
+
+  // An .html file dropped on the homepage.
+  useEffect(() => {
+    if (params.get("handoff") !== "1") return;
+    takeHandoff()
+      .then((handed) => {
+        const html = handed.find((h) => HTML_NAME.test(h.name) || h.type === "text/html");
+        if (!html) return;
+        setSource("file");
+        void chooseFile([handoffToFile(html)]);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ?url= fills in the box; it never starts by itself.
   useEffect(() => {
@@ -188,10 +204,26 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
   /** Focus is in this tool (or was dropped to the page by a view that left it). */
   const focusHere = () => document.activeElement === document.body || !!flow.ref.current?.contains(document.activeElement);
 
+  /** Asks for a failed or cancelled try back (/api/render/refund decides). True if it was. */
+  async function giveBack(): Promise<boolean> {
+    const token = grantToken.current;
+    grantToken.current = null;
+    if (!token) return false;
+    const res = await fetch("/api/render/refund", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      keepalive: true,
+    }).catch(() => null);
+    return !!(await res?.json().catch(() => null))?.refunded;
+  }
+
+  /** Stops the worker's job, then asks for the try back. */
   function stopJob() {
     const j = job.current;
     job.current = null;
-    if (j) void fetch(`${j.workerUrl}/render/${j.id}`, { method: "DELETE", keepalive: true }).catch(() => null);
+    const stopped = j ? fetch(`${j.workerUrl}/render/${j.id}`, { method: "DELETE", keepalive: true }).catch(() => null) : Promise.resolve(null);
+    void stopped.then(() => giveBack());
   }
 
   async function chooseFile(list: FileList | File[] | null) {
@@ -230,6 +262,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
     setNextFailed(null);
     let body: Record<string, unknown>;
     let html: string | null = null;
+    // An uploaded file's PDF is named here, after it: the name isn't sent anywhere.
     let name: string | null = null;
     if (source === "url") {
       const checked = webPageUrl(linkIn(url));
@@ -241,7 +274,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
       body = { mode: "url", url: checked.url, options };
     } else {
       html = source === "file" ? (file?.html ?? "") : wellFormed(pasted);
-      name = source === "file" ? (file?.name ?? null) : null;
+      name = source === "file" && file ? `${file.name.replace(HTML_NAME, "").trim() || "page"}.pdf` : null;
       if (!html.trim()) {
         setError({ message: source === "file" ? "Choose an .html file." : "Paste some HTML first." });
         return;
@@ -265,8 +298,10 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
     setProgress(0.02);
     setPhase("working");
     try {
-      const made = await makePdf(body, html, name, signal);
+      const made = await makePdf(body, html, signal);
       if (!made || signal.aborted) return;
+      grantToken.current = null;
+      if (name) made.name = name;
       setProgress(1);
       if (!reduce) await sleep(PROGRESS_HOLD_MS, signal);
       if (signal.aborted) return;
@@ -281,7 +316,9 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
     } catch (err) {
       if (signal.aborted) return;
       const shown = err instanceof Shown ? err : new Shown("Couldn't make a PDF of this page. Try again.");
-      setError({ message: shown.message, upgrade: shown.upgrade });
+      const back = await giveBack();
+      if (signal.aborted) return;
+      setError({ message: back ? `${shown.message} This try wasn't counted.` : shown.message, upgrade: shown.upgrade });
       if (hadFocus || focusHere()) focusNext.current = "input";
       flow.release();
       setPhase("input");
@@ -291,7 +328,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
   }
 
   /** The grant, the worker's job, then the file. Null when cancelled. */
-  async function makePdf(body: Record<string, unknown>, html: string | null, name: string | null, signal: AbortSignal) {
+  async function makePdf(body: Record<string, unknown>, html: string | null, signal: AbortSignal) {
     const res = await fetch("/api/render/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -308,13 +345,15 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
       throw new Shown(grant?.error ?? (res ? "Couldn't make a PDF of this page. Try again." : "You're offline. Check your connection."));
     }
     const workerUrl: string = grant.workerUrl;
-    setStage(html !== null ? "sending" : "queued");
+    grantToken.current = grant.token;
+    // "Waiting for a free browser" only once the worker says the job waits.
+    setStage(html !== null ? "sending" : "loading");
     setProgress(0.05);
     // Not aborted on Cancel: the answer is needed to stop the job it may have started.
     const created = await fetch(`${workerUrl}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(html !== null ? { token: grant.token, html, name } : { token: grant.token }),
+      body: JSON.stringify(html !== null ? { token: grant.token, html } : { token: grant.token }),
     }).catch(() => null);
     const made = await created?.json().catch(() => null);
     if (made?.id) job.current = { workerUrl, id: made.id };
@@ -346,6 +385,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
         throw new Shown(s.error ?? "Couldn't make a PDF of this page. Try again.");
       }
       if (s.stage === "queued" || s.stage === "loading" || s.stage === "printing") setStage(s.stage);
+      else if (s.stage === "starting") setStage("loading");
       // The worker's share of the bar: 5% to 92%.
       setProgress((p) => Math.max(p, 0.05 + Math.min(1, Number(s.progress) || 0) * 0.87));
       if (s.status === "ready") {
@@ -510,8 +550,8 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                           <motion.span layoutId="web-pdf-source" className="absolute inset-0 bg-background shadow" style={{ borderRadius: 8 }} transition={SPRING_LAYOUT} />
                         )}
                         <span className="relative z-[1] flex items-center gap-1.5">
-                          {/* Left out on the narrowest phones, so the three labels fit. */}
-                          <Icon aria-hidden className="h-4 w-4 max-[380px]:hidden" />
+                          {/* Left out on phones, so the three labels fit in their tabs. */}
+                          <Icon aria-hidden className="hidden h-4 w-4 sm:block" />
                           {label}
                         </span>
                       </Tabs.Trigger>
@@ -539,7 +579,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                         spellCheck={false}
                         disabled={working}
                         aria-invalid={shownUrlProblem ? true : undefined}
-                        aria-describedby={shownUrlProblem ? "web-pdf-url-hint" : undefined}
+                        aria-describedby={error ? "web-pdf-error" : shownUrlProblem ? "web-pdf-url-hint" : undefined}
                         className="h-12 w-full rounded-xl border border-input bg-background pl-10 pr-24 text-base outline-none focus:ring-2 focus:ring-ring disabled:opacity-60 sm:text-sm"
                       />
                       <button
@@ -599,6 +639,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                             }}
                             className="tap rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             aria-label={`Remove ${file.name}`}
+                            aria-describedby={error ? "web-pdf-error" : undefined}
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -607,7 +648,13 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                     ) : (
                       <ToolDropzone label="Drop an .html file here" onFiles={(f) => void chooseFile(f)} icon={FileCode2} className="p-6 sm:p-8">
                         <p className="text-sm text-muted-foreground">or</p>
-                        <Button ref={focusRef("input")} type="button" className="mt-3 h-11" onClick={() => fileInput.current?.click()}>
+                        <Button
+                          ref={focusRef("input")}
+                          type="button"
+                          className="mt-3 h-11"
+                          aria-describedby={error ? "web-pdf-error" : undefined}
+                          onClick={() => fileInput.current?.click()}
+                        >
                           Choose file
                         </Button>
                       </ToolDropzone>
@@ -632,7 +679,7 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                       autoComplete="off"
                       disabled={working}
                       placeholder={"<h1>Hello</h1>\n<p>Paste a whole page or just a part of one.</p>"}
-                      aria-describedby="web-pdf-html-size"
+                      aria-describedby={error ? "web-pdf-html-size web-pdf-error" : "web-pdf-html-size"}
                       className="block w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-base leading-relaxed outline-none focus:ring-2 focus:ring-ring disabled:opacity-60 sm:text-sm"
                     />
                     <p id="web-pdf-html-size" className={cn("mt-1.5 text-xs tabular-nums", pastedBytes > MAX_HTML_BYTES ? "text-destructive" : "text-muted-foreground")}>
@@ -640,6 +687,21 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                     </p>
                   </Tabs.Content>
                 </Tabs.Root>
+
+                {/* Next to the field focus goes back to, so a phone shows both. */}
+                <div id="web-pdf-error">
+                  <AnimatePresence>
+                    {error && (
+                      <InlineError key="error" message={error.message} className="mt-3">
+                        {error.upgrade && !paid && (
+                          <Link href="/pricing" className="tap font-semibold underline underline-offset-2">
+                            Upgrade
+                          </Link>
+                        )}
+                      </InlineError>
+                    )}
+                  </AnimatePresence>
+                </div>
 
                 <div className="mt-4 rounded-2xl border border-border">
                   <button
@@ -789,18 +851,6 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
                   </AnimatePresence>
                 </div>
               </div>
-
-              <AnimatePresence>
-                {error && (
-                  <InlineError key="error" message={error.message}>
-                    {error.upgrade && !paid && (
-                      <Link href="/pricing" className="tap font-semibold underline underline-offset-2">
-                        Upgrade
-                      </Link>
-                    )}
-                  </InlineError>
-                )}
-              </AnimatePresence>
             </motion.form>
           )}
         </AnimatePresence>

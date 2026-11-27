@@ -200,8 +200,14 @@ the visitor's browser, and the page says so before anything is sent.
    checked by size (up to 5 MB) and only its SHA-256 is sent. Then the
    daily allowance (guest 5, free 15, Pro and Team 200; up to 50 pages a
    PDF free, 300 with Pro), 6 tries a minute per person and 3,000 a day
-   site-wide (`WEB_PDF_GLOBAL_DAILY_LIMIT`). Each try counts, even when the
-   site then fails: the worker did the work.
+   site-wide (`WEB_PDF_GLOBAL_DAILY_LIMIT`). Grants are signed with a key
+   derived for this feature alone, so they never pass for a download's or a
+   conversion's grant. A try that never opened the page (refused by our
+   address rules, not found, the connection refused, an error page, the
+   worker busy or failing, or cancelled before it started) is given back by
+   `POST /api/render/refund`, which asks the worker, once per grant and up to
+   10 a day per person; one that loaded, or kept a browser waiting for an
+   answer, counts.
 2. **The worker** verifies the grant, opens the page in a fresh browser
    context and prints it. Every connection the page makes goes through a
    proxy in the worker that checks the address it connects to, after DNS,

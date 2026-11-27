@@ -304,6 +304,13 @@ export default function PrivacyPage() {
               as it is sent to you.
             </li>
           )}
+          {HTML_TO_PDF_ENABLED && (
+            <li>
+              <strong>Web pages saved as PDF</strong>: the address or HTML, and the PDF, only in our server&apos;s memory
+              while the PDF is made; deleted as soon as it is sent to you, or after about two minutes if it isn&apos;t.
+              The name of an HTML file you upload stays in your browser.
+            </li>
+          )}
           <li>
             <strong>Sample Finder cache</strong>: songs looked up and their connections, up to 30 days; the title and
             channel of videos read (and a TikTok&apos;s sound), 7 days; never who asked.
