@@ -77,7 +77,7 @@ export interface Details {
 }
 
 /** The XMP packet for these details. */
-export function xmpPacket(part: Part, d: Details, ids: { document: string; instance: string }): Uint8Array {
+export function xmpPacket(part: Part, d: Details, ids: { document: string; instance: string }, identify = true): Uint8Array {
   const alt = (tag: string, v?: string) => (v ? `   <${tag}><rdf:Alt><rdf:li xml:lang="x-default">${xml(v)}</rdf:li></rdf:Alt></${tag}>\n` : "");
   const simple = (tag: string, v?: string) => (v ? `   <${tag}>${xml(v)}</${tag}>\n` : "");
   const desc = (ns: string, body: string) => `  <rdf:Description rdf:about="" ${ns}>\n${body}  </rdf:Description>\n`;
@@ -85,7 +85,7 @@ export function xmpPacket(part: Part, d: Details, ids: { document: string; insta
     `<?xpacket begin="${String.fromCharCode(0xfeff)}" id="W5M0MpCehiHzreSzNTczkc9d"?>\n` +
     `<x:xmpmeta xmlns:x="adobe:ns:meta/">\n` +
     ` <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n` +
-    desc('xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"', simple("pdfaid:part", String(part)) + simple("pdfaid:conformance", "B")) +
+    (identify ? desc('xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"', simple("pdfaid:part", String(part)) + simple("pdfaid:conformance", "B")) : "") +
     desc(
       'xmlns:dc="http://purl.org/dc/elements/1.1/"',
       simple("dc:format", "application/pdf") +
@@ -110,9 +110,10 @@ export function xmpPacket(part: Part, d: Details, ids: { document: string; insta
 /**
  * Writes the document's details into Info and a new XMP packet, both the
  * same, and gives the trailer a file identifier (keeping the first half of
- * an old one, which names the document across versions).
+ * an old one, which names the document across versions). `identify` false
+ * leaves out the PDF/A identification, for a file that doesn't meet it.
  */
-export function writeMetadata(doc: PDFDocument, part: Part, now = new Date()): Details {
+export function writeMetadata(doc: PDFDocument, part: Part, now = new Date(), identify = true): Details {
   const old = catalogXmp(doc);
   const read = (get: () => string | undefined) => {
     try {
@@ -155,7 +156,7 @@ export function writeMetadata(doc: PDFDocument, part: Part, now = new Date()): D
   const ctx = doc.context;
   const ids = { document: uuid(), instance: uuid() };
   // Uncompressed: PDF/A-1 asks for that, and anyone can read it.
-  doc.catalog.set(N("Metadata"), ctx.register(ctx.stream(xmpPacket(part, details, ids), { Type: "Metadata", Subtype: "XML" })));
+  doc.catalog.set(N("Metadata"), ctx.register(ctx.stream(xmpPacket(part, details, ids, identify), { Type: "Metadata", Subtype: "XML" })));
 
   const random = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
   const oldId = ctx.lookup(ctx.trailerInfo.ID);

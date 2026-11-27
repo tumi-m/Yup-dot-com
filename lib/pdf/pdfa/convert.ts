@@ -66,7 +66,13 @@ export interface PdfaFacts {
 export interface PdfaResult {
   bytes: Uint8Array;
   facts: PdfaFacts;
+  /** Our check, of the file as written with the PDF/A label. */
   checks: CheckResult[];
+  /**
+   * The file says it is PDF/A. False when our check found a rule not met:
+   * it is then written without the label, so it never claims what it isn't.
+   */
+  labelled: boolean;
 }
 
 export type Prepared =
@@ -267,6 +273,9 @@ export async function preparePdfa(bytes: Uint8Array, opts: PrepareOptions): Prom
   cleanObjects(doc, opts.part, facts.objects, attached);
   cleanCatalog(doc, opts.part, facts.objects, attached);
   dropDeadLinks(doc);
+  // Fonts pdf-lib drew new field and comment pictures with are only written
+  // into the file on saving: written now, so the fonts they draw with are read too.
+  await doc.flush();
   dropUnreachable(doc);
   stopIfAborted(opts.signal);
 
@@ -355,11 +364,18 @@ async function complete(doc: PDFDocument, facts: PdfaFacts, opts: Omit<PrepareOp
   progress(0.92, "Writing the PDF/A file…");
   // Every field is part of its page now, as a picture or flattened.
   doc.catalog.delete(N("AcroForm"));
-  writeMetadata(doc, facts.part);
+  const now = new Date();
+  writeMetadata(doc, facts.part, now);
   dropUnreachable(doc);
   stopIfAborted(opts.signal);
-  const bytes = await doc.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
+  const save = () => doc.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
+  let bytes = await save();
   progress(0.97, "Checking the result…");
   const checks = await checkPdfa(bytes, facts.part);
-  return { bytes, facts, checks };
+  if (checks.every((c) => c.ok)) return { bytes, facts, checks, labelled: true };
+  // A rule isn't met: the same fixes, but no claim to be PDF/A.
+  writeMetadata(doc, facts.part, now, false);
+  dropUnreachable(doc);
+  bytes = await save();
+  return { bytes, facts, checks, labelled: false };
 }
