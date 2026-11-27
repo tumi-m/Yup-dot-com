@@ -190,9 +190,10 @@ function wordsOf(text: string): string[] {
 }
 
 /**
- * Languages matching a search, best first: a name starting with it, then
- * any word of a name, native name or other name starting with it, then the
- * code. An empty search gives the whole list.
+ * Languages matching a search, best first: the English name starting with
+ * it ("swa" is Swahili before siSwati, also called Swati), then its own name
+ * or another name, then any word of them, then the code. An empty search
+ * gives the whole list.
  */
 export function searchLanguages(query: string, list: Language[] = LANGUAGES): Language[] {
   const q = fold(query.trim());
@@ -201,9 +202,10 @@ export function searchLanguages(query: string, list: Language[] = LANGUAGES): La
   for (const lang of list) {
     const names = [lang.name, lang.native, ...(lang.aka ?? [])];
     let rank = -1;
-    if (names.some((n) => fold(n).startsWith(q))) rank = 0;
-    else if (names.some((n) => wordsOf(n).some((w) => w.startsWith(q))) || wordsOf(names.join(" ")).join(" ").includes(q)) rank = 1;
-    else if (fold(lang.code) === q || fold(lang.code).startsWith(`${q}-`)) rank = 2;
+    if (fold(lang.name).startsWith(q)) rank = 0;
+    else if (names.some((n) => fold(n).startsWith(q))) rank = 1;
+    else if (names.some((n) => wordsOf(n).some((w) => w.startsWith(q))) || wordsOf(names.join(" ")).join(" ").includes(q)) rank = 2;
+    else if (fold(lang.code) === q || fold(lang.code).startsWith(`${q}-`)) rank = 3;
     if (rank >= 0) ranked.push({ lang, rank });
   }
   return ranked.sort((a, b) => a.rank - b.rank).map((r) => r.lang);

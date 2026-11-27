@@ -275,7 +275,8 @@ export function HeroDropzone({
             className={cn(
               "mt-3 grid gap-2",
               (actions.length === 0 || held.length > 0) && "hidden",
-              actions.length === 2 ? "grid-cols-2" : actions.length === 1 ? "grid-cols-1 sm:grid-cols-2" : actions.length % 3 === 0 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
+              // Twelve fill three rows of four on a wide screen, so the last row stays above the fold; three across on a phone.
+              actions.length === 2 ? "grid-cols-2" : actions.length === 1 ? "grid-cols-1 sm:grid-cols-2" : actions.length % 12 === 0 ? "grid-cols-3 sm:grid-cols-4" : actions.length % 3 === 0 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
             )}
           >
             {!held.length && actions.map((slug, i) => {

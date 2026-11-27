@@ -32,8 +32,33 @@ Rules:
 - A passage already in the target language, or with nothing to translate, comes back unchanged.
 - Never add explanations, alternatives or transliterations.`;
 
-/** Room for the longest answer: scripts like Devanagari take several tokens a character. */
+/** The most an answer may run to: a full request into a script like Devanagari, which takes several tokens a character. */
 const MAX_ANSWER_TOKENS = 8192;
+/** The least: room for a short answer after the model's hidden reasoning. */
+const MIN_ANSWER_TOKENS = 1536;
+
+/**
+ * Tokens the model may write for these passages: about three a character
+ * sent, plus each line's JSON, between the bounds above. A request can't
+ * be made to write far more than it sent.
+ */
+export function answerTokens(passages: { text: string }[]): number {
+  const chars = passages.reduce((n, p) => n + p.text.length, 0);
+  return Math.min(MAX_ANSWER_TOKENS, Math.max(MIN_ANSWER_TOKENS, chars * 3 + passages.length * 40));
+}
+
+// Chinese, Japanese and Korean say in one character what other scripts take several for.
+const DENSE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+
+/**
+ * The longest translation taken for a passage: four times its length, ten
+ * times for Chinese, Japanese and Korean characters, and at least 40
+ * characters for a word or two. Longer is the model writing something else.
+ */
+export function longestAnswer(source: string): number {
+  const dense = source.match(DENSE)?.length ?? 0;
+  return Math.max(40, (source.length - dense) * 4 + dense * 10);
+}
 /** A second try for missing passages only when this much time is left. */
 const RETRY_MIN_MS = 20_000;
 
@@ -85,9 +110,7 @@ export function readAnswerLine(line: string, sources: Map<string, string>): { id
   if (source === undefined) return null;
   const text = cleanPassage(rawText);
   if (!text) return null;
-  // Translations run from about a third (into Chinese) to twice the length
-  // (out of it); far longer is the model writing something else.
-  if (text.length > Math.max(400, source.length * 6)) return null;
+  if (text.length > longestAnswer(source)) return null;
   return { id, text };
 }
 
@@ -152,9 +175,10 @@ export async function* translateBatch(config: OllamaConfig, req: BatchRequest, o
       got.set(answer.id, answer.text);
       return { type: "segment", id: clientId.get(answer.id)!, text: answer.text };
     };
+    const passages = ids.map((id) => ({ id, text: sources.get(id)! }));
     const stream = streamChat(
       config,
-      { messages: translateMessages(ids.map((id) => ({ id, text: sources.get(id)! })), req.target, req.source), maxAnswerTokens: MAX_ANSWER_TOKENS },
+      { messages: translateMessages(passages, req.target, req.source), maxAnswerTokens: answerTokens(passages) },
       { signal: opts.signal, deadline, fetch: opts.fetch }
     );
     let buffer = "";
@@ -166,6 +190,12 @@ export async function* translateBatch(config: OllamaConfig, req: BatchRequest, o
         const event = take(buffer.slice(0, nl));
         buffer = buffer.slice(nl + 1);
         if (event) yield event;
+        // Every passage has its answer: whatever the model writes next is
+        // nothing anyone asked for, so the connection is closed now.
+        if (seen.size === ids.length) {
+          await stream.return({ doneReason: "stop" });
+          return;
+        }
       }
       result = await stream.next();
     }

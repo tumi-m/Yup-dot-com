@@ -432,7 +432,7 @@ export const TRANSLATE_BURST_MESSAGE = "Too many requests at once. Try again in 
 export const TRANSLATE_SPENT_MESSAGE = "You've used today's translation allowance.";
 
 export type TranslateClaim =
-  | { ok: true; remaining: number; refund: (opts?: { unsent?: boolean }) => Promise<void> }
+  | { ok: true; remaining: number; refund: (opts?: { unsent?: boolean; delivered?: number }) => Promise<void> }
   | { ok: false; status: number; error: string; upgrade?: boolean; reason?: string };
 
 /**
@@ -441,8 +441,11 @@ export type TranslateClaim =
  * the site-wide day (in requests). The store counts one at a time, so the
  * blocks are taken one by one; a refused claim gives back what it took.
  *
- * `refund` is for a request that delivered nothing: it gives back the day's
- * blocks, but only for the first `unanswered` such requests a day. The
+ * `refund` is for a request that delivered less than it asked for (it
+ * failed, was stopped, or the model left passages out): it gives back the
+ * day's blocks beyond the whole blocks of the `delivered` characters, so
+ * asking again for the rest never costs more than the first request did.
+ * Only the first `unanswered` such requests a day get anything back. The
  * site-wide count stays (the model ran) unless `unsent` says the request
  * never reached it; the burst always stays. As claimAiAnswer.
  */
@@ -492,12 +495,15 @@ export async function claimTranslation(
   return {
     ok: true,
     remaining: left * unit,
-    refund: async ({ unsent = false } = {}) => {
+    refund: async ({ unsent = false, delivered = 0 } = {}) => {
       if (refunded) return;
+      // Whole blocks of what came back stay counted; a part block is given back.
+      const keep = Math.min(taken, Math.floor(Math.max(0, delivered) / unit));
+      if (keep >= taken) return;
       refunded = true;
-      if (unsent) await s.refund(GLOBAL_SUBJECT, "translate", "day");
+      if (unsent && !delivered) await s.refund(GLOBAL_SUBJECT, "translate", "day");
       else if ((await s.consume(subject, "translate-unanswered", policy.unanswered, "day")) < 0) return;
-      await giveBack();
+      for (; taken > keep; taken--) await s.refund(subject, "translate", "day");
     },
   };
 }

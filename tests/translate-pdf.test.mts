@@ -196,6 +196,7 @@ const dir = mkdtempSync(join(tmpdir(), "translate-"));
   check("search by its own name, accents or not", first("isizulu") === "zu" && first("tshivenda") === "ve" && first("francais") === "fr" && first("deutsch") === "de");
   check("search by other names", first("farsi") === "fa" && first("tagalog") === "fil" && first("swazi") === "ss");
   check("search by code", searchLanguages("pt").some((l) => l.code === "pt-BR"));
+  check("an English name first: 'swa' is Swahili, then siSwati (Swati)", first("swa") === "sw" && searchLanguages("swa")[1]?.code === "ss", searchLanguages("swa").slice(0, 3).map((l) => l.code));
   check("an empty search lists everything", searchLanguages("  ").length === LANGUAGES.length);
   check("right to left: Arabic, Hebrew, Persian, Urdu", ["ar", "he", "fa", "ur"].every((c) => languageByCode(c)!.rtl) && !languageByCode("fr")!.rtl);
   check("PDF for Latin, Cyrillic, Greek and Devanagari", ["fr", "zu", "vi", "ru", "el", "hi", "mr"].every((c) => pdfSupported(languageByCode(c)!)));
@@ -483,6 +484,51 @@ async function longPdf(pages: number): Promise<Uint8Array> {
   check("the service keeps failing: the run stops with a message for people", r.error instanceof TranslateError && /translation service/.test(r.error.message), r.error?.message);
 }
 
+// ---------- Stopped or failed part way: what came back is kept ----------
+{
+  const segments = Array.from({ length: 40 }, (_, i) => ({ id: String(i + 1), text: `Kept passage ${i + 1} says one more thing XSLOWX` }));
+  const kept = new Map<string, string>();
+  const server = serverFetch();
+  const stop = new AbortController();
+  const run = settle(translateSegments(segments, { target: "fr", fetch: server.fetch, signal: stop.signal, kept }));
+  await new Promise((r) => setTimeout(r, 900));
+  stop.abort();
+  await run;
+  const done = kept.size;
+  const keptTexts = new Set(segments.filter((s) => kept.has(s.id)).map((s) => s.text));
+  check("Cancel part way: the passages that came back are kept", done > 0 && done < segments.length, done);
+  const before = model.calls.length;
+  const again = await translateSegments(segments, { target: "fr", fetch: server.fetch, kept });
+  const sent = model.calls.slice(before).flatMap((c) => c.passages.map((p) => p.text));
+  check("translating again sends only the rest", sent.length === segments.length - done && !sent.some((t) => keptTexts.has(t)), { sent: sent.length, done });
+  check("and finishes the document", again.missing.length === 0 && again.translations.size === segments.length && again.translations === kept);
+
+  // The day's allowance is exactly what the document takes, and the stream
+  // breaks part way: the server gives back what didn't come, so the retry fits.
+  const five = Array.from({ length: 5 }, (_, i) => ({ id: String(i + 1), text: `${("Clause " + (i + 1) + " of the lease sets out one more duty. ").repeat(14).slice(0, 570)}${i === 2 ? " XBREAKX" : ""}`.padEnd(580, ".") }));
+  const exact = { TRANSLATE_LIMIT_GUEST_DAY: String(chargeFor(2900)), TRANSLATE_BURST_PER_MINUTE: "1000" };
+  const fits = await settle(translateSegments(five, { target: "de", fetch: serverFetch({ tier: "guest", env: exact }).fetch }));
+  check("a connection cut part way, with an exact allowance: the retry fits and the run finishes", !!fits.value && fits.value.missing.length === 0, fits.error?.message);
+
+  const noGiveBack = { ...exact, TRANSLATE_LIMIT_GUEST_UNANSWERED: "0" };
+  const broke = five.map((s) => ({ ...s, text: s.text.replace("XBREAKX", "XBREAKX.") }));
+  const spent = await settle(translateSegments(broke, { target: "de", fetch: serverFetch({ tier: "guest", env: noGiveBack }).fetch }));
+  const e = spent.error as InstanceType<typeof TranslateError> | null;
+  check("when the retry then finds the day used up, it is said as a failure, with no upgrade prompt", e instanceof TranslateError && e.reason === "failed" && !e.upgrade && /translation service/.test(e.message), { reason: e?.reason, upgrade: e?.upgrade, message: e?.message });
+}
+
+// ---------- What the page and the privacy policy say is sent ----------
+{
+  const privacy = readFileSync("./app/privacy/page.tsx", "utf8");
+  const tool = readFileSync("./components/tools/TranslateTool.tsx", "utf8");
+  const about = readFileSync("./components/tools/TranslateAbout.tsx", "utf8");
+  check("the privacy summary names Translate PDF", /<li>The AI assistant and Translate PDF send a document&apos;s text, not the file, to our AI provider\.<\/li>/.test(privacy));
+  check("its AI section says what Translate PDF sends, to whom, and that nothing is stored", /When you use Translate PDF[\s\S]{0,400}passes it to Ollama to translate[\s\S]{0,200}We don&apos;t store the text or the translations/.test(privacy) && /id="ai"/.test(privacy));
+  check("the processor list includes the translations", /Ollama<\/strong>: AI assistant answers and Translate PDF translations/.test(privacy));
+  check("the page says the text goes to the AI provider, with the same caution, and links the policy", /our AI provider, the one Chat with PDF uses/.test(tool) && /aren&apos;t allowed to share with a third party/.test(tool) && /href="\/privacy#ai"/.test(tool));
+  check("the questions say the same", /our AI provider, the one Chat with PDF uses/.test(about) && /aren't allowed to share with a third party/.test(about) && !/Nothing is kept|our translation service/.test(about));
+}
+
 // ---------- Registered like the other tools ----------
 {
   const { TOOLS, getTool, relatedTools } = await import("../lib/tools.tsx");
@@ -498,7 +544,10 @@ async function longPdf(pages: number): Promise<Uint8Array> {
   check("named first when searched by name", filterTools(TOOLS, "all", "translate")[0]?.slug === "translate-pdf");
   check("in the sitemap", sitemap().some((u) => u.url.endsWith("/tools/translate-pdf")));
   check("related tools are real tools", relatedTools("translate-pdf").length === 4 && relatedTools("translate-pdf").every((t) => getTool(t.slug)));
-  check("offered for a PDF on the homepage", PDF_ACTIONS.includes("translate-pdf"));
+  // Twelve tools fill the homepage's grid (four across, or three); a
+  // thirteenth sat alone below the fold, so Translate PDF is found from
+  // /tools, search, the footer and its own page instead.
+  check("the homepage's tools for a PDF fill their rows", PDF_ACTIONS.length % 4 === 0 && PDF_ACTIONS.length % 3 === 0, PDF_ACTIONS.length);
   check("its route is listed: GET answers anyone, POST is checked", routes.PUBLIC_ROUTES.includes("/api/ai/translate"));
 }
 

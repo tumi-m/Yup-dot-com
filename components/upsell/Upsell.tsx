@@ -19,9 +19,15 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
 
 const characters = (n: number) => `${n.toLocaleString("en-US")} characters`;
+
+function translateBody(t: Tier) {
+  return t === "guest"
+    ? `${characters(LIMITS.free.translateCharsPerDay)} a day with a free account, ${characters(LIMITS.pro.translateCharsPerDay)} with Pro.`
+    : `${characters(LIMITS.pro.translateCharsPerDay)} a day with Pro.`;
+}
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -49,10 +55,12 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
   },
   translate: {
     title: "Daily translation limit reached",
-    body: (t) =>
-      t === "guest"
-        ? `${characters(LIMITS.free.translateCharsPerDay)} a day with a free account, ${characters(LIMITS.pro.translateCharsPerDay)} with Pro.`
-        : `${characters(LIMITS.pro.translateCharsPerDay)} a day with Pro.`,
+    body: (t) => translateBody(t),
+  },
+  // Before anything is used: the document is bigger than what's left today.
+  "translate-size": {
+    title: "This document needs more than you have left today",
+    body: (t) => translateBody(t),
   },
   edits: {
     title: "You've used today's free edit",
@@ -182,7 +190,7 @@ export function UpgradeDialog({
                 ? EDIT_BENEFITS
                 : reason === "samples"
                   ? SAMPLE_BENEFITS
-                  : reason === "translate"
+                  : reason === "translate" || reason === "translate-size"
                     ? TRANSLATE_BENEFITS
                     : BENEFITS
             ).map((b, i) => (

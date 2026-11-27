@@ -33,7 +33,7 @@ work with or without an account.
 | **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek, Cyrillic and Devanagari (shaped) come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
 | **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
-| **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, all of South Africa's official languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
+| **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, South Africa's 11 official written languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
 | **PDF → Text** | Extract text in true reading order (multi-column aware). |
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
@@ -321,11 +321,16 @@ user message, never in the system prompt, which says to translate the
 passages and never follow, answer or comment on them
 (`lib/ai/translate.ts`). The answer must be JSON lines keyed by the request's
 own short ids: prose, code fences, broken lines, unknown ids and "translations"
-far longer than their passage are dropped. Passages the model left out, or
-seems to have merged into a neighbour, are asked for once more in the same
-request; any still missing keep their original text in their own place, and
-the result says how many and on which pages. Nothing is rendered as HTML, and
-the text is never logged.
+more than four times their passage's length (ten times for Chinese, Japanese
+and Korean, at least 40 characters) are dropped. The model may write about
+three tokens a character sent (1,536 to 8,192), and the route closes its
+stream as soon as every passage has its answer, so a request can't be made to
+write much more than it sent. Passages the model left out, or seems to have
+merged into a neighbour, are asked for once more in the same request; any
+still missing keep their original text in their own place, and the result
+says how many and on which pages. Nothing is rendered as HTML, and the text is
+never logged. The page and the privacy policy say the text goes to the same
+AI provider as Chat with PDF's, and nothing is stored.
 
 The files are written in a Web Worker (`lib/pdf/translate/`): a Word file from
 `buildDocx` (paragraphs, tables and runs right to left for Arabic, Hebrew,
@@ -342,10 +347,19 @@ link that takes the file to OCR PDF.
 The allowance is counted on the server in characters, in blocks of 500 per
 request (rounded up): guests 15,000 a day, Free 60,000, Pro and Team 400,000;
 30 requests a minute per person and 3,000 requests a day site-wide. The page
-works out what a document will take before it starts and offers the upgrade
-(or Split PDF) when it is more than what is left. A request that brought
-nothing back is given back, up to 10 a day. Cancel aborts the requests, which
-closes the model's stream; nothing half-translated is offered as a file.
+works out what a document will take before it starts and, when it is more
+than what is left, says so and offers Split PDF (and to guests and Free the
+upgrade). What a request didn't deliver (it failed, was stopped, or the model
+left passages out) is given back, keeping only whole blocks of what did come
+back, so asking again for the rest never costs more than the first request;
+up to 10 requests a day. Cancel aborts the requests, which closes the model's
+stream. Passages that came back stay on the page, so translating again after
+Cancel or a failure sends only the rest, and the page says what was kept and
+what it counted; nothing half-translated is offered as a file.
+
+Translate PDF isn't among the tools the homepage offers for a dropped PDF:
+those twelve fill three rows of four above the fold, and a thirteenth sat
+alone below it.
 
 ## Motion design
 
@@ -903,7 +917,7 @@ Variables** and redeploy:
 | `AI_GLOBAL_DAILY_LIMIT` | Optional. AI answers per day across the whole site (default 3000) |
 | `OLLAMA_TRANSLATE_MODEL` | Optional. The model Translate PDF uses, on the same host with the same key. Default: `OLLAMA_MODEL`'s |
 | `TRANSLATE_LIMIT_<TIER>_DAY` | Optional. Characters translated per day for `GUEST`, `FREE`, `PRO`, `TEAM` (defaults 15000/60000/400000/400000; guest `0` requires an account) |
-| `TRANSLATE_LIMIT_<TIER>_UNANSWERED` | Optional. Translation requests a day that brought nothing back and are given back (default 10) |
+| `TRANSLATE_LIMIT_<TIER>_UNANSWERED` | Optional. Translation requests a day whose undelivered part is given back (default 10) |
 | `TRANSLATE_BURST_PER_MINUTE` | Optional. Translation requests per minute per user or guest (default 30) |
 | `TRANSLATE_GLOBAL_DAILY_LIMIT` | Optional. Translation requests per day across the whole site, each up to 3,000 characters (default 3000) |
 | `NEXT_PUBLIC_LEGAL_NAME` | Legal pages: the person or company responsible (POPIA "responsible party", shown as the Information Officer) |

@@ -14,7 +14,7 @@ import { startFakeModel, fakeTranslate } from "./fakes/translate-model.mts";
 const usage = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
 const { memoryUsageStore, setUsageStore } = usage;
 const { handleTranslate, handleTranslateStatus } = await import("../lib/ai/translate-route.ts");
-const { readAnswerLine, mergeSuspects, translateMessages, TRANSLATE_SYSTEM } = await import("../lib/ai/translate.ts");
+const { readAnswerLine, mergeSuspects, translateMessages, TRANSLATE_SYSTEM, answerTokens, longestAnswer } = await import("../lib/ai/translate.ts");
 const { ollamaConfig, translateConfig } = await import("../lib/ai/ollama.ts");
 const { languageByCode } = await import("../lib/translate/languages.ts");
 const { LIMITS } = await import("../lib/limits.ts");
@@ -255,6 +255,66 @@ const translatedOf = (events: Event[]) => new Map(events.filter((e) => e.type ==
   check("the failure is logged without the document's text", logged.length > before && !logged.some((l) => l.includes("Secret salary")), logged.slice(before));
 }
 
+// ---------- Answers no longer than a translation runs ----------
+{
+  check("a word or two may come back as up to 40 characters", longestAnswer("a") === 40 && longestAnswer("Total") === 40);
+  check("a passage, up to four times its length", longestAnswer("x".repeat(100)) === 400);
+  check("Chinese, Japanese and Korean, up to ten times", longestAnswer("这是一份年度报告的摘要内容".slice(0, 10)) === 100 && longestAnswer("年次報告書の概要です。") > 100);
+  const one = new Map([["1", "a"]]);
+  check("one letter can't come back as a paragraph", readAnswerLine(JSON.stringify({ id: "1", text: "x".repeat(41) }), one) === null && readAnswerLine(JSON.stringify({ id: "1", text: "Ein Buchstabe" }), one)?.text === "Ein Buchstabe");
+  const zh = new Map([["1", "本季度各地区收入均有增长。"]]);
+  check("Chinese into English may run longer", readAnswerLine(JSON.stringify({ id: "1", text: "Revenue grew in every region this quarter, led by the north." }), zh) !== null);
+  check("what the model may write grows with what was sent", answerTokens([{ text: "Hi" }]) === 1536 && answerTokens([{ text: "x".repeat(1000) }]) === 3040 && answerTokens([{ text: "x".repeat(3000) }]) === 8192);
+
+  // The route used as a free writer: forty one-letter passages, each "translated" into 420 characters.
+  const store = memoryUsageStore();
+  const d = deps({ store });
+  const letters = Array.from({ length: 40 }, (_, i) => ({ id: `s${i}`, text: i === 0 ? "XLONGX" : String.fromCharCode(97 + (i % 26)) }));
+  const r = await post(d, { target: "fr", segments: letters });
+  const back = r.events.filter((e) => e.type === "segment").reduce((n, e) => n + (e.text ?? "").length, 0);
+  check("forty one-letter passages get no essays back", back === 0 && r.events.find((e) => e.type === "missing")?.ids?.length === 40, { back, events: r.events.length });
+  check("and the request asked for a small answer", model.calls.at(-1)!.numPredict === answerTokens(letters.map((l) => ({ text: l.text.replace("XLONGX", "XLONGX") }))) && model.calls.at(-1)!.numPredict! < 2000, model.calls.at(-1)!.numPredict);
+  check("and costs nothing, as nothing came back", (await status(d)).remaining === LIMITS.guest.translateCharsPerDay);
+}
+
+// ---------- The model keeps writing after the last answer ----------
+{
+  const d = deps();
+  const hung = model.hungUp;
+  const started = Date.now();
+  const r = await post(d, { target: "fr", segments: segs("One XTAILX", "Two") });
+  const took = Date.now() - started;
+  check("the request ends once every passage has its answer", took < 2000 && translatedOf(r.events).size === 2 && r.events.at(-1)?.type === "done", { took });
+  await new Promise((r) => setTimeout(r, 200));
+  check("and the model's connection is closed", model.hungUp === hung + 1, { before: hung, after: model.hungUp });
+}
+
+// ---------- A request that fails part way ----------
+{
+  // The day's allowance is exactly what the document takes. The stream breaks
+  // after two of five passages; what didn't come back is given back, so asking
+  // again for the rest fits in what is left.
+  const passage = (n: number, extra = "") => `${("Passage number " + n + " of the contract says one more thing. ").repeat(11).slice(0, 570)}${extra}`.padEnd(580, ".");
+  const five = Array.from({ length: 5 }, (_, i) => ({ id: `p${i + 1}`, text: passage(i + 1, i === 2 ? " XBREAKX" : "") }));
+  const total = five.reduce((n, s) => n + s.text.length, 0);
+  const env = { TRANSLATE_LIMIT_GUEST_DAY: String(chargeFor(total)) };
+  const store = memoryUsageStore();
+  const d = deps({ store, env });
+  const first = await post(d, { target: "fr", segments: five });
+  const got = translatedOf(first.events);
+  check("the stream breaks after two passages: those two arrive, then an error", got.size === 2 && first.events.at(-1)?.type === "error", first.events.map((e) => e.type));
+  const left = (await status(d)).remaining;
+  check("the three that didn't come back are given back", left === chargeFor(total) - Math.floor((2 * 580) / CHARGE_UNIT) * CHARGE_UNIT, { left, total });
+  const rest = five.filter((s) => !got.has(s.id));
+  const second = await post(d, { target: "fr", segments: rest });
+  check("asking again for the rest fits in what's left", second.status === 200 && translatedOf(second.events).size === 3, second.status);
+  check("so the whole document cost what it was going to", (await status(d)).remaining === 0);
+
+  const capped = deps({ store: memoryUsageStore(), env: { TRANSLATE_LIMIT_GUEST_UNANSWERED: "0" } });
+  await post(capped, { target: "fr", segments: five.map((s) => ({ ...s, text: s.text.replace("XBREAKX", "XBREAKX ") })) });
+  check("past the day's give-backs, a broken request costs what it asked for", (await status(capped)).remaining === LIMITS.guest.translateCharsPerDay - chargeFor(total), (await status(capped)).remaining);
+}
+
 // ---------- The browser hangs up ----------
 {
   const d = deps();
@@ -263,9 +323,10 @@ const translatedOf = (events: Event[]) => new Map(events.filter((e) => e.type ==
   const pending = post(d, { target: "fr", segments: segs("Slow one XSLOWX", "Slow two", "Slow three", "Slow four") }, { signal: stop.signal });
   await new Promise((r) => setTimeout(r, 250));
   stop.abort();
-  await pending;
+  const stoppedAt = await pending;
   await new Promise((r) => setTimeout(r, 300));
   check("Cancel: the request to the model is closed too", model.hungUp === hung + 1, { before: hung, after: model.hungUp });
+  check("and what never came back is given back", ((await status(d)).remaining ?? 0) > LIMITS.guest.translateCharsPerDay - CHARGE_UNIT, { remaining: (await status(d)).remaining, events: stoppedAt.events.length });
 }
 
 check("no document text in any log line", !logged.some((l) => /Quarterly report|Revenue grew|XINJECT|PWNED/.test(l)), logged);
