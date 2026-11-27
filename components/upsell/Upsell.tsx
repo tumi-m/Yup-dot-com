@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Languages, Sparkles, Stamp, X, Zap } from "lucide-react";
+import { Cloud, Crown, Disc3, Film, Globe, Infinity as InfinityIcon, Languages, Layers, Sparkles, Stamp, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples" | "web-pdfs";
 
 const characters = (n: number) => `${n.toLocaleString("en-US")} characters`;
 
@@ -77,6 +77,13 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
         ? `${LIMITS.free.mediaDownloadsPerDay} a day with a free account, ${LIMITS.pro.mediaDownloadsPerDay} with Pro.`
         : `${LIMITS.pro.mediaDownloadsPerDay} a day with Pro.`,
   },
+  "web-pdfs": {
+    title: "Daily web page limit reached",
+    body: (t) =>
+      t === "guest"
+        ? `${LIMITS.free.webPdfsPerDay} a day with a free account, ${LIMITS.pro.webPdfsPerDay} with Pro.`
+        : `${LIMITS.pro.webPdfsPerDay} a day with Pro, up to ${LIMITS.pro.webPdfPages} pages each.`,
+  },
   samples: {
     title: "Daily lookups used",
     body: (t) =>
@@ -116,6 +123,12 @@ const TRANSLATE_BENEFITS = [
   { icon: Languages, text: `${characters(LIMITS.pro.translateCharsPerDay)} translated a day` },
   { icon: InfinityIcon, text: "Bigger files and batches" },
   { icon: Sparkles, text: "More AI answers" },
+];
+
+const WEB_PDF_BENEFITS = [
+  { icon: Globe, text: `${LIMITS.pro.webPdfsPerDay} web pages a day` },
+  { icon: Layers, text: `Up to ${LIMITS.pro.webPdfPages} pages each` },
+  { icon: Sparkles, text: "Bigger files, more AI" },
 ];
 
 const BENEFITS = [
@@ -192,7 +205,9 @@ export function UpgradeDialog({
                   ? SAMPLE_BENEFITS
                   : reason === "translate" || reason === "translate-size"
                     ? TRANSLATE_BENEFITS
-                    : BENEFITS
+                    : reason === "web-pdfs"
+                      ? WEB_PDF_BENEFITS
+                      : BENEFITS
             ).map((b, i) => (
               <motion.li
                 key={b.text}

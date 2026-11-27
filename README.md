@@ -32,6 +32,7 @@ work with or without an account.
 | **Scan to PDF** | The phone's rear camera at its best resolution (or a webcam, or photos), page after page. Each page's corners are found on the device (its own edge and shape search, no OpenCV) and can be dragged, by touch or with the arrow keys; the page is flattened with a perspective warp. Colour, greyscale or Document (black and white, with shadows and uneven light evened out), turn, reorder, retake, delete. One PDF: Fit, A4 or Letter, optionally made searchable with the OCR PDF engine. On a computer it shows a QR code that opens the page on a phone. The camera is allowed on this page only (`lib/permissions-policy.ts`) and turned off when the page is left or hidden. Pages are built in a worker. |
 | **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek, Cyrillic and Devanagari (shaped) come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
 | **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
+| **HTML to PDF** | A web page by its address, an `.html` file or pasted HTML, opened by Chromium on the media worker and printed: A4, Letter or one long page, portrait or landscape, margins, backgrounds, as on screen or the site's print version. Text stays selectable and links work. Pages are opened signed out, with no cookies; private and local addresses are refused on every request the page makes. The PDF is deleted from the worker once downloaded. *Hidden until `NEXT_PUBLIC_ENABLE_HTML_TO_PDF=1`; needs the media worker. Guests 5 a day, free 15, Pro 200.* [More below](#html-to-pdf). |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
 | **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, South Africa's 11 official written languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
@@ -178,6 +179,35 @@ one download. After deploying, check what's missing with
 (without the secret it answers 404 in production).
 Read the worker README's **Things to know before launch** section: YouTube
 blocks cloud IPs, and there are legal points too.
+
+## HTML to PDF
+
+`/tools/html-to-pdf` (also found as URL to PDF, Webpage to PDF, Save web
+page as PDF) saves a web page, an HTML file or pasted HTML as a PDF. A page
+needs a real browser, so it is rendered on the media worker
+(`media-worker/render.py`, headless Chromium driven by Playwright), not in
+the visitor's browser, and the page says so before anything is sent.
+
+1. **The grant** (`POST /api/render/link`, `lib/web-pdf-route.ts`): other
+   sites' pages are refused; the address must be http or https, without a
+   user name or password, not a private, local or metadata address (also
+   after a DNS lookup) and not on a port below 1024 but 80 and 443. HTML is
+   checked by size (up to 5 MB) and only its SHA-256 is sent. Then the
+   daily allowance (guest 5, free 15, Pro and Team 200; up to 50 pages a
+   PDF free, 300 with Pro), 6 tries a minute per person and 3,000 a day
+   site-wide (`WEB_PDF_GLOBAL_DAILY_LIMIT`). Each try counts, even when the
+   site then fails: the worker did the work.
+2. **The worker** verifies the grant, opens the page in a fresh browser
+   context and prints it. Every connection the page makes goes through a
+   proxy in the worker that checks the address it connects to, after DNS,
+   for every redirect and subresource; see
+   [media-worker/README.md](media-worker/README.md#html-to-pdf-web-pages-html-files-pasted-html).
+3. **The PDF** goes from the worker straight to the browser and is deleted
+   from the worker's memory once sent (or after about two minutes).
+
+Off until the owner deploys the worker and sets
+`NEXT_PUBLIC_ENABLE_HTML_TO_PDF=1`: until then the tool is left out of
+every list, search, the sitemap and the CSP, and `/api/render/link` answers 404.
 
 ## Sample Finder
 
@@ -522,6 +552,14 @@ legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
 with outputs checked by independent readers.
 
+`npm run test:render` runs HTML to PDF's worker side with real Chromium
+(Playwright for Python, and its Chromium): the address rules, the proxy
+every connection goes through, and jobs against hostile local sites
+(redirects and subresources to private and metadata addresses, DNS
+rebinding, `file:` links, endless redirects, pages that never finish, huge
+pages, popups, downloads, service workers, websockets, WebRTC), then the
+worker end to end with grants signed by the web app's code.
+
 `npm run test:browser` drives the Sample Finder in Chrome (`playwright-core`,
 the system Chrome at `/usr/bin/google-chrome`, or `CHROME_PATH`) against
 `next dev` started with a preload (`tests/fakes/samples-net.cjs`) that
@@ -597,6 +635,16 @@ vulnerability, see [SECURITY.md](SECURITY.md); the public summary is at
   may use only the names listed in `PUBLIC_VARS` (`lib/secret-scan.cjs`).
   There is no admin password anywhere. `.env*` files are git-ignored except
   `.env.example`.
+- **Web pages to PDF.** The media worker opens pages for HTML to PDF in
+  Chromium, and every connection the page makes (redirects, pictures,
+  frames, workers, websockets) goes through the worker's own proxy, which
+  resolves the name, refuses loopback, private, link-local and metadata,
+  CGNAT, multicast and reserved addresses (IPv6 forms too) and connects to
+  the address it checked, keeping a name's first answer for the job (no DNS
+  rebinding). Only http and https; no downloads, popups, service workers,
+  websockets, WebRTC or permissions; a fresh context with no cookies per
+  job; caps on time, requests, bytes, pages and PDF size. Tested against
+  hostile local sites (`npm run test:render`).
 - **Downloads and imports.** Links users paste are fetched by the server only
   from allow-listed hosts (`video.twimg.com`, Google Slides), checked again on
   every redirect. The Sample Finder's server calls go to fixed addresses
@@ -761,7 +809,11 @@ someone leaves or a key changes.
     approval for workflows from forks. Add the variable `SITE_URL` =
     `https://pdfwizard.xyz` for the Live check workflow.
 11. Media worker host: `MEDIA_ALLOWED_ORIGINS=https://pdfwizard.xyz`, and
-    `YTDLP_PROXY` credentials only in that host's secret store.
+    `YTDLP_PROXY` credentials only in that host's secret store. Before
+    turning on HTML to PDF, run the worker where it can't reach anything
+    private (no cloud metadata service, no internal network), and check
+    `/api/media/health` says whether Chromium's sandbox is on
+    ([media-worker/README.md](media-worker/README.md#html-to-pdf-web-pages-html-files-pasted-html)).
 12. After changing any of these: `npm run check:live -- https://pdfwizard.xyz`.
 
 ---
@@ -795,6 +847,7 @@ pdf-wizard/
 │   │   ├── CropTool.tsx          ← Crop PDF: page preview, the box, margins, trim
 │   │   ├── CompareTool.tsx       ← Compare PDFs: two files, the changes, side by side and overlay
 │   │   ├── TranslateTool.tsx     ← Translate PDF: languages, what's sent, progress, the files
+│   │   ├── WebToPdf.tsx          ← HTML to PDF: address, file or pasted HTML, settings, the worker's job
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -819,6 +872,7 @@ pdf-wizard/
 │   ├── pdf/redact/               ← Redact PDF: marks, presets, pictures, clean-up, the search and check after
 │   ├── pdf/translate/            ← Translate PDF: the Word file and the PDF, in a worker
 │   ├── translate/                ← Translate PDF: languages, passages, requests to the route
+│   ├── web-pdf.ts, web-pdf-route.ts ← HTML to PDF: options, address checks, the grant
 │   ├── ai/                       ← Ollama client, chat and translation prompts and checks
 │   ├── pdf/images-to-pdf/        ← Pictures to PDF: formats, browser and TIFF decoding, in a worker
 │   ├── pdf/text-to-pdf/          ← Text and Markdown to PDF: fonts, layout, in a worker
@@ -906,7 +960,9 @@ Variables** and redeploy:
 | `OLLAMA_MODEL` | Optional. Default `deepseek-v4.1-flash` on Ollama Cloud, `deepseek-v4.1-flash:cloud` on your own server |
 | `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
 | `OLLAMA_CONTEXT_TOKENS` | Optional. Context window to ask the model for (`num_ctx`, at least 8192). Unset: the model's default |
-| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
+| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads and HTML to PDF — see [`media-worker/README.md`](media-worker/README.md) |
+| `NEXT_PUBLIC_ENABLE_HTML_TO_PDF` | Optional. `1` shows HTML to PDF (hidden by default) once the media worker is redeployed with Chromium; set it with `MEDIA_WORKER_URL` and `MEDIA_WORKER_SECRET`, then redeploy |
+| `WEB_PDF_GLOBAL_DAILY_LIMIT` | Optional. Web pages saved as PDF per day across the whole site (default 3000) |
 | `MEDIA_SIGNING_SECRET` | Recommended. Signs and encrypts X, TikTok and Instagram download links (with keys derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
 | `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
 | `TRUSTED_PROXY_HOPS` | Only when hosted outside Vercel: how many proxies in front of the app append to `X-Forwarded-For` (`1` for one nginx or load balancer). The visitor's address is that many entries from the right; anything further left is ignored. Unset: forwarding headers aren't trusted and every guest shares one allowance. Ignored on Vercel |

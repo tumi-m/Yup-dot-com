@@ -127,5 +127,8 @@ jobs:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pip install -r media-worker/requirements.txt
+      # The Chromium build that Playwright version expects, for HTML to PDF.
+      - run: python -m playwright install --with-deps --only-shell chromium
       - run: npm ci
       - run: npm run test:media
+      - run: npm run test:render

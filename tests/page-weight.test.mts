@@ -68,8 +68,8 @@ check(
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all fifteen panels lazily",
-  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench,TranslateTool",
+  "ToolPanel loads all sixteen panels lazily",
+  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench,TranslateTool,WebToPdf",
   lazy
 );
 
