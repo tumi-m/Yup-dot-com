@@ -302,6 +302,8 @@ msgs = {
   "upcoming": "ERROR: [youtube] abcdefghijk: This live event will begin in 3 hours.",
   "members": "ERROR: [youtube] abcdefghijk: Join this channel to get access to members-only content like this video, and other exclusive perks.",
   "removed": "ERROR: [youtube] abcdefghijk: Video unavailable. This video has been removed by the uploader",
+  "rate_bare": "ERROR: [youtube] abcdefghijk: Video unavailable. This content isn't available, try again later.",
+  "generic": "ERROR: [youtube] abcdefghijk: Something went wrong. Please try again later.",
 }
 print(json.dumps({k: [worker.is_bot_check(m), worker.friendly_error(m)] for k, m in msgs.items()}))
 `], { env: { ...process.env, MEDIA_WORKER_SECRET: "x" }, stdio: ["ignore", "pipe", "ignore"] })
@@ -316,6 +318,8 @@ print(json.dumps({k: [worker.is_bot_check(m), worker.friendly_error(m)] for k, m
   check("YouTube's rate limit says to try later, not that the video is gone", /limiting downloads/.test(said.rate[1]), JSON.stringify(said.rate));
   check("a stream or premiere not out yet says so", /hasn't started/.test(said.upcoming[1]), JSON.stringify(said.upcoming));
   check("a members-only video says so", /members only/.test(said.members[1]), JSON.stringify(said.members));
+  check("YouTube's rate-limit wording alone still reads as one", /limiting downloads/.test(said.rate_bare[1]), JSON.stringify(said.rate_bare));
+  check("any other \"try again later\" isn't taken for YouTube's rate limit", !/limiting downloads/.test(said.generic[1]), JSON.stringify(said.generic));
   check("a removed video is still unavailable", said.removed[1] === "This video is unavailable.", JSON.stringify(said.removed));
   const noAuth = await fetch(`${W}/info`, { method: "POST", body: JSON.stringify({ url: MPD }) });
   check("/info requires the shared secret", noAuth.status === 401);

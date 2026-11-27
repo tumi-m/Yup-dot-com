@@ -456,8 +456,10 @@ def friendly_error(message: str, subject: str = "video", phase: str = "info", ki
         return BOT_MESSAGE
     if "confirm your age" in m or "age-restricted" in m or "inappropriate for some users" in m:
         return f"This {subject} is age-restricted, so it can't be downloaded."
-    # YouTube's rate limit reads "Video unavailable. This content isn't available, try again later."
-    if "try again later" in m or "rate-limited" in m or "http error 429" in m:
+    # YouTube's rate limit reads "Video unavailable. This content isn't available, try
+    # again later." (yt-dlp adds "rate-limited"); a bare "try again later" is any error.
+    if ("content isn't available, try again later" in m or "content isn’t available, try again later" in m
+            or "rate-limited" in m or "http error 429" in m):
         print("YouTube rate-limited the worker's address; it lifts within the hour.", flush=True)
         return "YouTube is limiting downloads right now. Try again later."
     if "live event will begin" in m or "premieres in" in m or "premiere will begin" in m:
