@@ -117,6 +117,66 @@ const check = (name: string, ok: boolean, detail = "") => {
   check("headings with space between stay apart", headings.includes("Afrikaans") && headings.includes("isiZulu"), JSON.stringify(headings));
 }
 
+// The last row's description wraps over three lines; a paragraph follows well below.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const p = d.addPage([612, 792]);
+  const xs = [90, 198, 306, 414];
+  const row = (y: number, cells: (string | null)[]) => cells.forEach((c, i) => c && p.drawText(c, { x: xs[i], y, size: 11, font: f }));
+  row(500, ["Description", "Qty", "Unit price", "Amount"]);
+  row(485, ["Logo redesign", "1", "4,500.00", "4,500.00"]);
+  row(470, ["Website landing", "1", "12,000.00", "12,000.00"]);
+  row(456.5, ["page with contact", null, null, null]);
+  row(443, ["form and gallery", null, null, null]);
+  p.drawText("Banking details: FNB, account 62812345678, branch 250655.", { x: 90, y: 400, size: 11, font: f });
+  const doc = await parseDocument(await d.save());
+  const rows = extractTables(doc)[0]?.rows ?? [];
+  check("the last row keeps all three lines of its description", rows[2]?.[0] === "Website landing page with contact form and gallery", JSON.stringify(rows));
+  check("the paragraph below stays a paragraph", /\n\nBanking details/.test(toMarkdown(doc)));
+}
+
+// A key and value form whose values run over several lines, and a glossary
+// in which every term's definition wraps.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const b = await d.embedFont(StandardFonts.HelveticaBold);
+  const p = d.addPage([612, 792]);
+  let y = 700;
+  const rows: [string, string[]][] = [
+    ["Reported by", ["Lerato Mokoena, shift supervisor at the northern depot"]],
+    ["Address", ["12 Long Street", "Cape Town", "8001"]],
+    ["Description", ["A forklift reversed into the racking in aisle four while", "the warning beeper was not working. Nobody was hurt but", "two pallets of tinned food fell and the aisle was closed", "for the rest of the afternoon while it was cleaned."]],
+    ["Action", ["The beeper was replaced the same day and all drivers", "were reminded to check it at the start of each shift."]],
+  ];
+  for (const [k, vs] of rows) {
+    p.drawText(k, { x: 72, y, size: 11, font: b });
+    vs.forEach((v, i) => p.drawText(v, { x: 200, y: y - i * 14, size: 11, font: f }));
+    y -= vs.length * 14 + 10;
+  }
+  p.drawText("Signed: L. Mokoena", { x: 72, y: y - 20, size: 11, font: f });
+  const t = extractTables(await parseDocument(await d.save()))[0]?.rows ?? [];
+  check("each value keeps all its lines", t.length === 4 && t[1][1] === "12 Long Street Cape Town 8001" && t[2][1].endsWith("while it was cleaned.") && t[3][1].endsWith("each shift."), JSON.stringify(t));
+
+  const g = await PDFDocument.create();
+  const gf = await g.embedFont(StandardFonts.Helvetica);
+  const gp = g.addPage([612, 792]);
+  const terms: [string, string[]][] = [
+    ["Accrual", ["An expense or revenue recognised in the period it occurs regardless", "of when cash changes hands, which matters for monthly statements."]],
+    ["Liquidity", ["How quickly an asset can be turned into cash without losing value;", "cash itself is the most liquid asset a business can hold."]],
+    ["Working capital", ["Current assets minus current liabilities, a measure of whether a business can", "pay its bills over the next twelve months."]],
+  ];
+  y = 700;
+  for (const [k, vs] of terms) {
+    gp.drawText(k, { x: 72, y, size: 11, font: gf });
+    vs.forEach((v, i) => gp.drawText(v, { x: 170, y: y - i * 14, size: 11, font: gf }));
+    y -= vs.length * 14 + 12;
+  }
+  const gmd = toMarkdown(await parseDocument(await g.save()));
+  check("a glossary whose every definition wraps keeps each definition whole", gmd.includes("whether a business can pay its bills") && !/\n\npay its bills/.test(gmd), gmd);
+}
+
 // A cover's two short title lines, and numbered headings one under the other, stay apart.
 {
   const d = await PDFDocument.create();

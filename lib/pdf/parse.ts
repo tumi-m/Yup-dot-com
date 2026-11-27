@@ -609,27 +609,44 @@ function findTables(lines: ParsedLine[]): { start: number; end: number; rows: st
       return Math.min(aligned, claimed) >= Math.min(2, cellRows[k].length);
     };
     // A cell's words wrapped onto a line of their own ("Website landing" /
-    // "page"): fewer cells, each under a column, close below the line above.
+    // "page"): fewer cells, each under a column, close below the line above,
+    // none starting a numbered or bulleted item of its own.
     const isWrap = (k: number) =>
       cellRows[k].length < anchor.length &&
       lines[k - 1].y - lines[k].y <= lines[k].fontSize * 1.6 &&
+      !cellRows[k].some((c) => /^(?:\d{1,3}[.)]|[•·▪◦‣\-–—*])\s/.test(c.text)) &&
       columnsOf(cellRows[k], anchor, slackAt(k)) !== null;
     // Extend while subsequent rows have a comparable number of aligned
-    // columns, taking wrapped lines along when the table goes on below them.
-    const rows: Cell[][] = [anchor];
-    const wraps: { row: number; line: number }[] = [];
-    let j = i + 1;
-    while (j < lines.length) {
-      if (isRow(j)) {
-        rows.push(cellRows[j++]);
-        continue;
+    // columns, taking wrapped lines along when the table goes on below them,
+    // or when what follows the last row's wrapped lines stands clearly apart.
+    const grow = (withWraps: boolean) => {
+      const rows: Cell[][] = [anchor];
+      const wraps: { row: number; line: number }[] = [];
+      let j = i + 1;
+      while (j < lines.length) {
+        if (isRow(j)) {
+          rows.push(cellRows[j++]);
+          continue;
+        }
+        if (!withWraps) break;
+        // A few lines: more is text beside the table, not a cell's words.
+        let k = j;
+        while (k < lines.length && k - j < 8 && isWrap(k)) k++;
+        if (k === j) break;
+        const spacing = lines[j - 1].y - lines[j].y;
+        const apart = k === lines.length || lines[k - 1].y - lines[k].y > spacing * 1.3;
+        if (k < lines.length && !isRow(k) && !apart) break;
+        for (; j < k; j++) wraps.push({ row: rows.length - 1, line: j });
+        if (k === lines.length || !isRow(k)) break;
       }
-      // A line or two: more is text beside the table, not a cell's words.
-      let k = j;
-      while (k < lines.length && k - j < 2 && isWrap(k)) k++;
-      if (k === j || k === lines.length || !isRow(k)) break;
-      for (; j < k; j++) wraps.push({ row: rows.length - 1, line: j });
-    }
+      return { rows, wraps, j };
+    };
+    let grown = grow(true);
+    // Every row wrapping (a glossary, a list of terms) may be prose set out
+    // in two columns: read without the wraps, as before.
+    const wrapped = new Set(grown.wraps.map((w) => w.row));
+    if (grown.wraps.length && wrapped.size === grown.rows.length) grown = grow(false);
+    const { rows, wraps, j } = grown;
     // Require at least two rows to call it a table.
     if (rows.length >= 2) {
       const width = Math.max(...rows.map((r) => r.length));
