@@ -8,7 +8,8 @@ import type { DocumentRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Your documents" };
+// Signed-in pages stay out of search results (robots.txt keeps crawlers out too).
+export const metadata = { title: "Your documents", robots: { index: false, follow: false } };
 
 export default async function DashboardPage() {
   const profile = await getProfile();

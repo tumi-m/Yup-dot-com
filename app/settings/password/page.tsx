@@ -5,7 +5,7 @@ import { PasswordForm } from "@/components/PasswordForm";
 import { loginHref, newPasswordPath, safeRedirect } from "@/components/auth-redirect";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Password" };
+export const metadata = { title: "Password", robots: { index: false, follow: false } };
 
 /** Where a password reset link lands, signed in. Also for changing a password. */
 export default async function PasswordPage({ searchParams }: { searchParams: Promise<{ redirect?: string }> }) {

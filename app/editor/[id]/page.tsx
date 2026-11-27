@@ -5,6 +5,7 @@ import { PdfEditor } from "@/components/editor/PdfEditor";
 import type { DocumentRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Edit PDF", robots: { index: false, follow: false } };
 
 export default async function EditorPage({
   params,
