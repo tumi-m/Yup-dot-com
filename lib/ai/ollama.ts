@@ -70,8 +70,8 @@ export class OllamaError extends Error {
 }
 
 const USER_MESSAGES: Record<OllamaErrorKind, string> = {
-  auth: "The AI assistant isn't available right now.",
-  model: "The AI assistant isn't available right now.",
+  auth: "Chat with PDF isn't available right now.",
+  model: "Chat with PDF isn't available right now.",
   rate_limit: "The assistant is busy right now. Try again in a moment.",
   bad_request: "The assistant couldn't process this document.",
   unavailable: "The assistant ran into a problem. Please try again.",

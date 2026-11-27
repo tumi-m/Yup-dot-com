@@ -125,7 +125,7 @@ async function kind(p: Promise<unknown>) {
 {
   const { fn } = fakeFetch([() => new Response('{"error":"unauthorized"}', { status: 401 })]);
   check("401 → auth (no retry)", (await kind(collect(streamChat(cfg, { messages: [] }, { fetch: fn })))) === "auth");
-  check("auth errors show a generic message, not the key problem", userMessage(new OllamaError("auth", "x")) === "The AI assistant isn't available right now.");
+  check("auth errors show a generic message, not the key problem", userMessage(new OllamaError("auth", "x")) === "Chat with PDF isn't available right now.");
 }
 {
   const { fn } = fakeFetch([() => new Response('{"error":"model not found"}', { status: 404 })]);

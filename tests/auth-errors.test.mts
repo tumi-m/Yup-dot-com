@@ -48,7 +48,7 @@ for (const [what, answer] of [
   check(`${what}: so do sign-up and Forgot password`, (await signup(answer)) === OFFLINE && (await reset(answer)) === OFFLINE);
 }
 const broken = await login({ status: 500, body: { code: 500, error_code: "unexpected_failure", msg: "Unexpected failure, please check server logs for more information" } });
-check("Supabase failing: says so, without its words", broken === "Sign-in isn't working right now. Try again in a few minutes.", broken);
+check("Supabase failing: says so, without its words", broken === "Logging in isn't working right now. Try again in a few minutes.", broken);
 
 const weak = { status: 422, body: { code: 422, error_code: "weak_password", msg: "Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ, 0123456789", weak_password: { reasons: ["characters"] } } };
 const weakSaid = await signup(weak);

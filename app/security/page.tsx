@@ -45,7 +45,7 @@ export default function SecurityPage() {
             Your cloud library (only when you&apos;re signed in) is kept in private storage. Database rules let each
             account reach only its own documents and files.
           </li>
-          <li>The AI assistant sends a document&apos;s text, not the file, and we don&apos;t store it.</li>
+          <li>Chat with PDF sends a document&apos;s text, not the file, and we don&apos;t store it.</li>
         </ul>
       </Section>
 

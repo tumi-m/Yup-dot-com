@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   const config = ollamaConfig();
   if (!config) {
     console.error("AI assistant disabled: set OLLAMA_API_KEY (Ollama Cloud) or OLLAMA_HOST (your own server).");
-    return json(503, "The AI assistant isn't configured on this deployment yet.");
+    return json(503, "Chat with PDF isn't set up on this site yet.");
   }
 
   const { user, tier } = await resolveTier();
