@@ -74,6 +74,12 @@ that account's first charge is waiting. A cancel or invoice event for a code
 the row doesn't hold waits for that create, then applies only if its code is
 the one stored. `tests/billing-unbound-charge.test.mts` checks this.
 
+Only a subscription paid with the card the account's own one started with
+is ever stopped as a second subscription (`tests/billing-second-subscription.test.mts`),
+so nobody can stop someone else's by paying on their customer. A refund
+changes a plan only after Paystack confirms the payment it names was
+refunded in full (`tests/billing-refunds.test.mts`).
+
 ## Why the MyBroadband-style hacks don't apply here
 
 In October 2026 MyBroadband reported a South African site, built with an AI
