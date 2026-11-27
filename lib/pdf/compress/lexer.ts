@@ -197,6 +197,121 @@ export function scanContent(data: Uint8Array, onOp: (op: string, operands: Opera
   }
 }
 
+/** An operand as written: where it is in the stream and what it holds. */
+export interface Token {
+  kind: "number" | "name" | "string" | "array" | "dict" | "word";
+  start: number;
+  end: number;
+  /** A number's value, a name (without the slash) or a word such as true. */
+  value?: number | string;
+  /** A string's bytes, escapes resolved. */
+  bytes?: Uint8Array;
+  /** An array's items. */
+  items?: Token[];
+}
+
+/** The bytes of the literal string at `from`..`to` (its parentheses included), escapes resolved. */
+function literalBytes(d: Uint8Array, from: number, to: number): Uint8Array {
+  const out: number[] = [];
+  for (let i = from + 1; i < to - 1; i++) {
+    let c = d[i];
+    if (c === 0x0d) {
+      // An end of line in a string is read as one newline.
+      if (d[i + 1] === 0x0a) i++;
+      out.push(0x0a);
+      continue;
+    }
+    if (c !== 0x5c) {
+      out.push(c);
+      continue;
+    }
+    c = d[++i];
+    const simple: Record<number, number> = { 0x6e: 10, 0x72: 13, 0x74: 9, 0x62: 8, 0x66: 12, 0x28: 0x28, 0x29: 0x29, 0x5c: 0x5c };
+    if (c in simple) out.push(simple[c]);
+    else if (c >= 0x30 && c <= 0x37) {
+      let v = c - 0x30;
+      for (let k = 0; k < 2 && d[i + 1] >= 0x30 && d[i + 1] <= 0x37; k++) v = v * 8 + (d[++i] - 0x30);
+      out.push(v & 0xff);
+    } else if (c === 0x0d) {
+      // A backslash at the end of a line joins the lines.
+      if (d[i + 1] === 0x0a) i++;
+    } else if (c !== 0x0a) out.push(c);
+  }
+  return Uint8Array.from(out);
+}
+
+function hexBytes(d: Uint8Array, from: number, to: number): Uint8Array {
+  const digits: number[] = [];
+  for (let i = from + 1; i < to - 1; i++) {
+    const v = hexValue(d[i]);
+    if (v >= 0) digits.push(v);
+  }
+  if (digits.length % 2) digits.push(0);
+  const out = new Uint8Array(digits.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = digits[2 * i] * 16 + digits[2 * i + 1];
+  return out;
+}
+
+/**
+ * Calls `onOp` for every operator in a content stream with its operands as
+ * written, where the first of them starts and where the operator ends, so a
+ * caller can cut whole operators out. Inline images are stepped over.
+ *
+ * Returns false when some of the stream can't be read with confidence: an
+ * inline image whose end isn't certain, braces (which content streams never
+ * have), or an array or dictionary left open. The operators seen may then be
+ * incomplete.
+ */
+export function readOperators(data: Uint8Array, onOp: (op: string, operands: Token[], start: number, end: number) => void): boolean {
+  const lx = new Lexer(data);
+  let operands: Token[] = [];
+  /** The arrays and dictionaries open at this point, innermost last. */
+  const open: Token[] = [];
+  const add = (t: Token) => {
+    const parent = open[open.length - 1];
+    if (parent) (parent.items ??= []).push(t);
+    else operands.push(t);
+  };
+  for (;;) {
+    const kind = lx.next();
+    const start = lx.start;
+    if (kind === END) return open.length === 0;
+    const c = data[start];
+    if (kind === OPEN || kind === CLOSE) {
+      if (c === 0x7b || c === 0x7d) return false;
+      if (kind === OPEN) {
+        open.push({ kind: c === 0x5b ? "array" : "dict", start, end: start, items: [] });
+        continue;
+      }
+      const t = open.pop();
+      // A ")" outside a string, or a closer that doesn't match what is open.
+      if (!t || c === 0x29 || (t.kind === "array") !== (c === 0x5d)) return false;
+      t.end = lx.pos;
+      add(t);
+      continue;
+    }
+    if (kind === NUM) add({ kind: "number", start, end: lx.pos, value: lx.value as number });
+    else if (kind === NAME) add({ kind: "name", start, end: lx.pos, value: lx.value as string });
+    else if (kind === OTHER) add({ kind: "string", start, end: lx.pos, bytes: c === 0x28 ? literalBytes(data, start, lx.pos) : hexBytes(data, start, lx.pos) });
+    else {
+      const word = lx.value as string;
+      if (open.length || word === "true" || word === "false" || word === "null") {
+        add({ kind: "word", start, end: lx.pos, value: word });
+        continue;
+      }
+      if (word === "BI") {
+        const end = skipInlineImage(lx);
+        if (end < 0) return false;
+        lx.pos = end;
+        operands = [];
+        continue;
+      }
+      onOp(word, operands, operands.length ? operands[0].start : start, lx.pos);
+      operands = [];
+    }
+  }
+}
+
 const COMPONENTS: Record<string, number> = {
   G: 1,
   DeviceGray: 1,

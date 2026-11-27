@@ -2,10 +2,12 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { ExternalLink, Trash2 } from "lucide-react";
-import type { Annotation } from "@/lib/editor/types";
+import type { Annotation, TextEditAnnotation } from "@/lib/editor/types";
 import { NEW_TEXT } from "@/lib/editor/factory";
 import { annotationTouchAction } from "@/lib/editor/canvas";
 import { annotationName, nudgeAnnotation } from "@/lib/editor/keyboard";
+import { runTransform } from "@/lib/editor/text-edit";
+import { cssBaseline, cssFamily } from "@/lib/pdf/edit-text/fonts";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "p1" | "p2";
 
@@ -67,6 +69,9 @@ export function AnnotationView({
   onCommitStart,
   onCommitEnd,
   onDelete,
+  onCommit,
+  onLeave,
+  tabStop = true,
 }: {
   ann: Annotation;
   scale: number;
@@ -82,6 +87,12 @@ export function AnnotationView({
   onCommitStart: () => void;
   onCommitEnd: () => void;
   onDelete: () => void;
+  /** Changed text: each change is an undo step, a burst of typing one step (`continuous`). */
+  onCommit?: (next: Annotation, continuous?: boolean) => void;
+  /** Changed text: Enter (done) or Escape (cancel, with the words put back) in its words. Without it, focus comes back here. */
+  onLeave?: (how: "done" | "cancel", reverted?: Annotation) => void;
+  /** Whether Tab stops on it (Edit text's runs stand in for changed text). */
+  tabStop?: boolean;
 }) {
   const gesture = useRef<{
     kind: "move" | Handle;
@@ -94,7 +105,9 @@ export function AnnotationView({
 
   const isLine =
     ann.type === "shape" && (ann.shape === "line" || ann.shape === "arrow");
-  const hasText = ann.type === "text" || ann.type === "note";
+  const hasText = ann.type === "text" || ann.type === "note" || ann.type === "edit";
+  /** Changed text stays where the old words were: it isn't moved or resized. */
+  const fixed = ann.type === "edit";
   const self = useRef<HTMLDivElement>(null);
 
   /** The keyboard version of the pointer gestures: move, resize, edit. */
@@ -102,13 +115,14 @@ export function AnnotationView({
     if (!interactive || e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      const box = e.currentTarget.querySelector("textarea");
+      const box = e.currentTarget.querySelector<HTMLTextAreaElement | HTMLInputElement>("textarea, input");
       if (!box) return;
       box.focus({ preventScroll: true });
       if (box.value === NEW_TEXT) box.select();
       else box.setSelectionRange(box.value.length, box.value.length);
       return;
     }
+    if (fixed) return;
     const next = nudgeAnnotation(ann, e, page);
     if (!next) return;
     e.preventDefault();
@@ -121,6 +135,12 @@ export function AnnotationView({
 
   function begin(e: React.PointerEvent, kind: "move" | Handle) {
     if (!interactive) return;
+    if (fixed) {
+      // Selects it; the press goes on to the words, to type there.
+      e.stopPropagation();
+      if (!selected) onSelect();
+      return;
+    }
     e.stopPropagation();
     e.preventDefault();
     // A finger selects on lift and drags once selected, so a swipe that
@@ -219,8 +239,8 @@ export function AnnotationView({
     top: ann.y * scale,
     width: Math.max(1, ann.width * scale),
     height: Math.max(1, ann.height * scale),
-    cursor: interactive ? "move" : "default",
-    touchAction: annotationTouchAction(interactive, selected),
+    cursor: fixed ? "text" : interactive ? "move" : "default",
+    touchAction: fixed ? undefined : annotationTouchAction(interactive, selected),
   };
 
   return (
@@ -244,7 +264,7 @@ export function AnnotationView({
       <div
         ref={self}
         data-ann-focus={interactive ? "" : undefined}
-        tabIndex={interactive ? 0 : undefined}
+        tabIndex={interactive ? (tabStop ? 0 : -1) : undefined}
         role={interactive ? (hasText ? "group" : "button") : undefined}
         aria-label={interactive ? annotationName(ann) : undefined}
         aria-describedby={interactive ? describedBy : undefined}
@@ -258,12 +278,15 @@ export function AnnotationView({
           selected={selected}
           interactive={interactive}
           onChange={onChange}
-          onDone={() => self.current?.focus({ preventScroll: true })}
+          onCommit={onCommit ?? onChange}
+          onDone={(how, reverted) => (onLeave ? onLeave(how, reverted) : self.current?.focus({ preventScroll: true }))}
         />
       </div>
 
       {selected && interactive && (
         <>
+          {/* Changed text is removed from the panel or with Delete: a button over the line above would hide it. */}
+          {!fixed && (
           <button
             type="button"
             // The Delete key and the Properties panel do this from the keyboard.
@@ -282,8 +305,9 @@ export function AnnotationView({
           >
             <Trash2 className="h-3 w-3" />
           </button>
+          )}
 
-          {(isLine ? (["p1", "p2"] as Handle[]) : BOX_HANDLES).map((h) => (
+          {(fixed ? [] : isLine ? (["p1", "p2"] as Handle[]) : BOX_HANDLES).map((h) => (
             <span
               key={h}
               onPointerDown={(e) => begin(e, h)}
@@ -324,6 +348,7 @@ function Content({
   selected,
   interactive,
   onChange,
+  onCommit,
   onDone,
 }: {
   ann: Annotation;
@@ -331,18 +356,22 @@ function Content({
   selected: boolean;
   interactive: boolean;
   onChange: (next: Annotation) => void;
+  onCommit: (next: Annotation, continuous?: boolean) => void;
   /** Escape in a text: back to the annotation itself. */
-  onDone: () => void;
+  onDone: (how: "done" | "cancel", reverted?: Annotation) => void;
 }) {
   /** Escape leaves the text for the annotation, which stays selected. */
   const leave = (e: React.KeyboardEvent) => {
     if (e.key !== "Escape" || !interactive) return;
     e.stopPropagation();
-    onDone();
+    onDone("done");
   };
   switch (ann.type) {
     case "text":
       return <TextBody ann={ann} scale={scale} selected={selected} interactive={interactive} onChange={onChange} onKeyDown={leave} />;
+
+    case "edit":
+      return <EditBody ann={ann} scale={scale} interactive={interactive} onCommit={onCommit} onDone={onDone} />;
 
     case "draw":
       return (
@@ -600,5 +629,91 @@ function TextBody({
         fontFamily: "Helvetica, Arial, sans-serif",
       }}
     />
+  );
+}
+
+/**
+ * Changed text: a box in the page's colour over the old words, and the new
+ * words in a box to type in, both laid along the old words' own line (turned
+ * with it on a turned page). Each change is saved to the history as typed,
+ * so Save sees it; Enter is done, Escape puts back the words it had when the
+ * box was entered.
+ */
+function EditBody({
+  ann,
+  scale,
+  interactive,
+  onCommit,
+  onDone,
+}: {
+  ann: TextEditAnnotation;
+  scale: number;
+  interactive: boolean;
+  onCommit: (next: Annotation, continuous?: boolean) => void;
+  onDone: (how: "done" | "cancel", reverted?: Annotation) => void;
+}) {
+  const run = ann.run;
+  const start = useRef(ann.text);
+  // Typed at 16px or more and scaled down to the page, so phones don't zoom in on focus.
+  const k = Math.max(1, 16 / Math.max(1, ann.fontSize));
+  const lineHeight = 1.25;
+  const font: React.CSSProperties = {
+    fontFamily: cssFamily(run.font.family),
+    fontSize: ann.fontSize * k,
+    fontWeight: ann.bold ? 700 : 400,
+    fontStyle: ann.italic ? "italic" : "normal",
+    lineHeight,
+    letterSpacing: 0,
+  };
+  const padX = run.size * 0.04;
+  const padY = run.size * 0.06;
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0 h-0 w-0"
+      style={{ transform: runTransform(run, scale, k, { x: ann.x, y: ann.y }), transformOrigin: "0 0" }}
+    >
+      <div
+        aria-hidden
+        className="absolute"
+        style={{
+          left: (run.x0 - padX) * k,
+          top: -(run.ascent * run.size + padY) * k,
+          width: (run.x1 - run.x0 + 2 * padX) * k,
+          height: ((run.ascent - run.descent) * run.size + 2 * padY) * k,
+          background: ann.background,
+        }}
+      />
+      <div className="absolute left-0 inline-grid" style={{ top: -cssBaseline(run.font.family, lineHeight) * ann.fontSize * k }}>
+        {/* Sizes the box to the words, so it grows as they are typed. */}
+        <span aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre pr-0.5" style={font}>
+          {ann.text || "Removed"}
+        </span>
+        <input
+          value={ann.text}
+          onChange={(e) => onCommit({ ...ann, text: e.target.value.replace(/[\r\n]+/g, " ") }, true)}
+          onFocus={() => (start.current = ann.text)}
+          onKeyDown={(e) => {
+            if (!interactive) return;
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onDone("done");
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              onDone("cancel", { ...ann, text: start.current });
+            }
+          }}
+          readOnly={!interactive}
+          // Reached through the text itself (Enter), so it isn't a second Tab stop.
+          tabIndex={-1}
+          aria-label={`New text for: ${run.text.length > 60 ? `${run.text.slice(0, 60)}…` : run.text}`}
+          placeholder="Removed"
+          spellCheck={false}
+          autoComplete="off"
+          className="pointer-events-auto col-start-1 row-start-1 w-full min-w-[2em] border-none bg-transparent p-0 outline-none placeholder:italic placeholder:text-slate-400"
+          style={{ ...font, color: ann.color }}
+        />
+      </div>
+    </div>
   );
 }

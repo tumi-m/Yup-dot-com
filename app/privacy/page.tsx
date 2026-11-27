@@ -53,7 +53,7 @@ export default function PrivacyPage() {
         <ul>
           <li>Most tools run in your browser. Those files never reach us.</li>
           <li>We store files only in your cloud library, which needs an account.</li>
-          <li>The AI assistant sends a document&apos;s text, not the file, to our AI provider.</li>
+          <li>The AI assistant and Translate PDF send a document&apos;s text, not the file, to our AI provider.</li>
           <li>Paystack handles payments. We never see your card number.</li>
           <li>Analytics cookies stay off unless you accept them.</li>
           <li>We don&apos;t sell your personal information.</li>
@@ -107,12 +107,18 @@ export default function PrivacyPage() {
         <h3>Tester codes</h3>
         <p>If you use a tester code: which code you used and when, and when your free tester time ends.</p>
 
-        <h3>The AI assistant</h3>
+        <h3 id="ai">The AI assistant and Translate PDF</h3>
         <p>
           When you use Chat with PDF, your browser extracts the document&apos;s text and sends it, with the file name and
           your questions, to our server, which passes them to Ollama, our AI provider, to write the answer. We don&apos;t
           store the text, your questions or the answers. Don&apos;t use the assistant on documents you aren&apos;t
           allowed to share with a third party.
+        </p>
+        <p>
+          When you use Translate PDF, your browser extracts the document&apos;s text and sends it, a page&apos;s worth at
+          a time with the languages you chose, to our server, which passes it to Ollama to translate. The file and its
+          name aren&apos;t sent. We don&apos;t store the text or the translations; the Word file and PDF are made in your
+          browser. Don&apos;t translate documents you aren&apos;t allowed to share with a third party.
         </p>
 
         <h3>Video and Slides links</h3>
@@ -138,7 +144,7 @@ export default function PrivacyPage() {
 
         <h3>Daily limits</h3>
         <p>
-          To apply daily limits (for example AI answers, downloads and song lookups), we count uses per account or, for visitors
+          To apply daily limits (for example AI answers, characters translated, downloads and song lookups), we count uses per account or, for visitors
           without an account, per salted one-way hash of the IP address. The counters never hold a raw IP address. Old
           counters are cleared automatically, usually within 40 days.
         </p>
@@ -219,7 +225,8 @@ export default function PrivacyPage() {
             <strong>Paystack</strong>: payments, subscriptions and refunds.
           </li>
           <li>
-            <strong>Ollama</strong>: AI assistant answers (document text and questions only).
+            <strong>Ollama</strong>: AI assistant answers and Translate PDF translations (document text, questions and the
+            chosen languages only).
           </li>
           <li>
             <strong>Google</strong>: Google Analytics, only if you accept analytics cookies; and YouTube, whose oEmbed

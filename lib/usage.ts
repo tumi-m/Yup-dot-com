@@ -397,6 +397,130 @@ export async function aiRemaining(subject: string, tier: Tier, opts: { env?: Nod
 }
 
 /* ------------------------------------------------------------------ */
+/* Translation (Translate PDF)                                         */
+/* ------------------------------------------------------------------ */
+
+export interface TranslatePolicy {
+  /** Characters a UTC day; 0 means none (a guest must sign in). */
+  day: number;
+  /** Requests a minute. */
+  burst: number;
+  /** Requests a day across the whole site. */
+  global: number;
+  /** Requests a day that delivered nothing and are given back; past that they cost what they asked for. */
+  unanswered: number;
+}
+
+/**
+ * Translation allowances. Every number can be overridden:
+ * TRANSLATE_LIMIT_<TIER>_DAY (characters), TRANSLATE_LIMIT_<TIER>_UNANSWERED,
+ * TRANSLATE_BURST_PER_MINUTE, TRANSLATE_GLOBAL_DAILY_LIMIT (requests, each
+ * at most MAX_BATCH_CHARS characters).
+ */
+export function translatePolicy(tier: Tier, env: NodeJS.ProcessEnv = process.env): TranslatePolicy {
+  const T = tier.toUpperCase();
+  return {
+    day: envInt(env, `TRANSLATE_LIMIT_${T}_DAY`) ?? LIMITS[tier].translateCharsPerDay,
+    burst: Math.max(1, envInt(env, "TRANSLATE_BURST_PER_MINUTE") ?? 30),
+    global: envInt(env, "TRANSLATE_GLOBAL_DAILY_LIMIT") ?? 3000,
+    unanswered: envInt(env, `TRANSLATE_LIMIT_${T}_UNANSWERED`) ?? 10,
+  };
+}
+
+export const TRANSLATE_BUSY_MESSAGE = "Translation is busy today. Try again tomorrow.";
+export const TRANSLATE_BURST_MESSAGE = "Too many requests at once. Try again in a minute.";
+export const TRANSLATE_SPENT_MESSAGE = "You've used today's translation allowance.";
+
+export type TranslateClaim =
+  | { ok: true; remaining: number; refund: (opts?: { unsent?: boolean; delivered?: number }) => Promise<void> }
+  | { ok: false; status: number; error: string; upgrade?: boolean; reason?: string };
+
+/**
+ * Claims one translation request of `chars` characters, counted in blocks
+ * of `unit` (rounded up): the caller's day, then the per-minute burst, then
+ * the site-wide day (in requests). The store counts one at a time, so the
+ * blocks are taken one by one; a refused claim gives back what it took.
+ *
+ * `refund` is for a request that delivered less than it asked for (it
+ * failed, was stopped, or the model left passages out): it gives back the
+ * day's blocks beyond the whole blocks of the `delivered` characters, so
+ * asking again for the rest never costs more than the first request did.
+ * Only the first `unanswered` such requests a day get anything back. The
+ * site-wide count stays (the model ran) unless `unsent` says the request
+ * never reached it; the burst always stays. As claimAiAnswer.
+ */
+export async function claimTranslation(
+  subject: string,
+  tier: Tier,
+  chars: number,
+  unit: number,
+  opts: { env?: NodeJS.ProcessEnv; store?: UsageStore } = {}
+): Promise<TranslateClaim> {
+  const s = opts.store ?? usageStore();
+  const policy = translatePolicy(tier, opts.env);
+  const upgrade = tier !== "pro" && tier !== "team";
+  const limit = Math.floor(policy.day / unit);
+  if (limit <= 0) {
+    return tier === "guest"
+      ? { ok: false, status: 401, error: "Sign in to translate documents." }
+      : { ok: false, status: 429, error: TRANSLATE_SPENT_MESSAGE, upgrade, reason: "translate" };
+  }
+  const units = Math.max(1, Math.ceil(chars / unit));
+  let taken = 0;
+  const giveBack = async () => {
+    for (; taken > 0; taken--) await s.refund(subject, "translate", "day");
+  };
+
+  let left = limit;
+  for (let i = 0; i < units; i++) {
+    const n = await s.consume(subject, "translate", limit, "day");
+    if (n < 0) {
+      await giveBack();
+      return { ok: false, status: 429, error: TRANSLATE_SPENT_MESSAGE, upgrade, reason: "translate" };
+    }
+    taken++;
+    left = n;
+  }
+
+  if ((await s.consume(subject, "translate", policy.burst, "minute")) < 0) {
+    await giveBack();
+    return { ok: false, status: 429, error: TRANSLATE_BURST_MESSAGE, reason: "burst" };
+  }
+  if ((await s.consume(GLOBAL_SUBJECT, "translate", policy.global, "day")) < 0) {
+    await giveBack();
+    return { ok: false, status: 503, error: TRANSLATE_BUSY_MESSAGE, reason: "busy" };
+  }
+
+  let refunded = false;
+  return {
+    ok: true,
+    remaining: left * unit,
+    refund: async ({ unsent = false, delivered = 0 } = {}) => {
+      if (refunded) return;
+      // Whole blocks of what came back stay counted; a part block is given back.
+      const keep = Math.min(taken, Math.floor(Math.max(0, delivered) / unit));
+      if (keep >= taken) return;
+      refunded = true;
+      if (unsent && !delivered) await s.refund(GLOBAL_SUBJECT, "translate", "day");
+      else if ((await s.consume(subject, "translate-unanswered", policy.unanswered, "day")) < 0) return;
+      for (; taken > keep; taken--) await s.refund(subject, "translate", "day");
+    },
+  };
+}
+
+/** Characters left today, without spending any. */
+export async function translationRemaining(
+  subject: string,
+  tier: Tier,
+  unit: number,
+  opts: { env?: NodeJS.ProcessEnv; store?: UsageStore } = {}
+): Promise<number> {
+  const s = opts.store ?? usageStore();
+  const limit = Math.floor(translatePolicy(tier, opts.env).day / unit);
+  return Math.max(0, limit - (await s.count(subject, "translate", "day"))) * unit;
+}
+
+/* ------------------------------------------------------------------ */
 /* Daily allowances (media downloads, link imports)                    */
 /* ------------------------------------------------------------------ */
 

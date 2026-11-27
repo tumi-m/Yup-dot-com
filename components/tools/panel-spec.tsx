@@ -2,7 +2,7 @@ import type { ToolMeta } from "@/lib/tools";
 
 /** Which panel a tool page shows; plain data, so a server page can pass it to ToolPanel. */
 export type PanelSpec =
-  | { kind: "editor"; mode?: "sign" }
+  | { kind: "editor"; mode?: "sign" | "text" }
   | { kind: "assistant" }
   | { kind: "media"; media: NonNullable<ToolMeta["media"]> }
   | { kind: "playlist" }
@@ -15,10 +15,11 @@ export type PanelSpec =
   | { kind: "compare"; slug: string }
   | { kind: "redact"; slug: string }
   | { kind: "scan"; slug: string }
+  | { kind: "translate"; slug: string }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
-  if (tool.editor) return tool.slug === "sign-pdf" ? { kind: "editor", mode: "sign" } : { kind: "editor" };
+  if (tool.editor) return tool.slug === "sign-pdf" ? { kind: "editor", mode: "sign" } : tool.slug === "edit-pdf-text" ? { kind: "editor", mode: "text" } : { kind: "editor" };
   if (tool.custom === "assistant") return { kind: "assistant" };
   if (tool.custom === "media" && tool.media) return { kind: "media", media: tool.media };
   if (tool.custom === "playlist") return { kind: "playlist" };
@@ -31,16 +32,18 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "compare") return { kind: "compare", slug: tool.slug };
   if (tool.custom === "redact") return { kind: "redact", slug: tool.slug };
   if (tool.custom === "scan") return { kind: "scan", slug: tool.slug };
+  if (tool.custom === "translate") return { kind: "translate", slug: tool.slug };
   return { kind: "workbench", slug: tool.slug };
 }
 
 /** Rendered heights of each kind of tool panel before a file is chosen. */
-export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign"): string {
-  // Fill & Sign has no Blank page button under Choose PDF on phones.
-  if (kind === "editor") return mode === "sign" ? "h-[244px]" : "h-[296px] sm:h-[244px]";
+export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text"): string {
+  // Fill & Sign and Edit PDF text have no Blank page button under Choose PDF on phones.
+  if (kind === "editor") return mode ? "h-[244px]" : "h-[296px] sm:h-[244px]";
   if (kind === "assistant") return "h-[300px] sm:h-[272px]";
   if (kind === "media" || kind === "playlist" || kind === "samples") return "h-[206px] sm:h-[150px]";
   if (kind === "slides-import") return "h-[158px] sm:h-[182px]";
+  if (kind === "translate") return "h-[308px] sm:h-[276px]";
   return "h-[292px]";
 }
 

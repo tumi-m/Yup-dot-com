@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Sparkles, Stamp, X, Zap } from "lucide-react";
+import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Languages, Sparkles, Stamp, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,15 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+
+const characters = (n: number) => `${n.toLocaleString("en-US")} characters`;
+
+function translateBody(t: Tier) {
+  return t === "guest"
+    ? `${characters(LIMITS.free.translateCharsPerDay)} a day with a free account, ${characters(LIMITS.pro.translateCharsPerDay)} with Pro.`
+    : `${characters(LIMITS.pro.translateCharsPerDay)} a day with Pro.`;
+}
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -44,6 +52,15 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
       t === "guest"
         ? `${LIMITS.free.aiAnswersPerDay} a day with a free account, ${LIMITS.pro.aiAnswersPerDay} with Pro.`
         : `${LIMITS.pro.aiAnswersPerDay} a day with Pro.`,
+  },
+  translate: {
+    title: "Daily translation limit reached",
+    body: (t) => translateBody(t),
+  },
+  // Before anything is used: the document is bigger than what's left today.
+  "translate-size": {
+    title: "This document needs more than you have left today",
+    body: (t) => translateBody(t),
   },
   edits: {
     title: "You've used today's free edit",
@@ -80,13 +97,18 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
 /**
  * Pro and Team have the same limits, so at one of these there is nothing to
  * upgrade to: they are told the limit instead. Their other limits (AI
- * answers, downloads) come from the server, which offers no upgrade then.
+ * answers, downloads) come from the server, which offers no upgrade then,
+ * and the dialog shows nothing for them.
  */
 const PAID_LIMIT: Partial<Record<UpsellReason, (plan: string, limits: TierLimits) => string>> = {
   "file-size": (plan, l) => `Files up to ${formatLimitBytes(l.maxFileBytes)} on ${plan}.`,
   batch: (plan, l) => `Up to ${l.maxBatchFiles} files at once on ${plan}.`,
   pages: (plan, l) => `Up to ${l.comparePages.toLocaleString("en-US")} pages a file on ${plan}.`,
   "redact-pages": (plan, l) => `Up to ${l.redactPages.toLocaleString("en-US")} pages with marks at a time on ${plan}.`,
+  // Translate PDF opens these only for guests and Free; should one reach Pro
+  // or Team, it says when the day's allowance comes back, not "Upgrade".
+  translate: (plan, l) => `${characters(l.translateCharsPerDay)} a day on ${plan}. More after midnight UTC.`,
+  "translate-size": (plan, l) => `${characters(l.translateCharsPerDay)} a day on ${plan}. More after midnight UTC.`,
 };
 
 /** What the dialog tells a Pro or Team user at this limit; null for other tiers (they get the upgrade) and other reasons. */
@@ -111,6 +133,12 @@ const EDIT_BENEFITS = [
   { icon: InfinityIcon, text: "Unlimited edits" },
   { icon: Stamp, text: "No watermark" },
   { icon: Sparkles, text: "Bigger files, more AI" },
+];
+
+const TRANSLATE_BENEFITS = [
+  { icon: Languages, text: `${characters(LIMITS.pro.translateCharsPerDay)} translated a day` },
+  { icon: InfinityIcon, text: "Bigger files and batches" },
+  { icon: Sparkles, text: "More AI answers" },
 ];
 
 const BENEFITS = [
@@ -196,7 +224,9 @@ export function UpgradeDialog({
                     ? EDIT_BENEFITS
                     : reason === "samples"
                       ? SAMPLE_BENEFITS
-                      : BENEFITS
+                      : reason === "translate" || reason === "translate-size"
+                        ? TRANSLATE_BENEFITS
+                        : BENEFITS
                 ).map((b, i) => (
                   <motion.li
                     key={b.text}

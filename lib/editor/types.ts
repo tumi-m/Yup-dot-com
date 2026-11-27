@@ -6,12 +6,15 @@
  * bake time.
  */
 
+import type { EditableRun } from "@/lib/pdf/edit-text/types";
+
 export type ShapeKind = "rect" | "ellipse" | "line" | "arrow" | "whiteout";
 export type MarkupKind = "highlight" | "underline" | "strikeout";
 export type FieldKind = "text" | "checkbox" | "radio" | "dropdown";
 
 export type ToolId =
   | "select"
+  | "edit-text"
   | "text"
   | "draw"
   | "image"
@@ -37,6 +40,24 @@ export interface TextAnnotation extends BaseAnnotation {
   fontSize: number;
   color: string;
   bold: boolean;
+}
+
+/**
+ * Existing text changed in place (Edit text). The box is the old words' box
+ * on the page; `run` is the run as it was read, which the save uses to take
+ * the old words out, or to cover them where it can't.
+ */
+export interface TextEditAnnotation extends BaseAnnotation {
+  type: "edit";
+  run: EditableRun;
+  /** The new words; empty takes the run away. */
+  text: string;
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  /** The page's colour round the old words, for covering them where they can't be taken out. */
+  background: string;
 }
 
 export interface DrawAnnotation extends BaseAnnotation {
@@ -100,6 +121,7 @@ export interface FieldAnnotation extends BaseAnnotation {
 
 export type Annotation =
   | TextAnnotation
+  | TextEditAnnotation
   | DrawAnnotation
   | ImageAnnotation
   | NoteAnnotation
@@ -164,6 +186,8 @@ export function annotationLabel(ann: Annotation): string {
   switch (ann.type) {
     case "text":
       return "Text";
+    case "edit":
+      return ann.text ? "Changed text" : "Removed text";
     case "draw":
       return "Drawing";
     case "image":

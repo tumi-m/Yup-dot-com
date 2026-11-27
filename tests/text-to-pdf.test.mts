@@ -176,9 +176,12 @@ check("tabs go to the next stop", expandTabs("a\tbc\td") === "a   bc  d" && expa
 {
   // Letters the font lacks.
   const mixed = await textToPdf(enc("Order 中文 confirmed 😀 ok"), "mixed.txt", {}, fonts);
-  check("missing: left out and counted, the rest drawn", mixed.note === "Left out 3 characters the font doesn't have (中 文 😀). It covers Latin, Greek and Cyrillic letters.", mixed.note);
+  check("missing: left out and counted, the rest drawn", mixed.note === "Left out 3 characters the font doesn't have (中 文 😀). It covers Latin, Greek, Cyrillic and Devanagari letters.", mixed.note);
   const [page] = await read(mixed.bytes);
   check("missing: no boxes, the words around them kept", page.text.includes("Order") && page.text.includes("confirmed") && !page.text.includes("中"), page.text);
+  const hindi = await textToPdf(enc("हिन्दी में अनुवाद: क्षत्रिय, श्री, प्रेम (2026)"), "hindi.txt", {}, fonts);
+  const [hindiPage] = await read(hindi.bytes);
+  check("Devanagari: drawn with nothing left out", !hindi.note && /[\u0900-\u097f]{3}/.test(hindiPage.text) && hindiPage.text.includes("2026"), { note: hindi.note, text: hindiPage.text });
   const cjk = await settle(textToPdf(enc("这是中文文本。\n第二行。"), "chinese.txt", {}, fonts));
   check("missing: a file with nothing the font has is turned away", /^chinese\.txt: none of this text can be drawn \(for example 这 是 中\)/.test(cjk.error?.message ?? ""), cjk.error?.message);
   const empty = await settle(textToPdf(enc(" \n\n "), "blank.txt", {}, fonts));
@@ -362,8 +365,10 @@ Inline <span style="color:red">span</span> and <script>alert(4)</script> done. C
 {
   // The alphabets each file covers match @fontsource's own CSS.
   const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
-  const ours = new Map(fontsModule.SUBSET_RANGES.map(([subset, list]) => [subset, list.map(([a, b]) => (a === b ? `U+${hex(a)}` : `U+${hex(a)}-${hex(b)}`)).join(",")]));
+  const all = new Map(fontsModule.SUBSET_RANGES.map(([subset, list]) => [subset, list.map(([a, b]) => (a === b ? `U+${hex(a)}` : `U+${hex(a)}-${hex(b)}`)).join(",")]));
   for (const pkg of ["noto-sans", "noto-sans-mono"]) {
+    // Mono has no Devanagari file; its faces use Noto Sans's.
+    const ours = new Map([...all].filter(([subset]) => pkg === "noto-sans" || !fontsModule.NO_MONO.has(subset)));
     const css = readFileSync(`./node_modules/@fontsource/${pkg}/400.css`, "utf8");
     const theirs = new Map([...css.matchAll(/\/\* (?:noto-sans-mono|noto-sans)-([a-z-]+)-400-normal \*\/[^}]*?unicode-range: ([^;]+);/g)].map(([, subset, r]) => [subset, r.trim()]));
     const differ = [...ours].filter(([subset, list]) => theirs.get(subset) !== list).map(([subset]) => subset);

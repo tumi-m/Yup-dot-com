@@ -146,6 +146,15 @@ export function ollamaConfig(env: Record<string, string | undefined> = process.e
 }
 
 /**
+ * The settings Translate PDF uses: the same host and key, with
+ * OLLAMA_TRANSLATE_MODEL in place of the chat model when it is set.
+ */
+export function translateConfig(env: Record<string, string | undefined> = process.env): OllamaConfig | null {
+  const model = env.OLLAMA_TRANSLATE_MODEL?.trim();
+  return ollamaConfig(model ? { ...env, OLLAMA_MODEL: model } : env);
+}
+
+/**
  * Splits a byte stream into parsed JSON lines. Lines may be split across
  * chunks anywhere, including inside a multi-byte character.
  */

@@ -18,6 +18,7 @@ const CropTool = lazy(() => import("./CropTool").then((m) => ({ default: m.CropT
 const CompareTool = lazy(() => import("./CompareTool").then((m) => ({ default: m.CompareTool })));
 const RedactTool = lazy(() => import("./RedactTool").then((m) => ({ default: m.RedactTool })));
 const ScanTool = lazy(() => import("./ScanTool").then((m) => ({ default: m.ScanTool })));
+const TranslateTool = lazy(() => import("./TranslateTool").then((m) => ({ default: m.TranslateTool })));
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
@@ -52,6 +53,8 @@ function panel(spec: PanelSpec, tier: Tier): ReactNode {
       return <RedactTool slug={spec.slug} tier={tier} />;
     case "scan":
       return <ScanTool slug={spec.slug} tier={tier} />;
+    case "translate":
+      return <TranslateTool slug={spec.slug} tier={tier} />;
     case "workbench":
       return <ToolWorkbench slug={spec.slug} tier={tier} />;
   }

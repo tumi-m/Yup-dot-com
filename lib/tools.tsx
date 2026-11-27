@@ -52,6 +52,8 @@ import {
   FileDiff,
   EyeOff,
   ScanLine,
+  TextCursor,
+  Languages,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -81,7 +83,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -370,6 +372,20 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-blue-100 text-blue-700",
   },
   {
+    slug: "translate-pdf",
+    name: "Translate PDF",
+    title: "Translate PDF: translate a document into another language",
+    description: "Translate a PDF into another language, as a Word file and, for most languages, a PDF.",
+    icon: Languages,
+    category: "convert",
+    tint: "bg-gradient-to-br from-sky-100 to-violet-100 text-sky-800",
+    badge: "AI",
+    custom: "translate",
+    keywords:
+      "translate translation translator translating language languages foreign english afrikaans zulu isizulu xhosa isixhosa sotho sesotho tswana setswana sepedi tsonga xitsonga swati siswati venda tshivenda ndebele isindebele french portuguese spanish german arabic chinese hindi swahili document",
+    aliases: ["PDF Translator", "Document Translator", "Translate Document", "Translate a PDF"],
+  },
+  {
     slug: "pdf-to-excel",
     name: "PDF to Excel",
     title: "PDF to Excel: pull tables into XLSX",
@@ -527,12 +543,26 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "edit-pdf",
     name: "Edit PDF",
-    title: "Edit PDF: annotate, draw, and add text",
-    description: "Add text, shapes, links and form fields.",
+    title: "Edit PDF: change text, add text, draw and annotate",
+    description: "Change text, add text, shapes, links and form fields.",
     icon: PenLine,
     category: "edit",
     tint: "bg-teal-100 text-teal-700",
     editor: true,
+  },
+  {
+    slug: "edit-pdf-text",
+    name: "Edit PDF Text",
+    title: "Edit PDF text: change the existing text in a PDF",
+    description: "Click a line and change its text, size or colour.",
+    icon: TextCursor,
+    category: "edit",
+    tint: "bg-emerald-100 text-emerald-800",
+    badge: "New",
+    editor: true,
+    keywords:
+      "edit text change text replace text rewrite fix typo spelling correct mistake update modify existing text font size bold italic colour color delete text remove line",
+    aliases: ["PDF Text Editor", "Change PDF Text", "Replace Text in PDF", "Edit Text in PDF"],
   },
   {
     slug: "sign-pdf",
@@ -712,7 +742,9 @@ export function getTool(slug: string): ToolMeta | undefined {
  * "More tools" for the pages whose category neighbours aren't the next step:
  * text and Markdown point at each other, pictures at other picture formats
  * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
- * Compare at reading and editing the text it found.
+ * Compare at reading and editing the text it found, the two editors at each
+ * other and at Redact PDF, which removes what covering only hides, and
+ * Translate at the other tools that read a document's text.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -729,6 +761,9 @@ const RELATED: Record<string, string[]> = {
   "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
   "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
   "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],
+  "edit-pdf-text": ["edit-pdf", "redact-pdf", "sign-pdf", "compress-pdf"],
+  "edit-pdf": ["edit-pdf-text", "sign-pdf", "compress-pdf", "redact-pdf"],
+  "translate-pdf": ["chat-with-pdf", "pdf-to-word", "ocr-pdf", "compress-pdf"],
   // A song's samples, then its sound from the sites people find songs on.
   "sample-finder": ["youtube-to-mp3", "tiktok-to-mp3", "instagram-to-mp3", "x-to-mp3"],
 };

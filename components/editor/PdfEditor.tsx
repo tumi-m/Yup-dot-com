@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -14,12 +15,13 @@ import {
   Save,
   Trash2,
   Undo2,
+  X,
   ZoomIn,
   ZoomOut,
   Maximize,
 } from "lucide-react";
 import { tryCreateClient } from "@/lib/supabase/client";
-import { getLocalDoc, saveLocalDoc } from "@/lib/local-store";
+import { getLocalDoc, saveLocalDoc, tryHandoff } from "@/lib/local-store";
 import { limitsFor, type Tier } from "@/lib/limits";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { documentFingerprint, EditCheckError, requestEdit } from "@/lib/edit-usage";
@@ -32,12 +34,16 @@ import { deleteMap, insertAfterMap, orderMap, pageAfter, remapAnnotations, sameM
 import { useUnsavedGuard } from "@/lib/editor/unsaved-guard";
 import { revealOffset } from "@/lib/editor/canvas";
 import { PICTURE_MESSAGE, pictureDataUrl } from "@/lib/editor/picture";
+import { editFromRun, joinReports, LOCKED, pristine as pristineEdit, textNotice } from "@/lib/editor/text-edit";
+import type { EditableRun } from "@/lib/pdf/edit-text/types";
+import type { TextEditReport } from "@/lib/pdf/edit-text/apply";
 import { scrollBehavior } from "@/components/motion/focus";
 import { pageKey, readShortcutsOn, toolShortcut, typedPage, writeShortcutsOn } from "@/lib/editor/keyboard";
 import {
   annotationLabel,
   DEFAULT_SETTINGS,
   type Annotation,
+  type TextEditAnnotation,
   type ToolId,
   type ToolSettings,
 } from "@/lib/editor/types";
@@ -48,7 +54,7 @@ import { friendlyPdfError } from "@/lib/pdf/errors";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToasts, ToastStack } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
+import { cn, uuid } from "@/lib/utils";
 import { Toolbar } from "./Toolbar";
 import { PageView } from "./PageView";
 import { ThumbnailSidebar } from "./ThumbnailSidebar";
@@ -84,6 +90,7 @@ export function PdfEditor({
   source: EditorSource;
   tier: Tier;
 }) {
+  const router = useRouter();
   const supabase = useMemo(() => (source.kind === "cloud" ? tryCreateClient() : null), [source.kind]);
   const [docName, setDocName] = useState(source.kind === "cloud" ? source.doc.name : "Document");
   const [upsellOpen, setUpsellOpen] = useState(false);
@@ -91,7 +98,7 @@ export function PdfEditor({
   /** The bytes last loaded or saved. */
   const savedRef = useRef<{ bytes: Uint8Array | null }>({ bytes: null });
   /** The file last built, for which edits, and the fingerprint it was claimed under. */
-  const builtRef = useRef<{ key: string; out: Uint8Array; note?: string; fp: string; watermark: boolean } | null>(null);
+  const builtRef = useRef<{ key: string; out: Uint8Array; note?: string; text?: TextEditReport; fp: string; watermark: boolean } | null>(null);
   const upsellShown = useRef(false);
   const mergeInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -115,12 +122,29 @@ export function PdfEditor({
   const [working, setWorking] = useState<"save" | "download" | null>(null);
   /** Read out by screen readers: the page after a page change, or what is being done. */
   const [live, setLive] = useState("");
+  /** Says something in the live region; the same words twice are said twice. */
+  const toggle = useRef(false);
+  const say = useCallback((message: string) => {
+    toggle.current = !toggle.current;
+    setLive(toggle.current ? message : `${message}\u00a0`);
+  }, []);
   /** The page number as typed in the page box, until it is used. */
   const [pageDraft, setPageDraft] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
 
   const history = useHistory<Annotation[]>([]);
   const annotations = history.state;
+  const undo = useCallback(() => {
+    if (!history.canUndo) return;
+    history.undo();
+    say("Undone.");
+  }, [history, say]);
+  const redo = useCallback(() => {
+    if (!history.canRedo) return;
+    history.redo();
+    say("Redone.");
+  }, [history, say]);
+  const snippet = (t: string) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
 
   const [tool, setTool] = useState<ToolId>("select");
   /** Single-key tool shortcuts, which the visitor can turn off. */
@@ -146,6 +170,16 @@ export function PdfEditor({
   const placeAfterSign = useRef(false);
   /** An annotation id, or "page": where focus goes once a deleted annotation has gone. */
   const focusAfter = useRef<string | null>(null);
+  /** Edit text: a run opened to change, kept out of the history until something about it changes. */
+  const [draft, setDraft] = useState<TextEditAnnotation | null>(null);
+  /** Bumped to move focus to the page's text (Edit text chosen with the keyboard). */
+  const [focusRuns, setFocusRuns] = useState(0);
+  /** The page turned to from the page's text, so focus goes to its text too. */
+  const [runFocusPage, setRunFocusPage] = useState<number | null>(null);
+  /** After a save or download that changed text: words covered rather than removed, other fonts, letters left out. */
+  const [notice, setNotice] = useState<ReturnType<typeof textNotice> | null>(null);
+  /** Changed text a page turn drew into the page before saving: told with the next save or download. */
+  const turnedText = useRef<TextEditReport | undefined>(undefined);
 
   const { toasts, toast, dismiss } = useToasts();
 
@@ -243,8 +277,24 @@ export function PdfEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bytes]);
 
-  const selected = annotations.find((a) => a.id === selectedId) ?? null;
-  const pageAnnotations = annotations.filter((a) => a.page === page);
+  // Opened from Edit PDF text: start in Edit text, focus on the page's first line once it is read.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("mode") !== "text") return;
+    setTool("edit-text");
+    setRunFocusPage(0);
+  }, []);
+  /** Edit text has said how it works (once a page with text is read). */
+  const textHinted = useRef(false);
+  /** Select has pointed at Edit text, after a press on the page's own text. */
+  const selectHinted = useRef(false);
+
+  const selected = annotations.find((a) => a.id === selectedId) ?? (draft && draft.id === selectedId ? draft : null);
+  const pageAnnotations = [...annotations.filter((a) => a.page === page), ...(draft && draft.page === page ? [draft] : [])];
+
+  // A run opened and left unchanged leaves nothing behind.
+  useEffect(() => {
+    if (draft && selectedId !== draft.id) setDraft(null);
+  }, [draft, selectedId]);
 
   // ---- annotation mutations ----
   const createAnnotation = useCallback(
@@ -264,9 +314,13 @@ export function PdfEditor({
 
   const updateAnnotation = useCallback(
     (next: Annotation) => {
+      if (draft && next.id === draft.id) {
+        setDraft(next as TextEditAnnotation);
+        return;
+      }
       history.live((prev) => prev.map((a) => (a.id === next.id ? next : a)));
     },
-    [history]
+    [history, draft]
   );
 
   /** The last properties-panel change, and the annotation it left. */
@@ -278,6 +332,13 @@ export function PdfEditor({
    */
   const commitAnnotation = useCallback(
     (next: Annotation, continuous = false) => {
+      // An opened run joins the history with its first change.
+      if (draft && next.id === draft.id) {
+        history.commit((list) => [...list, next]);
+        setDraft(null);
+        panelRun.current = continuous ? { id: next.id, keys: changedKeys(draft, next).join(), at: Date.now(), ann: next } : null;
+        return;
+      }
       const prev = annotations.find((a) => a.id === next.id);
       const run = { id: next.id, keys: prev ? changedKeys(prev, next).join() : "", at: Date.now() };
       const last = panelRun.current;
@@ -288,11 +349,41 @@ export function PdfEditor({
       else history.commit(update);
       panelRun.current = continuous ? { ...run, ann: next } : null;
     },
-    [annotations, history]
+    [annotations, history, draft]
+  );
+
+  /** Edit text: open a run to change, or the edit already made to it. Returns the edit's id. */
+  const openRun = useCallback(
+    (run: EditableRun, background: string): string => {
+      const made = annotations.find((a): a is TextEditAnnotation => a.type === "edit" && a.page === page && a.run.key === run.key);
+      if (made) {
+        setSelectedId(made.id);
+        return made.id;
+      }
+      const next = editFromRun(run, page, background, uuid());
+      setDraft(next);
+      setSelectedId(next.id);
+      return next.id;
+    },
+    [annotations, page]
   );
 
   const deleteAnnotation = useCallback(
     (id: string) => {
+      if (draft?.id === id) {
+        setDraft(null);
+        setSelectedId(null);
+        return;
+      }
+      const gone = annotations.find((a) => a.id === id);
+      if (gone?.type === "edit") {
+        // Restore original: the line as it was, and focus back on it in Edit text.
+        if (tool === "edit-text") focusAfter.current = `run:${gone.run.key}`;
+        say(`Restored: ${snippet(gone.run.text)}`);
+        history.commit((prev) => prev.filter((a) => a.id !== id));
+        setSelectedId((s) => (s === id ? null : s));
+        return;
+      }
       // Keep focus on the page: on the next annotation when the deleted one
       // had it, or on the page itself when its delete button or panel did.
       const area = canvasArea.current;
@@ -311,7 +402,108 @@ export function PdfEditor({
       history.commit((prev) => prev.filter((a) => a.id !== id));
       setSelectedId((s) => (s === id ? null : s));
     },
-    [history]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [history, draft, annotations, tool, say]
+  );
+
+  /**
+   * Escape in changed text: the words it had when it was entered are back.
+   * An edit left changing nothing goes, so the line shows as it was.
+   */
+  const cancelEdit = useCallback(
+    (next: TextEditAnnotation) => {
+      if (draft && next.id === draft.id) setDraft(null);
+      else if (pristineEdit(next)) history.commit((list) => list.filter((a) => a.id !== next.id));
+      else {
+        const prev = annotations.find((a) => a.id === next.id);
+        if (prev && prev.type === "edit" && prev.text !== next.text) commitAnnotation(next);
+      }
+      setSelectedId(null);
+      say("Change cancelled.");
+    },
+    [draft, annotations, history, commitAnnotation, say]
+  );
+
+  /** Enter in changed text: say what it is now. */
+  const editDone = useCallback(
+    (ann: TextEditAnnotation) => {
+      if (ann.text !== ann.run.text) say(ann.text ? `Changed to: ${snippet(ann.text)}` : `Removed: ${snippet(ann.run.text)}`);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [say]
+  );
+
+  /** Focus on a changed line: its line in Edit text, otherwise the edit itself. */
+  const focusEdit = (ann: TextEditAnnotation) => {
+    const area = canvasArea.current;
+    const el =
+      tool === "edit-text"
+        ? area?.querySelector<HTMLElement>(`[data-run-key="${CSS.escape(ann.run.key)}"]`)
+        : area?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(ann.id)}"] [data-ann-focus]`);
+    el?.focus({ preventScroll: true });
+  };
+
+  /** Select: a press on the page's own text points at Edit text, once. Its text is read on the first press. */
+  const selectRuns = useRef<{ of: LoadedPdf; page: number; runs: EditableRun[] } | null>(null);
+  const pointAtText = useCallback(
+    async (point: [number, number]) => {
+      if (selectHinted.current || !loaded) return;
+      let read = selectRuns.current;
+      if (read?.of !== loaded || read.page !== page) {
+        const runs = await loaded.textRuns(page + 1).catch(() => [] as EditableRun[]);
+        selectRuns.current = read = { of: loaded, page, runs };
+      }
+      const on = read.runs.some((r) => point[0] >= r.box.x && point[0] <= r.box.x + r.box.width && point[1] >= r.box.y && point[1] <= r.box.y + r.box.height);
+      if (!on || selectHinted.current) return;
+      selectHinted.current = true;
+      toast("To change this text, choose Edit text (E) in the toolbar.", "info");
+    },
+    [loaded, page, toast]
+  );
+
+  /** Edit text: a run has focus, so its edit (or nothing) is the one selected. */
+  const focusRun = useCallback(
+    (run: EditableRun) => {
+      const made = annotations.find((a) => a.type === "edit" && a.page === page && a.run.key === run.key);
+      setSelectedId((id) => (made ? made.id : draft && id === draft.id && draft.run.key === run.key ? id : null));
+    },
+    [annotations, page, draft]
+  );
+
+  /** Edit text: Delete on a run takes its words away. */
+  const removeRun = useCallback(
+    (run: EditableRun, background: string) => {
+      const made = annotations.find((a): a is TextEditAnnotation => a.type === "edit" && a.page === page && a.run.key === run.key);
+      say(`Removed: ${snippet(run.text)}`);
+      if (made) {
+        if (made.text) commitAnnotation({ ...made, text: "" });
+        setSelectedId(made.id);
+        return;
+      }
+      const next = { ...editFromRun(run, page, background, uuid()), text: "" };
+      history.commit((list) => [...list, next]);
+      setDraft(null);
+      setSelectedId(next.id);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [annotations, page, commitAnnotation, history, say]
+  );
+
+  /** Delete on changed text takes its words away; on anything else it removes the item. */
+  const removeItem = useCallback(
+    (id: string) => {
+      const ann = annotations.find((a) => a.id === id) ?? (draft?.id === id ? draft : null);
+      if (ann?.type === "edit") {
+        if (ann.text) {
+          commitAnnotation({ ...ann, text: "" });
+          say(`Removed: ${snippet(ann.run.text)}`);
+        }
+        return;
+      }
+      deleteAnnotation(id);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [annotations, draft, commitAnnotation, deleteAnnotation, say]
   );
 
   useEffect(() => {
@@ -322,7 +514,9 @@ export function PdfEditor({
     const el =
       target === "page"
         ? area?.querySelector<HTMLElement>("[data-page-layer]")
-        : area?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(target)}"] [data-ann-focus]`);
+        : target.startsWith("run:")
+          ? area?.querySelector<HTMLElement>(`[data-run-key="${CSS.escape(target.slice(4))}"]`)
+          : area?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(target)}"] [data-ann-focus]`);
     el?.focus({ preventScroll: true });
   }, [annotations]);
 
@@ -343,9 +537,12 @@ export function PdfEditor({
       if (!bytes || busyRef.current) return false;
       busyRef.current = true;
       setBusy(true);
+      setDraft(null);
       try {
         const own = bakePage === undefined ? [] : annotations.filter((a) => a.page === bakePage);
-        const input = own.length ? await bakeAnnotations(bytes, own) : bytes;
+        const input = own.length
+          ? await bakeAnnotations(bytes, own, { onTextEdits: (r) => (turnedText.current = joinReports(turnedText.current, r)) })
+          : bytes;
         const result = await transform(new Uint8Array(input));
         const keep = (anns: Annotation[]) => {
           const left = bakePage === undefined ? anns : anns.filter((a) => a.page !== bakePage);
@@ -449,18 +646,28 @@ export function PdfEditor({
   const buildOutput = useCallback(
     async (watermark: boolean) => {
       if (!bytes) throw new Error("Nothing to export.");
-      let out = await bakeAnnotations(bytes, annotations, { watermark });
+      let text: TextEditReport | undefined;
+      let out = await bakeAnnotations(bytes, annotations, { watermark, onTextEdits: (r) => (text = r) });
       if (Object.keys(formValues).length) {
         out = await fillFormFields(out, formValues);
       }
-      if (!flatten) return { out };
+      if (!flatten) return { out, text };
       const { flattenFormsIfAny } = await import("@/lib/pdf/flatten");
       // The note says which fields stayed fillable, if any did.
       const flat = await flattenFormsIfAny(out);
-      return { out: flat.bytes, note: flat.note };
+      return { out: flat.bytes, note: flat.note, text };
     },
     [bytes, annotations, formValues, flatten]
   );
+
+  /** After a save or download: say what changed text left behind, if anything needs saying. */
+  const tellText = useCallback((report: TextEditReport | undefined) => {
+    const all = joinReports(turnedText.current, report);
+    const said = all && textNotice(all);
+    setNotice(said && (said.covered || said.fonts.length || said.missing) ? said : null);
+  }, []);
+  /** The tool a saved file counts for: Edit PDF text when it changed existing text. */
+  const usedTool = () => (annotations.some((a) => a.type === "edit") || turnedText.current ? "edit-pdf-text" : undefined);
 
   /**
    * One edit a day on Free: builds the file, then asks the server for it.
@@ -475,8 +682,8 @@ export function PdfEditor({
     let built = builtRef.current?.key === key ? builtRef.current : null;
     if (!built) {
       const watermark = limitsFor(tier).watermark;
-      const { out, note } = await buildOutput(watermark);
-      built = { key, out, note, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
+      const { out, note, text } = await buildOutput(watermark);
+      built = { key, out, note, text, watermark, fp: await documentFingerprint(pristine ? bytes : out) };
     }
     let grant;
     try {
@@ -509,8 +716,9 @@ export function PdfEditor({
         new Blob([built.out.slice() as unknown as BlobPart], { type: "application/pdf" }),
         `${docName}.pdf`
       );
-      trackToolUsed();
+      trackToolUsed(usedTool());
       toast(withNote("Downloaded.", built.note), "success");
+      tellText(built.text);
     } catch (err) {
       toast(friendlyPdfError(err).message || "Export failed.", "error");
     } finally {
@@ -568,11 +776,16 @@ export function PdfEditor({
       const saved = new Uint8Array(out);
       // Downloading what was just saved, now or after reopening it, is the same edit.
       savedRef.current = { bytes: saved };
+      const counted = usedTool();
       history.reset([]);
       setSelectedId(null);
+      setDraft(null);
       setFormValues({});
       setBytes(saved);
-      trackToolUsed();
+      trackToolUsed(counted);
+      tellText(built.text);
+      // Saved: what a page turn changed is in the file now, and has been said.
+      turnedText.current = undefined;
       if (source.kind === "local") {
         toast(withNote("Saved on this device.", built.note), "success");
         // Offer the cloud once, after the user has saved something they value.
@@ -609,7 +822,9 @@ export function PdfEditor({
     setTool(next);
     // Chosen with the keyboard: there is no pointer to place it with, so it
     // goes in the middle of the page, ready to move with the arrow keys.
+    // Edit text has nothing to place: focus goes to the page's text.
     if (keyboard && next === "draw") toast("Draw with a mouse, pen or finger.", "info");
+    else if (keyboard && next === "edit-text") setFocusRuns((n) => n + 1);
     else if (keyboard && next !== "select") setPlaceNow((n) => n + 1);
   };
 
@@ -702,12 +917,16 @@ export function PdfEditor({
       }
       if (mod && (e.key.toLowerCase() === "z" || e.key.toLowerCase() === "y")) {
         e.preventDefault();
-        if (e.shiftKey || e.key.toLowerCase() === "y") history.redo();
-        else history.undo();
+        if (e.shiftKey || e.key.toLowerCase() === "y") redo();
+        else undo();
         return;
       }
 
       if (e.key === "Escape") {
+        // Closing a dialog (the cloud offer after a save) keeps the tool.
+        if (target?.closest("[role=dialog]")) return;
+        // Leaving Edit text from its text: focus stays on the page as the text goes.
+        if (target?.closest("[data-run-key]")) canvasArea.current?.querySelector<HTMLElement>("[data-page-layer]")?.focus({ preventScroll: true });
         setTool("select");
         setSelectedId(null);
         return;
@@ -716,24 +935,26 @@ export function PdfEditor({
       const paged = mod || e.altKey || e.shiftKey || e.defaultPrevented ? null : pageKey(e.key, page, numPages);
       if (paged !== null && !target?.closest("[data-ann-id], [role=dialog], aside[aria-label=Pages]")) {
         e.preventDefault();
+        setRunFocusPage(target?.closest("[data-run-key]") ? paged : null);
         showPage(paged);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         e.preventDefault();
-        deleteAnnotation(selectedId);
+        removeItem(selectedId);
         return;
       }
       const mapped = toolShortcut(e, shortcuts);
       if (mapped) {
         e.preventDefault();
-        handleToolChange(mapped);
+        // E takes focus to the page's text, as choosing Edit text with Enter does.
+        handleToolChange(mapped, mapped === "edit-text");
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, selectedId, deleteAnnotation, handleSave, placementImage, shortcuts, page, numPages]);
+  }, [undo, redo, selectedId, removeItem, handleSave, placementImage, shortcuts, page, numPages]);
 
   // Don't let a stray tab close, link or Back throw away unsaved edits.
   useUnsavedGuard(dirty);
@@ -791,7 +1012,7 @@ export function PdfEditor({
           <Button
             variant="ghost"
             size="icon"
-            onClick={history.undo}
+            onClick={undo}
             // aria-disabled, not disabled: a disabled button drops the focus it has.
             aria-disabled={!history.canUndo}
             title="Undo (Ctrl+Z)"
@@ -802,7 +1023,7 @@ export function PdfEditor({
           <Button
             variant="ghost"
             size="icon"
-            onClick={history.redo}
+            onClick={redo}
             aria-disabled={!history.canRedo}
             title="Redo (Ctrl+Shift+Z)"
             aria-label="Redo"
@@ -850,6 +1071,47 @@ export function PdfEditor({
             writeShortcutsOn(on);
           }}
         />
+      )}
+
+      {notice && (
+        // After a save or download: what changed text left behind. Stays until dismissed.
+        <div role="status" className="flex shrink-0 items-start gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <div className="min-w-0 flex-1 space-y-1 py-0.5">
+            {notice.covered && (
+              <p>
+                {notice.covered} To remove them for good, use{" "}
+                <Link
+                  href="/tools/redact-pdf"
+                  onClick={(e) => {
+                    const built = builtRef.current;
+                    // A new tab, or nothing built: Redact PDF opens ready for the file.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || !built) return;
+                    e.preventDefault();
+                    void tryHandoff([{ name: `${docName}.pdf`, type: "application/pdf", bytes: built.out.slice() }]).then((handed) =>
+                      router.push(handed ? "/tools/redact-pdf?handoff=1" : "/tools/redact-pdf")
+                    );
+                  }}
+                  className="font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Redact PDF
+                </Link>
+                .
+              </p>
+            )}
+            {notice.fonts.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            {notice.missing && <p>{notice.missing}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11 pointer-coarse:w-11"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       )}
 
       {!loadError && hasFields && (
@@ -925,9 +1187,30 @@ export function PdfEditor({
                 onChange={updateAnnotation}
                 onCommitStart={history.begin}
                 onCommitEnd={history.end}
-                onDelete={deleteAnnotation}
+                onDelete={removeItem}
                 onPlacementUsed={() => setPlacementImage(null)}
                 placeNow={placeNow}
+                runsOn={tool === "edit-text"}
+                focusRuns={focusRuns}
+                autoFocusRuns={runFocusPage === page}
+                onRunsFocused={() => setRunFocusPage(null)}
+                onOpenRun={openRun}
+                onRunFocus={focusRun}
+                onCancelEdit={cancelEdit}
+                onRemoveRun={removeRun}
+                onLockedRun={(run) => run.locked && toast(LOCKED[run.locked], "info")}
+                onRunsRead={(runs) => {
+                  // One message: how it works on a page with text, or why there is nothing to change.
+                  if (!runs.length) toast("This page has no text to change. If it is a scan, run OCR PDF on it first.", "info");
+                  else {
+                    if (!textHinted.current) toast("Choose a line of text to change it.", "info");
+                    say(`${runs.length} ${runs.length === 1 ? "line" : "lines"} of text on this page.`);
+                  }
+                  if (runs.length) textHinted.current = true;
+                }}
+                onEditDone={editDone}
+                onPageClick={pointAtText}
+                onCommit={commitAnnotation}
               />
             </div>
           )}
@@ -936,7 +1219,8 @@ export function PdfEditor({
 
           {loaded && (
             // left-0 keeps the controls in view while a zoomed page scrolls sideways.
-            <div className="pointer-events-none sticky bottom-4 left-0 flex justify-center">
+            // Above the phone sheet while it is open, so zoom stays in reach.
+            <div className="pointer-events-none sticky bottom-4 left-0 flex justify-center" style={sheetCover ? { bottom: sheetCover + 16 } : undefined}>
               <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-background/95 px-1.5 py-1.5 shadow-lg backdrop-blur sm:gap-1 sm:px-2">
                 {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
                 <Button
@@ -1024,7 +1308,9 @@ export function PdfEditor({
             aria-label="Properties"
             className="hidden w-64 shrink-0 border-l border-border bg-background p-4 md:block"
           >
-            <p className="text-sm text-muted-foreground">Select an item to change it.</p>
+            <p className="text-sm text-muted-foreground">
+              {tool === "edit-text" ? "Choose a line of text to change it." : "Select an item to change it."}
+            </p>
           </aside>
         )}
         {selected && (
@@ -1034,13 +1320,24 @@ export function PdfEditor({
             onChange={commitAnnotation}
             onDelete={() => deleteAnnotation(selected.id)}
             onClose={() => {
-              // Back to the annotation the panel was for, not to the top of the page.
+              // Back to the annotation the panel was for (a changed line's line in Edit text), not to the top of the page.
               if (document.activeElement?.closest("[data-properties]")) {
-                canvasArea.current
-                  ?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(selected.id)}"] [data-ann-focus]`)
-                  ?.focus({ preventScroll: true });
+                if (selected.type === "edit") focusEdit(selected);
+                else
+                  canvasArea.current
+                    ?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(selected.id)}"] [data-ann-focus]`)
+                    ?.focus({ preventScroll: true });
               }
               setSelectedId(null);
+            }}
+            onEditDone={() => {
+              if (selected.type !== "edit") return;
+              focusEdit(selected);
+              editDone(selected);
+            }}
+            onEditCancel={(reverted) => {
+              focusEdit(reverted);
+              cancelEdit(reverted);
             }}
             onCover={setSheetCover}
           />

@@ -36,6 +36,17 @@ export interface TextRun {
   mono?: boolean;
   /** Where each UTF-16 unit starts and ends along the line, from the font's own widths: x for lines across, y for lines down. */
   spans?: [number, number][];
+  /** pdf.js's name for its font, its text matrix (font size included) in PDF user space, and its length along the line there. */
+  font?: string;
+  matrix?: number[];
+  width?: number;
+  /** pdf.js read it as right-to-left text, or it is in a font written top to bottom. */
+  rtl?: boolean;
+  vertical?: boolean;
+  /** The drawn glyphs its letters lined up with: from the first to just before the second. */
+  glyphs?: [number, number];
+  /** The glyph each UTF-16 unit came from, -1 for a space pdf.js put in. */
+  units?: number[];
 }
 
 /** Text a comment, link or form field holds, and where it sits. */

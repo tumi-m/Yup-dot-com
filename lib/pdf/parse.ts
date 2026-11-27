@@ -91,6 +91,8 @@ export interface ParsedDocument {
    * scans: a picture, with next to no text of their own.
    */
   likelyScanned: boolean;
+  /** Pages that are a picture with next to no text of their own; listed only when asked for. */
+  scans?: number[];
 }
 
 /** A page with fewer characters than this has no real text layer of its own. */
@@ -245,6 +247,11 @@ function rtlBalance(text: string): number {
 /** True when most letters in `text` are Arabic, Hebrew or another right-to-left script. */
 export function isRtl(text: string): boolean {
   return rtlBalance(text) > 0;
+}
+
+/** True when `text` has any letter of a right-to-left script. */
+export function hasRtl(text: string): boolean {
+  return text.search(RTL_LETTERS) >= 0;
 }
 
 /** Horizontal space between two spans, whichever side each is on. */
@@ -780,7 +787,9 @@ export async function parseDocument(
   data: Uint8Array,
   onProgress?: (page: number, total: number) => void,
   /** Stops between pages once aborted. */
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** `scans`: look at every page with next to no text, and list those that are pictures. */
+  options: { scans?: boolean } = {}
 ): Promise<ParsedDocument> {
   const pdfjsLib = await getPdfjs();
   const doc = await pdfjsLib.getDocument({ data: data.slice(), isEvalSupported: false }).promise;
@@ -789,6 +798,7 @@ export async function parseDocument(
   const allSizes: number[] = [];
   let totalChars = 0;
   let scannedPages = 0;
+  const scans: number[] = [];
 
   for (let p = 1; p <= doc.numPages; p++) {
     if (signal?.aborted) {
@@ -802,9 +812,12 @@ export async function parseDocument(
     // certificate with a short title has no picture, or more text. Pictures
     // are only looked for while the answer can still change.
     const undecided = scannedPages < doc.numPages / 2 && scannedPages + doc.numPages - p + 1 >= doc.numPages / 2;
-    if (chars < PAGE_TEXT && undecided) {
+    if (chars < PAGE_TEXT && (undecided || options.scans)) {
       try {
-        if (await showsPictures(page, pdfjsLib.OPS as unknown as Record<string, number>)) scannedPages++;
+        if (await showsPictures(page, pdfjsLib.OPS as unknown as Record<string, number>)) {
+          scannedPages++;
+          scans.push(p);
+        }
       } catch {
         // Drawing it fails: its text is all there is to go on.
       } finally {
@@ -852,6 +865,7 @@ export async function parseDocument(
     pageCount,
     bodySize,
     likelyScanned: totalChars === 0 || scannedPages >= pageCount / 2,
+    ...(options.scans ? { scans } : {}),
   };
 }
 

@@ -30,9 +30,17 @@ for (const tier of ["pro", "team"] as const) {
   for (const reason of ["ai", "edits", "quality", "downloads", "samples", "save", "nudge"] as UpsellReason[]) {
     check(`${name}, ${reason}: nothing to show`, paidLimitNote(reason, tier) === null);
   }
+  // Translate PDF opens these only for guests and Free; reaching Pro or Team
+  // they say the day's allowance and when it comes back, never "Upgrade".
+  for (const reason of ["translate", "translate-size"] as UpsellReason[]) {
+    const note = paidLimitNote(reason, tier);
+    check(`${name}, ${reason}: the day's characters on ${name}, and when more come`,
+      note === `${LIMITS[tier].translateCharsPerDay.toLocaleString("en-US")} characters a day on ${name}. More after midnight UTC.`, note);
+  }
 }
 for (const tier of ["guest", "free"] as const) {
   check(`${tier} still gets the upgrade at a file size limit`, paidLimitNote("file-size", tier) === null);
+  check(`${tier} still gets the upgrade at the translation limit`, paidLimitNote("translate", tier) === null && paidLimitNote("translate-size", tier) === null);
 }
 
 const src = readFileSync(new URL("../components/upsell/Upsell.tsx", import.meta.url), "utf8");
