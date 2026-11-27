@@ -260,9 +260,13 @@ function hexBytes(d: Uint8Array, from: number, to: number): Uint8Array {
  * Returns false when some of the stream can't be read with confidence: an
  * inline image whose end isn't certain, braces (which content streams never
  * have), or an array or dictionary left open. The operators seen may then be
- * incomplete.
+ * incomplete. `onInlineImage` gets each inline image's dictionary.
  */
-export function readOperators(data: Uint8Array, onOp: (op: string, operands: Token[], start: number, end: number) => void): boolean {
+export function readOperators(
+  data: Uint8Array,
+  onOp: (op: string, operands: Token[], start: number, end: number) => void,
+  onInlineImage?: (entries: InlineImageEntries) => void
+): boolean {
   const lx = new Lexer(data);
   let operands: Token[] = [];
   /** The arrays and dictionaries open at this point, innermost last. */
@@ -300,7 +304,7 @@ export function readOperators(data: Uint8Array, onOp: (op: string, operands: Tok
         continue;
       }
       if (word === "BI") {
-        const end = skipInlineImage(lx);
+        const end = skipInlineImage(lx, onInlineImage);
         if (end < 0) return false;
         lx.pos = end;
         operands = [];
@@ -336,7 +340,7 @@ const FILTER_NAMES: Record<string, string> = {
 };
 
 /** Every operator in PDF 32000 (Table A.1). */
-const OPERATORS = new Set(
+export const OPERATORS = new Set(
   (
     "b B b* B* BDC BI BMC BT BX c cm CS cs d d0 d1 Do DP EI EMC ET EX f F f* G g gs h i ID j J K k l m M MP n q Q " +
     "re RG rg ri s S SC sc SCN scn sh T* Tc Td TD Tf Tj TJ TL Tm Tr Ts Tw Tz v w W W* y ' \""

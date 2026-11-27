@@ -264,6 +264,16 @@ function polyline(points: number[], close: boolean): PDFOperator[] {
  * for kinds readers draw from fonts or icons, such as free text and notes.
  */
 function paintPlain(page: PDFPage, dict: PDFDict, kind: string): boolean {
+  const drawing = plainDrawing(dict, kind);
+  return !!drawing && draw(page, dict, drawing.multiply, drawing.ops);
+}
+
+/**
+ * What paintPlain draws, in page space: the operators, and whether readers
+ * multiply it onto the page (highlights). Null for kinds it can't draw.
+ * PDF/A uses it to give such markup an appearance of its own.
+ */
+export function plainDrawing(dict: PDFDict, kind: string): { ops: PDFOperator[]; multiply: boolean } | null {
   const stroke = colour(colourOf(dict, "C"), true);
   const fillColour = colour(colourOf(dict, "C"), false);
   const interior = colour(colourOf(dict, "IC"), false);
@@ -277,7 +287,7 @@ function paintPlain(page: PDFPage, dict: PDFDict, kind: string): boolean {
     case "Underline":
     case "StrikeOut":
     case "Squiggly": {
-      if (!quads || !fillColour || !stroke) return false;
+      if (!quads || !fillColour || !stroke) return null;
       for (let i = 0; i + 7 < quads.length; i += 8) {
         const q = quads.slice(i, i + 8);
         const ys = [q[1], q[3], q[5], q[7]];
@@ -294,45 +304,45 @@ function paintPlain(page: PDFPage, dict: PDFDict, kind: string): boolean {
           body.push(op(Ops.SetLineWidth, Math.max(1, h / 14)), op(Ops.MoveTo, left, y), op(Ops.LineTo, right, y), op(Ops.StrokePath));
         }
       }
-      return draw(page, dict, kind === "Highlight", [kind === "Highlight" ? fillColour : stroke, ...body]);
+      return { multiply: kind === "Highlight", ops: [kind === "Highlight" ? fillColour : stroke, ...body] };
     }
     case "Square":
     case "Circle": {
-      if (!rect || (!stroke && !interior)) return false;
+      if (!rect || (!stroke && !interior)) return null;
       const inset = stroke ? width / 2 : 0;
       const [x0, y0, x1, y1] = [rect[0] + inset, rect[1] + inset, rect[2] - inset, rect[3] - inset];
-      if (x1 <= x0 || y1 <= y0) return false;
+      if (x1 <= x0 || y1 <= y0) return null;
       const path = kind === "Square" ? [op(Ops.AppendRectangle, x0, y0, x1 - x0, y1 - y0)] : ellipse(x0, y0, x1, y1);
       const paint = stroke && interior && width > 0 ? Ops.FillNonZeroAndStroke : interior ? Ops.FillNonZero : Ops.StrokePath;
       const set = [stroke, interior].filter((o): o is PDFOperator => !!o);
-      return draw(page, dict, false, [...set, op(Ops.SetLineWidth, width), ...path, op(paint)]);
+      return { multiply: false, ops: [...set, op(Ops.SetLineWidth, width), ...path, op(paint)] };
     }
     case "Ink": {
       const list = dict.lookup(N("InkList"));
-      if (!(list instanceof PDFArray) || !stroke) return false;
+      if (!(list instanceof PDFArray) || !stroke) return null;
       for (let i = 0; i < list.size(); i++) {
         const pts = numbers(dict.context.lookup(list.get(i)), 2);
         if (pts) body.push(...polyline(pts, false), op(Ops.StrokePath));
       }
-      if (!body.length) return false;
-      return draw(page, dict, false, [stroke, op(Ops.SetLineWidth, width), op(Ops.SetLineCapStyle, 1), op(Ops.SetLineJoinStyle, 1), ...body]);
+      if (!body.length) return null;
+      return { multiply: false, ops: [stroke, op(Ops.SetLineWidth, width), op(Ops.SetLineCapStyle, 1), op(Ops.SetLineJoinStyle, 1), ...body] };
     }
     case "Line": {
       const l = lookupNumbers(dict, "L", 4);
-      if (!l || !stroke) return false;
-      return draw(page, dict, false, [stroke, op(Ops.SetLineWidth, width), ...polyline(l, false), op(Ops.StrokePath)]);
+      if (!l || !stroke) return null;
+      return { multiply: false, ops: [stroke, op(Ops.SetLineWidth, width), ...polyline(l, false), op(Ops.StrokePath)] };
     }
     case "Polygon":
     case "PolyLine": {
       const v = lookupNumbers(dict, "Vertices", 4);
-      if (!v || (!stroke && !interior)) return false;
+      if (!v || (!stroke && !interior)) return null;
       const closed = kind === "Polygon";
       const paint = closed && interior ? (stroke ? Ops.FillNonZeroAndStroke : Ops.FillNonZero) : Ops.StrokePath;
       const set = [stroke, closed ? interior : null].filter((o): o is PDFOperator => !!o);
-      return draw(page, dict, false, [...set, op(Ops.SetLineWidth, width), ...polyline(v, closed), op(paint)]);
+      return { multiply: false, ops: [...set, op(Ops.SetLineWidth, width), ...polyline(v, closed), op(paint)] };
     }
   }
-  return false;
+  return null;
 }
 
 function draw(page: PDFPage, dict: PDFDict, multiply: boolean, body: PDFOperator[]): boolean {
