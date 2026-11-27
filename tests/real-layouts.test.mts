@@ -242,6 +242,29 @@ const check = (name: string, ok: boolean, detail = "") => {
   check("a line to initial on every page stays", count("Initials: Tenant") === 3);
 }
 
+// A statement whose table header is repeated at the very top of each page:
+// each part keeps it as its header, and the table is one in Excel.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const xs = [40, 150, 400, 480];
+  let n = 0;
+  for (let page = 0; page < 3; page++) {
+    const p = d.addPage([595, 842]);
+    ["Date", "Description", "Amount", "Balance"].forEach((c, i) => p.drawText(c, { x: xs[i], y: 815, size: 11, font: f }));
+    for (let r = 0; r < 40; r++, n++) {
+      [`2026-02-${String((n % 28) + 1).padStart(2, "0")}`, `Payment received ref ${1000 + n}`, (n * 13.5).toFixed(2), (5000 + n * 13.5).toFixed(2)].forEach((c, i) =>
+        p.drawText(c, { x: xs[i], y: 795 - r * 18, size: 11, font: f })
+      );
+    }
+  }
+  const doc = await parseDocument(await d.save());
+  const md = toMarkdown(doc);
+  check("each page's part of the table keeps the header row", (md.match(/\| Date \| Description \| Amount \| Balance \|\n\| --- /g) ?? []).length === 3, md.slice(0, 300));
+  const tables = extractTables(doc);
+  check("one table of all the rows, its header once", tables.length === 1 && tables[0].rows.length === 121, JSON.stringify(tables.map((t) => t.rows.length)));
+}
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
