@@ -15,7 +15,8 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const { memoryUsageStore, OFFICE_LINKS_PER_MINUTE, usageSubject } = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
-const { handleOfficeLink, handleOfficeRefund, officeKey, OFFICE_BUCKET, OFFICE_TOKEN_TTL, OFFICE_OFF_MESSAGE } = await import("../lib/office-server.ts");
+const { handleOfficeLink, handleOfficeRefund, officeKey, OFFICE_BUCKET, OFFICE_REFUNDS_PER_DAY, OFFICE_TOKEN_TTL, OFFICE_OFF_MESSAGE } = await import("../lib/office-server.ts");
+import { readFileSync } from "node:fs";
 const { signToken, verifyToken } = await import("../lib/media-server.ts");
 const { LIMITS } = await import("../lib/limits.ts");
 type Tier = import("../lib/limits.ts").Tier;
@@ -56,7 +57,7 @@ function req(body: unknown, headers: Record<string, string> = SAME_SITE, path = 
 }
 
 async function link(d: Deps, body: Record<string, unknown>, headers?: Record<string, string>) {
-  const res = await handleOfficeLink(req({ tool: "word-to-pdf", name: "Report.docx", size: 20_000, ...body }, headers), d);
+  const res = await handleOfficeLink(req({ tool: "word-to-pdf", ext: "docx", size: 20_000, ...body }, headers), d);
   return { status: res.status, body: (await res.json()) as Record<string, any>, headers: res.headers };
 }
 
@@ -85,7 +86,7 @@ async function link(d: Deps, body: Record<string, unknown>, headers?: Record<str
   check("refund from another site: 403", refundCross.status === 403);
   const bad = await handleOfficeLink(req("{not json"), d);
   check("a body that isn't JSON: 400", bad.status === 400);
-  for (const body of [{ tool: "pptx-to-pdf" }, { size: -1 }, { size: 1.5 }, { name: "" }, { options: { fit: "yes" } }, { options: { orientation: "sideways" } }]) {
+  for (const body of [{ tool: "pptx-to-pdf" }, { size: -1 }, { size: 1.5 }, { ext: "" }, { ext: "../x" }, { ext: "docx\u0000" }, { options: { fit: "yes" } }, { options: { orientation: "sideways" } }]) {
     const r = await link(d, body);
     check(`bad field ${JSON.stringify(body)}: 400`, r.status === 400, r);
   }
@@ -118,7 +119,8 @@ async function link(d: Deps, body: Record<string, unknown>, headers?: Record<str
   let granted = 0;
   for (const [tool, name, error] of cases) {
     later(61_000);
-    const r = await link(d, { tool, name });
+    // The page sends the extension only.
+    const r = await link(d, { tool, ext: name.includes(".") ? name.split(".").pop() : "none" });
     if (!error) granted++;
     check(`${tool}: ${name} ${error ? "refused" : "taken"}`, error ? r.status === 415 && r.body.error === error : r.status === 200 && !!r.body.token, r);
   }
@@ -129,10 +131,10 @@ async function link(d: Deps, body: Record<string, unknown>, headers?: Record<str
 
 // What a grant says.
 {
-  const r = await link(deps(), { tool: "excel-to-pdf", name: "Q3 numbers.xlsx", size: 12_345, options: { sheets: "first" } });
+  const r = await link(deps(), { tool: "excel-to-pdf", ext: "XLSX", size: 12_345, options: { sheets: "first" } });
   const payload = verifyToken<Record<string, any>>(r.body.token, officeKey(SECRET));
   check("the worker's address, normalised as the CSP names it", r.body.workerUrl === "https://convert.example.com", r.body.workerUrl);
-  check("a grant names the size and type, never the file's name", payload?.k === "office" && payload.x === "xlsx" && payload.z === 12_345 && !JSON.stringify(payload).includes("Q3"), payload);
+  check("a grant names the size and type (the page never sends the name)", payload?.k === "office" && payload.x === "xlsx" && payload.z === 12_345, payload);
   check("sheet options: given ones kept, the rest default", JSON.stringify(payload?.o) === JSON.stringify({ fit: true, orientation: "auto", sheets: "first" }), payload?.o);
   check("who and when are recorded for a refund", payload?.s === usageSubject(req({}), null, undefined, ON) && typeof payload?.c === "string" && payload.t === Math.floor(clock / 1000), payload);
   const left = payload!.e - Math.floor(Date.now() / 1000);
@@ -251,6 +253,10 @@ for (const tier of ["guest", "free", "pro"] as Tier[]) {
   const running = await refund(deps({ store, fetch: busy.f }), t6);
   check("one still converting after the wait isn't", running.status === 409 && busy.calls.length >= 3, { running, calls: busy.calls.length });
 
+  const t7 = await grant();
+  const timedOut = await refund(deps({ store, fetch: worker([{ used: true, status: "timeout", since: started }]).f }), t7);
+  check("a conversion that ran out of time isn't given back", timedOut.status === 409 && timedOut.body.refunded === false, timedOut);
+
   const download = signToken({ k: "mp4", u: "https://www.youtube.com/watch?v=x", s: subject, c: "media-ref-1234", t: Math.floor(clock / 1000) }, SECRET);
   const asMedia = await refund(deps({ store, fetch: failed.f }), download);
   check("a download grant can't be refunded as a conversion", asMedia.status === 400 && asMedia.body.refunded === false, asMedia);
@@ -258,9 +264,32 @@ for (const tier of ["guest", "free", "pro"] as Tier[]) {
   check("nor a grant signed with another key", (await refund(deps({ store, fetch: failed.f }), forged)).status === 400);
 }
 
+// Failures are given back only a few times a day per person.
+{
+  const store = memoryUsageStore(() => clock);
+  const user = { id: "refund-cap" };
+  const started = Math.floor(clock / 1000) - 3600;
+  const failed = (async () => Response.json({ used: true, status: "error", since: started })) as unknown as typeof fetch;
+  const given: boolean[] = [];
+  for (let i = 0; i <= OFFICE_REFUNDS_PER_DAY; i++) {
+    later(61_000);
+    const token = (await link(deps({ store, tier: "pro", user }), {})).body.token;
+    const res = await handleOfficeRefund(req({ token }, SAME_SITE, "/api/convert/refund"), deps({ store, tier: "pro", user, fetch: failed }));
+    given.push(((await res.json()) as { refunded: boolean }).refunded);
+  }
+  check(`${OFFICE_REFUNDS_PER_DAY} failures a day are given back, then no more`, given.slice(0, OFFICE_REFUNDS_PER_DAY).every(Boolean) && given.at(-1) === false, given);
+}
+
+// The page sends the file's extension and size, never its name.
+{
+  const page = readFileSync(new URL("../components/tools/OfficeToPdf.tsx", import.meta.url), "utf8");
+  const sent = /fetch\("\/api\/convert\/link"[\s\S]*?body: JSON\.stringify\(([^\n]*)\)/.exec(page)?.[1] ?? "";
+  check("the link request carries the extension, not the name", /ext: officeExtension\(file\.name\)/.test(sent) && !/name:/.test(sent), sent);
+}
+
 // The worker verifies what this signs (media-worker/office.py, standard library only).
 {
-  const token = (await link(deps(), { tool: "excel-to-pdf", name: "a.csv", size: 77, options: { orientation: "landscape" } })).body.token;
+  const token = (await link(deps(), { tool: "excel-to-pdf", ext: "csv", size: 77, options: { orientation: "landscape" } })).body.token;
   const script = [
     "import json, os, sys",
     "sys.path.insert(0, 'media-worker')",

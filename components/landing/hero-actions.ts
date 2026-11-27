@@ -2,6 +2,7 @@
 
 import { fileKind, MARKDOWN_NAME } from "@/lib/journey";
 import { limitsFor, type Tier } from "@/lib/limits";
+import { OFFICE_ENABLED } from "@/lib/office";
 
 export const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -38,6 +39,8 @@ const FORMAT_PAGES: [RegExp, string][] = [
 /** A text or Markdown file: one at a time, laid out as pages. */
 export const TEXT_ACTIONS = ["txt-to-pdf", "markdown-to-pdf"];
 export const MARKDOWN_ACTIONS = ["markdown-to-pdf", "txt-to-pdf"];
+/** A CSV: as a table (Excel to PDF, while it is on) or as text. */
+export const CSV_ACTIONS = ["excel-to-pdf", "txt-to-pdf"];
 /**
  * PDFs and images together: no tool takes both. Merge PDF would drop the
  * images and could be left with one file, so the panel says to pick one kind.
@@ -48,7 +51,7 @@ export const PPTX_ACTIONS = ["pptx-to-pdf", "edit-pptx"];
 /** Tools handed every file; the others get the first. */
 export const TAKES_ALL = ["merge-pdf", "compare-pdf", "jpg-to-pdf", ...FORMAT_PAGES.map(([, slug]) => slug)];
 
-export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: string }[]): string[] {
+export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: string }[], office = OFFICE_ENABLED): string[] {
   if (mode === "pptx") return PPTX_ACTIONS;
   // By name too: a photo from a share sheet or a phone picker can come without a type.
   const images = files.filter((f) => fileKind(f) === "image").length;
@@ -58,6 +61,7 @@ export function heroActions(mode: "pdf" | "pptx", files: { name: string; type: s
     return page ? [page[1]] : IMAGE_ACTIONS;
   }
   // The text tools take one file: the first, Markdown or not.
+  if (files.length > 0 && texts === files.length && office && /\.csv$/i.test(files[0].name)) return CSV_ACTIONS;
   if (files.length > 0 && texts === files.length) return MARKDOWN_NAME.test(files[0].name) || /markdown/.test(files[0].type) ? MARKDOWN_ACTIONS : TEXT_ACTIONS;
   if (images > 0 || texts > 0) return MIXED_ACTIONS;
   return files.length === 2 ? TWO_ACTIONS : files.length > 1 ? MULTI_ACTIONS : PDF_ACTIONS;

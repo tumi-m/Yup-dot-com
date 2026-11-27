@@ -10,7 +10,8 @@
  * (lib/media-refund.ts). The token names the file's size and type, lasts two
  * minutes and starts one conversion; it is signed with a key of its own, so
  * a download grant can't pass for a conversion grant or be refunded as one.
- * The file's name never leaves the browser.
+ * Only the file's extension and size are sent: its name never leaves the
+ * browser, here or to the worker.
  */
 import "server-only";
 import { createHmac } from "node:crypto";
@@ -19,12 +20,14 @@ import { refuseCrossSite } from "./cross-site";
 import { formatLimitBytes, limitsFor, type Tier } from "./limits";
 import { signToken, verifyToken, WORKER_CONFIG_HELP, workerConfig } from "./media-server";
 import { askWorker, grantRef, newGrantRef, REFUND_GRACE_SECONDS, REFUNDABLE, refundGrant } from "./media-refund";
-import { DEFAULT_SHEET_OPTIONS, OFFICE_FORMATS, officeExtension, officeTypeProblem } from "./office";
+import { DEFAULT_SHEET_OPTIONS, OFFICE_FORMATS, officeTypeProblem } from "./office";
 import { claimOfficeLink, consumeDaily, OFFICE_BURST_MESSAGE, usageStore, usageSubject, type UsageStore } from "./usage";
 
 export const OFFICE_BUCKET = "office";
 /** How long an upload grant lasts: the browser starts uploading at once. */
 export const OFFICE_TOKEN_TTL = 120;
+/** Failed or cancelled conversions given back a day, per person or guest IP. */
+export const OFFICE_REFUNDS_PER_DAY = 5;
 export const OFFICE_OFF_MESSAGE = "Word and Excel to PDF isn't switched on for this site yet.";
 
 /** Read where it's used, not at build time, so tests can switch it. */
@@ -56,7 +59,8 @@ function json(status: number, body: Record<string, unknown>, headers: Record<str
 
 const linkSchema = z.object({
   tool: z.enum(["word-to-pdf", "excel-to-pdf"]),
-  name: z.string().min(1).max(1000),
+  // The extension only: the file's name stays in the browser.
+  ext: z.string().regex(/^[a-z0-9]{1,8}$/i),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   options: z
     .object({
@@ -80,8 +84,9 @@ export async function handleOfficeLink(request: Request, deps: OfficeDeps): Prom
   }
   const parsed = linkSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return json(400, { error: "Invalid request." });
-  const { tool, name, size } = parsed.data;
-  const problem = officeTypeProblem(tool, name);
+  const { tool, size } = parsed.data;
+  const ext = parsed.data.ext.toLowerCase();
+  const problem = officeTypeProblem(tool, `file.${ext}`);
   if (problem) return json(415, { error: problem });
   if (size === 0) return json(422, { error: "This file is empty." });
 
@@ -107,7 +112,6 @@ export async function handleOfficeLink(request: Request, deps: OfficeDeps): Prom
       reason: "quota",
     });
   }
-  const ext = officeExtension(name)!;
   const options = tool === "excel-to-pdf" ? { ...DEFAULT_SHEET_OPTIONS, ...parsed.data.options } : {};
   const token = signToken(
     { k: "office", x: ext, z: size, o: options, s: subject, c: newGrantRef(), t: made },
@@ -137,6 +141,10 @@ export async function handleOfficeRefund(request: Request, deps: OfficeDeps): Pr
   if (!ref) return json(400, { refunded: false });
   const verdict = await askWorker(config.url, config.secret, ref, deps.fetch ?? fetch, deps.settleMs ?? 4000);
   if (!REFUNDABLE.includes(verdict)) return json(409, { refunded: false });
+  // Failures are given back a few times a day per person, so a file built to
+  // fail (or be cancelled) can't be sent again and again for free.
+  const store = deps.store ?? usageStore();
+  if ((await store.consume(ref.s, "office-refunds", OFFICE_REFUNDS_PER_DAY, "day")) < 0) return json(409, { refunded: false });
   const now = deps.now?.() ?? Date.now();
-  return json(200, { refunded: await refundGrant(deps.store ?? usageStore(), ref, now, OFFICE_BUCKET) });
+  return json(200, { refunded: await refundGrant(store, ref, now, OFFICE_BUCKET) });
 }

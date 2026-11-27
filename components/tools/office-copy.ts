@@ -23,7 +23,7 @@ const ALLOWANCE = {
 
 const REFUSED = {
   q: "Which files are turned away?",
-  a: "Password-protected files (remove the password and save first), files with macros (.docm, .xlsm: save as .docx or .xlsx without them), files whose name doesn't match what they are, and damaged files. Each says why. Macros never run, and links to other files or websites aren't followed.",
+  a: "Password-protected files (remove the password and save first), files with macros (.docm, .xlsm: save as .docx or .xlsx without them), files whose name doesn't match what they are, damaged files, and files that pull in something from elsewhere as they open (a picture or text linked rather than embedded, an INCLUDEPICTURE or DDE field, a linked workbook). Each says why. Macros never run.",
 };
 
 export const OFFICE_COPY: Record<OfficeTool, OfficeCopy> = {
@@ -63,7 +63,7 @@ export const OFFICE_COPY: Record<OfficeTool, OfficeCopy> = {
       },
       {
         q: "Are formulas recalculated?",
-        a: "No. The values the spreadsheet was last saved with are printed, as in the file.",
+        a: "Not in Excel files (.xlsx): the values they were last saved with are printed. OpenDocument spreadsheets (.ods) are recalculated as they open, so a value can differ if the app that saved it calculates differently. Formulas that read another file, a website or another program are turned away.",
       },
       {
         q: "What about CSV files?",
