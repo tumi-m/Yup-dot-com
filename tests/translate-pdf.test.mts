@@ -544,7 +544,10 @@ async function longPdf(pages: number): Promise<Uint8Array> {
   check("named first when searched by name", filterTools(TOOLS, "all", "translate")[0]?.slug === "translate-pdf");
   check("in the sitemap", sitemap().some((u) => u.url.endsWith("/tools/translate-pdf")));
   check("related tools are real tools", relatedTools("translate-pdf").length === 4 && relatedTools("translate-pdf").every((t) => getTool(t.slug)));
-  check("offered for a PDF on the homepage", PDF_ACTIONS.includes("translate-pdf"));
+  // Twelve tools fill the homepage's grid (four across, or three); a
+  // thirteenth sat alone below the fold, so Translate PDF is found from
+  // /tools, search, the footer and its own page instead.
+  check("the homepage's tools for a PDF fill their rows", PDF_ACTIONS.length % 4 === 0 && PDF_ACTIONS.length % 3 === 0, PDF_ACTIONS.length);
   check("its route is listed: GET answers anyone, POST is checked", routes.PUBLIC_ROUTES.includes("/api/ai/translate"));
 }
 
