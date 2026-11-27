@@ -46,8 +46,15 @@ export const SLIDES_FAILURE_STATUS: Record<SlidesFailure, number> = {
   "bad-answer": 502,
 };
 
+/** Failures on Google's side, logged by the export route. */
+const LOGGED: SlidesFailure[] = ["unreachable", "bad-answer", "rate-limited"];
+
 export class SlidesError extends Error {
-  constructor(public readonly kind: SlidesFailure) {
+  /** `detail`: what Google sent, for the server log (a status, a type); never the deck. */
+  constructor(
+    public readonly kind: SlidesFailure,
+    public readonly detail?: string
+  ) {
     super(kind);
   }
 }
@@ -198,7 +205,8 @@ export async function fetchSlidesExport(
         },
       });
     } catch (err) {
-      throw new SlidesError(fetchFailure(err));
+      const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+      throw new SlidesError(fetchFailure(err), typeof code === "string" ? code : err instanceof Error ? err.name : undefined);
     }
 
     if (res.status >= 300 && res.status < 400) {
@@ -223,14 +231,14 @@ export async function fetchSlidesExport(
       if (res.status === 401 || res.status === 403) throw new SlidesError("private");
       if (res.status === 404 || res.status === 410) throw new SlidesError("not-found");
       if (res.status === 429) throw new SlidesError("rate-limited");
-      throw new SlidesError(res.status >= 500 ? "unreachable" : "bad-answer");
+      throw new SlidesError(res.status >= 500 ? "unreachable" : "bad-answer", `HTTP ${res.status}`);
     }
 
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (type !== SLIDES_MIME[format]) {
       await discard(res);
       // Google answers a private deck with its sign-in page.
-      throw new SlidesError(type === "text/html" ? "private" : "bad-answer");
+      throw new SlidesError(type === "text/html" ? "private" : "bad-answer", `type ${type || "none"}`);
     }
     if (!res.body) throw new SlidesError("bad-answer");
 
@@ -384,6 +392,11 @@ export async function handleSlidesExport(request: Request, deps: SlidesExportDep
     file = await fetchSlidesExport(id, format, deps.fetcher ?? fetch, request.signal);
   } catch (err) {
     const kind = err instanceof SlidesError ? err.kind : "bad-answer";
+    // Google failing or changing its answer shows in the server log; a deck
+    // that is private or gone is the visitor's to fix, and is not logged.
+    if (LOGGED.includes(kind) && !request.signal.aborted) {
+      console.warn(`slides export: ${kind}${err instanceof SlidesError && err.detail ? ` (${err.detail})` : ""}`);
+    }
     // A visitor who cancelled gets nothing back: that was their doing. A deck
     // Google keeps failing on is given back a day's allowance of times, not
     // at 10 a minute all day.

@@ -352,6 +352,23 @@ for (const [name, reply, status, message, given] of failures) {
     res.status === status && body.error === message && consumed.length === 1 && refunded.length === (given ? 1 : 0),
     `${res.status} ${JSON.stringify(body)} consumed=${consumed.length} refunded=${refunded.length}`);
 }
+// Google failing left nothing in the server log, so a change on its side
+// looked like visitors' bad links. What it sent is logged, never the deck.
+{
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => void warned.push(a.join(" "));
+  try {
+    for (const reply of [{ status: 503 }, { status: 200, headers: { "content-type": "application/json" }, body: "{}" }, redirect("https://accounts.google.com/v3/signin"), { status: 404 }] as Reply[]) {
+      const { f } = fakeFetch(() => reply);
+      await (await handleSlidesExport(req(`url=${link}&format=pdf`), deps(f).d)).arrayBuffer();
+    }
+  } finally {
+    console.warn = warn;
+  }
+  check("route: Google's failures are logged with what it sent", warned.length === 2 && warned[0] === "slides export: unreachable (HTTP 503)" && warned[1] === "slides export: bad-answer (type application/json)", JSON.stringify(warned));
+  check("route: the log never names the deck", !warned.some((w) => w.includes(good[1]) || /[A-Za-z0-9_-]{25,}/.test(w)), JSON.stringify(warned));
+}
 for (const [name, q, message] of [
   ["bad link", `url=${encodeURIComponent("https://example.com/x")}&format=pdf`, SLIDES_FAILURE_MESSAGE.invalid],
   ["published link", `url=${encodeURIComponent(PUB)}&format=pdf`, SLIDES_FAILURE_MESSAGE.published],
