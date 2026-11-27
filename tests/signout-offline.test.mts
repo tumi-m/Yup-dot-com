@@ -27,6 +27,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
+// supabase-js and sign-out log each failure: not this test's output.
+console.error = () => {};
+
 const { handleSignOut, sessionCookieNames } = await import("../lib/sign-out.ts");
 const { AUTH_COOKIE_OPTIONS } = await import("../lib/supabase/config.ts");
 
