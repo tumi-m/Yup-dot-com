@@ -62,11 +62,13 @@ export function grantRef(payload: Record<string, unknown> | null): GrantRef | nu
  * Gives the download back once per grant. True if this call refunded it.
  * Only on the UTC day the grant was counted: after midnight that day's
  * allowance is gone anyway, and taking one off today's would be a gift.
+ * `bucket`: the allowance it was counted in (Word and Excel to PDF grants
+ * count in their own).
  */
-export async function refundGrant(store: UsageStore, ref: GrantRef, now = Date.now()): Promise<boolean> {
+export async function refundGrant(store: UsageStore, ref: GrantRef, now = Date.now(), bucket = MEDIA_BUCKET): Promise<boolean> {
   if (periodStart("day", ref.t * 1000) !== periodStart("day", now)) return false;
   if ((await store.consume(ref.s, refundBucket(ref.c), 1, MARKERS)) < 0) return false;
-  await store.refund(ref.s, MEDIA_BUCKET, "day");
+  await store.refund(ref.s, bucket, "day");
   return true;
 }
 
@@ -155,12 +157,17 @@ export type WorkerVerdict = "failed" | "unused" | "unreachable" | "used" | "unkn
  * there. A worker that refuses our secret (401, mid-rotation) never looked
  * at the grant, and one that restarted with the new secret may have sent
  * its file: "unknown" too.
+ *
+ * `settleMs`: a conversion the browser just cancelled is still stopping for
+ * a moment; ask again every half second, up to this long, while the worker
+ * says it is working.
  */
 export async function askWorker(
   workerUrl: string,
   secret: string,
   ref: GrantRef,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  settleMs = 0
 ): Promise<WorkerVerdict> {
   let res: Response;
   try {
@@ -181,6 +188,10 @@ export async function askWorker(
     return "unknown";
   }
   if (!res.ok || typeof body.used !== "boolean") return "unknown";
+  if (body.used && body.status === "working" && settleMs > 0) {
+    await new Promise((r) => setTimeout(r, 500));
+    return askWorker(workerUrl, secret, ref, fetcher, settleMs - 500);
+  }
   if (body.used) return body.status === "error" ? "failed" : "used";
   return typeof body.since === "number" && body.since < ref.t ? "unused" : "unknown";
 }

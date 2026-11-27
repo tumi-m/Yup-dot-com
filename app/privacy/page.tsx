@@ -3,6 +3,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
 import { GA_ID } from "@/lib/analytics";
+import { OFFICE_ENABLED } from "@/lib/office";
 import { ContactList, EmailLink, Fill, LegalPage, Section } from "@/components/legal/LegalPage";
 import { CookieSettingsButton } from "@/components/analytics/CookieSettingsButton";
 
@@ -183,6 +184,14 @@ export default function PrivacyPage() {
           your browser&apos;s storage so it survives a reload (clearing your browser data removes it). When you&apos;re
           signed in, it saves to your cloud library.
         </p>
+        {OFFICE_ENABLED && (
+          <p>
+            Word to PDF and Excel to PDF are the exception: they upload the file you choose to our conversion server, where
+            it is converted and then deleted, together with the PDF, as soon as the PDF has been sent back to you (or at
+            once if converting fails or you cancel). We don&apos;t keep, read or reuse it. The file&apos;s name isn&apos;t
+            sent.
+          </p>
+        )}
       </Section>
 
       <Section id="basis" title={S.basis}>
@@ -230,7 +239,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Our video download host</strong>: a cloud provider that runs our YouTube download server (video
-            links only).
+            links only){OFFICE_ENABLED && " and our document conversion server (the Word or Excel file you convert, while it is converted)"}.
           </li>
           <li>
             <strong>Our email provider</strong>: sends account emails such as sign-up confirmations.
@@ -274,6 +283,12 @@ export default function PrivacyPage() {
           <li>
             <strong>Daily limit counters</strong>: usually up to 40 days.
           </li>
+          {OFFICE_ENABLED && (
+            <li>
+              <strong>Word and Excel files you convert</strong>: only while they are converted; deleted with the PDF as soon
+              as it is sent to you.
+            </li>
+          )}
           <li>
             <strong>Sample Finder cache</strong>: songs looked up and their connections, up to 30 days; the title and
             channel of videos read (and a TikTok&apos;s sound), 7 days; never who asked.

@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
+import { officeEnabled } from "@/lib/office-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,31 @@ function ownerOnly(request: Request): boolean {
   const given = Buffer.from(request.headers.get("authorization") ?? "");
   const wanted = Buffer.from(`Bearer ${secret}`);
   return !!secret && given.length === wanted.length && timingSafeEqual(given, wanted);
+}
+
+/**
+ * Word and Excel to PDF, from the worker's health: whether it has
+ * LibreOffice, whether the tools are switched on here, and whether
+ * LibreOffice has no network at all or only an unreachable proxy.
+ */
+function officeStatus(worker: Record<string, any> | null, problem?: string) {
+  const enabled = officeEnabled();
+  if (problem) return { enabled, ready: false, problem };
+  const office = worker?.office;
+  if (!office || typeof office !== "object") {
+    return { enabled, ready: false, problem: "This worker predates Word and Excel to PDF. Redeploy it from media-worker/." };
+  }
+  const ready = office.ready === true;
+  return {
+    enabled,
+    ready,
+    problem: !ready
+      ? "The worker has no LibreOffice. Rebuild it from the current media-worker/Dockerfile."
+      : enabled
+        ? null
+        : "Ready on the worker. Set NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1 and redeploy to show the tools.",
+    network: office.network === "none" ? "none" : "proxy-only",
+  };
 }
 
 /**
@@ -26,7 +52,8 @@ export async function GET(request: Request) {
   if (!ownerOnly(request)) return Response.json({ error: "Not found." }, { status: 404 });
   const config = workerConfig();
   if (!config.ok) {
-    return Response.json({ x: "ready", youtube: { ready: false, problem: WORKER_CONFIG_HELP[config.reason] } });
+    const problem = WORKER_CONFIG_HELP[config.reason];
+    return Response.json({ x: "ready", youtube: { ready: false, problem }, office: officeStatus(null, problem) });
   }
   const worker = process.env.NODE_ENV === "production" ? undefined : config.url;
   try {
@@ -38,10 +65,8 @@ export async function GET(request: Request) {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body) {
-      return Response.json({
-        x: "ready",
-        youtube: { ready: false, worker, problem: `The worker answered HTTP ${res.status} without JSON. Check MEDIA_WORKER_URL.` },
-      });
+      const problem = `The worker answered HTTP ${res.status} without JSON. Check MEDIA_WORKER_URL.`;
+      return Response.json({ x: "ready", youtube: { ready: false, worker, problem }, office: officeStatus(null, problem) });
     }
     const problem =
       body.jsRuntime === null || body.jsRuntime === false
@@ -59,11 +84,10 @@ export async function GET(request: Request) {
         ytdlp: typeof body.ytdlp === "string" ? body.ytdlp.slice(0, 40) : undefined,
         jsRuntime: !!body.jsRuntime,
       },
+      office: officeStatus(body),
     });
   } catch {
-    return Response.json({
-      x: "ready",
-      youtube: { ready: false, worker, problem: "The worker didn't respond. Is it running, and is MEDIA_WORKER_URL right?" },
-    });
+    const problem = "The worker didn't respond. Is it running, and is MEDIA_WORKER_URL right?";
+    return Response.json({ x: "ready", youtube: { ready: false, worker, problem }, office: officeStatus(null, problem) });
   }
 }

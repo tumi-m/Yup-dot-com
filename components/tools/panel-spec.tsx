@@ -1,4 +1,5 @@
 import type { ToolMeta } from "@/lib/tools";
+import type { OfficeTool } from "@/lib/office";
 
 /** Which panel a tool page shows; plain data, so a server page can pass it to ToolPanel. */
 export type PanelSpec =
@@ -16,6 +17,7 @@ export type PanelSpec =
   | { kind: "redact"; slug: string }
   | { kind: "scan"; slug: string }
   | { kind: "translate"; slug: string }
+  | { kind: "office"; tool: OfficeTool }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -33,6 +35,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "redact") return { kind: "redact", slug: tool.slug };
   if (tool.custom === "scan") return { kind: "scan", slug: tool.slug };
   if (tool.custom === "translate") return { kind: "translate", slug: tool.slug };
+  if (tool.custom === "office") return { kind: "office", tool: tool.slug as OfficeTool };
   return { kind: "workbench", slug: tool.slug };
 }
 
@@ -44,6 +47,8 @@ export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text")
   if (kind === "media" || kind === "playlist" || kind === "samples") return "h-[206px] sm:h-[150px]";
   if (kind === "slides-import") return "h-[158px] sm:h-[182px]";
   if (kind === "translate") return "h-[308px] sm:h-[276px]";
+  // The drop zone's upload note wraps to two lines on a phone.
+  if (kind === "office") return "h-[348px] sm:h-[332px]";
   return "h-[292px]";
 }
 

@@ -13,7 +13,9 @@ sites like iLovePDF and Smallpdf) with a full editor and a freemium SaaS layer.
 ## Tools (the spellbook)
 
 All tools run **entirely in the browser** — files are never uploaded — so they
-work with or without an account.
+work with or without an account. The one exception is Word and Excel to PDF
+(hidden until switched on), which uploads the file to our conversion server
+and deletes it straight after; its pages say so.
 
 | Tool | What it does |
 | ---- | ------------ |
@@ -34,7 +36,9 @@ work with or without an account.
 | **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
 | **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, South Africa's 11 official written languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
+| **Word → PDF** | *Hidden until `NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1`; needs the media worker with LibreOffice.* `.docx`, `.doc`, `.odt`, `.rtf` converted by headless LibreOffice on the media worker, with fonts made to Office's widths (Carlito, Caladea, Liberation), all embedded, headings as bookmarks, tagged. **Uploads the file** (the page says so) and deletes it as soon as the PDF is sent. Guests 5 a day, free 10, Pro 200; 25 MB, 100 MB with Pro. [More below](#word-and-excel-to-pdf). |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
+| **Excel → PDF** | *Hidden until switched on, as Word → PDF.* `.xlsx`, `.xls`, `.ods`, `.csv`: fit each sheet's width to the page, orientation (automatic, portrait, landscape), all sheets or the first. CSV values print exactly as written. Same upload, deletion and limits as Word → PDF. |
 | **PDF → Text** | Extract text in true reading order (multi-column aware). |
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
 | **Extract Tables** | Detect tables by column structure, export each as CSV. |
@@ -272,6 +276,47 @@ detected and reported rather than silently returning nothing.
   directly as SpreadsheetML over JSZip instead of pulling in a ~1 MB library.
   These target editable *content*, not a pixel-perfect copy of the layout.
 
+## Word and Excel to PDF
+
+`/tools/word-to-pdf` and `/tools/excel-to-pdf` share one panel
+(`components/tools/OfficeToPdf.tsx`) and are the only tools that upload the
+visitor's file. Browsers can't lay out a Word or Excel file faithfully, so the
+media worker runs headless LibreOffice (`media-worker/office.py`):
+
+1. The page asks `POST /api/convert/link` (`lib/office-server.ts`) with the
+   tool, the file's name and size, and for spreadsheets the page setup. The
+   route refuses other sites' pages, types the tool doesn't take (by
+   extension; the worker checks the bytes), empty files, files over the
+   plan's limit (`officeMaxBytes`), more than ten asks a minute, and the
+   daily allowance once spent (`officeConversionsPerDay`, bucket `office`),
+   which it spends before answering. It answers with the worker's URL and a
+   token signed with a key derived from `MEDIA_WORKER_SECRET` for this
+   purpose: it names the file's size and extension and the options, lasts two
+   minutes, starts one conversion, and can't pass for a download grant. The
+   file's name never leaves the browser.
+2. The browser uploads the file straight to the worker
+   (`POST /convert/office`, token in `X-Convert-Token`), showing upload
+   progress, then "Converting on our server" with the seconds, then the PDF
+   arriving. The worker checks the file, converts it and sends the PDF back in
+   the same response, then deletes everything.
+3. A conversion that failed, was turned away or was cancelled is given back
+   through `POST /api/convert/refund`, by the worker's own record, as YouTube
+   downloads are.
+
+The pages say plainly, next to the drop zone and the Convert button and in
+their questions, that the file is uploaded and deleted straight after; the
+privacy policy and security page add the same while the tools are on. The
+worker side (type checks, password-protected and macro-enabled files, zip
+bombs, sandboxing, timeouts, the queue) is in
+[`media-worker/README.md`](media-worker/README.md#word-and-excel-to-pdf).
+
+**Switching it on:** rebuild the worker, check
+`/api/media/health` reports `"office": {"ready": true}`, set
+`NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1` and redeploy. Until then the tools have
+no page, aren't listed, searched or in the sitemap, `/api/convert/link`
+answers 503, and the CSP doesn't name the worker for them. `.pptx` stays with
+PPTX to PDF, which renders it in the browser; `.ppt` and `.odp` aren't taken.
+
 ## Self-hosted runtime assets
 
 `scripts/copy-vendor.mjs` runs before `dev` and `build` and copies the pdf.js
@@ -482,7 +527,16 @@ on every kind of font and drawing, and a picture of the page can.
 
 ```bash
 npm test
+npm run test:office   # the worker's Word and Excel to PDF (python3; LibreOffice for the conversions)
 ```
+
+`tests/office-route.test.mts` runs `/api/convert/link` and `/api/convert/refund`
+(switch off and on, other sites, types, empty files, each plan's size and
+daily limits, the minute's limit, what a grant says and its key, refunds by
+the worker's record, and a grant verified by the worker's Python);
+`tests/office-tools.test.mts` checks the two tools are listed, searched, in
+the sitemap and named in the CSP only while switched on, and that their pages
+say the file is uploaded.
 
 The suites in `tests/` run the real pipeline against generated files. For PDFs:
 structure extraction, multi-column reading order, table-vs-gutter
@@ -906,7 +960,7 @@ Variables** and redeploy:
 | `OLLAMA_MODEL` | Optional. Default `deepseek-v4.1-flash` on Ollama Cloud, `deepseek-v4.1-flash:cloud` on your own server |
 | `OLLAMA_THINK` | Optional. Reasoning level: `low` (default for DeepSeek V4.1 Flash), `medium`, `high`, `max`, `false` |
 | `OLLAMA_CONTEXT_TOKENS` | Optional. Context window to ask the model for (`num_ctx`, at least 8192). Unset: the model's default |
-| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads — see [`media-worker/README.md`](media-worker/README.md) |
+| `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` | YouTube downloads and Word and Excel to PDF — see [`media-worker/README.md`](media-worker/README.md) |
 | `MEDIA_SIGNING_SECRET` | Recommended. Signs and encrypts X, TikTok and Instagram download links (with keys derived from it). Falls back to `MEDIA_WORKER_SECRET`, then the service-role key; with none of them, links only work on the server instance that made them |
 | `USAGE_HASH_SALT` | Recommended. Secret salt for hashing guest IPs in usage counters. Falls back to one derived from `SUPABASE_SERVICE_ROLE_KEY` or `MEDIA_SIGNING_SECRET` |
 | `TRUSTED_PROXY_HOPS` | Only when hosted outside Vercel: how many proxies in front of the app append to `X-Forwarded-For` (`1` for one nginx or load balancer). The visitor's address is that many entries from the right; anything further left is ignored. Unset: forwarding headers aren't trusted and every guest shares one allowance. Ignored on Vercel |
@@ -927,6 +981,7 @@ Variables** and redeploy:
 | `NEXT_PUBLIC_SECURITY_EMAIL` | Optional. Where security reports go, on `/security` and in `/.well-known/security.txt` (default `security@pdfwizard.xyz`) |
 | `NEXT_PUBLIC_BUSINESS_NAME` | Optional. Trading name on the legal pages and footer (default `PDF Wizard`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Optional. Google Analytics 4 (`G-…`). Unset: no analytics, no cookie banner. Set it for Production only |
+| `NEXT_PUBLIC_ENABLE_OFFICE_CONVERT` | Optional. `1` shows Word to PDF and Excel to PDF and lets their pages upload to the media worker (hidden by default); needs `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET` and the worker rebuilt with LibreOffice. Redeploy after changing |
 | `NEXT_PUBLIC_ENABLE_YOUTUBE` | Optional. `1` brings back the YouTube tools (they are paused and hidden by default); needs the media worker |
 | `MUSICBRAINZ_CONTACT` | Optional. The https page MusicBrainz is told to contact about the Sample Finder's requests (its User-Agent). Default: the site's `/contact` page. Never a personal email |
 | `SAMPLES_MB_DISABLED` | Optional. `1` makes the Sample Finder answer from its hand-checked list only, sending nothing to MusicBrainz |

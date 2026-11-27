@@ -1,4 +1,4 @@
-# Media worker (YouTube downloads)
+# Media worker (YouTube downloads, Word and Excel to PDF)
 
 **X (Twitter) needs nothing from this folder.** The web app resolves X posts
 itself, streams the MP4 through `/api/media/file`, and converts to MP3 in the
@@ -99,16 +99,149 @@ request after a sleep times out.
   the downloaders on a separate domain and payment account, so a complaint can't
   take down the PDF business.
 
+## Word and Excel to PDF
+
+Word to PDF and Excel to PDF run headless LibreOffice here (`office.py`). They
+are the only tools on the site that upload the visitor's file, and both pages
+say so.
+
+```
+browser ──(1) Convert──▶ Next.js /api/convert/link   (checks plan, file size, daily quota;
+                                                       signs a 2-minute token for this
+                                                       file's size and type)
+browser ──(2) file + token in X-Convert-Token──▶ worker POST /convert/office
+        ◀──────────────────── the PDF, in the same response
+```
+
+The file goes straight from the browser to the worker and the PDF straight
+back; neither passes through Vercel. Each token starts one conversion and
+only for a file of the size and type it names. The upload, LibreOffice's
+profile and the PDF are deleted as soon as the PDF has been sent, and at
+once when a conversion fails, times out or the visitor cancels (the worker
+notices the browser hanging up and stops LibreOffice).
+
+Before LibreOffice sees a file, the worker checks that it is what its name
+says (the bytes, the parts inside a `.docx`, `.xlsx`, `.odt` or `.ods`, the
+streams inside a `.doc` or `.xls`), and turns away password-protected files,
+macro-enabled files (`.docm`, `.xlsm` renamed), zip bombs (more than 512 MB
+unpacked, counted as it unpacks, embedded files included) and sheets with more
+than a million filled cells, each with a message saying what to do.
+
+LibreOffice runs:
+
+- with a new profile for every job: macros off at the highest level and the
+  document opened with macros never run, links never updated, formulas not
+  recalculated on load (cached values print, so `WEBSERVICE()` and the like
+  never run), pictures or sections linked to files outside the document not
+  loaded, and an unreachable proxy;
+- with no network at all where the host allows a new network namespace
+  (`unshare`; the health check says `"network": "none"`). Docker's default
+  seccomp profile doesn't, so in a plain Docker container it is
+  `"proxy-only"`: no network through LibreOffice's own settings;
+- never as root: as the image's `worker` user (as `nobody` if the worker is
+  ever started as root), with a clean environment (no secrets), and the worker
+  process itself marked non-dumpable, so LibreOffice can't read its memory or
+  environment;
+- with a hard timeout (90 s), a memory ceiling (2 GB of address space, a CPU
+  limit and a 512 MB output limit), two at a time, up to eight more files
+  waiting their turn for a minute before "busy, try again in a minute".
+
+Spreadsheets have three options, set on the page: fit the sheet's width to
+the page (on by default; never enlarges), orientation (automatic turns a sheet
+wider than a portrait page sideways), and all sheets or the first. A CSV gets
+A4 pages, column widths that fit its values, cell lines, and every value
+printed exactly as written (leading zeros and dates kept).
+
+### Deploy it
+
+1. Rebuild and redeploy the worker from this folder's `Dockerfile`. The
+   LibreOffice block makes the image roughly 500–650 MB larger (estimated
+   from Debian's package sizes; `docker image ls` shows the real figure).
+2. Give it memory: a conversion took 200–250 MB resident in testing (a
+   250-page document, a 1,900-page sheet), so **1 GB** covers two at once
+   with room for the worker; **2 GB** if it also serves YouTube downloads.
+   One CPU is enough; two let both conversions run at full speed. Set
+   `OFFICE_MAX_CONCURRENT=1` on a 512 MB host.
+3. Check the worker (it needs the secret to show details):
+
+   ```bash
+   curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<worker>/health
+   # ... "office": {"ready": true, "soffice": true, "uno": true, "network": "none" or "proxy-only", ...}
+   ```
+
+4. On the web app (Vercel), with `MEDIA_WORKER_URL` and `MEDIA_WORKER_SECRET`
+   already set, add `NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1` and redeploy. Until
+   then the two tools are hidden (no page, not listed, not in the sitemap) and
+   `/api/convert/link` answers 503. The page's Content-Security-Policy then
+   allows the worker's address, as it does for YouTube downloads.
+5. Check the web app sees it:
+
+   ```bash
+   curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<your-site>/api/media/health
+   # ... "office": {"ready": true, ...}
+   ```
+
+6. Convert a file by hand. The token is the one the web app would sign
+   (any `.docx` will do; `SIZE` must be its size in bytes):
+
+   ```bash
+   SIZE=$(wc -c < letter.docx)
+   TOKEN=$(MEDIA_WORKER_SECRET=$MEDIA_WORKER_SECRET node -e '
+     const c = require("crypto");
+     const key = c.createHmac("sha256", process.env.MEDIA_WORKER_SECRET).update("pdf-wizard/office-token/v1").digest("base64url");
+     const body = Buffer.from(JSON.stringify({ k: "office", x: "docx", z: +process.argv[1], o: {}, s: "test", c: c.randomBytes(12).toString("base64url"), t: Math.floor(Date.now() / 1000), e: Math.floor(Date.now() / 1000) + 120 })).toString("base64url");
+     console.log(body + "." + c.createHmac("sha256", key).update(body).digest("base64url"));' "$SIZE")
+   curl -f -o letter.pdf -H "X-Convert-Token: $TOKEN" --data-binary @letter.docx https://<worker>/convert/office
+   ```
+
+   A wrong or expired token answers 401, a file that isn't what its name says
+   415, a password-protected one 422, each with a message in JSON.
+
+Settings (all optional):
+
+| Variable | |
+| -------- | - |
+| `OFFICE_MAX_CONCURRENT` | Conversions at once (default 2) |
+| `OFFICE_MAX_QUEUE` | Files that may upload and wait for a turn (default 8) |
+| `OFFICE_QUEUE_WAIT_SECONDS` | How long one waits before "busy" (default 60) |
+| `OFFICE_TIMEOUT_SECONDS` | Hard limit for one conversion (default 90) |
+| `OFFICE_UPLOAD_SECONDS` | Longest an upload may take (default 600) |
+| `OFFICE_MAX_BYTES` | Largest upload taken (default 100 MB; the web app's per-plan limits are lower) |
+| `OFFICE_MEMORY_MB` | Address-space ceiling for LibreOffice (default 2048; it reserves far more than it uses) |
+| `OFFICE_MAX_UNZIPPED_BYTES`, `OFFICE_MAX_ZIP_ENTRIES` | Zip bomb limits (default 512 MB, 10,000 parts) |
+| `OFFICE_MAX_CELLS` | Filled cells a spreadsheet may have (default 1,000,000, about 2,000 pages) |
+| `OFFICE_MAX_PDF_BYTES` | Largest PDF written (default 512 MB) |
+| `OFFICE_SANDBOX` | `off` skips the network namespace (default `auto`) |
+| `OFFICE_USER` | Who LibreOffice runs as if the worker runs as root (default `nobody`) |
+| `OFFICE_SOFFICE`, `OFFICE_PYTHON` | Only outside the Dockerfile: `soffice`, and the Python that has `python3-uno` (default `/usr/bin/python3`) |
+
+The worker's single-instance rule (below) applies here too: a grant is
+recorded in memory, which is what makes a failed conversion refundable.
+
 ## Test
 
 ```bash
 FFMPEG=/path/to/ffmpeg npm run test:media   # needs python3 + yt-dlp
+npm run test:office                          # Word and Excel to PDF
 ```
 
-The test builds a local multi-quality DASH stream shaped like YouTube HD and
+`test:media` builds a local multi-quality DASH stream shaped like YouTube HD and
 checks: the right height at 1080/720/360p, H.264 + AAC merged into MP4, MP3
 extraction, and rejection of tampered, expired, and wrongly signed tokens and
 non-allowlisted hosts. It also serves local RSS feeds, which yt-dlp lists as
 playlists the way it lists YouTube playlists with `extract_flat`, to check
 `/playlist`: titles, durations and thumbnails, the 200-item cap and its flag,
 rejection of single videos, friendly errors, and that no media is fetched.
+
+`npm run test:office` (`test_office.py`, standard library only) checks what a
+file really is without LibreOffice: wrong extensions, damaged files, encrypted
+compound files, `.docm`/`.xlsm` renamed, zip bombs (declared, understated and
+embedded), sheets too big, empty files, CSV separators and encodings, tokens.
+With LibreOffice and `python3-uno` installed it also converts every format and
+reads the PDFs back (pages, text, tables, embedded fonts, sheet options, CSV
+values as written), checks real password-protected files from LibreOffice, a
+picture linked to a file on the server staying out of the PDF, the timeout
+and cancel leaving no process behind, LibreOffice not running as root and
+having no network, and the route through `worker.py`'s own handler: one
+conversion per grant, refusals, busy, the browser hanging up, and the records
+a refund reads.

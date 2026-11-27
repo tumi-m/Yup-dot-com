@@ -38,6 +38,26 @@ only the letters a document uses are embedded in its PDF.
 The source code of the MPL-2.0 and GPL-licensed components is available at the
 links above, for the exact versions listed.
 
+## Media worker (Word and Excel to PDF)
+
+The media worker's container (`media-worker/Dockerfile`) installs these from
+Debian and runs them as separate programs; they aren't linked into our code
+or sent to browsers. Their licence texts are in the image under
+`/usr/share/doc/<package>/copyright`.
+
+| Component | Licence | Source |
+| --- | --- | --- |
+| LibreOffice (Writer, Calc and the UNO bridge, `python3-uno`) | MPL-2.0 | https://www.libreoffice.org/about-us/source-code/ |
+| Carlito (metric-compatible with Calibri) | SIL Open Font License 1.1 | https://github.com/googlefonts/carlito |
+| Caladea (metric-compatible with Cambria) | SIL Open Font License 1.1 | https://github.com/huertatipografica/Caladea |
+| Liberation fonts 2.x (metric-compatible with Arial, Times New Roman, Courier New) | SIL Open Font License 1.1 | https://github.com/liberationfonts/liberation-fonts |
+| DejaVu fonts | Bitstream Vera licence and public domain (DejaVu changes) | https://dejavu-fonts.github.io/ |
+| Noto fonts (`fonts-noto-core`) | SIL Open Font License 1.1 | https://github.com/notofonts |
+
+PDFs made by Word and Excel to PDF embed subsets of the fonts a document
+uses, which each of these licences allows. LibreOffice's source code is
+available at the link above for the version Debian ships.
+
 ## Data
 
 The Sample Finder shows song relationships from

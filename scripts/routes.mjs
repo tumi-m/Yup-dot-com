@@ -52,6 +52,8 @@ export const CLOSED_ROUTES = [
   "/api/billing/team",
   "/api/billing/verify",
   "/api/billing/webhook",
+  "/api/convert/link", // POST only, same site: Word and Excel to PDF upload grants
+  "/api/convert/refund", // POST only, same site
   "/api/media/file",
   "/api/media/health",
   "/api/media/info",

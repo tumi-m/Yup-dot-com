@@ -54,9 +54,12 @@ import {
   ScanLine,
   TextCursor,
   Languages,
+  FileType,
+  FileSpreadsheet,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
+import { OFFICE_ENABLED } from "./office";
 import type { PagesMode } from "./pdf/pages/plan";
 
 export type ToolCategory =
@@ -83,7 +86,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate" | "office";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -372,6 +375,19 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-blue-100 text-blue-700",
   },
   {
+    slug: "word-to-pdf",
+    name: "Word to PDF",
+    title: "Word to PDF: convert DOCX and DOC files to PDF",
+    description: "Word documents to PDF, laid out as in Word.",
+    icon: FileType,
+    category: "convert",
+    tint: "bg-indigo-100 text-indigo-800",
+    badge: "New",
+    custom: "office",
+    keywords: "docx doc odt rtf microsoft office word document writer libreoffice openoffice letter cv resume report",
+    aliases: ["DOCX to PDF", "DOC to PDF", "ODT to PDF", "RTF to PDF", "Document to PDF"],
+  },
+  {
     slug: "translate-pdf",
     name: "Translate PDF",
     title: "Translate PDF: translate a document into another language",
@@ -393,6 +409,19 @@ const ALL_TOOLS: ToolMeta[] = [
     icon: Sheet,
     category: "convert",
     tint: "bg-green-100 text-green-700",
+  },
+  {
+    slug: "excel-to-pdf",
+    name: "Excel to PDF",
+    title: "Excel to PDF: convert XLSX, XLS and CSV spreadsheets to PDF",
+    description: "Spreadsheets to PDF, each sheet fitted to the page.",
+    icon: FileSpreadsheet,
+    category: "convert",
+    tint: "bg-emerald-100 text-emerald-800",
+    badge: "New",
+    custom: "office",
+    keywords: "xlsx xls ods csv spreadsheet sheet sheets workbook microsoft office calc table libreoffice openoffice budget invoice",
+    aliases: ["XLSX to PDF", "XLS to PDF", "ODS to PDF", "Spreadsheet to PDF", "Sheet to PDF"],
   },
   {
     slug: "pdf-to-pptx",
@@ -731,8 +760,17 @@ const ALL_TOOLS: ToolMeta[] = [
 
 const isYoutubeTool = (t: ToolMeta) => t.media?.platform === "youtube" || t.custom === "playlist";
 
-/** Every tool on the site. YouTube's are left out while it's paused (lib/media.ts). */
-export const TOOLS: ToolMeta[] = YOUTUBE_ENABLED ? ALL_TOOLS : ALL_TOOLS.filter((t) => !isYoutubeTool(t));
+/**
+ * The tools shown with these switches: YouTube's while it isn't paused
+ * (lib/media.ts), Word and Excel to PDF once the media worker converts
+ * (lib/office.ts). Hidden tools have no page and aren't listed anywhere.
+ */
+export function shownTools(on: { youtube: boolean; office: boolean }): ToolMeta[] {
+  return ALL_TOOLS.filter((t) => (on.youtube || !isYoutubeTool(t)) && (on.office || t.custom !== "office"));
+}
+
+/** Every tool on the site. */
+export const TOOLS: ToolMeta[] = shownTools({ youtube: YOUTUBE_ENABLED, office: OFFICE_ENABLED });
 
 export function getTool(slug: string): ToolMeta | undefined {
   return TOOLS.find((t) => t.slug === slug);
@@ -743,8 +781,9 @@ export function getTool(slug: string): ToolMeta | undefined {
  * text and Markdown point at each other, pictures at other picture formats
  * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
  * Compare at reading and editing the text it found, the two editors at each
- * other and at Redact PDF, which removes what covering only hides, and
- * Translate at the other tools that read a document's text.
+ * other and at Redact PDF, which removes what covering only hides,
+ * Translate at the other tools that read a document's text, and Word and
+ * Excel to PDF at each other and the way back.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -764,6 +803,9 @@ const RELATED: Record<string, string[]> = {
   "edit-pdf-text": ["edit-pdf", "redact-pdf", "sign-pdf", "compress-pdf"],
   "edit-pdf": ["edit-pdf-text", "sign-pdf", "compress-pdf", "redact-pdf"],
   "translate-pdf": ["chat-with-pdf", "pdf-to-word", "ocr-pdf", "compress-pdf"],
+  // Office files the other way, and back again.
+  "word-to-pdf": ["excel-to-pdf", "pptx-to-pdf", "pdf-to-word", "merge-pdf"],
+  "excel-to-pdf": ["word-to-pdf", "pptx-to-pdf", "pdf-to-excel", "merge-pdf"],
   // A song's samples, then its sound from the sites people find songs on.
   "sample-finder": ["youtube-to-mp3", "tiktok-to-mp3", "instagram-to-mp3", "x-to-mp3"],
 };

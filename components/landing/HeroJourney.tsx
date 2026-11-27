@@ -50,6 +50,8 @@ import { pasteBlockedMessage } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { HeroDropzone } from "./HeroDropzone";
 import { takePdfs } from "./hero-actions";
+import { OFFICE_ENABLED, officeToolFor } from "@/lib/office";
+import { fileToHandoff, tryHandoff } from "@/lib/local-store";
 import type { Tier } from "@/lib/limits";
 
 const CHOICES: Record<JourneyChoice, { label: string; icon: LucideIcon; tint: string }> = {
@@ -90,6 +92,7 @@ function setHash(choice: JourneyChoice | null) {
  * into that branch. `#pdf`, `#pptx`, `#slides` and `#media` skip the question.
  */
 export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
+  const router = useRouter();
   const reduce = useReducedMotion();
   const [choice, setChoice] = useState<JourneyChoice | null>(null);
   // True once the visitor picks something, so branches take focus; a deep
@@ -141,7 +144,16 @@ export function HeroJourney({ tier = "guest" }: { tier?: Tier }) {
     const target = choiceForFiles(files);
     if (!target) {
       setPptxError(null);
-      setDropError("Drop a PDF, image, text file or PPTX.");
+      // A Word or Excel file goes to the tool that converts it.
+      const office = OFFICE_ENABLED ? officeToolFor(files[0].name) : null;
+      if (office) {
+        setDropError(null);
+        void tryHandoff([fileToHandoff(files[0], files[0].name)]).then((ok) =>
+          ok ? router.push(`/tools/${office}?handoff=1`) : setDropError("Couldn't open that file here. Open it from the tool's page.")
+        );
+        return;
+      }
+      setDropError(OFFICE_ENABLED ? "Drop a PDF, image, text, Word, Excel or PPTX file." : "Drop a PDF, image, text file or PPTX.");
       return;
     }
     setDropError(null);

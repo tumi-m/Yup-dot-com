@@ -63,13 +63,13 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|CompareTool|RedactTool|ScanTool|TranslateTool)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|CompareTool|RedactTool|ScanTool|TranslateTool|OfficeToPdf)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all fifteen panels lazily",
-  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench,TranslateTool",
+  "ToolPanel loads all sixteen panels lazily",
+  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,OfficeToPdf,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench,TranslateTool",
   lazy
 );
 
@@ -96,6 +96,7 @@ for (const file of [
   "components/tools/QrCode.tsx",
   "components/tools/TranslateTool.tsx",
   "components/tools/LanguagePicker.tsx",
+  "components/tools/OfficeToPdf.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
@@ -118,6 +119,7 @@ check("redact marks have no imports", staticImports(src("lib/pdf/redact/marks.ts
 // Translate PDF's page brings the language list, the passages and the
 // requests: plain code. The parser, the Word writer and the PDF layout come
 // with the work.
+check("Word and Excel to PDF's shared code has no imports", staticImports(src("lib/office.ts"), /./).length === 0);
 check("the language list has no imports", staticImports(src("lib/translate/languages.ts"), /./).length === 0);
 check("the passages and requests import only each other", [...staticImports(src("lib/translate/segments.ts"), /./), ...staticImports(src("lib/translate/client.ts"), /./)].every((m) => /^\.\.?\/(abort|format|segments)$/.test(m)));
 check("the files are written in a worker that loads on demand", /await import\("@\/lib\/pdf\/translate\/off-thread"\)/.test(src("components/tools/TranslateTool.tsx")) && /await import\("@\/lib\/pdf\/parse"\)/.test(src("components/tools/TranslateTool.tsx")));
