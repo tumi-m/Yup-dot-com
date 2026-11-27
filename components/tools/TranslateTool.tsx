@@ -40,8 +40,26 @@ interface Loaded {
   file: File;
   parsed: ParsedDocument;
   plan: TranslationPlan;
-  /** What translating it all takes from the day's allowance. */
-  charge: number;
+}
+
+/**
+ * Translations already paid for, by passage, for one file into one
+ * language. After Cancel or a failure the next run sends only the rest.
+ */
+interface Kept {
+  key: string;
+  map: Map<string, string>;
+}
+
+/** What the last run that didn't finish left behind, said on the page. */
+interface Stopped {
+  key: string;
+  /** Stopped with Cancel, or by a failure (the error says which). */
+  cancelled: boolean;
+  done: number;
+  total: number;
+  /** Characters of today's allowance it took, once known. */
+  used: number | null;
 }
 
 interface Result {
@@ -58,6 +76,7 @@ interface Result {
 
 const plural = (n: number, word: string, many = `${word}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? word : many}`;
 const chars = (n: number) => n.toLocaleString("en-US");
+const keyOf = (file: File, target: string, source: string) => `${file.name}|${file.size}|${file.lastModified}|${target}|${source}`;
 
 /** The file's name without .pdf, then the language: "report-fr.docx". */
 function outputName(name: string, lang: Language, ext: string) {
@@ -91,6 +110,10 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
   const [downloaded, setDownloaded] = useState(false);
   const [nextFailed, setNextFailed] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [kept, setKept] = useState<Kept | null>(null);
+  const [stopped, setStopped] = useState<Stopped | null>(null);
+  /** Characters left before the run, to say what a stopped one took. */
+  const before = useRef<number | null>(null);
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
   const { next: focusNext, focusRef } = useFocusNext<"choose" | "reading" | "file" | "target" | "run" | "progress" | "done">();
   const flow = useHeightLock<HTMLDivElement>();
@@ -101,13 +124,32 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
   useEffect(() => () => job.current?.abort(), []);
 
   // Whether translation runs here, and what is left today.
-  function refreshService() {
-    fetch("/api/ai/translate", { cache: "no-store" })
+  function refreshService(): Promise<TranslateStatus | null> {
+    return fetch("/api/ai/translate", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: TranslateStatus | null) => d && setService(d))
-      .catch(() => {});
+      .then((d: TranslateStatus | null) => {
+        if (d) setService(d);
+        return d;
+      })
+      .catch(() => null);
   }
-  useEffect(refreshService, []);
+  useEffect(() => void refreshService(), []);
+
+  /**
+   * Says on the page what a run that didn't finish left: the passages kept,
+   * and, once the server has given back what never came, what it took.
+   */
+  function noteStop(key: string, cancelled: boolean, done: number, total: number) {
+    setStopped({ key, cancelled, done, total, used: null });
+    const was = before.current;
+    // The server gives back what a stopped request didn't deliver once it sees the request end.
+    window.setTimeout(() => {
+      void refreshService().then((d) => {
+        if (was == null || d?.remaining == null) return;
+        setStopped((s) => (s && s.key === key ? { ...s, used: Math.max(0, was - d.remaining!) } : s));
+      });
+    }, 800);
+  }
 
   // A file handed over from the homepage or another tool.
   useEffect(() => {
@@ -148,6 +190,8 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
     fail(null);
     setResult(null);
     setLoaded(null);
+    setKept(null);
+    setStopped(null);
     setReading(null);
     // Cancel stays in reach while a long file is read.
     if (hadFocus) focusNext.current = "reading";
@@ -168,10 +212,10 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
         setStatus("idle");
         return;
       }
-      setLoaded({ file, parsed, plan, charge: chargeForSegments(plan.segments) });
+      setLoaded({ file, parsed, plan });
       setStatus("ready");
       if (hadFocus) focusNext.current = target ? "run" : "target";
-      say(`${file.name}: ${plural(parsed.pageCount, "page")}, about ${chars(plan.chars)} characters to translate.`);
+      say(`${file.name}: ${plural(parsed.pageCount, "page")}, ${chars(plan.chars)} characters to translate.`);
     } catch (err) {
       if (ctl.signal.aborted || isAbort(err)) return;
       fail(friendlyPdfError(err, file.name).message, file);
@@ -198,17 +242,23 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
       fail("Translation isn't available right now. Please try again later.");
       return;
     }
-    if (service?.remaining != null && loaded.charge > service.remaining) {
-      // The note under the languages already says so; the upgrade prompt is the next step.
-      setUpsell("translate");
-      say(overMessage(loaded.charge, service.remaining));
+    const key = keyOf(loaded.file, lang.code, source);
+    const keep = kept?.key === key ? kept : { key, map: new Map<string, string>() };
+    const charge = chargeForSegments(loaded.plan.segments.filter((s) => !keep.map.has(s.id)));
+    if (service?.remaining != null && charge > service.remaining) {
+      // The note under the languages already says so; for Free and guests the upgrade prompt is the next step.
+      if (upgradable) setUpsell("translate-size");
+      say(overMessage(charge, service.remaining));
       return;
     }
+    setKept(keep);
+    setStopped(null);
+    before.current = service?.remaining ?? null;
     // Cancel stays in reach while it works; the result or the error takes focus after.
     if (document.activeElement?.closest("[data-cast]")) focusNext.current = "progress";
     flow.lock(resultFloor());
     fail(null);
-    setProgress({ done: 0, total: loaded.plan.segments.length });
+    setProgress({ done: loaded.plan.segments.filter((s) => keep.map.has(s.id)).length, total: loaded.plan.segments.length });
     setWriting(null);
     setWaiting(0);
     setNextFailed(null);
@@ -234,6 +284,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
         signal: ctl.signal,
         onProgress: showProgress,
         onWait: (seconds) => !ctl.signal.aborted && setWaiting(seconds),
+        kept: keep.map,
       });
       clearTimeout(timer);
       if (ctl.signal.aborted) return;
@@ -271,24 +322,25 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
       trackToolUsed(slug);
       setShowCard(!upsellCardDismissed());
       if (recordTask(tier === "guest")) nudge.arm();
-      refreshService();
+      void refreshService();
     } catch (err) {
       if (ctl.signal.aborted || isAbort(err)) return;
       if (err instanceof TranslateError) {
-        if (err.reason === "translate") {
-          setService((s) => (s ? { ...s, remaining: 0 } : s));
-          if (err.upgrade) setUpsell("translate");
-        }
+        // Only the day's allowance running out by use gets the upgrade
+        // prompt; a failure ("failed") or a busy service doesn't.
+        if (err.reason === "translate" && err.upgrade) setUpsell("translate");
         fail(err.message, null, err.status === 401);
       } else {
         fail(friendlyPdfError(err).message, loaded.file);
       }
+      // What was translated before it stopped is kept for the next try.
+      setKept({ ...keep });
+      noteStop(key, false, loaded.plan.segments.filter((s) => keep.map.has(s.id)).length, loaded.plan.segments.length);
       if (focusNext.current || document.activeElement?.closest("[data-progress]") || document.activeElement === document.body) {
         focusNext.current = "run";
       }
       flow.release();
       setStatus("ready");
-      refreshService();
     } finally {
       clearTimeout(timer);
       if (job.current === ctl) {
@@ -300,6 +352,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
   }
 
   function cancel() {
+    const running = status === "translating" || status === "writing";
     job.current?.abort();
     job.current = null;
     setProgress(null);
@@ -308,8 +361,12 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
     focusNext.current = loaded ? "run" : "choose";
     flow.release();
     setStatus(loaded ? "ready" : "idle");
-    say("Stopped. Nothing was kept.");
-    refreshService();
+    if (running && loaded && kept) {
+      const done = loaded.plan.segments.filter((s) => kept.map.has(s.id)).length;
+      setKept({ ...kept });
+      noteStop(kept.key, true, done, loaded.plan.segments.length);
+      say(`Stopped after ${chars(done)} of ${plural(loaded.plan.segments.length, "passage")}. ${done ? "They're kept, so translating again sends only the rest." : ""}`);
+    } else say("Stopped.");
   }
 
   function reset() {
@@ -320,6 +377,8 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
     else flow.release();
     setLoaded(null);
     setResult(null);
+    setKept(null);
+    setStopped(null);
     fail(null);
     setStatus("idle");
   }
@@ -349,7 +408,15 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
 
   const lang = languageByCode(target);
   const working = status === "translating" || status === "writing";
-  const over = !!loaded && service?.remaining != null && loaded.charge > service.remaining;
+  // Guests and Free can upgrade for more; Pro and Team have the most there is.
+  const upgradable = tier === "guest" || tier === "free";
+  const key = loaded && lang ? keyOf(loaded.file, lang.code, source) : null;
+  const keptMap = key && kept?.key === key ? kept.map : null;
+  const keptDone = loaded && keptMap ? loaded.plan.segments.filter((s) => keptMap.has(s.id)).length : 0;
+  const total = loaded?.plan.segments.length ?? 0;
+  const charge = loaded ? chargeForSegments(keptMap ? loaded.plan.segments.filter((s) => !keptMap.has(s.id)) : loaded.plan.segments) : 0;
+  const over = !!loaded && service?.remaining != null && charge > service.remaining;
+  const partial = keptDone > 0 && keptDone < total;
   const scans = loaded?.parsed.scans ?? [];
 
   return (
@@ -483,7 +550,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                         <UploadCloud /> Choose PDF
                       </Button>
                       <p className="mt-4 text-xs text-muted-foreground">
-                        Up to {formatLimitBytes(limits.maxFileBytes)}. The file stays on your device; only its text is sent to be translated.
+                        Up to {formatLimitBytes(limits.maxFileBytes)}. The file stays on your device; only its text is sent to our AI provider to be translated.
                       </p>
                     </>
                   )}
@@ -507,7 +574,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                         {loaded.file.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {formatBytes(loaded.file.size)} · {plural(loaded.parsed.pageCount, "page")} · about {chars(loaded.plan.chars)} characters to translate
+                        {formatBytes(loaded.file.size)} · {plural(loaded.parsed.pageCount, "page")} · {chars(loaded.plan.chars)} characters to translate
                       </p>
                     </div>
                     {!working && (
@@ -566,7 +633,10 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                       <p className="flex items-start gap-2">
                         <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                         <span>
-                          <span className="font-semibold text-foreground">What&apos;s sent:</span> the document&apos;s text, not the file, goes to our translation service (a language model) to be translated. Nothing is kept once it&apos;s done.
+                          <span className="font-semibold text-foreground">What&apos;s sent:</span> the document&apos;s text, not the file, goes through our server to our AI provider, the one Chat with PDF uses, to be translated. We don&apos;t store it. Don&apos;t translate documents you aren&apos;t allowed to share with a third party.{" "}
+                          <Link href="/privacy#ai" className="whitespace-nowrap font-semibold underline underline-offset-2">
+                            Privacy policy
+                          </Link>
                         </span>
                       </p>
                       <p className="flex items-start gap-2">
@@ -578,23 +648,42 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                       <p className={cn("text-xs", over ? "font-medium text-amber-800 dark:text-amber-300" : "text-muted-foreground")} data-testid="allowance">
                         {over ? (
                           <>
-                            {overMessage(loaded.charge, service.remaining)}{" "}
+                            {overMessage(charge, service.remaining)}{" "}
                             <Link href="/tools/split-pdf" className="font-semibold underline underline-offset-2">
                               Split PDF
                             </Link>{" "}
-                            to translate part of it, or{" "}
-                            <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setUpsell("translate")}>
-                              see the plans
-                            </button>
-                            .
+                            to translate part of it
+                            {upgradable ? (
+                              <>
+                                , or{" "}
+                                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => setUpsell("translate-size")}>
+                                  see the plans
+                                </button>
+                                .
+                              </>
+                            ) : (
+                              ", or translate it after midnight UTC, when the day's allowance starts again."
+                            )}
                           </>
                         ) : (
-                          `Uses about ${chars(loaded.charge)} of the ${chars(service.remaining)} characters you have left today.`
+                          `${partial ? "The rest counts" : "Counts"} as ${chars(charge)} of the ${chars(service.remaining)} characters you have left today: each request is rounded up to the next 500.`
                         )}
                       </p>
                     )}
                   </div>
                 </fieldset>
+              )}
+
+              {stopped && stopped.key === key && status === "ready" && (
+                <Notice block>
+                  <span data-testid="stopped">
+                    {stopped.cancelled && `Stopped after ${chars(stopped.done)} of ${plural(stopped.total, "passage")}. `}
+                    {stopped.done > 0 && stopped.done < stopped.total
+                      ? `${stopped.cancelled ? (stopped.done === 1 ? "It's" : "They're") : `The ${plural(stopped.done, "passage")} translated so far ${stopped.done === 1 ? "is" : "are"}`} kept here, so translating again sends only the rest. `
+                      : ""}
+                    {stopped.used != null && (stopped.used ? `That counted ${chars(stopped.used)} characters of today's allowance.` : "Nothing was counted.")}
+                  </span>
+                </Notice>
               )}
 
               <AnimatePresence>
@@ -673,7 +762,7 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
                           className="min-w-52 shadow-lg shadow-primary/25"
                           disabled={service?.available === false}
                         >
-                          <Languages /> {lang ? `Translate into ${lang.name}` : "Translate PDF"}
+                          <Languages /> {lang ? `${partial ? "Translate the rest into" : "Translate into"} ${lang.name}` : "Translate PDF"}
                         </Button>
                       </motion.div>
                     )}
@@ -690,9 +779,8 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
 }
 
 function overMessage(charge: number, remaining: number) {
-  return remaining > 0
-    ? `This document needs about ${chars(charge)} characters; you have ${chars(remaining)} left today.`
-    : `You've used today's translation allowance. This document needs about ${chars(charge)} characters.`;
+  const needs = `Translating this counts as ${chars(charge)} characters`;
+  return remaining > 0 ? `${needs}; you have ${chars(remaining)} left today.` : `${needs}, and you've used today's allowance.`;
 }
 
 function scansNote(pages: number[]) {

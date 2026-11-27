@@ -9,14 +9,14 @@ const pages = (n: number) => Math.round(n / 3000);
 
 const STEPS: [string, string][] = [
   ["Choose a PDF", "Its text is read in your browser: headings, paragraphs, lists and tables, in reading order."],
-  ["Pick a language", `${LANGUAGES.length} languages, including all of South Africa's official languages.`],
-  ["Download", "A Word file you can edit, and a PDF, with the headings, lists and tables kept."],
+  ["Pick a language", `${LANGUAGES.length} languages, including all 11 of South Africa's official written languages.`],
+  ["Download", "A Word file you can edit and, for most languages, a PDF, with the headings, lists and tables kept."],
 ];
 
 const FAQ: { q: string; a: string }[] = [
   {
     q: "Is my file uploaded?",
-    a: `No. The PDF is read in your browser. Only its text is sent to our translation service (a language model), a page's worth at a time, to be translated, and nothing is kept once it's done. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} with Pro.`,
+    a: `No. The PDF is read in your browser. Only its text is sent, a page's worth at a time, through our server to our AI provider, the one Chat with PDF uses (our privacy policy names it), to be translated. We don't store the text or the translation. Don't translate documents you aren't allowed to share with a third party. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} with Pro.`,
   },
   {
     q: "How good is the translation?",
@@ -24,7 +24,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How much can I translate?",
-    a: `As a guest, ${chars(LIMITS.guest.translateCharsPerDay)} characters a day (about ${pages(LIMITS.guest.translateCharsPerDay)} pages). With a free account, ${chars(LIMITS.free.translateCharsPerDay)} (about ${pages(LIMITS.free.translateCharsPerDay)} pages). With Pro or Team, ${chars(LIMITS.pro.translateCharsPerDay)} (about ${pages(LIMITS.pro.translateCharsPerDay)} pages). Numbers, dates and text repeated on every page count once or not at all.`,
+    a: `As a guest, ${chars(LIMITS.guest.translateCharsPerDay)} characters a day (about ${pages(LIMITS.guest.translateCharsPerDay)} pages). With a free account, ${chars(LIMITS.free.translateCharsPerDay)} (about ${pages(LIMITS.free.translateCharsPerDay)} pages). With Pro or Team, ${chars(LIMITS.pro.translateCharsPerDay)} (about ${pages(LIMITS.pro.translateCharsPerDay)} pages). Numbers, dates and text repeated on every page count once or not at all, and each request is rounded up to the next 500 characters.`,
   },
   {
     q: "Does it keep the layout?",
@@ -44,7 +44,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Can I stop it?",
-    a: "Yes. Cancel stops it at once and nothing is kept. What was already sent counts toward the day's allowance.",
+    a: "Yes. Cancel stops it at once, and no file is made from part of a document. What was translated stays on the page, so translating again sends only the rest. Passages that never came back aren't counted (for a few requests a day); what did come back is.",
   },
 ];
 

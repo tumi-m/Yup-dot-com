@@ -375,7 +375,7 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "translate-pdf",
     name: "Translate PDF",
     title: "Translate PDF: translate a document into another language",
-    description: "Translate a PDF into another language, as Word and PDF.",
+    description: "Translate a PDF into another language, as a Word file and, for most languages, a PDF.",
     icon: Languages,
     category: "convert",
     tint: "bg-gradient-to-br from-sky-100 to-violet-100 text-sky-800",
