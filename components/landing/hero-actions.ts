@@ -7,6 +7,7 @@ export const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presenta
 
 export const PDF_ACTIONS = [
   "edit-pdf",
+  "edit-pdf-text",
   "sign-pdf",
   "compress-pdf",
   "pdf-to-word",

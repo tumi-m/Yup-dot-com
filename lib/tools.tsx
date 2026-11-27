@@ -52,6 +52,7 @@ import {
   FileDiff,
   EyeOff,
   ScanLine,
+  TextCursor,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -528,11 +529,25 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "edit-pdf",
     name: "Edit PDF",
     title: "Edit PDF: annotate, draw, and add text",
-    description: "Add text, shapes, links and form fields.",
+    description: "Change text, add text, shapes, links and form fields.",
     icon: PenLine,
     category: "edit",
     tint: "bg-teal-100 text-teal-700",
     editor: true,
+  },
+  {
+    slug: "edit-pdf-text",
+    name: "Edit PDF Text",
+    title: "Edit PDF text: change the existing text in a PDF",
+    description: "Click a line and change its text, size or colour.",
+    icon: TextCursor,
+    category: "edit",
+    tint: "bg-emerald-100 text-emerald-800",
+    badge: "New",
+    editor: true,
+    keywords:
+      "edit text change text replace text rewrite fix typo spelling correct mistake update modify existing text font size bold italic colour color delete text remove line",
+    aliases: ["PDF Text Editor", "Change PDF Text", "Replace Text in PDF", "Edit Text in PDF"],
   },
   {
     slug: "sign-pdf",
@@ -702,7 +717,8 @@ export function getTool(slug: string): ToolMeta | undefined {
  * "More tools" for the pages whose category neighbours aren't the next step:
  * text and Markdown point at each other, pictures at other picture formats
  * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
- * Compare at reading and editing the text it found.
+ * Compare at reading and editing the text it found, the two editors at each
+ * other and at Redact PDF, which removes what covering only hides.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -719,6 +735,8 @@ const RELATED: Record<string, string[]> = {
   "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
   "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
   "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],
+  "edit-pdf-text": ["edit-pdf", "redact-pdf", "sign-pdf", "compress-pdf"],
+  "edit-pdf": ["edit-pdf-text", "sign-pdf", "compress-pdf", "redact-pdf"],
 };
 
 /** Four tools to offer under a tool: its own list, else its category's first, then the most used. */

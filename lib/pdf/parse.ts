@@ -247,6 +247,11 @@ export function isRtl(text: string): boolean {
   return rtlBalance(text) > 0;
 }
 
+/** True when `text` has any letter of a right-to-left script. */
+export function hasRtl(text: string): boolean {
+  return text.search(RTL_LETTERS) >= 0;
+}
+
 /** Horizontal space between two spans, whichever side each is on. */
 function gapBetween(p: ParsedSpan, q: ParsedSpan): number {
   return Math.max(p.x, q.x) - Math.min(p.x + p.width, q.x + q.width);

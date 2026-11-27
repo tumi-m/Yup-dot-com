@@ -7,6 +7,7 @@ import { ownText, paints, showsPictures } from "./page-content";
 import type { OwnText } from "./ocr-layer";
 import type { PageText } from "./parse";
 import type { PageText as RedactText } from "./redact/marks";
+import type { EditableRun } from "./edit-text/types";
 
 function ensureWorker() {
   configureWorker(pdfjsLib);
@@ -78,6 +79,8 @@ export interface LoadedPdf {
    * letter placed with the font's own widths (reads the page's drawing).
    */
   pageText: (pageNumber: number, opts?: { wide?: LoadedPdf | null; exact?: boolean }) => Promise<RedactText>;
+  /** The page's text as Edit text offers it: runs of one line in one font, size and colour (reads the page's drawing). */
+  textRuns: (pageNumber: number) => Promise<EditableRun[]>;
   /** How many bookmarks and form fields the document has, as pdf.js reads them. */
   extras: () => Promise<{ bookmarks: number; fields: number }>;
   /** What a reader shows about the document beyond its pages: details, bookmark titles, attachments and scripts. */
@@ -178,6 +181,14 @@ export async function loadForRender(data: ArrayBuffer | Uint8Array): Promise<Loa
       return pageText(await doc.getPage(pageNumber), {
         wide,
         exact: opts?.exact ? { ops: pdfjsLib.OPS as unknown as Record<string, number>, noAnnotations: pdfjsLib.AnnotationMode.DISABLE } : undefined,
+      });
+    },
+    async textRuns(pageNumber) {
+      // The run reader loads when Edit text is first used, not with the editor.
+      const { editableRuns } = await import("./edit-text/runs");
+      return editableRuns(await doc.getPage(pageNumber), {
+        ops: pdfjsLib.OPS as unknown as Record<string, number>,
+        noAnnotations: pdfjsLib.AnnotationMode.DISABLE,
       });
     },
     async facts() {
