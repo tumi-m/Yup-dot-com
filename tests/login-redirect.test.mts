@@ -33,5 +33,23 @@ check("public pages pass through", !open.headers.get("location"));
 
 check("loginHref encodes the path", loginHref(`/settings/billing?ref=${REF}`) === `/login?redirect=%2Fsettings%2Fbilling%3Fref%3D${REF}`);
 
+// "Log in" in the header went to the dashboard afterwards, from Pricing or a
+// tool too, so someone about to pay or mid-task lost their place.
+{
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { PathnameContext } = await import("next/dist/shared/lib/hooks-client-context.shared-runtime.js");
+  const { MarketingNav } = await import("../components/MarketingNav.tsx");
+  const loginLinks = (pathname: string, props: { loginHref?: string } = {}) => {
+    const html = renderToStaticMarkup(createElement(PathnameContext.Provider, { value: pathname }, createElement(MarketingNav, { isAuthed: false, ...props })));
+    return [...new Set([...html.matchAll(/href="([^"]*\/login[^"]*)"/g)].map((m) => m[1].replaceAll("&amp;", "&")))];
+  };
+  check("Log in on Pricing comes back to Pricing", JSON.stringify(loginLinks("/pricing")) === JSON.stringify([loginHref("/pricing")]), loginLinks("/pricing"));
+  check("Log in on a tool comes back to the tool", JSON.stringify(loginLinks("/tools/compress-pdf")) === JSON.stringify([loginHref("/tools/compress-pdf")]), loginLinks("/tools/compress-pdf"));
+  check("Log in on the home page goes on to the dashboard", JSON.stringify(loginLinks("/")) === '["/login"]', loginLinks("/"));
+  check("not for pages that only start the same", JSON.stringify(loginLinks("/pricingx")) === '["/login"]', loginLinks("/pricingx"));
+  check("a page's own loginHref still wins", JSON.stringify(loginLinks("/redeem", { loginHref: loginHref("/redeem") })) === JSON.stringify([loginHref("/redeem")]));
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);
