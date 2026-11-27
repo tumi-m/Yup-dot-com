@@ -121,7 +121,7 @@ export function PropertiesPanel({
                 <button
                   key={c.value}
                   onClick={() => onChange({ ...annotation, color: c.value })}
-                  className={`h-7 w-7 rounded-full border ${
+                  className={`h-7 w-7 rounded-full border forced-color-adjust-none ${
                     annotation.color === c.value ? "ring-2 ring-ring ring-offset-1" : ""
                   }`}
                   style={{ background: c.value }}

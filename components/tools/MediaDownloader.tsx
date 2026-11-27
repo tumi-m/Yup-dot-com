@@ -1007,9 +1007,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       focusRing
                     )}
                   >
-                    <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors duration-fast", smaller ? "bg-primary" : "bg-secondary")}>
+                    <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors duration-fast forced-colors:border forced-colors:border-[CanvasText]", smaller ? "bg-primary" : "bg-secondary")}>
                       <motion.span
-                        className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow"
+                        className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow forced-colors:top-px forced-colors:bg-[CanvasText] forced-colors:forced-color-adjust-none"
                         initial={false}
                         animate={{ x: smaller ? 16 : 0 }}
                         transition={SPRING_LAYOUT}

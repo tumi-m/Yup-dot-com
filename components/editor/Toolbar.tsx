@@ -217,7 +217,8 @@ export function Toolbar({
                     aria-pressed={active}
                     title={c.name}
                     className={cn(
-                      "h-6 w-6 shrink-0 rounded-full border border-black/10 pointer-coarse:h-8 pointer-coarse:w-8",
+                      // The colour itself is the information: high contrast keeps it.
+                      "h-6 w-6 shrink-0 rounded-full border border-black/10 forced-color-adjust-none pointer-coarse:h-8 pointer-coarse:w-8",
                       active && "ring-2 ring-ring ring-offset-1"
                     )}
                     style={{ background: c.value }}
