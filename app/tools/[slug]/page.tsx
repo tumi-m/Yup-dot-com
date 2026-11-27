@@ -24,6 +24,7 @@ import { RepairAbout } from "@/components/tools/RepairAbout";
 import { CompareAbout } from "@/components/tools/CompareAbout";
 import { RedactAbout } from "@/components/tools/RedactAbout";
 import { ScanAbout } from "@/components/tools/ScanAbout";
+import { TranslateAbout } from "@/components/tools/TranslateAbout";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -92,6 +93,7 @@ export default async function ToolPage({
           {tool.slug === "compare-pdf" && <CompareAbout />}
           {tool.slug === "redact-pdf" && <RedactAbout />}
           {tool.slug === "scan-to-pdf" && <ScanAbout />}
+          {tool.slug === "translate-pdf" && <TranslateAbout />}
 
           <RelatedTools slug={tool.slug} />
         </div>

@@ -63,18 +63,18 @@ check("panel specs are plain data (server → client)", kinds.every(([, s]) => J
 const page = src("app/tools/[slug]/page.tsx");
 check(
   "tool page imports no panel component",
-  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|CompareTool|RedactTool|ScanTool)$/).length === 0
+  staticImports(page, /components\/tools\/(ToolWorkbench|EditorLaunch|PdfAssistant|MediaDownloader|PlaylistDownloader|PptxToPdf|PptxEditor|SlidesImporter|SampleFinder|PageOrganizer|CropTool|CompareTool|RedactTool|ScanTool|TranslateTool)$/).length === 0
 );
 const panel = src("components/tools/ToolPanel.tsx");
 const lazy = [...panel.matchAll(/lazy\(\(\) => import\("\.\/(\w+)"\)/g)].map((m) => m[1]).sort();
 check(
-  "ToolPanel loads all fourteen panels lazily",
-  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench",
+  "ToolPanel loads all fifteen panels lazily",
+  lazy.join() === "CompareTool,CropTool,EditorLaunch,MediaDownloader,PageOrganizer,PdfAssistant,PlaylistDownloader,PptxEditor,PptxToPdf,RedactTool,SampleFinder,ScanTool,SlidesImporter,ToolWorkbench,TranslateTool",
   lazy
 );
 
 // Heavy libraries load when used, not with the panel.
-const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|marked|utif2|@pdf-lib\/fontkit|@\/lib\/pdf\/text-to-pdf\/.*|@\/lib\/pdf\/images-to-pdf\/(index|off-thread|tiff|decode)|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|compare\/index|compare\/diff|compare\/run|compare\/off-thread|compare\/exports|compare\/mark|compare\/report|redact\/index|redact\/off-thread|redact\/run|redact\/pictures|redact\/verify|redact\/scan|redact\/page-text|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|diff|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
+const HEAVY = /^(pdf-lib|@cantoo\/pdf-lib|pdfjs-dist(\/.*)?|jszip|docx|pptxtojson|marked|utif2|@pdf-lib\/fontkit|@\/lib\/pdf\/text-to-pdf\/.*|@\/lib\/pdf\/images-to-pdf\/(index|off-thread|tiff|decode)|@supabase\/.*|@\/lib\/pdf\/(toolkit|operations|render|bake|convert|parse|pages\/index|pages\/off-thread|resize\/index|resize\/off-thread|crop\/index|crop\/off-thread|crop\/run|crop\/pictures|compare\/index|compare\/diff|compare\/run|compare\/off-thread|compare\/exports|compare\/mark|compare\/report|redact\/index|redact\/off-thread|redact\/run|redact\/pictures|redact\/verify|redact\/scan|redact\/page-text|translate\/off-thread|translate\/output|translate\/pdf|raster)|@\/lib\/pptx\/(package|parse|editor|to-pdf|from-pdf)|@\/lib\/supabase\/client|tesseract\.js|diff|@ffmpeg\/.*|mediabunny|@\/lib\/video-compress)$/;
 for (const file of [
   "components/tools/ToolWorkbench.tsx",
   "components/tools/processors.ts",
@@ -94,6 +94,8 @@ for (const file of [
   "components/tools/RedactTool.tsx",
   "components/tools/ScanTool.tsx",
   "components/tools/QrCode.tsx",
+  "components/tools/TranslateTool.tsx",
+  "components/tools/LanguagePicker.tsx",
 ]) {
   const heavy = staticImports(src(file), HEAVY);
   check(`${file.split("/").pop()} has no heavy top-level imports`, heavy.length === 0, heavy);
@@ -113,6 +115,12 @@ check("crop geometry imports only the page-list reader", staticImports(src("lib/
 check("the compare view's logic imports no code", ["marks", "pixels", "view"].every((f) => staticImports(src(`lib/pdf/compare/${f}.ts`), /./).length === 0));
 // Redact PDF's marks, search and presets load with the page: plain code, no imports.
 check("redact marks have no imports", staticImports(src("lib/pdf/redact/marks.ts"), /./).length === 0);
+// Translate PDF's page brings the language list, the passages and the
+// requests: plain code. The parser, the Word writer and the PDF layout come
+// with the work.
+check("the language list has no imports", staticImports(src("lib/translate/languages.ts"), /./).length === 0);
+check("the passages and requests import only each other", [...staticImports(src("lib/translate/segments.ts"), /./), ...staticImports(src("lib/translate/client.ts"), /./)].every((m) => /^\.\.?\/(abort|format|segments)$/.test(m)));
+check("the files are written in a worker that loads on demand", /await import\("@\/lib\/pdf\/translate\/off-thread"\)/.test(src("components/tools/TranslateTool.tsx")) && /await import\("@\/lib\/pdf\/parse"\)/.test(src("components/tools/TranslateTool.tsx")));
 // Scan to PDF's page brings its corner search, warp and filters, but not
 // pdf-lib, the JPEG codec or the QR encoder: those load when used.
 {

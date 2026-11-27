@@ -483,6 +483,25 @@ async function longPdf(pages: number): Promise<Uint8Array> {
   check("the service keeps failing: the run stops with a message for people", r.error instanceof TranslateError && /translation service/.test(r.error.message), r.error?.message);
 }
 
+// ---------- Registered like the other tools ----------
+{
+  const { TOOLS, getTool, relatedTools } = await import("../lib/tools.tsx");
+  const { panelSpec } = await import("../components/tools/panel-spec.tsx");
+  const { filterTools } = await import("../components/tool-filter.ts");
+  const { default: sitemap } = await import("../app/sitemap.ts");
+  const { PDF_ACTIONS } = await import("../components/landing/hero-actions.ts");
+  const routes = await import("../scripts/routes.mjs");
+  const tool = getTool("translate-pdf");
+  check("registered once, under Convert", !!tool && TOOLS.filter((t) => t.slug === "translate-pdf").length === 1 && tool.category === "convert", tool?.category);
+  check("its own panel", !!tool && panelSpec(tool).kind === "translate");
+  check("search finds it by what people type", ["translate", "translate pdf", "translation", "pdf translator", "translate document", "afrikaans", "zulu", "french"].every((q) => filterTools(TOOLS, "all", q).some((t) => t.slug === "translate-pdf")));
+  check("named first when searched by name", filterTools(TOOLS, "all", "translate")[0]?.slug === "translate-pdf");
+  check("in the sitemap", sitemap().some((u) => u.url.endsWith("/tools/translate-pdf")));
+  check("related tools are real tools", relatedTools("translate-pdf").length === 4 && relatedTools("translate-pdf").every((t) => getTool(t.slug)));
+  check("offered for a PDF on the homepage", PDF_ACTIONS.includes("translate-pdf"));
+  check("its route is listed: GET answers anyone, POST is checked", routes.PUBLIC_ROUTES.includes("/api/ai/translate"));
+}
+
 console.error = realError;
 rmSync(dir, { recursive: true, force: true });
 await model.close();

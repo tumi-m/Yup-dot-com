@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Sparkles, Stamp, X, Zap } from "lucide-react";
+import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Languages, Sparkles, Stamp, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,9 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+
+const characters = (n: number) => `${n.toLocaleString("en-US")} characters`;
 
 const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }> = {
   "file-size": {
@@ -44,6 +46,13 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
       t === "guest"
         ? `${LIMITS.free.aiAnswersPerDay} a day with a free account, ${LIMITS.pro.aiAnswersPerDay} with Pro.`
         : `${LIMITS.pro.aiAnswersPerDay} a day with Pro.`,
+  },
+  translate: {
+    title: "Daily translation limit reached",
+    body: (t) =>
+      t === "guest"
+        ? `${characters(LIMITS.free.translateCharsPerDay)} a day with a free account, ${characters(LIMITS.pro.translateCharsPerDay)} with Pro.`
+        : `${characters(LIMITS.pro.translateCharsPerDay)} a day with Pro.`,
   },
   edits: {
     title: "You've used today's free edit",
@@ -93,6 +102,12 @@ const EDIT_BENEFITS = [
   { icon: InfinityIcon, text: "Unlimited edits" },
   { icon: Stamp, text: "No watermark" },
   { icon: Sparkles, text: "Bigger files, more AI" },
+];
+
+const TRANSLATE_BENEFITS = [
+  { icon: Languages, text: `${characters(LIMITS.pro.translateCharsPerDay)} translated a day` },
+  { icon: InfinityIcon, text: "Bigger files and batches" },
+  { icon: Sparkles, text: "More AI answers" },
 ];
 
 const BENEFITS = [
@@ -167,7 +182,9 @@ export function UpgradeDialog({
                 ? EDIT_BENEFITS
                 : reason === "samples"
                   ? SAMPLE_BENEFITS
-                  : BENEFITS
+                  : reason === "translate"
+                    ? TRANSLATE_BENEFITS
+                    : BENEFITS
             ).map((b, i) => (
               <motion.li
                 key={b.text}
