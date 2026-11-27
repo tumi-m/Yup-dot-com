@@ -720,6 +720,9 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   readOnly={loading}
+                  // An error under the form is about this link while the form shows.
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? "media-error" : undefined}
                   placeholder={PLATFORM_PLACEHOLDER[config.platform]}
                   inputMode="url"
                   autoComplete="off"
@@ -1182,6 +1185,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
         {error && (
           <InlineError
             key="error"
+            id="media-error"
             message={
               errorLink?.message === error ? (
                 // In the sentence's flow, so a narrow screen keeps the message wide.

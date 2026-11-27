@@ -387,12 +387,15 @@ export function SuccessBadge({
  * reduced motion it only fades. Render it inside an AnimatePresence.
  */
 export function InlineError({
+  id,
   message,
   shakeKey,
   compact = false,
   className,
   children,
 }: {
+  /** For a field's aria-describedby, when the error is about that field. */
+  id?: string;
   message: React.ReactNode;
   shakeKey?: number | string;
   /** Small text without the pill, for tight spaces like the hero panel. */
@@ -417,6 +420,7 @@ export function InlineError({
   return (
     <motion.p
       ref={scope}
+      id={id}
       role="alert"
       data-testid="tool-error"
       initial={{ opacity: 0, y: -4 }}
