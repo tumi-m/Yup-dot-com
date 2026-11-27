@@ -344,9 +344,34 @@ async function logged(p: Promise<unknown>) {
   // Share links: followed to the post, on instagram.com only.
   const share = (location: string | null, status = 302) =>
     fakeFetch((u) => (igPath(u).startsWith("/share/") ? (location ? { status, headers: [["location", location]] } : { status }) : "throw"));
-  check("instagram share link → the post it redirects to", (await expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", share(`https://www.instagram.com/reel/${CODE}/?igsh=abc`).f)) === CODE);
-  check("instagram share link: a redirect off instagram.com is refused", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", share("https://evil.example.com/reel/C4Hm4z2oEVp/").f))) === "not-found");
-  check("instagram share link: login wall → blocked", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", share("https://www.instagram.com/accounts/login/").f))) === "blocked");
+  const SHARE = "https://www.instagram.com/share/reel/BAEBrWYmM/";
+  const expanded = await expandInstagramShare(SHARE, share(`https://www.instagram.com/reel/${CODE}/?igsh=abc`).f);
+  check("instagram share link → the post it redirects to", expanded.code === CODE && expanded.index === null, JSON.stringify(expanded));
+  const slide = await expandInstagramShare(SHARE, share(`https://www.instagram.com/p/${CODE}/?img_index=3`).f);
+  check("instagram share link keeps the slide it names", slide.code === CODE && slide.index === 3, JSON.stringify(slide));
+  check("instagram share link: a redirect off instagram.com is refused", (await kind(expandInstagramShare(SHARE, share("https://evil.example.com/reel/C4Hm4z2oEVp/").f))) === "not-found");
+  for (const off of [`http://www.instagram.com/reel/${CODE}/`, `https://www.instagram.com:4731/reel/${CODE}/`, `https://u:p@www.instagram.com/reel/${CODE}/`]) {
+    check(`instagram share link: no downgrade, other port or credentials (${off})`, (await kind(expandInstagramShare(SHARE, share(off).f))) === "not-found");
+  }
+  // One budget for the share link and the post: a slow Instagram can't take the route past its 30 s.
+  {
+    const slowHops = fakeFetch(() => ({ status: 302, headers: [["location", "https://www.instagram.com/share/next/"]] }));
+    const lagging = (async (url: string, init?: RequestInit) => {
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, 700);
+        init?.signal?.addEventListener("abort", () => (clearTimeout(t), reject(init.signal!.reason)));
+      });
+      return (slowHops.f as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+    }) as never;
+    const t0 = Date.now();
+    const k = await kind(expandInstagramShare(SHARE, lagging, Date.now() + 1_900));
+    const took = Date.now() - t0;
+    check("instagram share link: stops at the shared deadline", k === "unreachable" && took < 2_000, `${k} after ${took} ms`);
+    const none = fakeFetch(() => "throw");
+    const late = await logged(resolveInstagram(CODE, none.f, null, Date.now() + 500));
+    check("instagram: a resolve whose deadline the share link used up asks nothing", late.k === "unreachable" && none.calls.length === 0, `${late.k}, ${none.calls.length} calls`);
+  }
+  check("instagram share link: login wall → blocked", (await kind(expandInstagramShare(SHARE, share("https://www.instagram.com/accounts/login/").f))) === "blocked");
   check("instagram share link: no redirect → not-found", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", share(null, 200).f))) === "not-found");
   check("instagram share link: network down → unreachable", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", fakeFetch(() => "throw").f))) === "unreachable");
   {
