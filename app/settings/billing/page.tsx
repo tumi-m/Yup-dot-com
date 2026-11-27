@@ -67,10 +67,11 @@ export default async function BillingPage({
         <section className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="current-plan">
           <p className="text-sm text-muted-foreground">Current plan</p>
           <div className="mt-1 flex items-center justify-between gap-4">
-            <div>
+            {/* min-w-0 and break-words: a Team owner's long email in "Seat on …'s team" wraps inside the card. */}
+            <div className="min-w-0">
               <p className="text-2xl font-bold">{planTitle(billing)}</p>
               {status.map((line) => (
-                <p key={line} className="text-sm text-muted-foreground">
+                <p key={line} className="break-words text-sm text-muted-foreground">
                   {line}
                 </p>
               ))}

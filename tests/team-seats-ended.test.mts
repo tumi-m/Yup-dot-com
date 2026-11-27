@@ -31,6 +31,10 @@ check("long emails wrap inside the row", (wide.match(new RegExp(`<span class="mi
 check("and Remove keeps its size", /class="[^"]*shrink-0[^"]*"[^>]*aria-label="Remove /.test(wide));
 
 const page = readFileSync(new URL("../app/settings/billing/page.tsx", import.meta.url), "utf8");
+check("Billing's plan lines wrap a long owner email inside the card",
+  /<div className="min-w-0">\s*<p className="text-2xl font-bold">\{planTitle\(billing\)\}<\/p>/.test(page) && /className="break-words text-sm text-muted-foreground"/.test(page));
+const passwordPage = readFileSync(new URL("../app/settings/password/page.tsx", import.meta.url), "utf8");
+check("so does the new password page's email", /For <span className="break-all">\{profile\.email\}<\/span>/.test(passwordPage));
 check("Billing lists seats while members exist, whatever the plan",
   /\(ownsTeam \|\| members\.length > 0\) && \(/.test(page) && /ended=\{!ownsTeam\}/.test(page) &&
     !/ownsTeam && isAdminConfigured\(\)/.test(page));

@@ -19,7 +19,10 @@ export default async function PasswordPage({ searchParams }: { searchParams: Pro
       <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <main id="main" className="container max-w-md py-10">
         <h1 className="text-3xl font-bold tracking-tight">New password</h1>
-        <p className="mt-1 text-sm text-muted-foreground">For {profile.email}</p>
+        {/* A long email wraps instead of pushing the page sideways on a phone. */}
+        <p className="mt-1 text-sm text-muted-foreground">
+          For <span className="break-all">{profile.email}</span>
+        </p>
         <PasswordForm next={back} />
       </main>
     </div>
