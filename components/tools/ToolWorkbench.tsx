@@ -48,7 +48,7 @@ import {
   useFocusNext,
   useHeightLock,
 } from "@/components/motion/focus";
-import { fieldHint, fieldShown, problemFields, PROCESSORS, type ToolField } from "./processors";
+import { fieldHint, fieldShown, problemFields, PROCESSORS, type OptionProblem, type ToolField } from "./processors";
 import { focusAfterRemove, movedMessage } from "@/components/list-focus";
 import { SuccessCard } from "./SuccessCard";
 import { percentSmaller, sortPick, takesFile, takesMessage } from "./file-pick";
@@ -140,6 +140,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
    * announced when focus was in its field already (moving focus there reads it).
    */
   const [tried, setTried] = useState<{ n: number; readOut: boolean } | null>(null);
+  /** A failed cast whose cause is one field (a password): said under that field, until it changes. */
+  const [failedAt, setFailedAt] = useState<OptionProblem | null>(null);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   /** The next tool the result couldn't be passed to. */
   const [nextFailed, setNextFailed] = useState<string | null>(null);
@@ -281,11 +283,12 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     // A message about the old options would stay after they were fixed.
     setError(null);
     setTried(null);
+    setFailedAt(null);
   }
 
   /** What is wrong with the options (see OptionProblem), and whether it shows yet. */
   const found = proc.problem?.(options) ?? null;
-  const problem = found && (found.live || tried) ? found : null;
+  const problem = failedAt ?? (found && (found.live || tried) ? found : null);
   /** The shown fields it is about: marked, and the message goes under the last. */
   const problemAt = problemFields(problem, proc.fields, options);
 
@@ -329,6 +332,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     // Cast from the button or with Enter in a field: both leave, so focus
     // follows the job to the progress bar and then the result.
     if (document.activeElement?.closest("[data-cast], [data-options]")) focusNext.current = "progress";
+    setFailedAt(null);
     // Room for the result, reserved now while the click still explains it.
     flow.lock(resultFloor());
     setStatus("working");
@@ -363,7 +367,22 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     } catch (err) {
       if (ctl.signal.aborted) return;
       // PDF messages only where PDFs go in: a broken .md isn't "a PDF".
-      fail((proc.accept.includes("pdf") ? friendlyPdfError : friendlyFileError)(err).message);
+      const message = (proc.accept.includes("pdf") ? friendlyPdfError : friendlyFileError)(err).message;
+      const key = proc.errorField?.(message);
+      const field = key && fieldShown(proc.fields.find((f) => f.key === key)!, options) ? key : null;
+      if (field) {
+        // Said under the field it is about, which takes focus, so the message is read with it.
+        flushSync(() => {
+          setFailedAt({ fields: [field], message });
+          setTried((t) => ({ n: (t?.n ?? 0) + 1, readOut: false }));
+          flow.release();
+          setStatus("idle");
+        });
+        focusNext.current = null;
+        flow.ref.current?.querySelector<HTMLElement>(`#opt-${field}`)?.focus();
+        return;
+      }
+      fail(message);
       if (focusNext.current || document.activeElement?.closest("[data-progress]")) focusNext.current = "run";
       // The work view stays, so nothing else lets go of the room kept for the result.
       flow.release();
