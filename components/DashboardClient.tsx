@@ -20,6 +20,8 @@ import { AnimatePresence } from "motion/react";
 import { InlineError, Reveal, staggerDelay } from "@/components/motion/primitives";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { formatLimitBytes, limitsFor } from "@/lib/limits";
+import { LIBRARY_OFFLINE, libraryError } from "@/lib/library-error";
+import { PLANS } from "@/lib/plans";
 import { getTool } from "@/lib/tools";
 import { cn } from "@/lib/utils";
 import { focusAfterRemove } from "@/components/list-focus";
@@ -81,9 +83,8 @@ export function DashboardClient({
     setError(null);
 
     if (atLimit) {
-      setError(
-        `You've reached the ${maxDocuments}-document limit on the ${plan} plan. Upgrade for more.`
-      );
+      // As the database says it.
+      setError(`The ${PLANS[plan].name} plan keeps ${maxDocuments} documents. Upgrade for more.`);
       return;
     }
 
@@ -100,10 +101,13 @@ export function DashboardClient({
 
     setUploading(true);
     try {
+      // Supabase's failures are said in plain words where they happen; the
+      // PDF check below already speaks plainly.
       const {
         data: { user },
+        error: authError,
       } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated.");
+      if (!user) throw new Error(libraryError(authError));
 
       const bytes = new Uint8Array(await file.arrayBuffer());
       const pageCount = await pageCountToStore(bytes);
@@ -125,7 +129,7 @@ export function DashboardClient({
         })
         .select("*")
         .single();
-      if (insertError) throw new Error(insertError.message);
+      if (insertError) throw new Error(libraryError(insertError));
 
       const { error: uploadError } = await supabase.storage
         .from("documents")
@@ -135,7 +139,7 @@ export function DashboardClient({
         });
       if (uploadError) {
         await supabase.from("documents").delete().eq("id", docId);
-        throw uploadError;
+        throw new Error(libraryError(uploadError));
       }
 
       setDocs((prev) => [row as DocumentRecord, ...prev]);
@@ -161,7 +165,7 @@ export function DashboardClient({
       ? { error: fileError }
       : await supabase.from("documents").delete().eq("id", doc.id);
     if (error) {
-      setError("Failed to delete document.");
+      setError(libraryError(error) === LIBRARY_OFFLINE ? LIBRARY_OFFLINE : "Couldn't delete it. Try again.");
       setDocs(prev);
     }
     router.refresh();
