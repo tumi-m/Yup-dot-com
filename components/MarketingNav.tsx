@@ -185,7 +185,9 @@ export function NavShell({
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0, transition: { duration: DUR.fast, ease: EASE_OUT } }}
               exit={{ opacity: 0, y: -8, transition: { duration: DUR.fast, ease: EASE_IN, delay: DUR.tap } }}
-              className="relative border-b border-border bg-background shadow-xl shadow-primary/5"
+              // Scrolls on its own when taller than the screen (a landscape phone,
+              // 400% zoom): the page behind is locked.
+              className="relative max-h-full overflow-y-auto overscroll-contain border-b border-border bg-background shadow-xl shadow-primary/5"
               // Any link closes the sheet, also one to the page already open
               // (no navigation then), including those passed in from outside.
               // That link goes with the sheet, so focus returns to the button.

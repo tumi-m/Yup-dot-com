@@ -179,7 +179,7 @@ export function LanguagePicker({
                 onMouseMove={() => active !== i && setActive(i)}
                 className={cn(
                   "flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 py-1.5 sm:min-h-9",
-                  i === active && "bg-accent text-accent-foreground"
+                  i === active && "bg-accent text-accent-foreground forced-colors:[outline:2px_solid_Highlight] forced-colors:-outline-offset-2"
                 )}
               >
                 <Check aria-hidden className={cn("h-4 w-4 shrink-0 text-primary", !isSelected && "invisible")} />

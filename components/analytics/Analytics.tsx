@@ -27,6 +27,7 @@ export function Analytics({ gaId }: { gaId: string }) {
   const opener = useRef<HTMLElement | null>(null);
   const firstButton = useRef<HTMLButtonElement>(null);
   const [reopened, setReopened] = useState(false);
+  const banner = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const saved = readConsent();
@@ -49,6 +50,27 @@ export function Analytics({ gaId }: { gaId: string }) {
     if (open && reopened) firstButton.current?.focus();
   }, [open, reopened]);
 
+  // While the banner is up, the page gets room below its end for it, and
+  // focused controls stop above it instead of under it (globals.css).
+  useEffect(() => {
+    const el = banner.current;
+    if (!open || !el) return;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty("--consent-space", `${Math.ceil(window.innerHeight - el.getBoundingClientRect().top)}px`);
+    measure();
+    const seen = new ResizeObserver(measure);
+    seen.observe(el);
+    window.addEventListener("resize", measure);
+    // The banner rises in: measure again where it comes to rest.
+    el.addEventListener("animationend", measure);
+    return () => {
+      seen.disconnect();
+      window.removeEventListener("resize", measure);
+      el.removeEventListener("animationend", measure);
+      root.style.removeProperty("--consent-space");
+    };
+  }, [open]);
+
   function close() {
     setOpen(false);
     setReopened(false);
@@ -69,12 +91,13 @@ export function Analytics({ gaId }: { gaId: string }) {
       {load && <Script id="gtag-js" src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`} strategy="afterInteractive" />}
       {open && (
         <section
+          ref={banner}
           aria-label="Cookie consent"
           onKeyDown={(e) => {
             // Escape keeps the earlier choice; a first visit has none to keep.
             if (e.key === "Escape" && reopened) close();
           }}
-          className="fixed inset-x-3 bottom-3 z-40 mx-auto max-w-3xl rounded-2xl border border-border bg-card/95 p-4 shadow-2xl shadow-primary/15 backdrop-blur-md motion-safe:animate-rise sm:inset-x-6 sm:bottom-6 sm:flex sm:items-center sm:gap-4 sm:p-5"
+          className="fixed inset-x-3 bottom-3 z-30 mx-auto max-h-[45dvh] max-w-3xl overflow-y-auto rounded-2xl border border-border bg-card/95 p-4 shadow-2xl shadow-primary/15 backdrop-blur-md motion-safe:animate-rise sm:inset-x-6 sm:bottom-6 sm:flex sm:items-center sm:gap-4 sm:p-5"
         >
           <p className="text-sm leading-6 sm:flex-1">
             <Cookie aria-hidden className="mr-1.5 inline h-4 w-4 -translate-y-px text-primary" />

@@ -481,6 +481,8 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
                     setUrl(e.target.value);
                     setError(null);
                   }}
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? "playlist-error" : undefined}
                   placeholder="youtube.com/playlist?list=…"
                   inputMode="url"
                   autoComplete="off"
@@ -819,7 +821,7 @@ export function PlaylistDownloader({ tier }: { tier: Tier }) {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <AnimatePresence>{error && <InlineError key="error" id="playlist-error" message={error} />}</AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">Only download videos you have permission to use.</p>
 

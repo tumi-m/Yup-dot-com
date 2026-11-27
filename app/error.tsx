@@ -19,6 +19,8 @@ export default function Error({
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* The tab and screen readers say what happened, not the page that failed. */}
+      <title>A spell misfired | PDF Wizard</title>
       <NavSkeleton bare />
       <LostPage title="A spell misfired">
         <Button size="lg" onClick={() => retry()}>

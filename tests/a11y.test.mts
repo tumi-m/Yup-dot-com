@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
@@ -5,6 +6,7 @@ import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 import { focusAfterRemove, movedMessage } from "../components/list-focus.ts";
 import { slideProgressNote } from "../components/tools/progress-note.ts";
+import { TOAST_MS, holdClock, releaseClock, startClock, toastsToSay } from "../components/ui/toast-timer.ts";
 
 let pass = 0;
 let total = 0;
@@ -128,6 +130,52 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("then counts quarters", said.slice(1).join(",") === "25% done,50% done,75% done", said);
   check("a one-slide deck says only the start", slideProgressNote(0, 1, "Exporting PDF…") === "Exporting PDF…" && slideProgressNote(1, 1, "Exporting PDF…") === "Exporting PDF…");
   check("finishing adds no announcement of its own", slideProgressNote(40, 40, "x") === slideProgressNote(39, 40, "x") && slideProgressNote(2, 2, "x") === slideProgressNote(1, 2, "x"));
+}
+
+// Toasts wait while pointed at or focused, then get their remaining time back (WCAG 2.2.1).
+{
+  const c = startClock(TOAST_MS.other, 1000);
+  const held = holdClock(c, 2000);
+  check("holding keeps the time left", held.startedAt === null && held.left === TOAST_MS.other - 1000, held);
+  check("holding twice changes nothing", JSON.stringify(holdClock(held, 9000)) === JSON.stringify(held));
+  const back = releaseClock(held, 60_000);
+  check("letting go restarts the rest of the time", back.ms === TOAST_MS.other - 1000 && back.clock.startedAt === 60_000, back);
+  const late = releaseClock(holdClock(c, 1000 + TOAST_MS.other + 50), 70_000);
+  check("a toast held as it was closing still gets a second", late.ms === 1000, late);
+  const running = releaseClock(c, 2000);
+  check("letting go of a running toast leaves it running", running.ms === TOAST_MS.other - 1000 && running.clock === c, running);
+  check("errors stay longer than other toasts", TOAST_MS.error > TOAST_MS.other);
+  const t = (id: number, tone: "success" | "error" | "info" = "success") => ({ id, tone });
+  const first = toastsToSay([t(1), t(2)], 0);
+  check("a new toast is said", first?.polite?.id === 2 && first.urgent === undefined && first.last === 2, first);
+  check("dismissing the newest says nothing again", toastsToSay([t(1)], 2) === null);
+  check("an error goes to the urgent region", toastsToSay([t(1), t(3, "error")], 2)?.urgent?.id === 3);
+  check("only toasts newer than the last said count", toastsToSay([t(1), t(4, "info")], 2)?.polite?.id === 4);
+}
+
+// Colours and high contrast, read from the stylesheet and the shared button.
+{
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const token = (name: string) => {
+    const m = css.match(new RegExp(`--${name}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`));
+    if (!m) throw new Error(`--${name} not found`);
+    const [h, s, l] = [Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100];
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+    return [f(0), f(8), f(4)];
+  };
+  const lum = (rgb: number[]) => { const [r, g, b] = rgb.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a: number[], b: number[]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  check("form field edges have 3:1 contrast on the page (WCAG 1.4.11)", ratio(token("input"), token("background")) >= 3, ratio(token("input"), token("background")));
+  check("and on muted panels", ratio(token("input"), token("muted")) >= 3, ratio(token("input"), token("muted")));
+  check("muted text has 4.5:1 on the page", ratio(token("muted-foreground"), token("background")) >= 4.5);
+  check("the focus ring has 3:1 on the page", ratio(token("ring"), token("background")) >= 3);
+  check("high contrast marks chosen pills, tabs and tools", /forced-colors: active[\s\S]*\[aria-pressed="true"\][\s\S]*\[role="tab"\]\[aria-selected="true"\]/.test(css));
+  check("the cookie banner's room is kept below the page and focus", css.includes("var(--consent-space, 0px)"));
+  const editor = readFileSync(new URL("../components/editor/PdfEditor.tsx", import.meta.url), "utf8");
+  check("the full-height editor ends above the banner instead of scrolling the page", editor.includes("h-[calc(100dvh-var(--consent-space,0px))]") && !/className="flex h-dvh/.test(editor));
+  const button = readFileSync(new URL("../components/ui/button.tsx", import.meta.url), "utf8");
+  check("filled buttons keep an edge in high contrast, and only there", ["bg-primary", "bg-secondary", "bg-destructive"].every((bg) => new RegExp(`forced-colors:border ${bg}`).test(button)) && !button.includes("border-transparent"));
 }
 
 console.log(`\n${pass}/${total} passed`);

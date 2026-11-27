@@ -185,7 +185,8 @@ export function Toolbar({
             aria-pressed={shortcuts}
             className={cn(
               "flex h-8 w-8 items-center justify-center rounded-md transition-colors pointer-coarse:h-11 pointer-coarse:w-11",
-              shortcuts ? "text-foreground hover:bg-accent" : "text-muted-foreground/60 hover:bg-accent hover:text-foreground"
+              // On shows as pressed; off keeps 3:1 contrast for its icon.
+              shortcuts ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
             )}
           >
             <Keyboard className="h-4 w-4" />
@@ -217,7 +218,8 @@ export function Toolbar({
                     aria-pressed={active}
                     title={c.name}
                     className={cn(
-                      "h-6 w-6 shrink-0 rounded-full border border-black/10 pointer-coarse:h-8 pointer-coarse:w-8",
+                      // The colour itself is the information: high contrast keeps it.
+                      "h-6 w-6 shrink-0 rounded-full border border-black/10 forced-color-adjust-none pointer-coarse:h-8 pointer-coarse:w-8",
                       active && "ring-2 ring-ring ring-offset-1"
                     )}
                     style={{ background: c.value }}

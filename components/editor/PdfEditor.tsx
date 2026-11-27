@@ -181,7 +181,7 @@ export function PdfEditor({
   /** Changed text a page turn drew into the page before saving: told with the next save or download. */
   const turnedText = useRef<TextEditReport | undefined>(undefined);
 
-  const { toasts, toast, dismiss } = useToasts();
+  const { toasts, toast, dismiss, hold, release } = useToasts();
 
   // ---- load bytes from storage ----
   useEffect(() => {
@@ -960,7 +960,9 @@ export function PdfEditor({
   useUnsavedGuard(dirty);
 
   return (
-    <div className="flex h-dvh flex-col bg-secondary/30">
+    // A full-height app: it ends above the cookie banner while that is up
+    // (--consent-space), so the page never scrolls and the zoom bar stays clear.
+    <div className="flex h-[calc(100dvh-var(--consent-space,0px))] flex-col bg-secondary/30">
       {/* Top bar */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 sm:gap-3 sm:px-3">
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
@@ -1043,11 +1045,12 @@ export function PdfEditor({
           </Button>
           <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
           {/* aria-disabled while busy, as Undo: focus stays on the button. Both return early then. */}
-          <Button variant="outline" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
+          {/* Icon-only on phones, as wide as their neighbours, so the bar fits 320px without buttons overlapping. */}
+          <Button variant="outline" className="max-sm:px-2.5" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
             {working === "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
             <span className="hidden sm:inline">Download</span>
           </Button>
-          <Button onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
+          <Button className="max-sm:px-2.5" onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
             {busy && working !== "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
             <span className="hidden sm:inline">{working === "save" ? "Saving…" : "Save"}</span>
           </Button>
@@ -1417,7 +1420,7 @@ export function PdfEditor({
         </DialogContent>
       </Dialog>
 
-      <ToastStack toasts={toasts} onDismiss={dismiss} />
+      <ToastStack toasts={toasts} onDismiss={dismiss} onHold={hold} onRelease={release} />
 
       <UpgradeDialog
         open={upsellOpen}

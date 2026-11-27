@@ -303,8 +303,9 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
                 autoComplete="off"
                 spellCheck={false}
                 disabled={phase === "fetching"}
-                aria-invalid={problem ? true : undefined}
-                aria-describedby={problem ? "slides-url-hint" : undefined}
+                aria-invalid={problem || error ? true : undefined}
+                // The hint gives way to the error below the form, so point at whichever shows.
+                aria-describedby={error ? "slides-error" : problem ? "slides-url-hint" : undefined}
                 className="h-12 w-full rounded-xl border border-input bg-background pl-10 pr-24 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
               />
               <button
@@ -414,7 +415,7 @@ export function SlidesImporter({ tier, format }: { tier: Tier; format: "pdf" | "
 
       <AnimatePresence>
         {error && (
-          <InlineError key="error" message={error.message}>
+          <InlineError key="error" id="slides-error" message={error.message}>
             {error.upgrade && tier !== "pro" && tier !== "team" && (
               <Link href="/pricing" className="tap font-semibold underline underline-offset-2">
                 Upgrade

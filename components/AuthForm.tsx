@@ -162,15 +162,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
           </p>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-3">
+        {/* Labels stay in sight above the fields: a placeholder goes once typing starts. */}
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {isSignup && (
             <div>
-              <label htmlFor="auth-name" className="sr-only">Full name</label>
+              <label htmlFor="auth-name" className="mb-1.5 block text-sm font-medium">Full name</label>
               <Input
                 id="auth-name"
                 className={field}
                 type="text"
-                placeholder="Full name"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 autoComplete="name"
@@ -178,7 +178,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
             </div>
           )}
           <div>
-            <label htmlFor="auth-email" className="sr-only">Email</label>
+            <label htmlFor="auth-email" className="mb-1.5 block text-sm font-medium">Email</label>
             <Input
               id="auth-email"
               className={field}
@@ -193,12 +193,11 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
           </div>
           {!isReset && (
             <div>
-              <label htmlFor="auth-password" className="sr-only">Password</label>
+              <label htmlFor="auth-password" className="mb-1.5 block text-sm font-medium">Password</label>
               <Input
                 id="auth-password"
                 className={field}
                 type="password"
-                placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
