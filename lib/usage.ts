@@ -648,6 +648,19 @@ export async function consumeWebPdf(
   return { ok: true, remaining: left };
 }
 
+/**
+ * Gives one web page back (and the site's count), once per grant (`ref`)
+ * and at most `perDay` a day for the person. True if this call did.
+ */
+export async function refundWebPdf(store: UsageStore, subject: string, ref: string, perDay: number): Promise<boolean> {
+  // The marker outlives the day, so a grant is never given back twice.
+  if ((await store.consume(subject, `web-pdf-refund:${ref}`, 1, "month")) < 0) return false;
+  if ((await store.consume(subject, "web-pdf-refunds", perDay, "day")) < 0) return false;
+  await store.refund(subject, WEB_PDF_BUCKET, "day");
+  await store.refund(GLOBAL_SUBJECT, WEB_PDF_BUCKET, "day");
+  return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* Edits (Edit PDF, Sign PDF, Edit PPTX)                               */
 /* ------------------------------------------------------------------ */

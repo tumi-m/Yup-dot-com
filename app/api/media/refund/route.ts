@@ -21,7 +21,9 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   const config = workerConfig();
   if (!parsed.success || !config.ok) return Response.json({ refunded: false }, { status: 400 });
-  const ref = grantRef(verifyToken(parsed.data.token, config.secret, REFUND_GRACE_SECONDS));
+  const payload = verifyToken<Record<string, unknown>>(parsed.data.token, config.secret, REFUND_GRACE_SECONDS);
+  // Only a download's grant: one made for another feature mustn't credit downloads.
+  const ref = payload?.k === "mp4" || payload?.k === "mp3" ? grantRef(payload) : null;
   if (!ref) return Response.json({ refunded: false }, { status: 400 });
 
   const verdict = await askWorker(config.url, config.secret, ref);

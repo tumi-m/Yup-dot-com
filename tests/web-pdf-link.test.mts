@@ -11,8 +11,8 @@ import { createRequire } from "node:module";
 // would get a second copy whose store the route never sees.
 const usage = createRequire(import.meta.url)("../lib/usage.ts") as typeof import("../lib/usage.ts");
 const { memoryUsageStore, WEB_PDF_BUCKET, WEB_PDF_LINKS_PER_MINUTE } = usage;
-const { handleWebPdfLink } = await import("../lib/web-pdf-route.ts");
-const { verifyToken } = await import("../lib/media-server.ts");
+const { handleWebPdfLink, handleWebPdfRefund, renderKey, WEB_PDF_REFUNDS_PER_DAY } = await import("../lib/web-pdf-route.ts");
+const { signToken, verifyToken } = await import("../lib/media-server.ts");
 const { LIMITS } = await import("../lib/limits.ts");
 const web = await import("../lib/web-pdf.ts");
 type Deps = import("../lib/web-pdf-route.ts").WebPdfDeps;
@@ -30,6 +30,7 @@ const logged: string[] = [];
 console.error = (...args: unknown[]) => logged.push(args.map(String).join(" "));
 
 const SECRET = "web-pdf-test-secret";
+const KEY = renderKey(SECRET);
 // One proxy in front, so each test address is its own guest.
 const ENV = { TRUSTED_PROXY_HOPS: "1" };
 const guest = (ip: string) => usage.usageSubject(new Request("http://x", { headers: { "x-forwarded-for": ip } }), null, undefined, ENV);
@@ -156,7 +157,7 @@ const urlBody = (url: string, options: Record<string, unknown> = OPTIONS) => ({ 
 {
   lookups = [];
   const r = await post(deps({ tier: "free", user: { id: "user-1" } }), urlBody("Example.com/news?id=7#top", { ...OPTIONS, size: "letter", orientation: "landscape", margins: "none", background: false, media: "print" }));
-  const grant = verifyToken<Record<string, any>>(r.json.token ?? "", SECRET);
+  const grant = verifyToken<Record<string, any>>(r.json.token ?? "", KEY);
   check("a grant for the page is made", r.status === 200 && r.json.workerUrl === "https://media.example.test" && r.cache === "no-store", r);
   check("it names the page as the worker opens it: https added, no fragment", grant?.u === "https://example.com/news?id=7" && grant?.k === "render" && grant?.m === "url", grant);
   check("with its options in render.py's keys", JSON.stringify(grant?.o) === JSON.stringify({ f: "letter", l: 1, g: "none", b: 0, p: "print" }), grant?.o);
@@ -164,10 +165,11 @@ const urlBody = (url: string, options: Record<string, unknown> = OPTIONS) => ({ 
   check("short-lived (10 minutes)", typeof grant?.e === "number" && grant.e - Date.now() / 1000 <= 601 && grant.e - Date.now() / 1000 > 590, grant?.e);
   check("the site was looked up first", lookups.includes("example.com"), lookups);
   check("a token signed with another secret isn't this one", verifyToken(r.json.token, "other-secret") === null);
-  const pro = verifyToken<Record<string, any>>((await post(deps({ tier: "pro", user: { id: "p" } }), urlBody("https://example.com"))).json.token ?? "", SECRET);
+  check("nor one signed with the shared secret itself: page grants have their own key", verifyToken(r.json.token, SECRET) === null && KEY !== SECRET, KEY);
+  const pro = verifyToken<Record<string, any>>((await post(deps({ tier: "pro", user: { id: "p" } }), urlBody("https://example.com"))).json.token ?? "", KEY);
   check("Pro grants allow more pages", pro?.x === LIMITS.pro.webPdfPages && LIMITS.pro.webPdfPages > LIMITS.free.webPdfPages, pro?.x);
   const ip = await post(deps(), urlBody("http://93.184.216.34/"));
-  check("a public address given as an IP needs no lookup", ip.status === 200 && verifyToken<Record<string, any>>(ip.json.token, SECRET)?.u === "http://93.184.216.34/", ip.json);
+  check("a public address given as an IP needs no lookup", ip.status === 200 && verifyToken<Record<string, any>>(ip.json.token, KEY)?.u === "http://93.184.216.34/", ip.json);
   const badOptions = await post(deps(), urlBody("https://example.com", { ...OPTIONS, size: "a0" }));
   check("unknown options are refused", badOptions.status === 400, badOptions.json);
 }
@@ -179,7 +181,7 @@ const urlBody = (url: string, options: Record<string, unknown> = OPTIONS) => ({ 
   const sha256 = createHash("sha256").update(html).digest("hex");
   lookups = [];
   const r = await post(deps(), { mode: "html", bytes, sha256, options: OPTIONS });
-  const grant = verifyToken<Record<string, any>>(r.json.token ?? "", SECRET);
+  const grant = verifyToken<Record<string, any>>(r.json.token ?? "", KEY);
   check("HTML: the grant names its size and SHA-256, never its text", r.status === 200 && grant?.m === "html" && grant?.n === bytes && grant?.d === sha256 && !("u" in grant) && !JSON.stringify(grant).includes("Bonjour"), grant);
   check("and nothing is looked up", lookups.length === 0, lookups);
   const big = await post(deps(), { mode: "html", bytes: web.MAX_HTML_BYTES + 1, sha256, options: OPTIONS });
@@ -225,6 +227,87 @@ const urlBody = (url: string, options: Record<string, unknown> = OPTIONS) => ({ 
   check("and gives that visitor's page back", (await site.count(third, WEB_PDF_BUCKET, "day")) === 0);
 }
 
+// ---------- Tries given back ----------
+{
+  const WORKER = "https://media.example.test";
+  const config = () => ({ ok: true as const, url: WORKER, secret: SECRET });
+  type Answer = Record<string, unknown> | "down";
+  const asked: string[] = [];
+  const worker = (answer: Answer) =>
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(`${String(input)} ${(init?.headers as Record<string, string>)?.Authorization}`);
+      if (answer === "down") throw new Error("down");
+      return Response.json(answer);
+    }) as typeof fetch;
+  const refund = async (token: string, answer: Answer, store: ReturnType<typeof memoryUsageStore>, headers: Record<string, string> = {}) => {
+    const res = await handleWebPdfRefund(
+      new Request("http://localhost/api/render/refund", { method: "POST", headers: { ...SAME_SITE, ...headers }, body: JSON.stringify({ token }) }),
+      { config, store, fetch: worker(answer) }
+    );
+    return { status: res.status, body: (await res.json()) as { refunded: boolean } };
+  };
+  const t = () => Math.floor(Date.now() / 1000);
+  const grant = (c: string, extra: Record<string, unknown> = {}) => signToken({ k: "render", m: "url", u: "https://example.com/", s: "ip:refund", c, t: t(), ...extra }, KEY);
+  const spend = async (store: ReturnType<typeof memoryUsageStore>) => usage.consumeWebPdf("ip:refund", "guest", { store, env: {} });
+
+  const store = memoryUsageStore();
+  await spend(store);
+  const failed = await refund(grant("grant-failed-01"), { used: true, status: "error", refundable: true, since: 1 }, store);
+  check("a try the worker says never loaded is given back", failed.status === 200 && failed.body.refunded === true && (await store.count("ip:refund", WEB_PDF_BUCKET, "day")) === 0, failed);
+  check("the worker is asked with the shared secret, about that grant", asked.at(-1) === `${WORKER}/render/refs/grant-failed-01/void Bearer ${SECRET}`, asked.at(-1));
+  await spend(store);
+  const twice = await refund(grant("grant-failed-01"), { used: true, status: "error", refundable: true, since: 1 }, store);
+  check("once per grant", twice.body.refunded === false && (await store.count("ip:refund", WEB_PDF_BUCKET, "day")) === 1, twice);
+  const kept = await refund(grant("grant-kept-001"), { used: true, status: "error", refundable: false, since: 1 }, store);
+  check("one that held a browser (a timeout, too big, too much memory) is kept", kept.status === 409 && kept.body.refunded === false, kept);
+  const made = await refund(grant("grant-made-001"), { used: true, status: "ready", refundable: false, since: 1 }, store);
+  check("a PDF that was made is kept", made.body.refunded === false, made);
+  const unused = await refund(grant("grant-unused-1"), { used: false, since: t() - 60 }, store);
+  check("a grant the worker never got is given back (and voided there)", unused.body.refunded === true, unused);
+  const restarted = await refund(grant("grant-restart1"), { used: false, since: t() + 60 }, store);
+  check("not when the worker restarted since the grant: it may have run it", restarted.body.refunded === false, restarted);
+  const down = await refund(grant("grant-down-001"), "down", store);
+  check("not when the worker doesn't answer", down.body.refunded === false, down);
+  const yesterday = await refund(grant("grant-old-0001", { t: t() - 2 * 86400 }), { used: true, status: "error", refundable: true, since: 1 }, store);
+  check("not for a try counted on another day", yesterday.body.refunded === false, yesterday);
+  const cross = await refund(grant("grant-cross-01"), { used: true, status: "error", refundable: true, since: 1 }, store, { "sec-fetch-site": "cross-site" });
+  check("not from another site's page", cross.status === 403, cross);
+  const download = await refund(signToken({ k: "mp4", u: "https://www.youtube.com/watch?v=aaaaaaaaaaa", s: "ip:refund", c: "grant-mp4-0001", t: t() }, SECRET), { used: true, status: "error", refundable: true, since: 1 }, store);
+  check("a download's grant isn't a page grant", download.status === 400, download);
+
+  const capped = memoryUsageStore();
+  const given: boolean[] = [];
+  for (let i = 0; i <= WEB_PDF_REFUNDS_PER_DAY; i++) {
+    await spend(capped);
+    given.push((await refund(grant(`grant-cap-${String(i).padStart(4, "0")}`), { used: true, status: "error", refundable: true, since: 1 }, capped)).body.refunded);
+  }
+  check(`at most ${WEB_PDF_REFUNDS_PER_DAY} given back a day`, given.slice(0, -1).every(Boolean) && given.at(-1) === false, given);
+}
+
+// A page grant posted to the downloads' refund route credits nothing.
+{
+  const env = process.env as Record<string, string | undefined>;
+  env.MEDIA_WORKER_URL = "https://media.example.test";
+  env.MEDIA_WORKER_SECRET = SECRET;
+  let calls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    calls++;
+    return Response.json({ used: true, status: "error", since: 1 });
+  }) as typeof fetch;
+  const { POST } = await import("../app/api/media/refund/route.ts");
+  const t = Math.floor(Date.now() / 1000);
+  const ask = async (payload: Record<string, unknown>, key: string) =>
+    (await POST(new Request("http://localhost/api/media/refund", { method: "POST", headers: SAME_SITE, body: JSON.stringify({ token: signToken(payload, key) }) }))).json();
+  const page = await ask({ k: "render", m: "url", u: "https://example.com/", s: "ip:x", c: "grant-page-0001", t }, SECRET);
+  check("the downloads' refund route refuses a page grant, even one signed with the shared secret", page.refunded === false && calls === 0, { page, calls });
+  const office = await ask({ k: "office", s: "ip:x", c: "grant-offi-0001", t }, SECRET);
+  check("and any grant that isn't a download's", office.refunded === false && calls === 0, { office, calls });
+  globalThis.fetch = realFetch;
+  delete env.MEDIA_WORKER_URL;
+  delete env.MEDIA_WORKER_SECRET;
+}
+
 // ---------- The shared checks ----------
 {
   for (const ip of ["127.0.0.1", "10.0.0.1", "100.64.0.1", "169.254.169.254", "172.16.5.4", "192.168.1.1", "0.0.0.0", "224.0.0.251", "255.255.255.255", "198.18.0.1",
@@ -247,6 +330,14 @@ const urlBody = (url: string, options: Record<string, unknown> = OPTIONS) => ({ 
   const empty = await post(deps(), urlBody(""));
   check("an empty address never reaches the checks", empty.status === 400, empty.json);
   check("defaults: Letter in the US and Canada, A4 elsewhere", web.defaultSize("en-US") === "letter" && web.defaultSize("fr-CA") === "letter" && web.defaultSize("en-ZA") === "a4" && web.defaultSize("en") === "a4" && web.defaultSize(undefined) === "a4");
+}
+
+// ---------- The homepage ----------
+{
+  check("an .html, .htm or .xhtml file, or one typed text/html, goes to HTML to PDF",
+    ["a.html", "B.HTM", "c.xhtml"].every((name) => web.isHtmlFile({ name })) && web.isHtmlFile({ name: "page", type: "text/html" }) && !web.isHtmlFile({ name: "a.pdf", type: "application/pdf" }) && !web.isHtmlFile({ name: "notes.txt" }));
+  check("the homepage names HTML only while the tool is on",
+    web.dropHint(false, false) === "Drop a PDF, image, text file or PPTX." && web.dropHint(false, true) === "Drop a PDF, image, text, HTML or PPTX file." && web.dropHint(true, true) === "Drop a PDF, image, text, Word, Excel, HTML or PPTX file." && web.dropHint(true, false) === "Drop a PDF, image, text, Word, Excel or PPTX file.");
 }
 
 // ---------- HTML files, read in the browser ----------

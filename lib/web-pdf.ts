@@ -46,6 +46,17 @@ export const MARGIN_LABEL: Record<Margins, string> = { none: "None", small: "Sma
 export const MAX_HTML_BYTES = 5 * 1024 * 1024;
 export const HTML_NAME = /\.(x?html?|xht)$/i;
 
+/** An HTML file, by name or type (a dropped file can come without either). */
+export function isHtmlFile(file: { name: string; type?: string }): boolean {
+  return HTML_NAME.test(file.name) || file.type === "text/html" || file.type === "application/xhtml+xml";
+}
+
+/** What the homepage asks for when a dropped file fits no tool. */
+export function dropHint(office: boolean, html: boolean): string {
+  if (!office && !html) return "Drop a PDF, image, text file or PPTX.";
+  return `Drop a PDF, image, text${office ? ", Word, Excel" : ""}${html ? ", HTML" : ""} or PPTX file.`;
+}
+
 /** The options as render.py reads them in a grant. */
 export function grantOptions(o: WebPdfOptions) {
   return { f: o.size, l: o.orientation === "landscape" ? 1 : 0, g: o.margins, b: o.background ? 1 : 0, p: o.media };

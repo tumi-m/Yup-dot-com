@@ -562,7 +562,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if render.handle(self, verify_token):
+        if render.handle(self):
             return
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
@@ -609,7 +609,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         """Cancel a job: stops the download and frees its slot and files."""
-        if render.handle(self, verify_token):
+        if render.handle(self):
             return
         path = urllib.parse.urlparse(self.path).path
         m = re.fullmatch(r"/jobs/([\w-]{16,64})", path)
@@ -650,7 +650,7 @@ class Handler(BaseHTTPRequestHandler):
         return bool(SECRET) and hmac.compare_digest(auth.encode(), b"Bearer " + SECRET)
 
     def do_POST(self):
-        if render.handle(self, verify_token):
+        if render.handle(self):
             return
         path = urllib.parse.urlparse(self.path).path
         if office.handles(path):

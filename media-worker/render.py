@@ -31,13 +31,16 @@ can't navigate away.
 """
 
 import asyncio
+import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
 import re
 import secrets
 import shutil
+import signal
 import socket
 import struct
 import tempfile
@@ -63,6 +66,8 @@ MAX_HTML = int(os.environ.get("RENDER_MAX_HTML_BYTES", str(5 * 1024**2)))
 HARD_MAX_PAGES = int(os.environ.get("RENDER_MAX_PAGES", "500"))
 # A finished PDF waits this long to be downloaded, then is deleted.
 RESULT_TTL = float(os.environ.get("RENDER_RESULT_TTL_SECONDS", "120"))
+# A page's renderer may use this much memory (RSS) before it is stopped.
+MAX_MEMORY_MB = int(os.environ.get("RENDER_MAX_MEMORY_MB", "1024"))
 # Chromium's binary. Unset: the one `playwright install` put in place.
 CHROMIUM = os.environ.get("RENDER_CHROMIUM") or None
 # "auto" tries Chromium's sandbox and runs without it if it can't start
@@ -77,6 +82,17 @@ for _pair in os.environ.get("RENDER_TEST_ADDRESSES", "").split(","):
             TEST_ADDRESSES.add((str(ipaddress.ip_address(_host.strip("[]"))), int(_port)))
     except ValueError:
         pass
+
+# A key of its own for grants, derived from the shared secret (lib/web-pdf-route.ts
+# derives the same), so a download or conversion grant never passes for one
+# and the other way round.
+SECRET = os.environ.get("MEDIA_WORKER_SECRET", "").strip().encode()
+GRANT_KEY = base64.urlsafe_b64encode(hmac.new(SECRET, b"pdf-wizard/render-grant/v1", hashlib.sha256).digest()).rstrip(b"=")
+STARTED = time.time()
+# What the Playwright driver (and so Chromium) may see of the worker's
+# environment: no secret, proxy or cookie setting.
+DRIVER_ENV = ("PATH", "HOME", "LANG", "TMPDIR", "TZ", "PLAYWRIGHT_BROWSERS_PATH", "FONTCONFIG_PATH", "DEBUGP")
+MEMORY_MESSAGE = "This page needs more memory than we allow, so it was stopped."
 
 VIEWPORT = {"width": 1280, "height": 800}
 # The document of a pasted or uploaded page: .invalid never resolves anywhere.
@@ -354,7 +370,13 @@ class Guard:
 # ---------------------------------------------------------------------------
 
 class RenderError(Exception):
-    """A problem the visitor can act on; the message is shown as it is."""
+    """A problem the visitor can act on; the message is shown as it is.
+    `refundable`: the page never loaded, so the try is given back (see
+    lib/web-pdf-route.ts for the rule)."""
+
+    def __init__(self, message: str, refundable: bool = False):
+        super().__init__(message)
+        self.refundable = refundable
 
 
 # Runs in every frame before the page's own scripts: no popups, no print
@@ -394,6 +416,26 @@ SIZE_SCRIPT = """
 """
 
 _UNSAFE_NAME = re.compile(r'[\\/:*?"<>|]')
+
+
+def _descendants(root: int) -> list[int]:
+    """Every process started, directly or not, by `root` (Chromium's renderers among them)."""
+    children: dict[int, list[int]] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(entry))
+    found, todo = [], [root]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            found.append(child)
+            todo.append(child)
+    return found
 
 
 def pdf_filename(title: str | None, fallback: str) -> str:
@@ -443,6 +485,9 @@ def net_message(error: str, guard: Guard) -> str:
         return "The site's security certificate isn't valid, so it wasn't opened."
     if "ERR_EMPTY_RESPONSE" in e or "ERR_INVALID_RESPONSE" in e or "ERR_INVALID_HTTP_RESPONSE" in e:
         return "The site sent back an empty or broken answer."
+    if "ERR_INVALID_AUTH_CREDENTIALS" in e or "ERR_UNEXPECTED_PROXY_AUTH" in e:
+        # A sign-in prompt (HTTP Basic): our browser has no credentials to give.
+        return status_message(401)
     if "ERR_ABORTED" in e:
         return "The site didn't send a page."
     return "The site didn't answer. Check the address, or try again later."
@@ -480,6 +525,9 @@ class Service:
         self.problem: str | None = None
         self.available = self._importable()
         self.user_agent: str | None = None
+        # Grant nonce -> its job, for the web app's refunds (POST /render/refs/<c>/void).
+        self.ref_jobs: dict[str, dict] = {}
+        self.memory_kills = 0
         self._deny = None
         self._launching = None
         self._slots = None
@@ -514,6 +562,7 @@ class Service:
         self._slots = asyncio.Semaphore(MAX_CONCURRENT)
         self.loop.create_task(self._reaper())
         self.loop.create_task(self._warm())
+        self.loop.create_task(self._watch_memory())
         self.loop.call_soon(self.started.set)
         self.loop.run_forever()
 
@@ -542,7 +591,17 @@ class Service:
         from playwright.async_api import async_playwright
 
         if not self.pw:
-            self.pw = await async_playwright().start()
+            # The driver copies the worker's environment as it starts: give it
+            # only what it needs, so no secret is in its (or Chromium's)
+            # /proc/<pid>/environ. Everything else read its settings at import.
+            saved = dict(os.environ)
+            os.environ.clear()
+            os.environ.update({k: v for k, v in saved.items() if k in DRIVER_ENV or k.startswith(("XDG_", "LC_"))})
+            try:
+                self.pw = await async_playwright().start()
+            finally:
+                os.environ.clear()
+                os.environ.update(saved)
         if not self._deny:
             self._deny = await asyncio.start_server(self._deny_all, "127.0.0.1", 0)
         self._home = self._home or tempfile.mkdtemp(prefix="pw-render-home-")
@@ -558,6 +617,8 @@ class Service:
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                 "--webrtc-ip-handling-policy=disable_non_proxied_udp",
                 "--disable-quic",
+                # JavaScript's own heap; typed arrays and the rest are capped by _watch_memory.
+                f"--js-flags=--max-old-space-size={max(128, MAX_MEMORY_MB * 3 // 4)}",
                 # Docker gives /dev/shm 64 MB, too little for big pages.
                 "--disable-dev-shm-usage",
                 "--disable-background-networking",
@@ -607,6 +668,31 @@ class Service:
                         if SANDBOX in ("1", "true", "yes") else "Chromium didn't start.")
         raise last or RuntimeError(self.problem)
 
+    async def _watch_memory(self):
+        """Stops any page's renderer that grows past MAX_MEMORY_MB, so one
+        page can't run the worker out of memory. Each job has its own
+        browser context, and so its own renderer: only that job fails."""
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        while True:
+            await asyncio.sleep(0.25)
+            limit = MAX_MEMORY_MB * 1024 * 1024
+            try:
+                for pid in _descendants(os.getpid()):
+                    try:
+                        with open(f"/proc/{pid}/cmdline", "rb") as f:
+                            if b"--type=renderer" not in f.read():
+                                continue
+                        with open(f"/proc/{pid}/statm") as f:
+                            rss = int(f.read().split()[1]) * page_size
+                    except (OSError, ValueError, IndexError):
+                        continue
+                    if rss > limit:
+                        os.kill(pid, signal.SIGKILL)
+                        self.memory_kills += 1
+                        print(f"render: stopped a page using {rss // 1024**2} MB (limit {MAX_MEMORY_MB} MB)", flush=True)
+            except Exception as e:  # noqa: BLE001 — keep watching
+                print(f"render: memory watch: {type(e).__name__}: {e}", flush=True)
+
     async def _reaper(self):
         while True:
             await asyncio.sleep(10)
@@ -619,65 +705,73 @@ class Service:
                     if done and now - done > RESULT_TTL + 600:
                         del self.jobs[job_id]
                 for ref, at in list(self.used.items()):
-                    if now - at > 2 * 60 * 60:
+                    if now - at > 3 * 60 * 60:
                         del self.used[ref]
+                        self.ref_jobs.pop(ref, None)
 
     # ----- jobs ---------------------------------------------------------
 
     def waiting(self) -> int:
         return sum(1 for j in self.jobs.values() if j["status"] == "working")
 
-    def submit(self, grant: dict, html: str | None, name: str | None) -> dict:
+    def submit(self, grant: dict, html: str | None) -> dict:
         job = {
             "id": secrets.token_urlsafe(24),
             "status": "working",
-            "stage": "queued",
+            "stage": "starting",
             "progress": 0.02,
             "created": time.time(),
             "pdf": None,
         }
         with self.lock:
             self.jobs[job["id"]] = job
-        job["future"] = asyncio.run_coroutine_threadsafe(self._job(job, grant, html, name), self.loop)
+        job["future"] = asyncio.run_coroutine_threadsafe(self._job(job, grant, html), self.loop)
         return job
 
     def cancel(self, job: dict):
         if job["status"] == "working":
-            job.update(status="error", error="Cancelled.", finished=time.time())
+            # Given back only if the page was never opened.
+            job.update(status="error", error="Cancelled.", finished=time.time(), refundable=job["stage"] in ("starting", "queued"))
             future = job.get("future")
             if future:
                 # Thread-safe: the job's task is cancelled on its own loop.
                 future.cancel()
         job["pdf"] = None
 
-    async def _job(self, job: dict, grant: dict, html: str | None, name: str | None):
+    async def _job(self, job: dict, grant: dict, html: str | None):
         try:
+            if self._slots.locked():
+                job["stage"] = "queued"
             try:
                 await asyncio.wait_for(self._slots.acquire(), JOB_SECONDS)
             except asyncio.TimeoutError:
-                raise RenderError("The service is busy. Try again in a minute.")
+                raise RenderError("The service is busy. Try again in a minute.", refundable=True)
             try:
-                await asyncio.wait_for(self._render(job, grant, html, name), JOB_SECONDS)
+                await asyncio.wait_for(self._render(job, grant, html), JOB_SECONDS)
             except asyncio.TimeoutError:
+                if job.get("crashed"):
+                    raise RenderError(MEMORY_MESSAGE)
                 raise RenderError("The page took too long to turn into a PDF." if job["stage"] == "printing"
                                   else "The page took too long to load.")
             finally:
                 self._slots.release()
         except asyncio.CancelledError:
             job.update(status="error", error="Cancelled.")
+            job.setdefault("refundable", False)
         except RenderError as e:
-            job.update(status="error", error=str(e))
+            job.update(status="error", error=str(e), refundable=e.refundable)
         except Exception as e:  # noqa: BLE001 — a clean message, the cause to the log
             print(f"render {job['id'][:8]} failed: {type(e).__name__}: {str(e).splitlines()[0][:300] if str(e) else ''}", flush=True)
-            job.update(status="error", error="Couldn't make a PDF of this page. Try again.")
+            # Our failure, not the page's: given back.
+            job.update(status="error", error="Couldn't make a PDF of this page. Try again.", refundable=True)
         finally:
             job["finished"] = time.time()
 
-    async def _render(self, job: dict, grant: dict, html: str | None, name: str | None):
+    async def _render(self, job: dict, grant: dict, html: str | None):
         try:
             browser = await self._ensure_browser()
         except Exception:  # noqa: BLE001
-            raise RenderError("Saving web pages isn't working on this server right now. Try again later.")
+            raise RenderError("Saving web pages isn't working on this server right now. Try again later.", refundable=True)
         options = grant.get("o") if isinstance(grant.get("o"), dict) else {}
         max_pages = max(1, min(int(grant.get("x") or 100), HARD_MAX_PAGES))
         guard = Guard(self.resolve)
@@ -699,6 +793,8 @@ class Service:
             )
             page = await context.new_page()
             job["context"] = context
+            # Its renderer stopped: by the memory watch, or Chromium itself.
+            page.on("crash", lambda _: job.update(crashed=True))
             await self._fence(context, page, guard, html)
             target = HTML_URL if html is not None else grant["u"]
             job["stage"] = "loading"
@@ -707,13 +803,16 @@ class Service:
             try:
                 response = await page.goto(target, wait_until="commit", timeout=LOAD_SECONDS * 1000)
             except Exception as e:  # noqa: BLE001
+                if job.get("crashed"):
+                    raise RenderError(MEMORY_MESSAGE)
                 if "Timeout" in type(e).__name__ or "Timeout" in str(e)[:80]:
+                    # Not given back: it held a browser for the whole wait.
                     raise RenderError("The site took too long to answer.")
-                raise RenderError(net_message(str(e), guard))
+                raise RenderError(net_message(str(e), guard), refundable=guard.over != "bytes")
             if guard.over == "bytes":
                 raise RenderError("This page is too big to save as a PDF.")
             if response and response.status >= 400:
-                raise RenderError(status_message(response.status))
+                raise RenderError(status_message(response.status), refundable=True)
             job["progress"] = 0.25
             # What arrives in time is printed: a page that never stops loading still gets its PDF.
             for state, progress in (("domcontentloaded", 0.4), ("load", 0.55)):
@@ -729,16 +828,23 @@ class Service:
             if guard.over == "bytes":
                 raise RenderError("This page is too big to save as a PDF.")
             job["stage"] = "printing"
-            pdf = await self._print(page, options, max_pages)
+            try:
+                pdf = await self._print(page, options, max_pages)
+            except Exception:  # noqa: BLE001
+                if job.get("crashed"):
+                    raise RenderError(MEMORY_MESSAGE)
+                raise
+            if job.get("crashed"):
+                raise RenderError(MEMORY_MESSAGE)
             if guard.over == "bytes":
                 raise RenderError("This page is too big to save as a PDF.")
             if len(pdf) > MAX_PDF:
                 raise RenderError(f"The PDF would be bigger than {MAX_PDF // 1024**2} MB, the most we save.")
             pages = count_pages(pdf)
-            title = await page.title() if html is None or not name else None
+            title = await page.title()
             if html is not None:
-                stem = re.sub(r"\.(x?html?|xht)$", "", name or "", flags=re.I).strip()
-                filename = pdf_filename(stem or title, "page")
+                # The browser names the file after the one it uploaded; its name isn't sent here.
+                filename = pdf_filename(title, "page")
             else:
                 host = urllib.parse.urlsplit(page.url).hostname or "page"
                 filename = pdf_filename(title, host)
@@ -891,10 +997,40 @@ def start():
 
 def health() -> dict:
     """For the web app's /api/media/health, which sends the secret."""
-    return {"render": service.available and service.problem is None, "renderSandbox": service.sandbox}
+    return {
+        "render": service.available and service.problem is None,
+        "renderSandbox": service.sandbox,
+        # Each page's renderer is stopped past this; the web app shows it to the owner.
+        "renderMemoryMb": MAX_MEMORY_MB,
+        "renderMemoryGuard": "watchdog" if os.path.isdir("/proc") else None,
+    }
 
 
-def _grant_problem(grant: dict, html, name) -> str | None:
+def b64url_decode(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def verify_grant(token) -> tuple[dict | None, str | None]:
+    """A grant signed with this feature's own key: (payload, None), or (None,
+    "bad-signature" | "expired"), as worker.py's verify_token answers."""
+    if not SECRET or not isinstance(token, str) or "." not in token:
+        return None, "bad-signature"
+    body, sig = token.rsplit(".", 1)
+    expected = hmac.new(GRANT_KEY, body.encode(), hashlib.sha256).digest()
+    try:
+        if not hmac.compare_digest(expected, b64url_decode(sig)):
+            return None, "bad-signature"
+        payload = json.loads(b64url_decode(body))
+    except (ValueError, json.JSONDecodeError):
+        return None, "bad-signature"
+    if not isinstance(payload, dict):
+        return None, "bad-signature"
+    if not isinstance(payload.get("e"), (int, float)) or payload["e"] < time.time():
+        return None, "expired"
+    return payload, None
+
+
+def _grant_problem(grant: dict, html) -> str | None:
     """Why this grant can't start a job (None when it can)."""
     if grant.get("k") != "render" or grant.get("m") not in ("url", "html"):
         return "Unsupported request."
@@ -906,7 +1042,7 @@ def _grant_problem(grant: dict, html, name) -> str | None:
         if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
             return "Only http and https pages can be saved."
         return None
-    if not isinstance(html, str) or (name is not None and not isinstance(name, str)):
+    if not isinstance(html, str):
         return "Unsupported request."
     data = html.encode("utf-8", "surrogatepass")
     if len(data) > MAX_HTML:
@@ -965,15 +1101,18 @@ def _send_pdf(handler, job: dict):
     job["pdf"] = None
 
 
-def handle(handler, verify) -> bool:
-    """Answers /render requests; False for any other path. `verify` is
-    worker.py's verify_token, so grants are checked the same way."""
+def handle(handler) -> bool:
+    """Answers /render requests; False for any other path."""
     path = urllib.parse.urlparse(handler.path).path
     if path != "/render" and not path.startswith("/render/"):
         return False
     method = handler.command
     if method == "POST" and path == "/render":
-        _post(handler, verify)
+        _post(handler)
+        return True
+    void = re.fullmatch(r"/render/refs/([\w-]{8,64})/void", path)
+    if method == "POST" and void:
+        _void(handler, void.group(1))
         return True
     m = re.fullmatch(r"/render/([\w-]{16,64})(/file)?", path)
     job = service.jobs.get(m.group(1)) if m else None
@@ -999,7 +1138,24 @@ def handle(handler, verify) -> bool:
     return True
 
 
-def _post(handler, verify):
+def _void(handler, ref: str):
+    """Server to server, before a refund: from now on this grant can't start
+    a job here. Says whether it had one, how it ended and whether that is
+    given back, and since when this process would know."""
+    auth = handler.headers.get("Authorization", "").encode()
+    if not SECRET or not hmac.compare_digest(auth, b"Bearer " + SECRET):
+        return handler.json(401, {"error": "Unauthorized."})
+    with service.lock:
+        job = service.ref_jobs.get(ref)
+        if ref not in service.used:
+            service.used[ref] = time.time()
+            service.ref_jobs[ref] = {"status": "void"}
+    if not job or job.get("status") == "void":
+        return handler.json(200, {"used": False, "since": STARTED})
+    return handler.json(200, {"used": True, "status": job.get("status"), "refundable": bool(job.get("refundable")), "since": STARTED})
+
+
+def _post(handler):
     if not service.available or not service.thread:
         return handler.json(503, {"error": "Saving web pages isn't set up on this server yet.", "code": "unavailable"})
     body, too_big = _read_body(handler)
@@ -1009,13 +1165,13 @@ def _post(handler, verify):
         return handler.json(413, {"error": f"HTML up to {MAX_HTML // 1024**2} MB can be saved.", "code": "too-big"})
     if body is None:
         return handler.json(400, {"error": "Invalid request."})
-    grant, reason = verify(body.get("token", ""))
+    grant, reason = verify_grant(body.get("token", ""))
     if not grant:
         if reason == "expired":
             return handler.json(401, {"error": "This link expired. Please try again.", "code": "expired"})
         print("POST /render: bad token signature. MEDIA_WORKER_SECRET differs from the web app's.", flush=True)
         return handler.json(401, {"error": "The PDF server rejected this site.", "code": "bad-signature"})
-    problem = _grant_problem(grant, body.get("html"), body.get("name"))
+    problem = _grant_problem(grant, body.get("html"))
     if problem:
         return handler.json(400, {"error": problem})
     ref = grant.get("c") if isinstance(grant.get("c"), str) else None
@@ -1026,7 +1182,9 @@ def _post(handler, verify):
             return handler.json(503, {"error": "The service is busy. Try again in a minute.", "code": "busy"})
         if ref:
             service.used[ref] = time.time()
-    job = service.submit(grant, body.get("html") if grant["m"] == "html" else None, body.get("name"))
+    job = service.submit(grant, body.get("html") if grant["m"] == "html" else None)
+    if ref:
+        service.ref_jobs[ref] = job
     handler.json(202, {"id": job["id"]})
 
 

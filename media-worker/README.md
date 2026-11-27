@@ -262,7 +262,12 @@ browser ──(3) ──▶ GET /render/<id>/file   (the PDF, deleted from memor
 
 The PDF lives only in the worker's memory: it is deleted as soon as it has
 been sent, or about two minutes after it was made. Addresses and HTML are
-never written to disk or to the log. Each grant makes one PDF.
+never written to disk or to the log, and an uploaded file's name isn't sent.
+Each grant makes one PDF. Grants are signed with a key derived from
+`MEDIA_WORKER_SECRET` for this feature alone (`pdf-wizard/render-grant/v1`),
+so a download or conversion grant can't start a page, nor the other way
+round. `POST /render/refs/<grant>/void` (with the secret) lets the web app
+ask how a grant's job ended before giving a try back.
 
 ### What keeps a page off private networks
 
@@ -282,7 +287,11 @@ no downloads, popups, service workers, websockets, WebRTC, permissions or
 extensions; video and audio aren't fetched; a fresh browser context per job
 with no cookies or credentials; up to 400 requests, 400 connections and
 50 MB of traffic per job; 20 seconds to load and 60 for the whole job; PDFs
-up to 40 MB and the plan's page limit (50 free, 300 Pro). Pasted HTML is
+up to 40 MB and the plan's page limit (50 free, 300 Pro). Each page's
+renderer is stopped if it uses more than 1 GB of memory (`RENDER_MAX_MEMORY_MB`;
+a watch on its resident memory every quarter second, plus a JavaScript heap
+cap), so one page can't run the worker out of memory; `/api/media/health`
+shows the limit. Pasted HTML is
 served from memory under `http://html.invalid/` and can't navigate away;
 public pictures, styles and fonts load under the same rules.
 
@@ -292,8 +301,8 @@ profile blocks, so in most containers it runs without it (it says so in its
 log, and `/api/media/health` reports `"sandbox": false`). What still isolates
 a page then: it runs as the unprivileged `worker` user in the container;
 every connection still goes through the guard above, which doesn't depend
-on the sandbox; and Chromium gets none of the worker's environment
-variables. What it doesn't stop: a Chromium exploit that escapes the
+on the sandbox; and neither Chromium nor Playwright's driver gets the
+worker's secrets or proxy settings in its environment. What it doesn't stop: a Chromium exploit that escapes the
 renderer would run as `worker`, could read the worker's memory (its
 `MEDIA_WORKER_SECRET`, other jobs' files) and could make its own
 connections without the proxy. So: rebuild weekly to keep Chromium current,
@@ -311,8 +320,10 @@ without it.
    the Noto fonts come with the Word and Excel block). Expect the image to
    grow by roughly 450–550 MB on top of LibreOffice (Chromium's headless
    shell is about 260 MB unpacked, Playwright with its Node driver about
-   140 MB, plus libraries). Give the worker **at least 1 GB of memory**, 2 GB
-   with both converters in use: each page takes 200–400 MB while it renders.
+   140 MB, plus libraries). Give the worker **at least 2 GB of memory**, more
+   with both converters busy: a page usually takes 200–400 MB while it
+   renders, and up to `RENDER_MAX_MEMORY_MB` (1 GB) each, `RENDER_MAX_CONCURRENT`
+   (2) at a time, before it is stopped.
 2. Optional settings on the worker:
 
    | Variable | |
@@ -324,6 +335,7 @@ without it.
    | `RENDER_MAX_REQUESTS`, `RENDER_MAX_CONNECTIONS` | Per job (default 400 each) |
    | `RENDER_MAX_DOWNLOAD_BYTES` | Traffic per job (default 50 MB) |
    | `RENDER_MAX_PDF_BYTES` | Largest PDF (default 40 MB) |
+   | `RENDER_MAX_MEMORY_MB` | Memory one page may use before it is stopped (default 1024) |
    | `RENDER_MAX_HTML_BYTES` | Largest pasted or uploaded HTML (default 5 MB; the web app's limit is 5 MB too) |
    | `RENDER_MAX_PAGES` | Ceiling on any grant's page limit (default 500) |
    | `RENDER_RESULT_TTL_SECONDS` | How long an unfetched PDF is kept (default 120) |
@@ -344,18 +356,19 @@ without it.
 
 ### Try it with curl
 
-A grant is signed with `MEDIA_WORKER_SECRET` (HMAC-SHA256, as
-`lib/media-server.ts` signs). From a checkout, with the secret in your shell:
+A grant is signed with a key derived from `MEDIA_WORKER_SECRET`
+(`renderKey` in `lib/web-pdf-route.ts`). From a checkout, with the secret in
+your shell:
 
 ```bash
 W=https://media.your-domain.com
 render() {  # render <address>: prints the job's final state; the PDF goes to page.pdf
   TOKEN=$(npx tsx -e '
     import { signToken } from "./lib/media-server.ts";
-    import { webPdfGrant } from "./lib/web-pdf-route.ts";
+    import { renderKey, webPdfGrant } from "./lib/web-pdf-route.ts";
     import { DEFAULT_OPTIONS } from "./lib/web-pdf.ts";
     const ref = { s: "owner", c: "manual-" + Date.now(), t: Math.floor(Date.now() / 1000) };
-    console.log(signToken(webPdfGrant({ u: process.argv.at(-1)! }, DEFAULT_OPTIONS, 50, ref), process.env.MEDIA_WORKER_SECRET!));' "$1")
+    console.log(signToken(webPdfGrant({ u: process.argv.at(-1)! }, DEFAULT_OPTIONS, 50, ref), renderKey(process.env.MEDIA_WORKER_SECRET!)));' "$1")
   ID=$(curl -s -H 'Content-Type: application/json' -d "{\"token\":\"$TOKEN\"}" $W/render | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
   until curl -s $W/render/$ID | grep -qv '"working"'; do sleep 1; done
   curl -s $W/render/$ID; echo
