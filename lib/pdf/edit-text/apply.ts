@@ -2,12 +2,15 @@ import {
   PDFArray,
   PDFDict,
   PDFName,
+  PDFNumber,
   PDFRawStream,
   PDFRef,
   StandardFonts,
   TextRenderingMode,
+  beginMarkedContent,
   beginText,
   concatTransformationMatrix,
+  endMarkedContent,
   endText,
   fill,
   moveText,
@@ -24,6 +27,7 @@ import {
   showText,
   type PDFDocument,
   type PDFFont,
+  type PDFObject,
   type PDFOperator,
   type PDFPage,
 } from "pdf-lib";
@@ -32,7 +36,7 @@ import { readOperators, type Token } from "../compress/lexer";
 import { decodeFully } from "../compress/streams";
 import { FontBook, vendorFonts, type Face, type FontFiles } from "../text-to-pdf/fonts";
 import { fontLabel, standardFont } from "./fonts";
-import type { CoverReason, EditableRun, Matrix, RemovePlan } from "./types";
+import { COVER_TAG, type CoverReason, type EditableRun, type Matrix, type RemovePlan } from "./types";
 
 /**
  * Writes Edit text's changes into a PDF. Where a run's words are drawn by
@@ -95,11 +99,23 @@ interface Show {
   strings: Uint8Array[];
   /** A later operation in the same text object draws on from where this one stopped. */
   carried: boolean;
+  /** The marked content it is in (BDC operators with their property lists), outermost first. */
+  marks: Marked[];
+}
+
+/** A BDC operator: its tag and property list as written, and where it is. */
+interface Marked {
+  start: number;
+  end: number;
+  tag: Token;
+  props: Token;
 }
 
 interface Content {
   data: Uint8Array;
   shows: Show[];
+  /** Every BDC operator, for telling whether a named property list is used by anything else. */
+  marked: Marked[];
   /** Graphics state saves less restores: the lowest it went, and where it ended. */
   low: number;
   depth: number;
@@ -157,7 +173,17 @@ function readContent(page: PDFPage): Content | null {
   let depth = 0;
   let low = 0;
   let last: Show | null = null;
+  /** Marked content open: a BDC's property list, or null for BMC. */
+  const marked: (Marked | null)[] = [];
+  const all: Marked[] = [];
   const whole = readOperators(data, (op, operands, start, end) => {
+    if (op === "BDC") {
+      const m = operands.length >= 2 ? { start, end, tag: operands[0], props: operands[1] } : null;
+      marked.push(m);
+      if (m) all.push(m);
+    }
+    else if (op === "BMC") marked.push(null);
+    else if (op === "EMC") marked.pop();
     if (op === "q") {
       fonts.push(font);
       depth++;
@@ -178,12 +204,12 @@ function readContent(page: PDFPage): Content | null {
       const arg = op === '"' ? operands[2] : operands[0];
       if (arg?.kind === "string") strings.push(arg.bytes!);
       else if (arg?.kind === "array") for (const t of arg.items ?? []) if (t.kind === "string") strings.push(t.bytes!);
-      const show: Show = { op, start, end, operands, font, strings, carried: false };
+      const show: Show = { op, start, end, operands, font, strings, carried: false, marks: marked.filter((m): m is Marked => !!m) };
       shows.push(show);
       last = show;
     } else if (FROM_LINE.has(op)) last = null;
   });
-  return whole ? { data, shows, low, depth } : null;
+  return whole ? { data, shows, marked: all, low, depth } : null;
 }
 
 /** Whether `bytes` are exactly the codes `codes`, each one to four bytes long. */
@@ -257,6 +283,91 @@ function rewrite(content: Content, cuts: { start: number; end: number; text: str
   }
   parts.push(content.data.subarray(at), tail);
   return concat(parts);
+}
+
+/** Keys of a property list or structure element that repeat its words for readers and search. */
+const ALT_KEYS = ["ActualText", "Alt", "E"].map((k) => PDFName.of(k));
+const raw = (data: Uint8Array, t: Token) => String.fromCharCode(...data.subarray(t.start, t.end));
+
+/**
+ * Taken-out words can live on as alternate text: ActualText, Alt or E in the
+ * marked content round them, inline or named in the page's Properties, or
+ * on the structure elements that point at it. They go too. An inline
+ * property list is written again without them. A named one only removed
+ * text uses loses them; one that text left on the page shares stays as it
+ * is (its alternate text is that text's too), and the removed text gets a
+ * copy without them under a new name. Returns the cuts for the BDC
+ * operators and the marked-content ids they carried.
+ */
+function dropAltText(page: PDFPage, data: Uint8Array, marks: Marked[], every: Marked[]): { cuts: { start: number; end: number; text: string }[]; mcids: number[] } {
+  const cuts: { start: number; end: number; text: string }[] = [];
+  const mcids: number[] = [];
+  const { context } = page.doc;
+  for (const m of marks) {
+    if (m.props.kind === "dict") {
+      const items = m.props.items ?? [];
+      const kept: string[] = [];
+      let drop = false;
+      for (let i = 0; i + 1 < items.length; i += 2) {
+        const key = items[i].kind === "name" ? (items[i].value as string) : "";
+        if (key === "MCID" && items[i + 1].kind === "number") mcids.push(items[i + 1].value as number);
+        if (ALT_KEYS.some((k) => k.decodeText() === key)) drop = true;
+        else kept.push(`${raw(data, items[i])} ${raw(data, items[i + 1])}`);
+      }
+      if (drop) cuts.push({ start: m.start, end: m.end, text: `${raw(data, m.tag)} <<${kept.join(" ")}>> BDC` });
+    } else if (m.props.kind === "name") {
+      const named = lookupDict(page, "Properties")?.lookup(PDFName.of(m.props.value as string));
+      if (!(named instanceof PDFDict)) continue;
+      const mcid = named.lookup(PDFName.of("MCID"));
+      if (mcid instanceof PDFNumber) mcids.push(mcid.asNumber());
+      if (!ALT_KEYS.some((k) => named.has(k))) continue;
+      const name = m.props.value as string;
+      const shared = every.some((o) => !marks.includes(o) && o.props.kind === "name" && o.props.value === name);
+      if (!shared) {
+        for (const k of ALT_KEYS) named.delete(k);
+        continue;
+      }
+      const copy = context.obj({});
+      for (const [k, v] of named.entries()) if (!ALT_KEYS.includes(k)) copy.set(k, v);
+      const resources = page.node.Resources() ?? context.obj({});
+      if (!page.node.Resources()) page.node.set(Resources, resources);
+      let props = resources.lookup(PDFName.of("Properties"));
+      if (!(props instanceof PDFDict)) resources.set(PDFName.of("Properties"), (props = context.obj({})));
+      const key = (props as PDFDict).uniqueKey("Props");
+      (props as PDFDict).set(key, context.register(copy));
+      cuts.push({ start: m.start, end: m.end, text: `${raw(data, m.tag)} ${key.toString()} BDC` });
+    }
+  }
+  return { cuts, mcids };
+}
+
+/** Takes ActualText, Alt and E off the structure elements that hold the given marked content of a page. */
+function dropStructAlt(page: PDFPage, mcids: Set<number>) {
+  const { context } = page.doc;
+  const root = page.doc.catalog.lookup(PDFName.of("StructTreeRoot"));
+  if (!(root instanceof PDFDict) || !mcids.size) return;
+  const seen = new Set<PDFDict>();
+  let budget = 200_000;
+  const visit = (node: PDFObject | undefined, pg: PDFObject | undefined) => {
+    const obj = node instanceof PDFRef ? context.lookup(node) : node;
+    if (obj instanceof PDFArray) return obj.asArray().forEach((n) => visit(n, pg));
+    if (!(obj instanceof PDFDict) || seen.has(obj) || --budget < 0) return;
+    seen.add(obj);
+    const own = obj.get(PDFName.of("Pg")) ?? pg;
+    const k = obj.get(PDFName.of("K"));
+    const kids = k === undefined ? [] : context.lookup(k) instanceof PDFArray ? (context.lookup(k) as PDFArray).asArray() : [k];
+    const holds = kids.some((kid) => {
+      const v = kid instanceof PDFRef ? context.lookup(kid) : kid;
+      if (v instanceof PDFNumber) return own === page.ref && mcids.has(v.asNumber());
+      if (v instanceof PDFDict && v.get(PDFName.of("MCID")) instanceof PDFNumber) {
+        return (v.get(PDFName.of("Pg")) ?? own) === page.ref && mcids.has((v.get(PDFName.of("MCID")) as PDFNumber).asNumber());
+      }
+      return false;
+    });
+    if (holds) for (const key of ALT_KEYS) obj.delete(key);
+    for (const kid of kids) visit(kid, own);
+  };
+  visit(root.get(PDFName.of("K")), undefined);
 }
 
 const latin1 = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
@@ -403,7 +514,7 @@ function rgbOf(hex: string): [number, number, number] {
 
 const cm = (m: Matrix) => concatTransformationMatrix(m[0], m[1], m[2], m[3], m[4], m[5]);
 
-/** A box over the old words, in the colour round them. */
+/** A box over the old words, in the colour round them, tagged so a later read leaves what it hides alone. */
 function coverOps(e: TextEdit): PDFOperator[] {
   const r = e.run;
   const s = r.size;
@@ -411,12 +522,14 @@ function coverOps(e: TextEdit): PDFOperator[] {
   const padY = s * 0.06;
   const [red, green, blue] = rgbOf(e.background);
   return [
+    beginMarkedContent(COVER_TAG),
     pushGraphicsState(),
     cm(r.user),
     setFillingRgbColor(red, green, blue),
     rectangle(r.x0 - padX, r.descent * s - padY, r.x1 - r.x0 + 2 * padX, (r.ascent - r.descent) * s + 2 * padY),
     fill(),
     popGraphicsState(),
+    endMarkedContent(),
   ];
 }
 
@@ -467,10 +580,12 @@ export async function applyTextEdits(doc: PDFDocument, edits: TextEdit[], opts: 
     const content = needed ? readContent(page) : null;
     const cuts: { start: number; end: number; text: string }[] = [];
     const items: (typeof work)[number]["items"] = [];
+    const marks = new Map<number, Marked>();
     for (const e of list) {
       const shows = e.run.remove ? planned(content, e.run.remove) : null;
       if (shows && content) {
         e.run.remove!.ops.forEach((op, i) => cuts.push({ start: shows[i].start, end: shows[i].end, text: replacement(shows[i], op, content.data) }));
+        for (const show of shows) for (const m of show.marks) marks.set(m.start, m);
         report.removed++;
       } else report.covered.push({ page: index + 1, reason: e.run.remove ? "page" : e.run.cover ?? "unmatched" });
       const dict = fontDictFor(page, shows?.[0]?.font ?? null, e.run);
@@ -480,6 +595,11 @@ export async function applyTextEdits(doc: PDFDocument, edits: TextEdit[], opts: 
       const face = own ? null : faceOf(e.run.font.family, e.bold, e.italic);
       if (face) for (const part of split(e.text, std)) if (!part.standard) fonts.book.need(part.text, face);
       items.push({ e, covered: !shows, font: own ?? std, face, own: !!own });
+    }
+    if (content && marks.size) {
+      const alt = dropAltText(page, content.data, [...marks.values()], content.marked);
+      cuts.push(...alt.cuts);
+      dropStructAlt(page, new Set(alt.mcids));
     }
     work.push({ page, index, content, cuts, items });
   }

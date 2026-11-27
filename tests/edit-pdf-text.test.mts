@@ -39,7 +39,7 @@ const { unchanged } = await import("../lib/pdf/edit-text/apply.ts");
 const { readOperators } = await import("../lib/pdf/compress/lexer.ts");
 const { stringsIn } = await import("../lib/pdf/redact/scan.ts");
 const { guessFont, standardFont, fontLabel, undrawable } = await import("../lib/pdf/edit-text/fonts.ts");
-const { editFromRun, ringColor, runStep, textNotice, pristine, runTransform } = await import("../lib/editor/text-edit.ts");
+const { editFromRun, ringColor, runStep, textNotice, pristine, runTransform, joinReports, nearestCaret, nearestRun, runLabel, toRunSpace } = await import("../lib/editor/text-edit.ts");
 const { remapAnnotations, deleteMap, orderMap } = await import("../lib/editor/page-map.ts");
 const { historyReducer } = await import("../lib/editor/history.ts");
 const { reorderPages, deletePages } = await import("../lib/pdf/operations.ts");
@@ -605,6 +605,141 @@ const helvetica = (doc: PDFDocument) => doc.embedFont(StandardFonts.Helvetica);
   const after = await itemsOf(out);
   check(`300 pages: one page read (${read} ms) and the file written (${saved} ms)`, runs.length === 2 && report?.removed === 1 && read < 5000 && saved < 20000, { read, saved });
   check("300 pages: only that page changed", textOf(after[249]).includes("Changed body on page 250.") && !textOf(after[249]).includes("long file") && textOf(after[0]) === "Heading of page 1 Body text on page 1 of the long file." && textOf(after[299]).endsWith("page 300 of the long file."));
+}
+
+// --- What else is drawn in the same place ---------------------------------------------------------------
+{
+  // Bold made by drawing the line twice, a hair apart: one run, and both copies go.
+  const doc = await PDFDocument.create();
+  rawPage(doc, [612, 792], "BT /F1 14 Tf 72 700 Td (OVERLAPWORD total 100) Tj ET BT /F1 14 Tf 72.35 700 Td (OVERLAPWORD total 100) Tj ET BT /F1 12 Tf 72 650 Td (Neighbour line) Tj ET");
+  const bytes = await doc.save();
+  const [runs] = await runsOf(bytes);
+  const bold = runs.filter((r) => r.text.includes("OVERLAPWORD"));
+  check("drawn twice: offered as one run, both copies to take out", bold.length === 1 && bold[0].remove?.ops.length === 2, runs.map((r) => [r.text, r.remove?.ops.length, r.cover]));
+  const { out, report } = await bake(bytes, [edit(bold[0], 0, { text: "Replaced" })]);
+  const raw = await rawText(out);
+  check("drawn twice: both copies gone from the file, and the report says removed", report?.removed === 1 && report.covered.length === 0 && !raw.includes("OVERLAPWORD") && textOf((await itemsOf(out))[0]).includes("Neighbour line"), report);
+
+  // Different words over each other: neither can be taken out alone.
+  const over = await PDFDocument.create();
+  rawPage(over, [612, 792], "BT /F1 14 Tf 72 700 Td (FIRSTWORD here) Tj ET BT /F1 14 Tf 74 700 Td (OTHERWORDS too) Tj ET");
+  const [overRuns] = await runsOf(await over.save());
+  check("other words in the same place: both covered, reason overlap", overRuns.length === 2 && overRuns.every((r) => r.cover === "overlap" && !r.remove), overRuns.map((r) => [r.text, r.cover]));
+
+  // A picture over the words (a scan laid over its text), and words drawn fully transparent.
+  for (const kind of ["under a picture", "transparent", "under a white box", "with an underline"]) {
+    const d = await PDFDocument.create();
+    const page = d.addPage([612, 792]);
+    const { context } = d;
+    const img = context.register(context.flateStream(new Uint8Array(3 * 4 * 4).fill(200), { Type: "XObject", Subtype: "Image", Width: 4, Height: 4, ColorSpace: "DeviceRGB", BitsPerComponent: 8 }));
+    const gs = context.register(context.obj({ Type: "ExtGState", ca: 0, CA: 0 }));
+    const helv = context.register(context.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Helvetica", Encoding: "WinAnsiEncoding" }));
+    page.node.set(PDFName.of("Resources"), context.obj({ Font: { F1: helv }, XObject: { Im1: img }, ExtGState: { G0: gs } }));
+    const text = "BT /F1 20 Tf 77 702 Td (SCANNED 1,250.00) Tj ET";
+    const ops =
+      kind === "under a picture"
+        ? `${text} q 300 0 0 40 72 690 cm /Im1 Do Q`
+        : kind === "transparent"
+          ? `q 300 0 0 40 72 690 cm /Im1 Do Q q /G0 gs ${text} Q`
+          : kind === "under a white box"
+            ? `${text} 1 g 70 690 200 30 re f`
+            : `${text} 0 g 77 699 180 1 re f`;
+    page.node.set(PDFName.of("Contents"), context.register(context.flateStream(`${ops} BT /F1 12 Tf 72 600 Td (A plain line) Tj ET`)));
+    const src = await d.save();
+    const [rs] = await runsOf(src);
+    const r = rs.find((x) => x.text.startsWith("SCANNED"))!;
+    const want = kind === "transparent" ? "hidden" : kind === "with an underline" ? null : "overlap";
+    check(`words ${kind}: ${want ? `covered (${want})` : "still taken out"}`, !!r && r.cover === want && !!r.remove === !want, r && [r.cover, !!r.remove]);
+    if (want) {
+      const done = await bake(src, [edit(r, 0, { text: "PAID 9,999.00" })]);
+      check(`words ${kind}: the save reports them covered, not removed`, done.report?.removed === 0 && done.report.covered[0]?.reason === want && !!textNotice(done.report).covered, done.report);
+    }
+  }
+}
+
+// --- Alternate text goes with the words ------------------------------------------------------------------
+{
+  const doc = await PDFDocument.create();
+  const { context } = doc;
+  const named = context.register(context.obj({ MCID: 1, ActualText: PDFString.of("NAMEDSECRET"), Lang: PDFString.of("en") }));
+  const shared = context.register(context.obj({ ActualText: PDFString.of("SHAREDALT") }));
+  const page = rawPage(
+    doc,
+    [612, 792],
+    [
+      "/Span <</ActualText (ACTUALSECRET) /Lang (en)>> BDC BT /F1 14 Tf 72 700 Td (ACTUALSECRET) Tj ET EMC",
+      "/P /MC1 BDC BT /F1 14 Tf 72 660 Td (NAMEDSECRET) Tj ET EMC",
+      "/P /MC2 BDC BT /F1 14 Tf 72 640 Td (SHAREDWORD) Tj ET EMC",
+      "/P /MC2 BDC BT /F1 14 Tf 72 620 Td (Kept line shares the list) Tj ET EMC",
+      "/P <</MCID 2>> BDC BT /F1 14 Tf 72 580 Td (STRUCTSECRET) Tj ET EMC",
+    ].join("\n"),
+    { Properties: { MC1: named, MC2: shared } }
+  );
+  const elem = context.register(context.obj({ Type: "StructElem", S: "P", Pg: page.ref, K: 2, ActualText: PDFString.of("STRUCTSECRET"), Alt: PDFString.of("STRUCTSECRET") }));
+  doc.catalog.set(PDFName.of("StructTreeRoot"), context.register(context.obj({ Type: "StructTreeRoot", K: [elem] })));
+  const bytes = await doc.save();
+  const [runs] = await runsOf(bytes);
+  const targets = runs.filter((r) => /SECRET|SHAREDWORD/.test(r.text));
+  const { out, report } = await bake(bytes, targets.map((r, i) => edit(r, 0, { text: `Changed ${i}` })));
+  const raw = await rawText(out);
+  check("alternate text: inline, named and in the structure tree, all taken out with the words", report?.removed === 4 && !/ACTUALSECRET|NAMEDSECRET|STRUCTSECRET|SHAREDWORD/.test(raw), [report, ["ACTUALSECRET", "NAMEDSECRET", "STRUCTSECRET", "SHAREDWORD"].filter((w) => raw.includes(w))]);
+  const reread = await PDFDocument.load(out);
+  const props = reread.getPage(0).node.Resources()!.lookup(PDFName.of("Properties")) as PDFDict;
+  const list = (name: string) => props.lookup(PDFName.of(name)) as PDFDict;
+  check("alternate text: a named list only removed text used loses it, keeping the rest (its id)", !list("MC1").has(PDFName.of("ActualText")) && list("MC1").has(PDFName.of("MCID")));
+  check("alternate text: a list a kept line shares stays as it was; the removed text gets a copy without it", list("MC2").has(PDFName.of("ActualText")) && props.entries().length === 3 && raw.includes("SHAREDALT"));
+  check("alternate text: the rest of each list is kept (language, ids)", /\/Span <<\/Lang \(en\)>> BDC/.test(raw) && raw.includes("/MCID 2") && textOf((await itemsOf(out))[0]).includes("Kept line shares the list"));
+}
+
+// --- After a save: covered words and the free plan's mark aren't offered; lines in page order -------------------
+{
+  const doc = await PDFDocument.create();
+  const { context } = doc;
+  const helv = context.register(context.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Helvetica", Encoding: "WinAnsiEncoding" }));
+  const form = context.register(context.stream("BT /F1 14 Tf 0 0 Td (Text inside a reused block) Tj ET", { Type: "XObject", Subtype: "Form", BBox: [0, 0, 400, 40], Resources: { Font: { F1: helv } } }));
+  rawPage(doc, [595, 842], "BT /F1 12 Tf 72 760 Td (First line) Tj ET\nq 1 0 0 1 72 720 cm /Fm Do Q\nBT /F1 12 Tf 72 680 Td (Middle line) Tj ET\nBT /F1 12 Tf 72 640 Td (Last line) Tj ET", { XObject: { Fm: form }, Font: { F1: helv } });
+  const bytes = await doc.save();
+  const [runs] = await runsOf(bytes);
+  let report: TextEditReport | null = null;
+  const saved = await bakeAnnotations(
+    bytes,
+    [edit(find(runs, "Text inside a reused block")!, 0, { text: "Block, changed" }), edit(find(runs, "Middle line")!, 0, { text: "Middle, changed" })],
+    { fonts: noto, watermark: true, onTextEdits: (r) => (report = r) }
+  );
+  const [again] = await runsOf(saved);
+  check("after a save: one covered, one removed", (report as TextEditReport | null)?.removed === 1 && (report as TextEditReport | null)?.covered.length === 1);
+  check("after a save: the covered words aren't offered again, the new ones are", !again.some((r) => r.text === "Text inside a reused block") && again.some((r) => r.text === "Block, changed"), again.map((r) => r.text));
+  check("after a save: the free plan's mark isn't offered as a line", !again.some((r) => r.text === "Made with PDF Wizard") && textOf((await itemsOf(saved))[0]).includes("Made with PDF Wizard"), again.map((r) => r.text));
+  check("after a save: lines come in page order, the changed ones where they are", again.map((r) => r.text).join("|") === "First line|Block, changed|Middle, changed|Last line", again.map((r) => r.text));
+}
+
+// --- The editor's helpers for presses, names and reports -----------------------------------------------------
+{
+  check("caret: the position nearest the press", nearestCaret([0, 7, 14, 21, 28], 16) === 2 && nearestCaret([0, 7, 14], -5) === 0 && nearestCaret([0, 7, 14], 99) === 2);
+  const run = { display: [1, 0, 0, -1, 100, 200] as [number, number, number, number, number, number] };
+  check("a press in the line's own space", toRunSpace(run.display, [130, 195]).map((v) => Math.round(v)).join() === "30,5");
+  const lines = [{ box: { x: 0, y: 0, width: 100, height: 8 } }, { box: { x: 0, y: 10, width: 100, height: 8 } }];
+  check("overlapping touch targets: the line nearest the press wins", nearestRun(lines, [50, 9.5]) === 1 && nearestRun(lines, [50, 8.5]) === 0 && nearestRun(lines, [50, 4]) === 0);
+  check("lines named by what was done", runLabel({ text: "Old words" }) === "Old words" && runLabel({ text: "Old words" }, { text: "New words" }) === "Changed: New words" && runLabel({ text: "Old words" }, { text: "" }) === "Removed: Old words");
+  const a = { removed: 1, covered: [{ page: 2, reason: "form" as const }], fonts: [], missing: ["中"] };
+  const b = { removed: 2, covered: [], fonts: [{ page: 1, from: "Calibri", to: "Helvetica" }], missing: ["中", "😀"] };
+  const both = joinReports(a, b)!;
+  check("a page turn's report joins the save's", both.removed === 3 && both.covered.length === 1 && both.fonts.length === 1 && both.missing.join("") === "中😀" && joinReports(undefined, b) === b && joinReports(a, null) === a);
+  const src = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+  const editor = src("components/editor/PdfEditor.tsx");
+  const view = src("components/editor/PageView.tsx");
+  check("a page turn's text edits are reported with the next save or download", /bakeAnnotations\(bytes, own, \{ onTextEdits/.test(editor) && /joinReports\(turnedText\.current, report\)/.test(editor));
+  check("E takes focus to the page's text, as Enter on Edit text does", /handleToolChange\(mapped, mapped === "edit-text"\)/.test(editor));
+  check("opened from Edit PDF Text, focus goes to the page's first line", /get\("mode"\) !== "text"\) return;\s*setTool\("edit-text"\);\s*setRunFocusPage\(0\)/.test(editor) && /onRunsFocused=\{\(\) => setRunFocusPage\(null\)\}/.test(editor));
+  check("undo, redo, removing and changing are said aloud", /say\("Undone\."\)/.test(editor) && /say\("Redone\."\)/.test(editor) && /Removed: \$\{snippet/.test(editor) && /Changed to: \$\{snippet/.test(editor));
+  check("a press puts the caret where it pressed; only the keys select every word", /if \(!at\) \{\s*input\.select\(\);/.test(view) && /e\.detail === 0\) return openRun\(run, null\)/.test(view));
+  check("phones: typed in the sheet's 16px box, zoom kept above the sheet", /data-edit-field/.test(src("components/editor/PropertiesPanel.tsx")) && /text-base/.test(src("components/editor/PropertiesPanel.tsx")) && /bottom: sheetCover \+ 16/.test(editor));
+  check("changed text has no floating delete button over the line above", /\{!fixed && \(\s*<button/.test(src("components/editor/AnnotationView.tsx")));
+  check("one message for a page: how it works, or why there is nothing to change", /if \(!runs\.length\) toast\(/.test(editor) && /if \(!textHinted\.current\) toast\("Choose a line/.test(editor) && !/textHinted\.current = true;\s*toast\("Choose/.test(editor));
+  check("Select points at Edit text after a press on the page's own text", /To change this text, choose Edit text \(E\)/.test(editor));
+  check("Restore original and closing the panel go back to the line", /focusAfter\.current = `run:\$\{gone\.run\.key\}`/.test(editor) && /if \(selected\.type === "edit"\) focusEdit\(selected\)/.test(editor));
+  check("Edit PDF's title says it changes text", /change text/i.test(getTool("edit-pdf")!.title));
+  check("the questions name the free plan's mark", /Made with PDF Wizard/.test(src("components/tools/EditTextAbout.tsx")));
 }
 
 // --- Registered like the other tools; loads on demand; limits as they were --------------------------------

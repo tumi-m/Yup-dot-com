@@ -8,7 +8,8 @@ import { DRAG_TOOLS } from "@/lib/editor/types";
 import { createAnnotation, createCentred, resizeDraft, finishDraft } from "@/lib/editor/factory";
 import { pageTouchAction } from "@/lib/editor/canvas";
 import { radioStep, radioTabStops } from "@/lib/editor/keyboard";
-import { ringColor, runStep, runTransform } from "@/lib/editor/text-edit";
+import { nearestCaret, nearestRun, ringColor, runLabel, runStep, runTransform, toRunSpace } from "@/lib/editor/text-edit";
+import { cssFamily } from "@/lib/pdf/edit-text/fonts";
 import type { EditableRun } from "@/lib/pdf/edit-text/types";
 import type { DetectedField } from "@/lib/pdf/forms";
 import { AnnotationView } from "./AnnotationView";
@@ -39,8 +40,11 @@ export function PageView({
   autoFocusRuns = false,
   onOpenRun,
   onRunFocus,
+  onRunsFocused,
   onRemoveRun,
   onCancelEdit,
+  onEditDone,
+  onPageClick,
   onLockedRun,
   onRunsRead,
   onCommit,
@@ -73,8 +77,14 @@ export function PageView({
   focusRuns?: number;
   /** Focus goes to the page's text once it is read (the page was turned to from the text). */
   autoFocusRuns?: boolean;
+  /** Focus went to the page's text as asked (`autoFocusRuns` or `focusRuns`). */
+  onRunsFocused?: () => void;
   /** A run has focus: its edit, if it has one, is the one selected. */
   onRunFocus?: (run: EditableRun) => void;
+  /** Enter in changed text: the change is done. */
+  onEditDone?: (ann: TextEditAnnotation) => void;
+  /** A press on the page with Select, where nothing is: the point, on the page as shown. */
+  onPageClick?: (point: [number, number]) => void;
   /** Escape in changed text: the edit as it was when entered (it goes if that changes nothing). */
   onCancelEdit?: (ann: TextEditAnnotation) => void;
   /** Delete on a run: its words are taken away. */
@@ -110,6 +120,8 @@ export function PageView({
   const runsFocused = useRef(focusRuns);
   const wantRunFocus = useRef(autoFocusRuns);
   const readRuns = useRef(false);
+  /** Where the last press on a run was: a tap's click is moved toward a nearby target, the press isn't. */
+  const pressAt = useRef<{ x: number; y: number; t: number } | null>(null);
   const pageFields = formFields.filter((f) => f.page === pageIndex);
   // Fields shown as inputs are left off the canvas. They are found after the
   // first render, so the page is drawn again once they are.
@@ -175,6 +187,7 @@ export function PageView({
     if (!wantRunFocus.current || !runs?.length) return;
     wantRunFocus.current = false;
     focusRun(Math.min(activeRun, runs.length - 1));
+    onRunsFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRuns, runs]);
 
@@ -208,8 +221,19 @@ export function PageView({
     }
   }
 
-  /** Opens a run to type in: its edit takes focus, its words selected. */
-  function openRun(run: EditableRun) {
+  /** A press's point on the page as shown, in points. */
+  function pagePoint(clientX: number, clientY: number): [number, number] {
+    const rect = layerRef.current!.getBoundingClientRect();
+    return [(clientX - rect.left) / scale, (clientY - rect.top) / scale];
+  }
+
+  /**
+   * Opens a run to type in: its edit takes focus. Opened with the keys, its
+   * words are selected; with a click or a tap, the caret goes where it
+   * pressed. On a phone the words are typed in the sheet's text box, which
+   * is big enough to read.
+   */
+  function openRun(run: EditableRun, at: [number, number] | null) {
     if (run.locked) {
       onLockedRun?.(run);
       return;
@@ -219,10 +243,27 @@ export function PageView({
       id = onOpenRun?.(run, background(run)) ?? null;
     });
     if (!id) return;
-    const input = layerRef.current?.querySelector<HTMLInputElement>(`[data-ann-id="${CSS.escape(id)}"] input`);
+    const phone = window.matchMedia("(max-width: 767px)").matches;
+    const input = phone
+      ? document.querySelector<HTMLInputElement>("[data-properties] [data-edit-field]")
+      : layerRef.current?.querySelector<HTMLInputElement>(`[data-ann-id="${CSS.escape(id)}"] input`);
     if (!input) return;
     input.focus({ preventScroll: true });
-    input.select();
+    const text = input.value;
+    if (!at) {
+      input.select();
+      return;
+    }
+    // A run just opened isn't in this render's list yet: it looks as the run does.
+    const made = annotations.find((a): a is TextEditAnnotation => a.id === id && a.type === "edit");
+    const look = made ?? { italic: run.font.italic, bold: run.font.bold, fontSize: run.size };
+    // The words are shown in the editor's own font: measure them in it.
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return;
+    ctx.font = `${look.italic ? "italic " : ""}${look.bold ? 700 : 400} ${look.fontSize}px ${cssFamily(run.font.family)}`;
+    const widths = Array.from({ length: text.length + 1 }, (_, i) => ctx.measureText(text.slice(0, i)).width);
+    const caret = nearestCaret(widths, toRunSpace(run.display, at)[0]);
+    input.setSelectionRange(caret, caret);
   }
 
   /** Enter or Escape in changed text: back to its run (Edit text) or to the edit itself. */
@@ -232,6 +273,7 @@ export function PageView({
       ? layer?.querySelector<HTMLElement>(`[data-run-key="${CSS.escape(ann.run.key)}"]`)
       : layer?.querySelector<HTMLElement>(`[data-ann-id="${CSS.escape(ann.id)}"] [data-ann-focus]`);
     target?.focus({ preventScroll: true });
+    if (how === "done") onEditDone?.(ann);
     if (how === "cancel") {
       if (onCancelEdit && reverted?.type === "edit") onCancelEdit(reverted);
       else onSelect(null);
@@ -247,6 +289,7 @@ export function PageView({
   }
 
   function handlePointerDown(e: React.PointerEvent) {
+    if (tool === "select" && e.target === e.currentTarget) onPageClick?.(pagePoint(e.clientX, e.clientY));
     if (tool === "select" || tool === "edit-text") {
       // A finger may be starting a swipe that scrolls the page: deselect on
       // lift, and not when the swipe takes over (pointercancel).
@@ -427,21 +470,38 @@ export function PageView({
           {/* Edit text: each run of the page's text, to choose with a click, a tap or the keys. */}
           {runsOn && runs && runs.length > 0 && (
             <div role="group" aria-label={`Text on page ${pageIndex + 1}`} className="pointer-events-none absolute inset-0 z-[15]">
-              {runs.map((run, i) => (
+              {runs.map((run, i) => {
+                const width = run.x1 - run.x0;
+                const height = (run.ascent - run.descent) * run.size;
+                // A finger's target is at least 24px each way; where targets overlap, the line nearest the press wins.
+                const padX = Math.max(0, (24 / scale - width) / 2);
+                const padY = Math.max(0, (24 / scale - height) / 2);
+                const made = annotations.find((a): a is TextEditAnnotation => a.type === "edit" && a.run.key === run.key);
+                return (
                 <div key={run.key} className="absolute left-0 top-0 h-0 w-0" style={{ transform: runTransform(run, scale), transformOrigin: "0 0" }}>
                   <button
                     type="button"
                     data-run-key={run.key}
                     data-run-index={i}
                     tabIndex={i === Math.min(activeRun, runs.length - 1) ? 0 : -1}
-                    aria-label={run.text.length > 80 ? `${run.text.slice(0, 80)}…` : run.text}
+                    aria-label={runLabel(run, made)}
                     aria-describedby={run.locked ? lockHint : runHint}
                     onFocus={() => {
                       setActiveRun(i);
                       onRunFocus?.(run);
                     }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => openRun(run)}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      pressAt.current = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+                    }}
+                    onClick={(e) => {
+                      // Enter or Space: this line, its words selected. A press: the line nearest it, the caret where it pressed.
+                      if (e.detail === 0) return openRun(run, null);
+                      const press = pressAt.current && e.timeStamp - pressAt.current.t < 1500 ? pressAt.current : { x: e.clientX, y: e.clientY };
+                      const at = pagePoint(press.x, press.y);
+                      const near = nearestRun(runs, at);
+                      openRun(runs[near] ?? run, at);
+                    }}
                     onKeyDown={(e) => {
                       if (e.altKey || e.ctrlKey || e.metaKey) return;
                       if ((e.key === "Delete" || e.key === "Backspace") && !run.locked) {
@@ -461,10 +521,13 @@ export function PageView({
                         ? "cursor-not-allowed hover:outline-dashed hover:outline-1 hover:outline-slate-400"
                         : "cursor-text hover:bg-sky-400/15 hover:outline hover:outline-1 hover:outline-sky-500/70 focus-visible:bg-sky-400/15"
                     }`}
-                    style={{ left: run.x0, top: -run.ascent * run.size, width: run.x1 - run.x0, height: (run.ascent - run.descent) * run.size }}
-                  />
+                    style={{ left: run.x0, top: -run.ascent * run.size, width, height }}
+                  >
+                    <span aria-hidden className="absolute hidden pointer-coarse:block" style={{ inset: `${-padY}px ${-padX}px` }} />
+                  </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

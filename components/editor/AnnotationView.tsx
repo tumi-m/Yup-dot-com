@@ -285,6 +285,8 @@ export function AnnotationView({
 
       {selected && interactive && (
         <>
+          {/* Changed text is removed from the panel or with Delete: a button over the line above would hide it. */}
+          {!fixed && (
           <button
             type="button"
             // The Delete key and the Properties panel do this from the keyboard.
@@ -303,6 +305,7 @@ export function AnnotationView({
           >
             <Trash2 className="h-3 w-3" />
           </button>
+          )}
 
           {(fixed ? [] : isLine ? (["p1", "p2"] as Handle[]) : BOX_HANDLES).map((h) => (
             <span
@@ -703,7 +706,7 @@ function EditBody({
           readOnly={!interactive}
           // Reached through the text itself (Enter), so it isn't a second Tab stop.
           tabIndex={-1}
-          aria-label="New text"
+          aria-label={`New text for: ${run.text.length > 60 ? `${run.text.slice(0, 60)}…` : run.text}`}
           placeholder="Removed"
           spellCheck={false}
           autoComplete="off"

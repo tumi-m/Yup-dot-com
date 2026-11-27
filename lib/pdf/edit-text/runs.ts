@@ -1,7 +1,8 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import { pageText, type Glyph, type ShowOp } from "../redact/page-text";
+import { pageText, type Glyph, type Paint, type ShowOp } from "../redact/page-text";
 import type { TextRun } from "../redact/marks";
 import { hasRtl } from "../parse";
+import { WATERMARK_TEXT } from "../../edit-usage";
 import type { CoverReason, EditableRun, Family, Matrix, Point, RemovePlan, RunFont } from "./types";
 
 /**
@@ -9,8 +10,10 @@ import type { CoverReason, EditableRun, Family, Matrix, Point, RemovePlan, RunFo
  * letter placed from the page's drawing operations (the reader Redact PDF
  * uses), grouped into runs of one line in one font, size and colour. Each
  * run says where it is, how it is drawn, and which operations of the page's
- * own content draw it, when only it is drawn by them. Takes any pdf.js page,
- * so Node tests can use pdf.js's legacy build.
+ * own content draw it, when only it is drawn by them. Text hidden under a
+ * cover Edit text drew, and the free plan's "Made with PDF Wizard" mark, are
+ * left out. Takes any pdf.js page, so Node tests can use pdf.js's legacy
+ * build.
  */
 
 const mul = (m: Matrix, n: Matrix): Matrix => [
@@ -91,7 +94,8 @@ export async function editableRuns(page: PDFPageProxy, opts: ReadOptions): Promi
   const view = [...vp.transform] as Matrix;
   const glyphs: Glyph[] = [];
   const shows: ShowOp[] = [];
-  const text = await pageText(page, { exact: { ops: opts.ops, noAnnotations: opts.noAnnotations, glyphs, shows } });
+  const paints: Paint[] = [];
+  const text = await pageText(page, { exact: { ops: opts.ops, noAnnotations: opts.noAnnotations, glyphs, shows, paints } });
   const fonts = new Map<string, FontObj | null>();
   const font = (name: string | undefined): FontObj | null => {
     if (!name) return null;
@@ -164,6 +168,8 @@ export async function editableRuns(page: PDFPageProxy, opts: ReadOptions): Promi
   flush();
 
   const out: EditableRun[] = [];
+  /** The last operation that draws each run (null when its letters weren't lined up with any). */
+  const lastOp: (number | null)[] = [];
   for (const group of groups) {
     const head = group[0];
     const inv = invert(head.user);
@@ -226,6 +232,9 @@ export async function editableRuns(page: PDFPageProxy, opts: ReadOptions): Promi
       else remove = verdict;
     }
     const first = head.run.glyphs ? head.run.glyphs[0] : -1 - pieces.indexOf(head);
+    let last: number | null = null;
+    if (exact) for (const p of group) for (let g = p.run.glyphs![0]; g < p.run.glyphs![1]; g++) last = Math.max(last ?? -1, glyphs[g].op);
+    lastOp.push(last);
     out.push({
       key: `${first}:${str}`,
       text: str,
@@ -245,7 +254,121 @@ export async function editableRuns(page: PDFPageProxy, opts: ReadOptions): Promi
       cover,
     });
   }
-  return out;
+  return inPageOrder(settle(out, lastOp, paints));
+}
+
+const areaOf = (b: EditableRun["box"]) => Math.max(0, b.width) * Math.max(0, b.height);
+/** How much of `a` lies inside `b` (a page box from the top left, or a Rect). */
+function sharedArea(a: EditableRun["box"], b: EditableRun["box"] | { x0: number; y0: number; x1: number; y1: number }): number {
+  const [bx0, by0, bx1, by1] = "x0" in b ? [b.x0, b.y0, b.x1, b.y1] : [b.x, b.y, b.x + b.width, b.y + b.height];
+  const w = Math.min(a.x + a.width, bx1) - Math.max(a.x, bx0);
+  const h = Math.min(a.y + a.height, by1) - Math.max(a.y, by0);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * What else on the page bears on each run. A cover Edit text drew over it
+ * hides it: it isn't offered again. A picture or opaque shape painted over
+ * it, or other text in the same place, means taking out its operators
+ * wouldn't take away what shows there: it can only be covered. A second
+ * copy of the same words in the same place (bold made by drawing twice, a
+ * shadow) is one run: both copies go, or both are covered.
+ */
+function settle(runs: EditableRun[], last: (number | null)[], paints: Paint[]): EditableRun[] {
+  const keep = runs.map((r) => r.text !== WATERMARK_TEXT);
+  const overlap = (r: EditableRun) => {
+    r.remove = null;
+    r.cover ??= "overlap";
+  };
+  runs.forEach((run, i) => {
+    const area = areaOf(run.box);
+    if (!keep[i] || !area) return;
+    for (const p of paints) {
+      // Painted before the run, it is under it. A run's order is unknown when its letters weren't lined up: covers are always drawn after the page's own text.
+      if (last[i] !== null ? p.after <= last[i]! : p.kind !== "cover") continue;
+      const share = sharedArea(run.box, p.box) / area;
+      if (p.kind === "cover" && share >= 0.7) {
+        keep[i] = false;
+        return;
+      }
+      if (p.kind !== "cover" && share >= 0.3) overlap(run);
+    }
+  });
+  const order = runs.map((_, i) => i).filter((i) => keep[i]).sort((a, b) => runs[a].box.y - runs[b].box.y);
+  for (let n = 0; n < order.length; n++) {
+    const i = order[n];
+    for (let m = n + 1; m < order.length && keep[i]; m++) {
+      const j = order[m];
+      if (runs[j].box.y > runs[i].box.y + runs[i].box.height) break;
+      if (!keep[j]) continue;
+      const share = sharedArea(runs[i].box, runs[j].box) / Math.max(1e-6, Math.min(areaOf(runs[i].box), areaOf(runs[j].box)));
+      if (share < 0.5) continue;
+      if (runs[i].text !== runs[j].text) {
+        overlap(runs[i]);
+        overlap(runs[j]);
+        continue;
+      }
+      // The copy drawn last is the one on top: it stands for both.
+      const [top, under] = (last[j] ?? -1) >= (last[i] ?? -1) ? [j, i] : [i, j];
+      merge(runs[top], runs[under]);
+      keep[under] = false;
+    }
+  }
+  return runs.filter((_, i) => keep[i]);
+}
+
+/** Folds a second copy of a run's words into it: its operators go too, and the run's box reaches over it. */
+function merge(top: EditableRun, under: EditableRun) {
+  if (top.remove && under.remove && top.remove.total === under.remove.total) {
+    const ops = new Map([...top.remove.ops, ...under.remove.ops].map((o) => [o.index, o]));
+    top.remove = { total: top.remove.total, ops: [...ops.values()].sort((a, b) => a.index - b.index) };
+  } else {
+    // One copy can't be taken out: both are covered, for its reason.
+    top.cover = top.remove ? (under.cover ?? "overlap") : (top.cover ?? "overlap");
+    top.remove = null;
+  }
+  const toRun = invert(top.display);
+  if (!toRun) return;
+  for (const [x, y] of under.quad.map((q) => apply(toRun, q[0], q[1]))) {
+    top.x0 = Math.min(top.x0, x);
+    top.x1 = Math.max(top.x1, x);
+    top.ascent = Math.max(top.ascent, y / top.size);
+    top.descent = Math.min(top.descent, y / top.size);
+  }
+  const s = top.size;
+  top.quad = [apply(top.display, top.x0, top.descent * s), apply(top.display, top.x1, top.descent * s), apply(top.display, top.x1, top.ascent * s), apply(top.display, top.x0, top.ascent * s)];
+  const xs = top.quad.map((q) => q[0]);
+  const ys = top.quad.map((q) => q[1]);
+  top.box = { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+}
+
+/**
+ * Runs in reading order on the page as shown: line by line down the page
+ * (as most of its text runs), each line from its start. The page's drawing
+ * order isn't kept: words a save draws again come last in it.
+ */
+function inPageOrder(runs: EditableRun[]): EditableRun[] {
+  if (runs.length < 2) return runs;
+  // The way most of the text runs.
+  const ways = new Map<string, { n: number; m: Matrix }>();
+  for (const r of runs) {
+    const key = `${Math.round(Math.atan2(r.display[1], r.display[0]) / (Math.PI / 2))}`;
+    const e = ways.get(key) ?? { n: 0, m: r.display };
+    e.n++;
+    ways.set(key, e);
+  }
+  const m = [...ways.values()].sort((a, b) => b.n - a.n)[0].m;
+  const along = Math.hypot(m[0], m[1]) || 1;
+  const up = Math.hypot(m[2], m[3]) || 1;
+  const placed = runs.map((r) => ({ r, line: -(r.display[4] * m[2] + r.display[5] * m[3]) / up, at: (r.display[4] * m[0] + r.display[5] * m[1]) / along }));
+  placed.sort((a, b) => a.line - b.line);
+  const lines: (typeof placed)[] = [];
+  for (const p of placed) {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(p.line - line[0].line) < Math.min(p.r.size, line[0].r.size) * 0.5) line.push(p);
+    else lines.push([p]);
+  }
+  return lines.flatMap((line) => line.sort((a, b) => a.at - b.at).map((p) => p.r));
 }
 
 const colourOf = (s: ShowOp) => (s.mode === 1 || s.mode === 5 ? s.stroke : s.fill) ?? "#000000";
@@ -321,7 +444,7 @@ function plan(group: Piece[], glyphs: Glyph[], shows: ShowOp[], level: number[],
   for (const k of ops) {
     const s = shows[k];
     if (s.form || level[k] < 0) return { cover: "form" };
-    if (s.mode === 3 || s.mode === 7) return { cover: "hidden" };
+    if (s.mode === 3 || s.mode === 7 || s.alpha < 0.01) return { cover: "hidden" };
     if (s.mode > 3) return { cover: "clip" };
     if (s.clip === "complex") return { cover: "clip" };
     if (s.clip && (s.clip.x0 > box.x + 1 || s.clip.y0 > box.y + 1 || s.clip.x1 < box.x + box.width - 1 || s.clip.y1 < box.y + box.height - 1)) return { cover: "clip" };
