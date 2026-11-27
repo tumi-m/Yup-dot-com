@@ -536,6 +536,164 @@ class Inspect(Files):
         self.assertEqual(self.refused(b"a,b\n\0\0\0", "csv").code, "mismatch")
 
 
+PNG_1PX = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def rtf_field(code: str) -> bytes:
+    return ("{\\rtf1\\ansi{\\fonttbl{\\f0 Arial;}}\\f0 before\\par{\\field{\\*\\fldinst " + code + "}{\\fldrslt cached}}\\par after\\par}").encode()
+
+
+def docx_fields(*runs: str, simple: str | None = None) -> bytes:
+    """A .docx whose field code is split over runs, or a fldSimple."""
+    body = '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+    body += "".join(f'<w:r><w:instrText xml:space="preserve">{r}</w:instrText></w:r>' for r in runs)
+    body += '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>cached</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+    if simple:
+        body += f'<w:p><w:fldSimple w:instr="{simple.replace(chr(34), "&quot;")}"><w:r><w:t>x</w:t></w:r></w:fldSimple></w:p>'
+    document = f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>'
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types({"/word/document.xml": WORD_MAIN}))
+        z.writestr("_rels/.rels", rels("word/document.xml"))
+        z.writestr("word/document.xml", document)
+    return buf.getvalue()
+
+
+def with_rel(data: bytes, kind: str, target: str, external: bool) -> bytes:
+    """A .docx with one more relationship from its document."""
+    mode = ' TargetMode="External"' if external else ""
+    rel = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+           f'<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{kind}" Target="{target}"{mode}/>'
+           "</Relationships>")
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, "w") as z:
+        for n in src.namelist():
+            z.writestr(n, src.read(n))
+        z.writestr("word/_rels/document.xml.rels", rel)
+    return out.getvalue()
+
+
+class Links(Files):
+    """Files that reach outside themselves are turned away before LibreOffice sees them."""
+
+    def code(self, data, ext):
+        return self.refused(data, ext).code
+
+    def test_rtf_fields(self):
+        for code in (
+            'INCLUDEPICTURE "/usr/share/pixmaps/x.png"',
+            'INCLUDEPICTURE "file:///etc/hostname"',
+            'INCLUDEPICTURE "/proc/self/cwd/../../../etc/passwd" \\\\d',
+            'INCLUDEPICTURE "http://127.0.0.1/x.png"',
+            'INCLUDETEXT "/etc/passwd"',
+            "\\'49NCLUDEPICTURE \"/x.png\"",  # a letter written as \'hh
+            'INCLUDE{}PICTURE "/x.png"',  # a word split by a group
+            "\\u73?NCLUDETEXT \"/x\"",
+            'DDEAUTO c:\\\\windows\\\\system32\\\\cmd.exe "/c calc"',
+            'IMPORT "/x.wmf"',
+        ):
+            with self.subTest(code=code):
+                e = self.refused(rtf_field(code), "rtf")
+                self.assertEqual(e.code, "links", e.message)
+        self.assertIn("(INCLUDEPICTURE)", self.refused(rtf_field('INCLUDEPICTURE "/x"'), "rtf").message)
+        for linked in (b"{\\rtf1 {\\object\\objautlink{\\*\\objclass Word.Document.8}}}", b"{\\rtf1 {\\shp{\\*\\shpinst{\\sp{\\sn pibName}{\\sv file:///etc/x.png}}}}}"):
+            self.assertEqual(self.code(linked, "rtf"), "links")
+        # Fields that don't fetch anything are fine.
+        for code in ('HYPERLINK "https://example.com"', "PAGE", 'MERGEFIELD Link', "DATE \\\\@ \"d MMMM yyyy\""):
+            with self.subTest(code=code):
+                office.inspect(self.write(f"ok-{secrets.token_hex(3)}.rtf", rtf_field(code)), "rtf")
+
+    def test_docx(self):
+        self.assertEqual(self.code(docx_fields(" INCLUDE", "PICTURE ", '"/etc/x.png"'), "docx"), "links")
+        self.assertEqual(self.code(docx_fields(simple='INCLUDETEXT "/etc/passwd"'), "docx"), "links")
+        self.assertEqual(self.code(docx_fields(' DDEAUTO "cmd"'), "docx"), "links")
+        self.assertEqual(self.code(with_rel(docx(), "image", "file:///etc/x.png", True), "docx"), "links")
+        self.assertEqual(self.code(with_rel(docx(), "oleObject", "file:///tmp/a.xlsx", True), "docx"), "links")
+        self.assertEqual(self.code(with_rel(docx(), "aFChunk", "chunk.html", False), "docx"), "links")
+        office.inspect(self.write("link.docx", with_rel(docx_fields(' HYPERLINK "https://example.com"', simple="PAGE"), "hyperlink", "https://example.com", True)), "docx")
+        office.inspect(self.write("merge.docx", docx_fields(" MERGEFIELD Link ")), "docx")
+        doctype = docx().replace(b"x", b"x")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(doctype)) as src, zipfile.ZipFile(buf, "w") as z:
+            for n in src.namelist():
+                d = src.read(n)
+                if n == "word/document.xml":
+                    d = d.replace(b"?>", b'?><!DOCTYPE d [<!ENTITY e SYSTEM "file:///etc/passwd">]>', 1)
+                z.writestr(n, d)
+        self.assertEqual(self.code(buf.getvalue(), "docx"), "unsafe")
+
+    def test_odf(self):
+        T = "application/vnd.oasis.opendocument.text"
+        for href in ("file:///etc/x.png", "/etc/x.png", "../x.png", "Pictures/../../x.png", "http://127.0.0.1/x.png"):
+            body = f'<office:text><text:p><draw:frame><draw:image xlink:href="{href}"/></draw:frame></text:p></office:text>'
+            with self.subTest(href=href):
+                self.assertEqual(self.code(odf(T, body), "odt"), "links")
+        section = '<office:text><text:section text:name="s"><text:section-source xlink:href="file:///etc/passwd"/></text:section></office:text>'
+        self.assertEqual(self.code(odf(T, section), "odt"), "links")
+        dde = '<office:text><text:dde-connection-decls><text:dde-connection-decl office:dde-application="soffice"/></text:dde-connection-decls></office:text>'
+        self.assertEqual(self.code(odf(T, dde), "odt"), "links")
+        inside = '<office:text><text:p><draw:frame><draw:image xlink:href="Pictures/a.png"/></draw:frame><text:a xlink:href="https://example.com">web</text:a></text:p></office:text>'
+        office.inspect(self.write("inside.odt", odf(T, inside)), "odt")
+        S = "application/vnd.oasis.opendocument.spreadsheet"
+        for formula in ('of:=WEBSERVICE("http://x")', "of:=['file:///etc/passwd'#$Sheet1.A1]", 'of:=DDE("soffice";"x";"")', 'of:=FILTERXML("a";"b")'):
+            cell = f'<office:spreadsheet><table:table table:name="A"><table:table-row><table:table-cell table:formula="{formula.replace(chr(34), "&quot;")}" office:value-type="float" office:value="1"/></table:table-row></table:table></office:spreadsheet>'
+            with self.subTest(formula=formula):
+                self.assertEqual(self.code(odf(S, cell), "ods"), "links")
+        source = '<office:spreadsheet><table:table table:name="A"><table:table-source xlink:href="file:///etc/passwd" table:filter-name="Text - txt - csv (StarCalc)"/></table:table></office:spreadsheet>'
+        self.assertEqual(self.code(odf(S, source), "ods"), "links")
+        plain = '<office:spreadsheet><table:table table:name="A"><table:table-row><table:table-cell table:formula="of:=SUM([.A2:.A3])" office:value-type="float" office:value="1"/></table:table-row></table:table></office:spreadsheet>'
+        office.inspect(self.write("sum.ods", odf(S, plain)), "ods")
+
+    def test_repeats_and_arrays_count(self):
+        # 806 bytes that unfold to 20,000 rows x 100 columns (the review's file).
+        S = "application/vnd.oasis.opendocument.spreadsheet"
+        repeat = ('<office:spreadsheet><table:table table:name="A"><table:table-row table:number-rows-repeated="20000">'
+                  '<table:table-cell table:number-columns-repeated="100" office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell>'
+                  "</table:table-row></table:table></office:spreadsheet>")
+        data = odf(S, repeat)
+        self.assertLess(len(data), 2000)
+        e = self.refused(data, "ods")
+        self.assertEqual(e.code, "too-big")
+        self.assertIn("2,000,000", e.message)
+        matrix = ('<office:spreadsheet><table:table table:name="A"><table:table-row><table:table-cell table:formula="of:=1" '
+                  'table:number-matrix-columns-spanned="1000" table:number-matrix-rows-spanned="5000" office:value-type="float" office:value="1"/>'
+                  "</table:table-row></table:table></office:spreadsheet>")
+        self.assertEqual(self.code(odf(S, matrix), "ods"), "too-big")
+        # Empty repeated rows (how LibreOffice pads a sheet) aren't cells.
+        pad = '<office:spreadsheet><table:table table:name="A"><table:table-row table:number-rows-repeated="1048576"><table:table-cell table:number-columns-repeated="1024"/></table:table-row></table:table></office:spreadsheet>'
+        office.inspect(self.write("pad.ods", odf(S, pad)), "ods")
+        arr = xlsx({"A": [("x",)]}).replace(b"x", b"x")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(arr)) as src, zipfile.ZipFile(buf, "w") as z:
+            for n in src.namelist():
+                d = src.read(n)
+                if n.endswith("sheet1.xml"):
+                    d = d.replace(b'<c r="A1" t="inlineStr"><is><t>x</t></is></c>', b'<c r="A1"><f t="array" ref="A1:XFD1048576">1</f><v>1</v></c>')
+                z.writestr(n, d)
+        self.assertEqual(self.code(buf.getvalue(), "xlsx"), "too-big")
+        ext = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(self.files["xlsx"])) as src, zipfile.ZipFile(ext, "w") as z:
+            for n in src.namelist():
+                z.writestr(n, src.read(n))
+            z.writestr("xl/externalLinks/externalLink1.xml", "<externalLink/>")
+        self.assertEqual(self.code(ext.getvalue(), "xlsx"), "links")
+
+    def test_word_97_and_excel_97(self):
+        fib = struct.pack("<HHHHHH", 0xA5EC, 0xC1, 0, 0, 0, 0)
+        for text in (b"\x13 INCLUDEPICTURE \"/etc/x.png\" \x14\x15", ' INCLUDETEXT "/etc/passwd" '.join(["\x13", "\x14"]).encode("utf-16-le")):
+            with self.subTest(text=text[:20]):
+                self.assertEqual(self.code(cfb({"WordDocument": fib + b"\0" * 32 + text, "1Table": b"\0" * 16}), "doc"), "links")
+        linked = cfb({"WordDocument": fib, "1Table": b"\0", "\x01Ole": struct.pack("<II", 0x02000001, 1)})
+        self.assertEqual(self.code(linked, "doc"), "links")
+        office.inspect(self.write("hyper.doc", cfb({"WordDocument": fib + b"\x13 HYPERLINK \"https://x\" \x14", "1Table": b"\0"})), "doc")
+        book = struct.pack("<HH", 0x0809, 16) + b"\0" * 16
+        external = book + struct.pack("<HH", 0x01AE, 8) + struct.pack("<HH", 1, 5) + b"\0a.xls" + struct.pack("<HH", 0x000A, 0)
+        self.assertEqual(self.code(cfb({"Workbook": external}), "xls"), "links")
+        own = book + struct.pack("<HH", 0x01AE, 4) + struct.pack("<HH", 1, 0x0401) + struct.pack("<HH", 0x000A, 0)
+        office.inspect(self.write("own.xls", cfb({"Workbook": own})), "xls")
+
+
 class Tokens(unittest.TestCase):
     def test_round_trip_and_limits(self):
         payload, reason = office.verify(sign(grant("docx", 10)))
@@ -617,7 +775,8 @@ class Convert(Files):
 
     def test_linked_local_file_not_read(self):
         # A picture linked (not embedded) to a file on the server: stock
-        # LibreOffice pulls it into the PDF; with this profile it stays out.
+        # LibreOffice pulls it into the PDF; here it is refused, and even
+        # without that check it stays out.
         picture = os.path.join(self.dir, "server-picture.png")
         with open(picture, "wb") as f:
             f.write(base64.b64decode(
@@ -630,8 +789,50 @@ class Convert(Files):
             "</draw:frame></text:p></office:text>"
         )
         path = self.write("linked.odt", odf("application/vnd.oasis.opendocument.text", body))
-        data, _, _, _ = self.convert("odt", path)
-        self.assertNotIn(b"/Subtype/Image", data.replace(b" ", b""))
+        # Turned away before LibreOffice sees it...
+        self.assertEqual(self.refused(path, "odt").code, "links")
+        # ...and LibreOffice's own settings and root keep it out anyway.
+        job = tempfile.mkdtemp(prefix="pw-office-conv-")
+        self.addCleanup(shutil.rmtree, job, True)
+        src = os.path.join(job, "input.odt")
+        shutil.copy(path, src)
+        with open(office.convert(src, "odt", {}, job, {}), "rb") as f:
+            self.assertNotIn(b"/Subtype/Image", f.read().replace(b" ", b""))
+
+    def test_own_root(self):
+        # Without the file checks: LibreOffice itself only sees system files
+        # and its job's folder, so a picture elsewhere on the server, reached
+        # by path, file:// or /proc/self/cwd, stays out of the PDF.
+        if not office.sandbox_prefix():
+            self.skipTest("no namespaces on this host")
+        outside = tempfile.mkdtemp(prefix="pw-office-outside-")
+        self.addCleanup(shutil.rmtree, outside, True)
+        os.chmod(outside, 0o755)
+        picture = os.path.join(outside, "server.png")
+        with open(picture, "wb") as f:
+            f.write(PNG_1PX)
+        os.chmod(picture, 0o644)
+
+        def raw(code: str) -> bytes:
+            job = tempfile.mkdtemp(prefix="pw-office-raw-")
+            self.addCleanup(shutil.rmtree, job, True)
+            src = os.path.join(job, "input.rtf")
+            with open(src, "wb") as f:
+                f.write(rtf_field(code))
+            with open(office.convert(src, "rtf", {}, job, {}), "rb") as f:
+                return f.read().replace(b" ", b"")
+
+        saved = office._sandbox
+        office._sandbox = []
+        try:
+            control = raw(f'INCLUDEPICTURE "{picture}"')
+        finally:
+            office._sandbox = saved
+        self.assertIn(b"/Subtype/Image", control, "LibreOffice no longer follows this field, so this test proves nothing")
+        for code in (f'INCLUDEPICTURE "{picture}"', f'INCLUDEPICTURE "file://{picture}"', f'INCLUDEPICTURE "/proc/self/cwd/../../..{picture}"'):
+            with self.subTest(code=code):
+                self.assertNotIn(b"/Subtype/Image", raw(code))
+        self.assertEqual(office.health()["isolation"], "own-root")
 
     def test_timeout_and_cancel_leave_nothing_running(self):
         for kw, expected in (({"timeout": 1}, office.Refused), ({"cancelled": lambda: True}, office.Cancelled)):
@@ -769,6 +970,32 @@ class Route(Files):
             self.assertTrue(self.void(g["c"])["used"])
         finally:
             office.MAX_QUEUE = saved
+
+    def test_one_at_a_time(self):
+        data = self.files["docx"]
+        g = grant("docx", len(data))
+        office._busy_subjects.add(g["s"])
+        try:
+            res, body = self.post(data, sign(g))
+        finally:
+            office._busy_subjects.discard(g["s"])
+        self.assertEqual((res.status, json.loads(body)["code"]), (429, "one-at-a-time"))
+
+    @needs_office
+    def test_timeout_is_not_refundable(self):
+        saved = office.TIMEOUT
+        office.TIMEOUT = 1
+        try:
+            data = self.files["long.docx"]
+            g = grant("docx", len(data))
+            res, body = self.post(data, sign(g))
+        finally:
+            office.TIMEOUT = saved
+        self.assertEqual((res.status, json.loads(body)["code"]), (504, "timeout"))
+        verdict = self.void(g["c"])
+        # Not "error": the web app gives back only failures (lib/media-refund.ts).
+        self.assertEqual((verdict["used"], verdict["status"]), (True, "timeout"))
+        self.assertEqual(self.jobs_left(), [])
 
     def test_refund_record(self):
         # A grant voided before use (a refund) can't start a conversion.

@@ -124,27 +124,71 @@ Before LibreOffice sees a file, the worker checks that it is what its name
 says (the bytes, the parts inside a `.docx`, `.xlsx`, `.odt` or `.ods`, the
 streams inside a `.doc` or `.xls`), and turns away password-protected files,
 macro-enabled files (`.docm`, `.xlsm` renamed), zip bombs (more than 512 MB
-unpacked, counted as it unpacks, embedded files included) and sheets with more
-than a million filled cells, each with a message saying what to do.
+unpacked, counted as it unpacks, embedded files included), XML with a
+DOCTYPE, and sheets with more than a million filled cells (cells an `.ods`
+repeats with `number-rows-repeated` and `number-columns-repeated` count once
+per copy, and array formulas count their whole area), each with a message
+saying what to do.
+
+It also turns away anything that reaches outside the file as LibreOffice
+opens it, because LibreOffice follows some of these whatever its settings
+say (an RTF `INCLUDEPICTURE "/path"` field put a server file into a PDF in
+review):
+
+- fields that pull in a file or ask another program: `INCLUDEPICTURE`,
+  `INCLUDETEXT`, `INCLUDE`, `IMPORT`, `LINK`, `DDE`, `DDEAUTO`, `DATABASE`, in
+  RTF (letters written as `\'hh` or `\u`, or split by groups, are read as
+  plain text first), in `.docx` (joined across runs, and `fldSimple`) and in
+  `.doc` (after the field mark, in either text encoding);
+- pictures, objects and files linked rather than embedded: `.docx`/`.xlsx`
+  relationships that point outside the package (web links and the attached
+  template are allowed), imported chunks (`altChunk`), linked workbooks;
+  `.odt`/`.ods` links that leave the package (a scheme, an absolute path or
+  `../`); RTF `\objlink`, `\objautlink` and linked shape pictures; `.doc`
+  OLE objects marked as linked; `.xls` links to other workbooks or programs
+  (`SUPBOOK`);
+- DDE links, and `.ods` formulas that read another file, a website or
+  another program (`WEBSERVICE`, `FILTERXML`, `DDE`, `'file:…'#$Sheet`).
+  LibreOffice recalculates formulas in `.ods` files when it opens them, even
+  with recalculation on load turned off in the profile (a cell saved as 7
+  with the formula `=1+1` prints 2), so these are refused rather than left
+  to the cached value. `.xlsx` files keep their saved values.
 
 LibreOffice runs:
 
 - with a new profile for every job: macros off at the highest level and the
-  document opened with macros never run, links never updated, formulas not
-  recalculated on load (cached values print, so `WEBSERVICE()` and the like
-  never run), pictures or sections linked to files outside the document not
-  loaded, and an unreachable proxy;
-- with no network at all where the host allows a new network namespace
-  (`unshare`; the health check says `"network": "none"`). Docker's default
-  seccomp profile doesn't, so in a plain Docker container it is
-  `"proxy-only"`: no network through LibreOffice's own settings;
+  document opened with macros never run, links never updated, `.xlsx`
+  formulas not recalculated on load, pictures linked from untrusted documents
+  blocked, and an unreachable proxy;
+- **in a root of its own** where the host allows user namespaces (`unshare`;
+  the health check says `"isolation": "own-root"` and `"network": "none"`):
+  a new mount, process and network namespace in which it sees the system's
+  programs, libraries, fonts and dictionaries read-only, a private `/tmp`,
+  `/dev` and `/proc` (only its own processes, so no other process's
+  environment), a two-line `/etc/passwd`, and this job's folder; not the
+  rest of `/etc` or `/usr/share`, `/home`, the worker's code, other jobs or
+  the network. Its own program files under `/usr/lib/libreoffice` stay
+  visible;
+- where the host doesn't allow it (Docker's default seccomp profile blocks
+  `unshare`), with none of that: `"isolation": "none"`, `"network":
+  "proxy-only"`, and the worker logs it at the first conversion. The file
+  checks above still apply. To get the root of its own in Docker, run the
+  container with a seccomp profile that allows `unshare` and `mount` in a
+  user namespace, or use a host whose containers allow user namespaces
+  (check the health line after deploying); to refuse to convert without it, set `OFFICE_REQUIRE_ISOLATION=1`
+  (health then reports `"ready": false` on such a host);
 - never as root: as the image's `worker` user (as `nobody` if the worker is
   ever started as root), with a clean environment (no secrets), and the worker
-  process itself marked non-dumpable, so LibreOffice can't read its memory or
-  environment;
+  process itself marked non-dumpable. Without its own root, LibreOffice still
+  runs as the same user as the worker, so this, the clean environment and the
+  file checks are what keep it from other processes' files;
 - with a hard timeout (90 s), a memory ceiling (2 GB of address space, a CPU
-  limit and a 512 MB output limit), two at a time, up to eight more files
-  waiting their turn for a minute before "busy, try again in a minute".
+  limit and a 512 MB output limit), two at a time and one per person (the
+  grant names who), up to eight more files waiting their turn for a minute
+  before "busy, try again in a minute". A conversion that runs out of time
+  isn't given back (the web app refunds only failures, and at most five a
+  day per person), so a file built to use up the clock can't be repeated
+  for free.
 
 Spreadsheets have three options, set on the page: fit the sheet's width to
 the page (on by default; never enlarges), orientation (automatic turns a sheet
@@ -166,7 +210,8 @@ printed exactly as written (leading zeros and dates kept).
 
    ```bash
    curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<worker>/health
-   # ... "office": {"ready": true, "soffice": true, "uno": true, "network": "none" or "proxy-only", ...}
+   # ... "office": {"ready": true, "soffice": true, "uno": true,
+   #                "isolation": "own-root" or "none", "network": "none" or "proxy-only", ...}
    ```
 
 4. On the web app (Vercel), with `MEDIA_WORKER_URL` and `MEDIA_WORKER_SECRET`
@@ -211,7 +256,8 @@ Settings (all optional):
 | `OFFICE_MAX_UNZIPPED_BYTES`, `OFFICE_MAX_ZIP_ENTRIES` | Zip bomb limits (default 512 MB, 10,000 parts) |
 | `OFFICE_MAX_CELLS` | Filled cells a spreadsheet may have (default 1,000,000, about 2,000 pages) |
 | `OFFICE_MAX_PDF_BYTES` | Largest PDF written (default 512 MB) |
-| `OFFICE_SANDBOX` | `off` skips the network namespace (default `auto`) |
+| `OFFICE_SANDBOX` | `off` skips the namespaces: no root of its own, no network isolation (default `auto`) |
+| `OFFICE_REQUIRE_ISOLATION` | `1` refuses to convert where LibreOffice can't get its own root (default off: the file checks still apply) |
 | `OFFICE_USER` | Who LibreOffice runs as if the worker runs as root (default `nobody`) |
 | `OFFICE_SOFFICE`, `OFFICE_PYTHON` | Only outside the Dockerfile: `soffice`, and the Python that has `python3-uno` (default `/usr/bin/python3`) |
 
@@ -236,15 +282,21 @@ rejection of single videos, friendly errors, and that no media is fetched.
 `npm run test:office` (`test_office.py`, standard library only) checks what a
 file really is without LibreOffice: wrong extensions, damaged files, encrypted
 compound files, `.docm`/`.xlsm` renamed, zip bombs (declared, understated and
-embedded), sheets too big, empty files, CSV separators and encodings, tokens.
+embedded), sheets too big (repeated `.ods` cells and array formulas
+counted), empty files, CSV separators and encodings, tokens, and files that
+reach outside themselves: RTF, `.docx` and `.doc` include fields (escaped,
+split and `/proc` paths among them), linked pictures, objects, sections and
+workbooks, `altChunk`, DDE, DOCTYPEs, and `.ods` formulas that read outside.
 With LibreOffice and `python3-uno` installed it also converts every format and
 reads the PDFs back (pages, text, tables, embedded fonts, sheet options, CSV
 values as written), checks real password-protected files from LibreOffice, a
-picture linked to a file on the server staying out of the PDF, the timeout
+picture linked to a file on the server staying out of the PDF, LibreOffice's
+own root (an RTF picture field reaching a server file by path, `file://` and
+`/proc/self/cwd` gets nothing, where stock settings embed it), the timeout
 and cancel leaving no process behind, LibreOffice not running as root and
 having no network, and the route through `worker.py`'s own handler: one
-conversion per grant, refusals, busy, the browser hanging up, and the records
-a refund reads.
+conversion per grant, one at a time per person, refusals, busy, the browser
+hanging up, a timeout that isn't refundable, and the records a refund reads.
 
 ## HTML to PDF (web pages, HTML files, pasted HTML)
 

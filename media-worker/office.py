@@ -84,6 +84,9 @@ UNO_PYTHON = os.environ.get("OFFICE_PYTHON") or "/usr/bin/python3"
 # "auto": LibreOffice gets no network where the host allows a new network
 # namespace; "off" skips that (it still has an unreachable proxy).
 SANDBOX = os.environ.get("OFFICE_SANDBOX", "auto").strip().lower()
+# "1": refuse to convert where LibreOffice can't get its own root and no
+# network (health() says which applies), rather than rely on the file checks.
+REQUIRE_ISOLATION = os.environ.get("OFFICE_REQUIRE_ISOLATION", "").strip() == "1"
 # Who LibreOffice runs as if the worker itself runs as root.
 RUN_AS = os.environ.get("OFFICE_USER", "nobody")
 
@@ -181,10 +184,12 @@ def job_from(payload: dict) -> dict | None:
     ref = payload.get("c")
     if not isinstance(ref, str) or not re.fullmatch(r"[\w-]{8,64}", ref):
         return None
+    subject = payload.get("s")
     return {
         "ext": ext,
         "size": size,
         "ref": ref,
+        "subject": subject if isinstance(subject, str) else ref,
         "options": {
             "fit": opts.get("fit") is not False,
             "orientation": opts.get("orientation") if opts.get("orientation") in ("portrait", "landscape") else "auto",
@@ -349,12 +354,13 @@ class Ole:
     def read(self, name: str, limit: int) -> bytes:
         """The first `limit` bytes of a stream."""
         e = next((e for e in self.entries if e["kind"] == 2 and e["name"] == name), None)
-        if not e:
-            return b""
+        return self._read_entry(e, limit) if e else b""
+
+    def _read_entry(self, e: dict, limit: int) -> bytes:
         want = min(e["size"], limit)
+        out = bytearray()
         if e["size"] < self.mini_cutoff:
             mini = self.chain(self.mini_start)
-            out = b""
             for m in self.chain(e["start"], self.minifat):
                 big, off = divmod(m * 64, self.ss)
                 if big >= len(mini):
@@ -362,13 +368,12 @@ class Ole:
                 out += self.sector(mini[big])[off:off + 64]
                 if len(out) >= want:
                     break
-            return out[:want]
-        out = b""
+            return bytes(out[:want])
         for s in self.chain(e["start"]):
             out += self.sector(s)
             if len(out) >= want:
                 break
-        return out[:want]
+        return bytes(out[:want])
 
 
 def inspect_ole(path: str, ext: str, kind: str) -> dict:
@@ -404,6 +409,7 @@ def inspect_ole(path: str, ext: str, kind: str) -> dict:
                 if rtype == 0x000A:  # end of the workbook globals
                     break
                 pos += 4 + rlen
+        _ole_links(ole, path, kind, names)
     return {}
 
 
@@ -496,24 +502,239 @@ def _read_small(zf: zipfile.ZipFile, name: str, limit: int = MB) -> bytes:
         return b""
 
 
-# Cells with a value: <v> (numbers, shared strings, formulas' results) and
-# <is> (inline strings) in a worksheet; office:value-type in ODF.
-_CELL_MARKS = {"ooxml": (b"<v>", b"<is>"), "odf": (b"office:value-type=",)}
+# ---------------------------------------------------------------------------
+# What a document reaches for outside itself
+# ---------------------------------------------------------------------------
+#
+# Office formats can pull in other files as they open: a field that includes
+# a picture or text from a path or URL (INCLUDEPICTURE "/etc/...", which
+# LibreOffice follows in RTF), a picture or object linked rather than
+# embedded, a section or sheet linked to another file, a DDE link, a formula
+# that reads another file or a website. A file with any of these is turned
+# away before LibreOffice sees it, whatever LibreOffice's own settings say.
+
+# Field codes that fetch another file or ask another program.
+LINK_FIELDS = {"INCLUDEPICTURE", "INCLUDETEXT", "INCLUDE", "IMPORT", "LINK", "DDE", "DDEAUTO", "DATABASE"}
+# Formulas that read outside the file: another program, a website, another
+# file ('file:///x.ods'#$Sheet1.A1, or any quoted URL).
+OUTSIDE_FORMULA = re.compile(r"\b(WEBSERVICE|FILTERXML|DDE)\s*\(|'[A-Z][A-Z0-9+.-]*:|#\$", re.I)
+
+
+def links_out(what: str) -> Refused:
+    return Refused(422, f"This file {what}, which we don't follow. Put it in the document itself, save, and try again.", "links")
+
+
+def unsafe_xml() -> Refused:
+    return Refused(415, "This file contains XML that Office never writes (a DOCTYPE), so it isn't converted.", "unsafe")
+
+
+def _first_word(code: str) -> str:
+    words = code.strip().lstrip("\\").split(None, 1)
+    return words[0].upper() if words else ""
+
+
+def _check_fields(codes) -> None:
+    for code in codes:
+        word = _first_word(code)
+        if word in LINK_FIELDS:
+            raise links_out(f"has a field ({word}) that pulls in another file or program")
+
+
+def _area(ref: str) -> int:
+    """Cells in an A1:B2 reference."""
+    m = re.fullmatch(r"\$?([A-Z]{1,3})\$?(\d{1,7})(?::\$?([A-Z]{1,3})\$?(\d{1,7}))?", ref.strip().upper())
+    if not m:
+        return 1
+    col = lambda s: sum((ord(ch) - 64) * 26 ** i for i, ch in enumerate(reversed(s)))  # noqa: E731
+    c1, r1 = col(m.group(1)), int(m.group(2))
+    c2, r2 = (col(m.group(3)), int(m.group(4))) if m.group(3) else (c1, r1)
+    return (abs(c2 - c1) + 1) * (abs(r2 - r1) + 1)
+
+
+def _int(value, default: int = 1, cap: int = 1 << 24) -> int:
+    try:
+        return max(0, min(int(value), cap))
+    except (TypeError, ValueError):
+        return default
+
+
+NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+NS_XLINK = "http://www.w3.org/1999/xlink"
+NS_TABLE = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+NS_OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+
+
+class _Scan:
+    """Reads one XML part as it unpacks (expat, no DTDs, no outside entities)."""
+
+    def __init__(self):
+        from xml.parsers import expat
+
+        self.cells = 0
+        p = expat.ParserCreate(namespace_separator=" ")
+        p.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+        p.StartDoctypeDeclHandler = self._doctype
+        p.StartElementHandler = self.start
+        p.EndElementHandler = self.end
+        p.CharacterDataHandler = self.text
+        self.parser, self.error = p, expat.ExpatError
+
+    def _doctype(self, *args):
+        raise unsafe_xml()
+
+    def feed(self, data: bytes, final: bool = False) -> None:
+        self.parser.Parse(data, final)
+        if final:
+            self.finish()
+
+    def start(self, name: str, attrs: dict) -> None:
+        pass
+
+    def end(self, name: str) -> None:
+        pass
+
+    def text(self, data: str) -> None:
+        pass
+
+    def finish(self) -> None:
+        pass
+
+
+def _local(name: str) -> str:
+    return name.rsplit(" ", 1)[-1]
+
+
+class _Rels(_Scan):
+    """OOXML relationships: anything but a web link pointing outside the
+    package (a linked picture, OLE object, subdocument or workbook), and
+    imported chunks (altChunk), which can load outside files themselves."""
+
+    def start(self, name, attrs):
+        if _local(name) != "Relationship":
+            return
+        kind = attrs.get("Type", "")
+        if kind.endswith("/aFChunk"):
+            raise links_out("has an imported part (altChunk) that can load other files")
+        if attrs.get("TargetMode", "").lower() == "external" and not kind.endswith(("/hyperlink", "/attachedTemplate")):
+            raise links_out("links to a picture, object or file outside the document")
+
+
+class _WordFields(_Scan):
+    """Word field codes, joined across runs, one per field."""
+
+    def __init__(self):
+        super().__init__()
+        self.codes, self.inside = [""], False
+
+    def start(self, name, attrs):
+        local = _local(name)
+        if local == "fldChar" and attrs.get(f"{NS_W} fldCharType") == "begin":
+            self.codes.append("")
+        elif local == "fldSimple":
+            self.codes.append(attrs.get(f"{NS_W} instr", ""))
+            self.codes.append("")
+        elif local == "instrText":
+            self.inside = True
+
+    def end(self, name):
+        if _local(name) == "instrText":
+            self.inside = False
+
+    def text(self, data):
+        if self.inside and len(self.codes[-1]) < 4096:
+            self.codes[-1] += data
+
+    def finish(self):
+        _check_fields(self.codes)
+
+
+class _SheetCells(_Scan):
+    """An Excel worksheet's filled cells, and the area of array formulas."""
+
+    def __init__(self):
+        super().__init__()
+        self.counted = True
+
+    def start(self, name, attrs):
+        local = _local(name)
+        if local == "c":
+            self.counted = False
+        elif local in ("v", "is") and not self.counted:
+            self.counted = True
+            self.cells += 1
+        elif local == "f" and attrs.get("t") == "array" and attrs.get("ref"):
+            self.cells += _area(attrs["ref"])
+
+
+class _Odf(_Scan):
+    """ODF content and styles: links out of the package, DDE, formulas that
+    read outside the file, and a sheet's filled cells, repeats counted."""
+
+    def __init__(self, sheet: bool):
+        super().__init__()
+        self.sheet, self.rows = sheet, [1]
+
+    def start(self, name, attrs):
+        local = _local(name)
+        href = attrs.get(f"{NS_XLINK} href")
+        if href and local != "a" and _outside(href):
+            raise links_out("links to a picture, section or object outside the document")
+        if local in ("dde-source", "dde-connection-decl", "dde-link"):
+            raise links_out("has a DDE link to another program")
+        formula = attrs.get(f"{NS_TABLE} formula")
+        if formula and OUTSIDE_FORMULA.search(formula):
+            raise links_out("has formulas that read another file, a website or another program")
+        if not self.sheet:
+            return
+        if local == "table-row":
+            self.rows.append(_int(attrs.get(f"{NS_TABLE} number-rows-repeated")))
+        elif local in ("table-cell", "covered-table-cell"):
+            if attrs.get(f"{NS_OFFICE} value-type") or formula:
+                cols = _int(attrs.get(f"{NS_TABLE} number-columns-repeated"))
+                self.cells += cols * self.rows[-1]
+            spanned = _int(attrs.get(f"{NS_TABLE} number-matrix-columns-spanned"), 0) * _int(attrs.get(f"{NS_TABLE} number-matrix-rows-spanned"), 0)
+            self.cells += spanned
+
+    def end(self, name):
+        if self.sheet and _local(name) == "table-row" and len(self.rows) > 1:
+            self.rows.pop()
+
+
+def _outside(href: str) -> bool:
+    """A link that leaves the package: a scheme (file:, http:), an absolute
+    path, or a path that climbs out of it. Pictures/x.png and ./Object 1
+    stay inside; #bookmark points within the document."""
+    h = href.strip()
+    if not h or h.startswith("#"):
+        return False
+    return bool(re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", h)) or h.startswith(("/", "\\")) or h.replace("\\", "/").startswith("../") or "/../" in h.replace("\\", "/")
+
+
+def _scanner(name: str, kind: str, container: str):
+    if container == "ooxml":
+        if name.endswith(".rels"):
+            return _Rels()
+        if kind == "word" and re.fullmatch(r"word/[^/]+\.xml", name):
+            return _WordFields()
+        if kind == "sheet" and name.startswith("xl/externalLinks/"):
+            raise links_out("links to another workbook")
+        if kind == "sheet" and re.fullmatch(r"xl/worksheets/[^/]+\.xml", name):
+            return _SheetCells()
+    if container == "odf" and name in ("content.xml", "styles.xml"):
+        return _Odf(sheet=kind == "sheet" and name == "content.xml")
+    return None
 
 
 def _unpack_all(zf, infos, ext: str, kind: str, container: str, budget: int, depth: int) -> tuple:
-    """Unpacks every part, raising a bomb past `budget` bytes; returns the
-    bytes and the filled cells counted on the way. A zip inside (an embedded
-    workbook, which LibreOffice may open) counts against the same budget."""
+    """Unpacks every part, raising a bomb past `budget` bytes, and reads the
+    XML parts that can link out or hold cells as they come; returns the
+    bytes and the filled cells. A zip inside (an embedded workbook, which
+    LibreOffice may open) counts against the same budget."""
     total, cells = 0, 0
-    marks = _CELL_MARKS.get(container, ())
     for info in infos:
         if info.is_dir():
             continue
-        counting = kind == "sheet" and (
-            (container == "ooxml" and info.filename.startswith("xl/worksheets/") and info.filename.endswith(".xml"))
-            or (container == "odf" and info.filename == "content.xml")
-        )
+        scan = _scanner(info.filename, kind, container) if depth == 0 else None
         # Read to the real end of the data, whatever size the header gives
         # (the size only decides when the checksum is checked).
         probe = zipfile.ZipInfo(info.filename, info.date_time)
@@ -521,7 +742,6 @@ def _unpack_all(zf, infos, ext: str, kind: str, container: str, budget: int, dep
             setattr(probe, attr, getattr(info, attr))
         probe.file_size = 1 << 62
         nested = bytearray() if depth < 1 else None
-        tail = b""
         try:
             with zf.open(probe) as f:
                 while True:
@@ -531,13 +751,20 @@ def _unpack_all(zf, infos, ext: str, kind: str, container: str, budget: int, dep
                     total += len(chunk)
                     if total > budget:
                         raise bomb()
-                    if counting:
-                        window = tail + chunk
-                        cells += sum(window.count(m) for m in marks) - sum(tail.count(m) for m in marks)
-                        tail = window[-32:]
+                    if scan:
+                        scan.feed(chunk)
                     if nested is not None and (nested or chunk.startswith(ZIP_MAGIC)):
                         nested += chunk
+            if scan:
+                scan.feed(b"", True)
+                cells += scan.cells
+                if kind == "sheet" and cells > MAX_CELLS:
+                    raise too_many_cells(cells)
         except (zipfile.BadZipFile, OSError, EOFError, ValueError, NotImplementedError, RuntimeError):
+            raise damaged(ext)
+        except Exception as e:  # noqa: BLE001 — expat's errors: XML LibreOffice wouldn't read either
+            if isinstance(e, Refused):
+                raise
             raise damaged(ext)
         if nested:
             try:
@@ -557,11 +784,95 @@ def _unpack_all(zf, infos, ext: str, kind: str, container: str, budget: int, dep
     return total, cells
 
 
+# RTF: a field's instruction text is in {\*\fldinst ...}; letters can be
+# written as \'hh or \uN, and groups can split a word, so each one is read
+# as plain text first.
+RTF_LINKED = re.compile(rb"\\(objlink|objautlink|linkself)\b|\\sn\s+(pibName|fillBlipName)\b", re.I)
+
+
+def _rtf_text(segment: bytes) -> str:
+    text = segment.decode("latin-1")
+    text = re.sub(r"\\'([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), text)
+    text = re.sub(r"\\u(-?\d+) ?\??", lambda m: chr(int(m.group(1)) % 65536), text)
+    text = re.sub(r"\\[a-zA-Z]+-?\d* ?", " ", text)
+    text = re.sub(r"\\(.)", r"\1", text)
+    return text.replace("{", "").replace("}", "")
+
+
+def _rtf_fields(data: bytes) -> list:
+    codes = []
+    for m in re.finditer(rb"\\fldinst", data):
+        start = data.rfind(b"{", 0, m.start())
+        depth, i, end = 0, max(start, 0), min(len(data), m.start() + 65536)
+        while i < end:
+            ch = data[i:i + 1]
+            if ch == b"\\":
+                i += 2
+                continue
+            if ch == b"{":
+                depth += 1
+            elif ch == b"}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        codes.append(_rtf_text(data[m.end():i]))
+    return codes
+
+
+def _rtf_links(path: str) -> None:
+    with open(path, "rb") as f:
+        data = f.read()
+    _check_fields(_rtf_fields(data))
+    if RTF_LINKED.search(data):
+        raise links_out("links to a picture or object outside the document")
+
+
+# Word 97-2003 keeps field codes in its text, after a field-begin mark
+# (0x13), in single-byte or UTF-16 text.
+_DOC_FIELD = re.compile(
+    rb"\x13[ \t]*(" + b"|".join(w.encode() for w in sorted(LINK_FIELDS, key=len, reverse=True)) + rb")\b"
+    + rb"|\x13\x00(?:[ \t]\x00)*(" + b"|".join(b"".join(bytes([c, 0]) for c in w.encode()) for w in sorted(LINK_FIELDS, key=len, reverse=True)) + rb")(?![A-Za-z]\x00)",
+    re.I,
+)
+
+
+def _ole_links(ole: "Ole", path: str, kind: str, names: set) -> None:
+    # A linked (not embedded) OLE object: its \x01Ole stream's flags say so.
+    for e in ole.entries:
+        if e["kind"] == 2 and e["name"] == "\x01Ole":
+            head = ole._read_entry(e, 8)
+            if len(head) >= 8 and struct.unpack_from("<I", head, 4)[0] & 1:
+                raise links_out("has an object linked to another file")
+    if kind == "word":
+        with open(path, "rb") as f:
+            carry = b""
+            for chunk in iter(lambda: f.read(MB), b""):
+                m = _DOC_FIELD.search(carry + chunk)
+                if m:
+                    word = (m.group(1) or m.group(2).replace(b"\x00", b"")).decode().upper()
+                    raise links_out(f"has a field ({word}) that pulls in another file or program")
+                carry = chunk[-64:]
+    else:
+        book = ole.read("Workbook" if "Workbook" in names else "Book", MAX_BYTES)
+        pos = 0
+        while pos + 4 <= len(book):
+            rtype, rlen = struct.unpack_from("<HH", book, pos)
+            # SUPBOOK: another workbook, DDE or OLE source, unless it is this
+            # workbook itself (0x0401) or add-in functions (0x3A01).
+            if rtype == 0x01AE and rlen >= 4 and struct.unpack_from("<H", book, pos + 6)[0] not in (0x0401, 0x3A01):
+                raise links_out("links to another workbook or program")
+            if rtype == 0x000A:
+                break
+            pos += 4 + rlen
+
+
 def inspect_rtf(path: str, ext: str) -> dict:
     with open(path, "rb") as f:
         head = f.read(64)
     if not head.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"{\\rtf"):
         raise mismatch(ext, guess(head) if guess(head) != "unknown" else "unknown")
+    _rtf_links(path)
     return {}
 
 
@@ -713,11 +1024,14 @@ def _drop_root() -> dict:
 
 
 def sandbox_prefix() -> list:
-    """`unshare` into new user and network namespaces where the host allows
-    it (no network at all, not even loopback), else nothing."""
+    """`unshare` into new user, network, mount and process namespaces where
+    the host allows it: no network at all (not even loopback), and room for
+    the helper to give LibreOffice a root of its own (_isolate). Else
+    nothing: health() says so, and OFFICE_REQUIRE_ISOLATION=1 then stops
+    conversions instead."""
     global _sandbox
     if _sandbox is None:
-        cmd = [shutil.which("unshare") or "unshare", "--user", "--map-root-user", "--net", "--"]
+        cmd = [shutil.which("unshare") or "unshare", "--user", "--map-root-user", "--net", "--mount", "--pid", "--fork", "--"]
         ok = False
         if SANDBOX != "off" and shutil.which(cmd[0]):
             try:
@@ -725,8 +1039,88 @@ def sandbox_prefix() -> list:
                                     stderr=subprocess.DEVNULL, timeout=10, **_drop_root()).returncode == 0
             except (OSError, subprocess.SubprocessError, KeyError):
                 ok = False
+        if not ok:
+            print("office: no namespaces here, so LibreOffice runs without its own root or network "
+                  "isolation (the file checks still apply). See media-worker/README.md.", flush=True)
         _sandbox = cmd if ok else []
     return _sandbox
+
+
+# What LibreOffice sees of the machine inside its own root: the programs,
+# libraries, fonts, dictionaries and their settings, read-only. Not the rest
+# of /usr/share or /etc, not /home, /app, /tmp, other jobs, or other
+# processes' /proc.
+SYSTEM_DIRS = (
+    "usr/bin", "usr/sbin", "usr/lib", "usr/lib64", "usr/libexec",
+    "usr/share/fonts", "usr/share/fontconfig", "usr/share/zoneinfo", "usr/share/libreoffice",
+    "usr/share/hyphen", "usr/share/mythes", "usr/share/hunspell", "usr/share/liblangtag", "usr/share/mime",
+    "etc/fonts", "etc/libreoffice", "etc/alternatives", "etc/python3", "var/cache/fontconfig",
+)
+
+
+def _isolate(job: str) -> None:
+    """Runs in the helper, as root of its own user namespace: mounts a
+    private root with only SYSTEM_DIRS (read-only), a fresh /proc for this
+    job's processes, a private /tmp and /dev, and this job's folder, then
+    chroots into it."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    MS_RDONLY, MS_NOSUID, MS_NODEV, MS_NOEXEC, MS_REMOUNT, MS_BIND, MS_REC, MS_PRIVATE = 1, 2, 4, 8, 32, 4096, 16384, 1 << 18
+
+    def mount(src, dst, fstype, flags, data=None):
+        enc = lambda v: v.encode() if isinstance(v, str) else v  # noqa: E731
+        if libc.mount(enc(src), enc(dst), enc(fstype), ctypes.c_ulong(flags), enc(data)) != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, f"mount {dst}: {os.strerror(err)}")
+
+    def bind_ro(src, dst):
+        mount(src, dst, None, MS_BIND | MS_REC)
+        # Read-only, keeping the flags the host locked on the original.
+        st = os.statvfs(src).f_flag
+        keep = (MS_NOSUID if st & os.ST_NOSUID else 0) | (MS_NODEV if st & os.ST_NODEV else 0) | (MS_NOEXEC if st & os.ST_NOEXEC else 0)
+        mount(None, dst, None, MS_BIND | MS_REMOUNT | MS_RDONLY | keep)
+
+    mount(None, "/", None, MS_REC | MS_PRIVATE)
+    root = os.path.join(job, "root")
+    os.makedirs(root, exist_ok=True)
+    mount("tmpfs", root, "tmpfs", MS_NOSUID | MS_NODEV, "mode=755,size=16m")
+    for name in ("bin", "lib", "lib32", "lib64", "libx32", "sbin"):
+        host = os.path.join("/", name)
+        if os.path.islink(host):
+            os.symlink(os.readlink(host), os.path.join(root, name))
+        elif os.path.isdir(host):
+            os.makedirs(os.path.join(root, name))
+            bind_ro(host, os.path.join(root, name))
+    for rel in SYSTEM_DIRS:
+        for host in sorted(__import__("glob").glob(os.path.join("/", rel + "*" if rel == "etc/python3" else rel))):
+            if os.path.isdir(host) and not os.path.islink(host):
+                inside = root + host
+                os.makedirs(inside, exist_ok=True)
+                bind_ro(host, inside)
+    if os.path.isfile("/etc/ld.so.cache"):
+        open(os.path.join(root, "etc/ld.so.cache"), "a").close()
+        bind_ro("/etc/ld.so.cache", os.path.join(root, "etc/ld.so.cache"))
+    # The time zone: a link into the zoneinfo mounted above.
+    if os.path.exists("/etc/localtime"):
+        os.symlink(os.path.realpath("/etc/localtime"), os.path.join(root, "etc/localtime"))
+    with open(os.path.join(root, "etc/passwd"), "w") as f:
+        f.write("root:x:0:0:root:/tmp:/usr/sbin/nologin\n")
+    with open(os.path.join(root, "etc/group"), "w") as f:
+        f.write("root:x:0:\n")
+    os.makedirs(os.path.join(root, "dev"))
+    for dev in ("null", "zero", "random", "urandom"):
+        inside = os.path.join(root, "dev", dev)
+        open(inside, "a").close()
+        mount(os.path.join("/dev", dev), inside, None, MS_BIND)
+    for d in ("proc", "tmp", "dev/shm"):
+        os.makedirs(os.path.join(root, d), exist_ok=True)
+    mount("proc", os.path.join(root, "proc"), "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC)
+    mount("tmpfs", os.path.join(root, "tmp"), "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777,size=256m")
+    mount("tmpfs", os.path.join(root, "dev/shm"), "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777,size=64m")
+    inside = root + job
+    os.makedirs(inside, exist_ok=True)
+    mount(job, inside, None, MS_BIND)
+    os.chroot(root)
+    os.chdir(job)
 
 
 def _clean_env(job: str) -> dict:
@@ -789,10 +1183,14 @@ def convert(src: str, ext: str, options: dict, job: str, info: dict | None = Non
         "soffice": SOFFICE,
         "timeout": timeout or TIMEOUT,
         "memoryMb": MEMORY_MB,
+        "isolate": bool(sandbox_prefix()),
         "maxPdfBytes": MAX_PDF_BYTES,
     }
     with open(os.path.join(job, "job.json"), "w", encoding="utf-8") as f:
         json.dump(spec, f)
+    if REQUIRE_ISOLATION and not spec["isolate"]:
+        print("office: OFFICE_REQUIRE_ISOLATION=1 and this host has no namespaces; not converting.", flush=True)
+        raise Refused(503, "Conversion isn't available right now. Try again later.", "unavailable")
     drop = _drop_root()
     if drop:
         for root, dirs, files in os.walk(job):
@@ -925,6 +1323,11 @@ def _leave() -> None:
         _admitted = max(0, _admitted - 1)
 
 
+# People (the grant's usage subject) with a file uploading, waiting or
+# converting: one each, so one person can't take every slot.
+_busy_subjects: set = set()
+
+
 BUSY = "The converter is busy. Try again in a minute."
 
 
@@ -966,7 +1369,16 @@ def handle(handler, refs: dict, lock) -> None:
             body["code"] = code
         return handler.json(status, body)
 
+    with _admit_lock:
+        mine = job["subject"] not in _busy_subjects
+        if mine:
+            _busy_subjects.add(job["subject"])
+    if not mine:
+        _drain(handler, length)
+        return fail(429, "One file at a time, please. Try again when the other one is done.", "one-at-a-time")
     if not _admit():
+        with _admit_lock:
+            _busy_subjects.discard(job["subject"])
         _drain(handler, length)
         return fail(503, BUSY, "busy")
     work = tempfile.mkdtemp(prefix="pw-office-job-")
@@ -1006,6 +1418,11 @@ def handle(handler, refs: dict, lock) -> None:
             record.update(status="error", error="Cancelled.")
             return
         except Refused as e:
+            if e.code == "timeout":
+                # The server's time was spent: a timeout isn't given back, so a
+                # file built to run out the clock can't be sent again for free.
+                record.update(status="timeout", error=e.message)
+                return handler.json(e.status, {"error": e.message, "code": e.code})
             return fail(e.status, e.message, e.code)
         finally:
             _slots.release()
@@ -1046,6 +1463,8 @@ def handle(handler, refs: dict, lock) -> None:
                 pass
     finally:
         _leave()
+        with _admit_lock:
+            _busy_subjects.discard(job["subject"])
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -1064,9 +1483,12 @@ def health() -> dict:
             uno = False
         _health = {"soffice": soffice, "uno": uno}
     return {
-        "ready": _health["soffice"] and _health["uno"],
+        "ready": _health["soffice"] and _health["uno"] and (bool(sandbox_prefix()) or not REQUIRE_ISOLATION),
         **_health,
         "network": "none" if sandbox_prefix() else "proxy-only",
+        # "own-root": LibreOffice sees only system files and this job's folder.
+        "isolation": "own-root" if sandbox_prefix() else "none",
+        "requireIsolation": REQUIRE_ISOLATION,
         "maxBytes": MAX_BYTES,
         "concurrent": MAX_CONCURRENT,
         "timeout": TIMEOUT,
@@ -1088,6 +1510,13 @@ def _uno_main(job: str) -> int:
         with open(os.path.join(job, "result.json"), "w", encoding="utf-8") as f:
             json.dump(res, f)
         return 0 if res.get("ok") else 1
+
+    if spec.get("isolate"):
+        try:
+            _isolate(job)
+        except OSError as e:
+            # Namespaces without mounts: stop rather than run without a root of its own.
+            return finish({"ok": False, "error": "start", "detail": f"isolation: {e}"})
 
     # Limits for this process and LibreOffice, which inherits them.
     mem = spec["memoryMb"] * MB
