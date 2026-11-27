@@ -26,12 +26,13 @@ const FILLER = new Set(["to", "a", "the", "and", "online", "free"]);
 
 /**
  * Lowercase words, one trailing "s" off, so "pdfs" finds "PDF" and "covers"
- * "cover". "PDF/A" is one word ("pdfa"): split, its "a" would be dropped.
+ * "cover". "PDF/A" (or "pdf a") is one word ("pdfa"): split, its "a" would
+ * be dropped as a filler word.
  */
 function words(text: string): string[] {
   return text
     .toLowerCase()
-    .replace(/\bpdf\s*[/-]\s*a(?![\p{L}\p{N}])/gu, "pdfa")
+    .replace(/\bpdf\s*[/-]?\s*a(?![\p{L}\p{N}])/gu, "pdfa")
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean)
     .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w));
@@ -69,9 +70,8 @@ export function filterTools(tools: ToolMeta[], pill: ToolPill, query: string): T
   const out = q.length > 1 && q[0] === "pdf";
   const ranked: { tool: ToolMeta; rank: number; toward: number; titled: number; whole: number }[] = [];
   for (const t of inPill) {
-    const text = words(
-      `${t.name} ${t.title} ${t.description} ${CATEGORY_LABELS[t.category]} ${CATEGORY_LABELS[groupOf(t.category)]} ${t.keywords ?? ""}`
-    );
+    // Fields kept apart, so a title's last "PDF" and a description's first "A" don't read as "PDF A".
+    const text = [t.name, t.title, t.description, CATEGORY_LABELS[t.category], CATEGORY_LABELS[groupOf(t.category)], t.keywords ?? ""].flatMap(words);
     const name = words(t.name);
     const aliases = (t.aliases ?? []).map(words);
     if (!matchesAll(q, [...text, ...aliases.flat()])) continue;
