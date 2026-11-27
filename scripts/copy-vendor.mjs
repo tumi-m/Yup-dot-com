@@ -94,6 +94,24 @@ for (const [pkg, { styles, subsets }] of Object.entries(noto)) {
   copy(join(pkgDir(pkg), "LICENSE"), join(dir, "LICENSE.txt"));
 }
 
+// Arimo, Tinos and Cousine (SIL Open Font License 1.1): PDF to PDF/A embeds
+// them in place of Helvetica/Arial, Times and Courier when a PDF leaves those
+// out (lib/pdf/pdfa/fonts.ts). Split by alphabet like Noto; the licence goes with them.
+const SUBSTITUTE_SUBSETS = [...SUBSETS, "hebrew"];
+for (const family of ["arimo", "tinos", "cousine"]) {
+  const pkg = `@fontsource/${family}`;
+  const v = version(pkg);
+  fontVersions.push(`${family} ${v}`);
+  const dir = join(out, family, v);
+  for (const subset of SUBSTITUTE_SUBSETS) {
+    for (const style of ["400-normal", "700-normal", "400-italic", "700-italic"]) {
+      const file = `${family}-${subset}-${style}.woff`;
+      copy(join(pkgDir(pkg), "files", file), join(dir, file));
+    }
+  }
+  copy(join(pkgDir(pkg), "LICENSE"), join(dir, "LICENSE.txt"));
+}
+
 // Language models (LSTM "best_int" variants — what OEM 1 loads)
 const langs = ["eng", "spa", "fra", "deu", "por", "ita", "nld"];
 for (const lang of langs) {
