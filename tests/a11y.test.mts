@@ -6,7 +6,7 @@ import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 import { focusAfterRemove, movedMessage } from "../components/list-focus.ts";
 import { slideProgressNote } from "../components/tools/progress-note.ts";
-import { TOAST_MS, holdClock, releaseClock, startClock } from "../components/ui/toast-timer.ts";
+import { TOAST_MS, holdClock, releaseClock, startClock, toastsToSay } from "../components/ui/toast-timer.ts";
 
 let pass = 0;
 let total = 0;
@@ -145,6 +145,12 @@ function check(name: string, ok: boolean, extra?: unknown) {
   const running = releaseClock(c, 2000);
   check("letting go of a running toast leaves it running", running.ms === TOAST_MS.other - 1000 && running.clock === c, running);
   check("errors stay longer than other toasts", TOAST_MS.error > TOAST_MS.other);
+  const t = (id: number, tone: "success" | "error" | "info" = "success") => ({ id, tone });
+  const first = toastsToSay([t(1), t(2)], 0);
+  check("a new toast is said", first?.polite?.id === 2 && first.urgent === undefined && first.last === 2, first);
+  check("dismissing the newest says nothing again", toastsToSay([t(1)], 2) === null);
+  check("an error goes to the urgent region", toastsToSay([t(1), t(3, "error")], 2)?.urgent?.id === 3);
+  check("only toasts newer than the last said count", toastsToSay([t(1), t(4, "info")], 2)?.polite?.id === 4);
 }
 
 // Colours and high contrast, read from the stylesheet and the shared button.

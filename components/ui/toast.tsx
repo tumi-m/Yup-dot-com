@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 import { ENTER_T, EXIT_T, SHAKE_T, SHAKE_X, SPRING_LAYOUT } from "@/components/motion/tokens";
 import { cn } from "@/lib/utils";
-import { TOAST_MS, holdClock, releaseClock, startClock, type ToastClock } from "./toast-timer";
+import { TOAST_MS, holdClock, releaseClock, startClock, toastsToSay, type ToastClock } from "./toast-timer";
 
 export type ToastTone = "success" | "error" | "info";
 
@@ -126,9 +126,17 @@ export function ToastStack({
     }
   }
 
-  const latest = (error: boolean) => [...toasts].reverse().find((t) => (t.tone === "error") === error);
-  const polite = latest(false);
-  const urgent = latest(true);
+  // Each toast is said once, when it arrives: dismissing the newest must not
+  // bring an older one back into the region and have it read again.
+  const [said, setSaid] = useState<{ polite?: Toast; urgent?: Toast }>({});
+  const lastSaid = useRef(0);
+  useEffect(() => {
+    const next = toastsToSay(toasts, lastSaid.current);
+    if (!next) return;
+    lastSaid.current = next.last;
+    setSaid((s) => ({ polite: next.polite ?? s.polite, urgent: next.urgent ?? s.urgent }));
+  }, [toasts]);
+  const { polite, urgent } = said;
 
   return (
     <>
