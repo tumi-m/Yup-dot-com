@@ -38,7 +38,8 @@ const words = lines.flatMap(lineWords);
 check("a bullet read as a stray letter or sign becomes a bullet", words[0].text === "•" && words.filter((w) => w.text === "•").length === 2, JSON.stringify(words.map((w) => w.text)));
 const first = words.filter((w) => w.y0 >= 100 && w.y1 <= 130);
 check("the words of a line share its baseline and size", first.every((w) => w.baseline === 124 && w.size === first[0].size), JSON.stringify(first.map((w) => [w.text, w.baseline, w.size])));
-check("the size is the line's, not the smallest letter's", Math.abs((first[0].size ?? 0) - 32) < 0.5, String(first[0].size));
+// Capitals rise 24 px: about 0.72 of the size.
+check("the size is the line's, not the smallest letter's", Math.abs((first[0].size ?? 0) - 24 / 0.72) < 0.5, String(first[0].size));
 // A word that isn't a bullet keeps its letters.
 check("a short word with a sure read stays a word", lineWords(line(100, 124, [["A", 60, 72], ["word", 110, 160]]))[0].text === "A");
 

@@ -70,13 +70,17 @@ export function lineWords(line: OcrLine): OcrWord[] {
   const b = line.baseline;
   const sloped = b && b.has_baseline !== false && b.x1 > b.x0;
   const baseAt = (x: number) => (sloped ? b.y0 + ((b.y1 - b.y0) * (x - b.x0)) / (b.x1 - b.x0) : box.y1 - (box.y1 - box.y0) * 0.2);
-  // The tallest letters rise about three quarters of the size above the baseline.
-  const size = Math.max(1, (baseAt((box.x0 + box.x1) / 2) - box.y0) / 0.75);
+  // Capitals and tall letters rise about 0.72 of the size above the baseline.
+  // Measured word by word, at a word with them (most have one): the line's
+  // own box is taller on a page scanned a little askew.
+  const rise = line.words.map((w) => baseAt((w.bbox.x0 + w.bbox.x1) / 2) - w.bbox.y0).sort((a, b) => b - a);
+  const size = Math.max(1, (rise[Math.floor(rise.length / 4)] ?? baseAt((box.x0 + box.x1) / 2) - box.y0) / 0.72);
   return line.words.map((w, i) => {
     const next = line.words[i + 1];
     const t = w.text.trim();
     const stray = /^[^\p{L}\p{N}]{1,2}$/u.test(t) || (/^\p{L}{1,2}$/u.test(t) && w.confidence < 80);
-    const bullet = i === 0 && !!next && stray && next.bbox.x0 - w.bbox.x1 > size && /[\p{L}\p{N}]/u.test(next.text);
+    // Before a word read with confidence: specks of dust and rules stay as they were read.
+    const bullet = i === 0 && !!next && stray && next.bbox.x0 - w.bbox.x1 > size && next.confidence >= 60 && /[\p{L}\p{N}]{2}/u.test(next.text);
     return {
       text: bullet ? "•" : w.text,
       confidence: bullet ? 100 : w.confidence,
