@@ -595,6 +595,47 @@ export async function claimMediaLookup(subject: string, store: UsageStore = usag
 }
 
 /* ------------------------------------------------------------------ */
+/* HTML to PDF (web pages, HTML files, pasted HTML)                    */
+/* ------------------------------------------------------------------ */
+
+export const WEB_PDF_BUCKET = "web-pdf";
+/** Tries at a PDF link a minute, per person or guest IP. */
+export const WEB_PDF_LINKS_PER_MINUTE = 6;
+export const WEB_PDF_BURST_MESSAGE = "Too many pages at once. Try again in a minute.";
+export const WEB_PDF_BUSY_MESSAGE = "Saving web pages is busy today. Try again tomorrow.";
+
+/**
+ * Counts one try at /api/render/link, whatever comes of it. Each can make
+ * the server look a site's name up, and a link opens a browser on the media
+ * worker, so without this one visitor could keep it busy. False when this
+ * minute's are used up.
+ */
+export async function claimWebPdfLink(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "web-pdf-link", WEB_PDF_LINKS_PER_MINUTE, "minute")) >= 0;
+}
+
+/**
+ * Spends one of the visitor's web pages today and one of the site's
+ * (WEB_PDF_GLOBAL_DAILY_LIMIT, default 3000), which keeps many guest
+ * addresses together from tying the worker up. Pages left today, or why not.
+ */
+export async function consumeWebPdf(
+  subject: string,
+  tier: Tier,
+  opts: { env?: NodeJS.ProcessEnv; store?: UsageStore } = {}
+): Promise<{ ok: true; remaining: number } | { ok: false; reason: "quota" | "busy" }> {
+  const s = opts.store ?? usageStore();
+  const left = await s.consume(subject, WEB_PDF_BUCKET, LIMITS[tier].webPdfsPerDay, "day");
+  if (left < 0) return { ok: false, reason: "quota" };
+  const site = envInt(opts.env ?? process.env, "WEB_PDF_GLOBAL_DAILY_LIMIT") ?? 3000;
+  if ((await s.consume(GLOBAL_SUBJECT, WEB_PDF_BUCKET, site, "day")) < 0) {
+    await s.refund(subject, WEB_PDF_BUCKET, "day");
+    return { ok: false, reason: "busy" };
+  }
+  return { ok: true, remaining: left };
+}
+
+/* ------------------------------------------------------------------ */
 /* Edits (Edit PDF, Sign PDF, Edit PPTX)                               */
 /* ------------------------------------------------------------------ */
 

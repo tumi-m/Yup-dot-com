@@ -58,6 +58,7 @@ export const CLOSED_ROUTES = [
   "/api/media/link",
   "/api/media/playlist",
   "/api/media/refund",
+  "/api/render/link", // POST only, same site: a grant for one web page PDF
   "/api/samples/identify", // POST only, same site
   "/api/samples/lookup", // POST only, same site
   "/api/slides/export",

@@ -33,15 +33,22 @@ export interface TierLimits {
    * well under what Chat with PDF reads a day.
    */
   translateCharsPerDay: number;
+  /**
+   * Web pages, HTML files and pasted HTML saved as PDF a day. Each opens a
+   * browser on the media worker for up to a minute.
+   */
+  webPdfsPerDay: number;
+  /** Pages in one of those PDFs; a longer page stops there. */
+  webPdfPages: number;
 }
 
 const MB = 1024 * 1024;
 
 export const LIMITS: Record<Tier, TierLimits> = {
-  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5, linkImportsPerDay: 20, sampleLookupsPerDay: 10, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 15_000 },
-  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 10, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10, linkImportsPerDay: 50, sampleLookupsPerDay: 30, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 60_000 },
-  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000 },
-  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000 },
+  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5, linkImportsPerDay: 20, sampleLookupsPerDay: 10, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 15_000, webPdfsPerDay: 5, webPdfPages: 50 },
+  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 10, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10, linkImportsPerDay: 50, sampleLookupsPerDay: 30, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 60_000, webPdfsPerDay: 15, webPdfPages: 50 },
+  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000, webPdfsPerDay: 200, webPdfPages: 300 },
+  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000, webPdfsPerDay: 200, webPdfPages: 300 },
 };
 
 export function limitsFor(tier: Tier): TierLimits {
