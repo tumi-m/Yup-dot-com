@@ -37,10 +37,14 @@
     outline: none;
   }
 
-  /* Focused controls never land under the sticky header. */
+  /* Focused controls never land under the sticky header, or under the
+     cookie banner while it is up (--consent-space, components/analytics). */
   html {
     scroll-padding-top: 5rem;
-    scroll-padding-bottom: 4rem;
+    scroll-padding-bottom: calc(4rem + var(--consent-space, 0px));
+  }
+  body {
+    padding-bottom: var(--consent-space, 0px);
   }
 
   /*
