@@ -642,7 +642,7 @@ export async function handlePaystackEvent(
         subscription_status: statusOf(data.status) === "complete" ? "complete" : "cancelled",
       })),
     "invoice.payment_failed": async () =>
-      subscriptionChange(data.subscription ?? {}, deps.store, () => ({ subscription_status: "attention" }), data.customer),
+      subscriptionChange(data.subscription ?? {}, deps.store, (row) => (paidSince(data, row) ? null : { subscription_status: "attention" }), data.customer),
     "invoice.update": async () =>
       subscriptionChange(data.subscription ?? {}, deps.store, (row) => {
         const sub = data.subscription ?? {};
@@ -652,7 +652,7 @@ export async function handlePaystackEvent(
             current_period_end: later(row.current_period_end, sub.next_payment_date ?? null),
           };
         }
-        if (sub.status === "attention") return { subscription_status: "attention" };
+        if (sub.status === "attention" && !paidSince(data, row)) return { subscription_status: "attention" };
         return null;
       }, data.customer),
   };
@@ -692,6 +692,18 @@ export async function handlePaystackEvent(
     await deps.store.releaseEvent(key);
     throw err;
   }
+}
+
+/**
+ * A failed invoice whose period the row has already been paid past: Paystack
+ * delivered it late (a webhook it retried), after a renewal that went
+ * through. Marking the account past due then would tell a paying customer
+ * their payment failed. Without a period_end it counts, as before.
+ */
+function paidSince(invoice: Json, row: BillingRow): boolean {
+  const end = time(typeof invoice.period_end === "string" ? invoice.period_end : null);
+  const paidTo = time(row.current_period_end);
+  return !Number.isNaN(end) && !Number.isNaN(paidTo) && end <= paidTo;
 }
 
 function statusOf(s: unknown): SubscriptionStatus | null {
