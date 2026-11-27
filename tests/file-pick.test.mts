@@ -26,6 +26,15 @@ const compress = { maxFileBytes: 50 * MB, multiple: false, toolName: "Compress P
 const clean = sortPick([pdf("a.pdf", 1000), pdf("b.pdf", 2000)], 0, merge);
 check("all fit: all kept, nothing said", names(clean.keep) === "a.pdf,b.pdf" && clean.message === null && clean.tooBig === 0, clean);
 
+// A zero-byte file was sent on to the tool, which said "isn't a readable
+// PDF. Try Repair PDF", and Repair PDF then said it was empty.
+const oneEmpty = sortPick([pdf("a.pdf", 1000), pdf("blank.pdf", 0)], 0, merge);
+check("an empty file is named and left out", names(oneEmpty.keep) === "a.pdf" && oneEmpty.message === "blank.pdf is empty." && oneEmpty.tooBig === 0, oneEmpty);
+const allEmpty = sortPick([pdf("x.pdf", 0), pdf("y.pdf", 0)], 0, merge);
+check("only empty files: none kept, both counted", allEmpty.keep.length === 0 && allEmpty.message === "2 files are empty.", allEmpty);
+const emptyFirst = sortPick([pdf("blank.pdf", 0), pdf("b.pdf", 2000)], 0, compress);
+check("a one-file tool takes the first file that isn't empty", names(emptyFirst.keep) === "b.pdf" && emptyFirst.message === "blank.pdf is empty.", emptyFirst);
+
 const oneBig = sortPick([pdf("a.pdf", 1000), pdf("b.pdf", 2000), pdf("big.pdf", 54 * MB)], 0, merge);
 check("one too big: the others are kept", names(oneBig.keep) === "a.pdf,b.pdf", names(oneBig.keep));
 check("one too big: named", oneBig.message === "big.pdf is over 50 MB, the limit on your plan.", oneBig.message);

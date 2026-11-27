@@ -32,8 +32,8 @@ export function takesFile(accept: string, file: { name: string; type: string }):
 /**
  * Sorts the files of one pick or drop (already filtered to types the tool
  * takes) into the ones to add, and says what happened to the rest. A file
- * over the size limit, or a second file on a one-file tool, never costs the
- * visitor the files that do fit.
+ * over the size limit, an empty one, or a second file on a one-file tool,
+ * never costs the visitor the files that do fit.
  */
 export function sortPick(
   accepted: File[],
@@ -47,9 +47,15 @@ export function sortPick(
     room?: number;
   }
 ): { keep: File[]; tooBig: number; overBatch: boolean; message: string | null } {
-  const fits = accepted.filter((f) => f.size <= o.maxFileBytes);
+  // An empty file (a download that never arrived, a cloud file not synced)
+  // is said now: every tool would only fail on it, and Repair PDF too.
+  const empty = accepted.filter((f) => f.size === 0);
+  const fits = accepted.filter((f) => f.size > 0 && f.size <= o.maxFileBytes);
   const tooBig = accepted.filter((f) => f.size > o.maxFileBytes);
   const notes: string[] = [];
+  if (empty.length) {
+    notes.push(empty.length === 1 ? `${empty[0].name} is empty.` : `${empty.length} files are empty.`);
+  }
   if (tooBig.length) {
     const limit = formatLimitBytes(o.maxFileBytes);
     notes.push(
