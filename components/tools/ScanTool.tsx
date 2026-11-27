@@ -44,6 +44,7 @@ import { flattenPage, PAGE_SIZES, type ScanPageSize } from "@/lib/pdf/scan/page"
 import { canUseCamera, cameraProblem, loadedElsewhere, openCamera, stopStream } from "@/lib/pdf/scan/camera";
 import { paint, photoFromFile, photoFromVideo, photoPixels, thumbnailUrl, type Photo } from "@/lib/pdf/scan/photo";
 import { cn, formatBytes } from "@/lib/utils";
+import { emptyMessage } from "./file-pick";
 
 /** Where a scan can go next. Searchable scans skip OCR. */
 const NEXT_STEPS = ["compress-pdf", "ocr-pdf", "merge-pdf", "sign-pdf"];
@@ -279,6 +280,8 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
     const files = Array.from(list);
     if (replace !== null && pagesRef.current.some((p) => p.id === replace)) {
       const file = files[0];
+      const empty = emptyMessage([file]);
+      if (empty) return fail(empty);
       if (file.size > limits.maxFileBytes) {
         setUpsell("file-size");
         return fail(`Photos up to ${formatLimitBytes(limits.maxFileBytes)} on your plan.`);
@@ -293,8 +296,13 @@ export function ScanTool({ slug, tier }: { slug: string; tier: Tier }) {
       }
       return;
     }
-    const pictures = files.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|avif|gif|bmp)$/i.test(f.name));
-    if (!pictures.length) return fail("Scan to PDF takes photos: JPG, PNG, WebP or HEIC.");
+    const named = files.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|avif|gif|bmp)$/i.test(f.name));
+    if (!named.length) return fail("Scan to PDF takes photos: JPG, PNG, WebP or HEIC.");
+    // An empty photo is named; the rest are still added.
+    const empty = emptyMessage(named);
+    if (empty) fail(empty);
+    const pictures = named.filter((f) => f.size > 0);
+    if (!pictures.length) return;
     const tooBig = pictures.filter((f) => f.size > limits.maxFileBytes);
     if (tooBig.length) {
       setUpsell("file-size");

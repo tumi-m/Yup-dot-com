@@ -14,7 +14,7 @@ import { UpgradeDialog, UpsellCard, useSuccessNudge, type UpsellReason } from "@
 import { SuccessCard } from "./SuccessCard";
 import { ErrorHelp } from "./ErrorHelp";
 import { isPdf } from "./read-pdf";
-import { takesMessage } from "./file-pick";
+import { emptyMessage, takesMessage } from "./file-pick";
 import { AUTO, LanguagePicker } from "./LanguagePicker";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
@@ -175,6 +175,11 @@ export function TranslateTool({ slug, tier }: { slug: string; tier: Tier }) {
     const file = Array.from(list).find(isPdf);
     if (!file) {
       fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
+      return;
+    }
+    const empty = emptyMessage([file]);
+    if (empty) {
+      fail(empty);
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.

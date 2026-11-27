@@ -30,6 +30,17 @@ export function takesFile(accept: string, file: { name: string; type: string }):
 }
 
 /**
+ * "a.pdf is empty." for a zero-byte file (a download that never arrived, a
+ * cloud file not synced), or "2 files are empty.": every tool would only fail
+ * on it, Repair PDF too. Null when none is empty.
+ */
+export function emptyMessage(files: { name: string; size: number }[]): string | null {
+  const empty = files.filter((f) => f.size === 0);
+  if (!empty.length) return null;
+  return empty.length === 1 ? `${empty[0].name} is empty.` : `${empty.length} files are empty.`;
+}
+
+/**
  * Sorts the files of one pick or drop (already filtered to types the tool
  * takes) into the ones to add, and says what happened to the rest. A file
  * over the size limit, an empty one, or a second file on a one-file tool,
@@ -47,15 +58,11 @@ export function sortPick(
     room?: number;
   }
 ): { keep: File[]; tooBig: number; overBatch: boolean; message: string | null } {
-  // An empty file (a download that never arrived, a cloud file not synced)
-  // is said now: every tool would only fail on it, and Repair PDF too.
-  const empty = accepted.filter((f) => f.size === 0);
+  const empty = emptyMessage(accepted);
   const fits = accepted.filter((f) => f.size > 0 && f.size <= o.maxFileBytes);
   const tooBig = accepted.filter((f) => f.size > o.maxFileBytes);
   const notes: string[] = [];
-  if (empty.length) {
-    notes.push(empty.length === 1 ? `${empty[0].name} is empty.` : `${empty.length} files are empty.`);
-  }
+  if (empty) notes.push(empty);
   if (tooBig.length) {
     const limit = formatLimitBytes(o.maxFileBytes);
     notes.push(

@@ -42,6 +42,7 @@ import { pptxErrorMessage } from "@/lib/pptx/errors";
 import type { Deck as RenderDeck, DeckElement, DeckSlide } from "@/lib/pptx/parse";
 import type { Deck as PkgDeck, TextShape } from "@/lib/pptx/package";
 import type { History } from "@/lib/pptx/editor";
+import { emptyMessage } from "./file-pick";
 
 const SLUG = "edit-pptx";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -236,6 +237,11 @@ export function PptxEditor({ tier }: { tier: Tier }) {
   async function open(picked: File | null, sniffed = false) {
     if (!picked) return;
     setError(null);
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      setError(empty);
+      return;
+    }
     if (!sniffed && !isPptxName(picked.name) && picked.type !== PPTX_MIME) {
       setError(/\.(ppt|pps|pot|odp|key)$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
       return;

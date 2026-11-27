@@ -40,6 +40,7 @@ import {
   type PageSize,
   type WebPdfOptions,
 } from "@/lib/web-pdf";
+import { emptyMessage } from "./file-pick";
 
 type Source = "url" | "file" | "paste";
 type Phase = "input" | "working" | "done";
@@ -232,6 +233,11 @@ export function WebToPdf({ slug, tier }: { slug: string; tier: Tier }) {
     setError(null);
     if (!HTML_NAME.test(picked.name) && picked.type !== "text/html" && picked.type !== "application/xhtml+xml") {
       setError({ message: /\.(mht|mhtml|webarchive)$/i.test(picked.name) ? "Save the page as “Web page, HTML only” first, or paste its address." : "Choose an .html file." });
+      return;
+    }
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      setError({ message: empty });
       return;
     }
     if (picked.size > MAX_HTML_BYTES * 2) {

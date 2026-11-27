@@ -20,7 +20,7 @@ import { fileToHandoff, handoffToFile, takeHandoff, tryHandoff } from "@/lib/loc
 import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { ErrorHelp } from "./ErrorHelp";
-import { takesMessage } from "./file-pick";
+import { emptyMessage, takesMessage } from "./file-pick";
 import { getTool } from "@/lib/tools";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import {
@@ -260,6 +260,11 @@ export function CropTool({ slug, tier }: { slug: string; tier: Tier }) {
     const picked = Array.from(list).find(isPdf);
     if (!picked) {
       fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
+      return;
+    }
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      fail(empty);
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.

@@ -15,7 +15,7 @@ import { SuccessCard } from "./SuccessCard";
 import { CompareView } from "./CompareView";
 import { isPdf, readPdf } from "./read-pdf";
 import { ErrorHelp } from "./ErrorHelp";
-import { takesMessage } from "./file-pick";
+import { emptyMessage, takesMessage } from "./file-pick";
 import { downloadBlob } from "@/lib/download";
 import { trackToolUsed } from "@/lib/analytics";
 import { formatLimitBytes, limitsFor, type Tier } from "@/lib/limits";
@@ -117,6 +117,11 @@ export function CompareTool({ slug, tier }: { slug: string; tier: Tier }) {
 
   /** `together`: placed with the other file at once; what to say is returned, to be said once for both. */
   async function openOn(side: Side, picked: File, together = false): Promise<string | null> {
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      fail(empty);
+      return null;
+    }
     // Limits are an upgrade prompt, never a silent failure.
     if (picked.size > limits.maxFileBytes) {
       setUpsell("file-size");

@@ -2,7 +2,8 @@
 // used to throw away every file picked with it, without saying which one; a
 // one-file tool kept the first of several dropped files without a word; and
 // a big saving read "100% smaller".
-import { errorFix, percentSmaller, sortPick, splitNameEnd, takesMessage } from "../components/tools/file-pick.ts";
+import { emptyMessage, errorFix, percentSmaller, sortPick, splitNameEnd, takesMessage } from "../components/tools/file-pick.ts";
+import { readFileSync } from "node:fs";
 import { ENCRYPTED_MESSAGE, SCANNED_MESSAGE, UNREADABLE_MESSAGE } from "../lib/pdf/errors.ts";
 
 let pass = 0;
@@ -34,6 +35,17 @@ const allEmpty = sortPick([pdf("x.pdf", 0), pdf("y.pdf", 0)], 0, merge);
 check("only empty files: none kept, both counted", allEmpty.keep.length === 0 && allEmpty.message === "2 files are empty.", allEmpty);
 const emptyFirst = sortPick([pdf("blank.pdf", 0), pdf("b.pdf", 2000)], 0, compress);
 check("a one-file tool takes the first file that isn't empty", names(emptyFirst.keep) === "b.pdf" && emptyFirst.message === "blank.pdf is empty.", emptyFirst);
+
+check("emptyMessage: one, several, none", emptyMessage([pdf("a.pdf", 0)]) === "a.pdf is empty." && emptyMessage([pdf("a.pdf", 0), pdf("b.pdf", 0), pdf("c.pdf", 1)]) === "2 files are empty." && emptyMessage([pdf("tiny.pdf", 1)]) === null);
+// The tools with their own panels read the file straight away and said
+// "isn't a readable PDF. Try Repair PDF", or a wrong-format message for an
+// empty .pptx or photo; HTML to PDF took an empty .html as ready to save.
+for (const panel of ["CropTool", "PageOrganizer", "CompareTool", "RedactTool", "TranslateTool", "EditorLaunch", "PdfAssistant", "WebToPdf", "ScanTool", "PptxToPdf", "PptxEditor"]) {
+  const code = readFileSync(new URL(`../components/tools/${panel}.tsx`, import.meta.url), "utf8");
+  const at = code.indexOf("emptyMessage([");
+  const read = Math.min(...["readPdf(", "arrayBuffer()", "photoFromFile(", "await import(", "saveLocalDoc(", "openLocal("].map((r) => code.indexOf(r, at)).filter((i) => i >= 0));
+  check(`${panel}: an empty file is named before it is read`, at > 0 && /import \{[^}]*emptyMessage[^}]*\} from "\.\/file-pick"/.test(code) && (read === Infinity || read > at), { at, read });
+}
 
 const oneBig = sortPick([pdf("a.pdf", 1000), pdf("b.pdf", 2000), pdf("big.pdf", 54 * MB)], 0, merge);
 check("one too big: the others are kept", names(oneBig.keep) === "a.pdf,b.pdf", names(oneBig.keep));
