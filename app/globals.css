@@ -263,3 +263,18 @@
   inset: 0;
   overflow: hidden;
 }
+
+/*
+ * High contrast (forced colours) drops backgrounds and shadows, which is all
+ * that marks the chosen pill, tab or tool here. A system-coloured border
+ * marks it instead.
+ */
+@media (forced-colors: active) {
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"],
+  [role="switch"][aria-checked="true"],
+  [role="tab"][aria-selected="true"],
+  [aria-current="page"] {
+    border: 2px solid Highlight;
+  }
+}
