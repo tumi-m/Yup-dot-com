@@ -6,6 +6,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 export async function generateMetadata(_: unknown, parent: ResolvingMetadata) {
   return {
     ...(await pageMetadata({ title: "Sign up", description: "Create a free PDF Wizard account to keep your documents in a cloud library.", path: "/signup" }, parent)),
+    alternates: {},
     robots: { index: false, follow: true },
   };
 }

@@ -7,6 +7,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 export async function generateMetadata(_: unknown, parent: ResolvingMetadata) {
   return {
     ...(await pageMetadata({ title: "Log in", description: "Log in to PDF Wizard to open your library and plan.", path: "/login" }, parent)),
+    alternates: {},
     robots: { index: false, follow: true },
   };
 }

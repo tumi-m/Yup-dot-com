@@ -12,6 +12,7 @@ const { TOOLS, shownTools, getTool, metaDescription, staysOnDevice } = await imp
 const { toolJsonLd, siteJsonLd, jsonLdHtml } = await import("../lib/structured-data.ts");
 const { panelSpec } = await import("../components/tools/panel-spec.tsx");
 const { actionLabel } = await import("../components/tools/action-label.ts");
+const { filterTools } = await import("../components/tool-filter.ts");
 const sitemap = (await import("../app/sitemap.ts")).default;
 
 let failed = 0;
@@ -70,7 +71,7 @@ const ALL = shownTools({ youtube: true, office: true, html: true });
   const tricky = jsonLdHtml({ name: "</script><b>" });
   check("\"<\" can't close the script tag", !tricky.includes("<") && JSON.parse(tricky).name === "</script><b>");
   const site = siteJsonLd(base);
-  check("the home page names the site", site["@type"] === "WebSite" && site.name === "PDF Wizard" && site.url === `${base}/`);
+  check("the home page names the site", site["@type"] === "WebSite" && site.name === "PDF Wizard" && site.url === base);
 }
 
 // Sitemap.
@@ -92,8 +93,8 @@ const ALL = shownTools({ youtube: true, office: true, html: true });
     const md = await page.generateMetadata({}, parent);
     const robots = md.robots as { index?: boolean; follow?: boolean };
     const og = md.openGraph as { title?: string; description?: string };
-    check(`${path}: noindex, own description on shared links`,
-      robots?.index === false && robots.follow === true && !!md.description && og.title === md.title && og.description === md.description, md);
+    check(`${path}: noindex, no canonical link, own description on shared links`,
+      robots?.index === false && robots.follow === true && !!md.description && og.title === md.title && og.description === md.description && !md.alternates?.canonical, md);
   }
   for (const file of ["dashboard/page.tsx", "settings/billing/page.tsx", "settings/password/page.tsx", "editor/[id]/page.tsx"]) {
     const src = readFileSync(new URL(`../app/${file}`, import.meta.url), "utf8");
@@ -105,8 +106,15 @@ const ALL = shownTools({ youtube: true, office: true, html: true });
 {
   check("Chat with PDF is called that on its card and h1", getTool("chat-with-pdf")?.name === "Chat with PDF");
   check("…and is still found as AI Assistant", !!getTool("chat-with-pdf")?.aliases?.includes("AI Assistant"));
-  const mismatched = ALL.filter((t) => t.title.includes(": ") && t.title.toLowerCase().startsWith(t.name.toLowerCase()) && !t.title.startsWith(t.name));
-  check("a title starting with the tool's name spells it the same way", mismatched.length === 0, mismatched.map((t) => t.title));
+  const mismatched = ALL.filter((t) => t.title.includes(": ") && t.title.slice(0, t.title.indexOf(": ")) !== t.name);
+  check("a title's part before the colon is the tool's name", mismatched.length === 0, mismatched.map((t) => `${t.name} / ${t.title}`));
+  check("Fill & Sign PDF is called that on its card, h1 and title", getTool("sign-pdf")?.name === "Fill & Sign PDF" && getTool("sign-pdf")!.title.startsWith("Fill & Sign PDF: "));
+  for (const q of ["sign pdf", "sign", "fill and sign"]) {
+    const found = filterTools(ALL, "all", q).map((t) => t.slug);
+    check(`search: '${q}' lists Fill & Sign PDF first`, found[0] === "sign-pdf", found.slice(0, 3));
+  }
+  check("Translate PDF says it gives a PDF too, for most languages", /Word file and, for most languages, a PDF/.test(getTool("translate-pdf")!.description));
+  check("Sample Finder's description says what it does", /samples/.test(getTool("sample-finder")!.description));
 }
 
 // The workbench's button says what it does.
@@ -114,6 +122,8 @@ const ALL = shownTools({ youtube: true, office: true, html: true });
   const workbench = ALL.filter((t) => panelSpec(t).kind === "workbench");
   const generic = workbench.filter((t) => actionLabel(t.slug) === "Cast spell").map((t) => t.slug);
   check(`every workbench tool names its action (${workbench.length})`, workbench.length > 20 && generic.length === 0, generic);
+  // OCR PDF can give a text file, not a searchable PDF: the button doesn't promise one.
+  check("OCR PDF's button fits either output", actionLabel("ocr-pdf") === "Run OCR");
 }
 
 if (failed) {

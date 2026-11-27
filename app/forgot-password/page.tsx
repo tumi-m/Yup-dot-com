@@ -6,6 +6,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 export async function generateMetadata(_: unknown, parent: ResolvingMetadata) {
   return {
     ...(await pageMetadata({ title: "Reset password", description: "Get a link to choose a new PDF Wizard password.", path: "/forgot-password" }, parent)),
+    alternates: {},
     robots: { index: false, follow: true },
   };
 }

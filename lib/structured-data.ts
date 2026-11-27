@@ -11,7 +11,8 @@ type JsonLd = Record<string, unknown>;
 const SITE_NAME = "PDF Wizard";
 
 export function siteJsonLd(base: string): JsonLd {
-  return { "@context": "https://schema.org", "@type": "WebSite", name: SITE_NAME, url: `${base}/` };
+  // The home page's address as its canonical link gives it, with no trailing slash.
+  return { "@context": "https://schema.org", "@type": "WebSite", name: SITE_NAME, url: base };
 }
 
 export function toolJsonLd(tool: ToolMeta, base: string): JsonLd {
@@ -22,7 +23,7 @@ export function toolJsonLd(tool: ToolMeta, base: string): JsonLd {
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Home", item: `${base}/` },
+          { "@type": "ListItem", position: 1, name: "Home", item: base },
           { "@type": "ListItem", position: 2, name: "All tools", item: `${base}/tools` },
           { "@type": "ListItem", position: 3, name: tool.name, item: url },
         ],
