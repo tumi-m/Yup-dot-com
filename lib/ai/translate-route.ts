@@ -6,9 +6,10 @@
  * As /api/ai/chat: other sites' pages are refused, guests get a small daily
  * allowance and account holders their plan's, counted on the server (lib/
  * usage.ts) before the model is asked, with a per-minute burst and a
- * site-wide daily cap; a request that delivered nothing is given back (a
- * few a day). The browser parses the PDF and sends only its text, a page's
- * worth at a time; nothing is stored, and the text is never logged.
+ * site-wide daily cap; what a request didn't deliver (it failed, was
+ * stopped, or the model left passages out) is given back, a few a day.
+ * The browser parses the PDF and sends only its text, a page's worth at a
+ * time; nothing is stored, and the text is never logged.
  *
  * Responds with newline-delimited JSON (lib/translate/format.ts):
  *   {"type":"segment","id":"..","text":".."} · {"type":"missing","ids":[..]} · {"type":"done"} · {"type":"error","message":".."}
@@ -84,9 +85,15 @@ export async function handleTranslate(request: Request, deps: TranslateDeps): Pr
 
   const body = new ReadableStream({
     async start(controller) {
-      let delivered = false;
+      // Characters of the passages that came back, each counted once.
+      const length = new Map(segments.map((s) => [s.id, s.text.length]));
+      const back = new Set<string>();
+      let delivered = 0;
       const send = (event: TranslateEvent) => {
-        if (event.type === "segment") delivered = true;
+        if (event.type === "segment" && !back.has(event.id)) {
+          back.add(event.id);
+          delivered += length.get(event.id) ?? 0;
+        }
         controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
       };
       try {
@@ -97,15 +104,16 @@ export async function handleTranslate(request: Request, deps: TranslateDeps): Pr
           { signal: request.signal, deadline: started + (maxDuration - 8) * 1000, fetch: deps.fetch }
         );
         for await (const event of events) send(event);
-        // Nothing usable came back: that costs nothing (up to a few a day).
-        if (!delivered) await claim.refund().catch(() => {});
+        // What didn't come back costs nothing (up to a few requests a day).
+        if (back.size < segments.length) await claim.refund({ delivered }).catch(() => {});
         send({ type: "done" });
       } catch (error) {
         // The model's or the connection's message only; never the document's text.
         if (!(error instanceof OllamaError) || (error.kind !== "aborted" && error.kind !== "rate_limit")) {
           console.error("ai/translate error:", error instanceof Error ? error.message : error);
         }
-        if (!delivered) await claim.refund({ unsent: error instanceof OllamaError && error.unsent }).catch(() => {});
+        // Stopped, cut off or failed part way: what didn't come back is given back.
+        if (back.size < segments.length) await claim.refund({ unsent: error instanceof OllamaError && error.unsent, delivered }).catch(() => {});
         try {
           send({ type: "error", message: translateMessage(error) });
         } catch {

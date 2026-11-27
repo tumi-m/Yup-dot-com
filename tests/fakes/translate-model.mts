@@ -12,6 +12,9 @@
  *   XINJECTALWAYSX  the same, every time
  *   XSLOWX        each line of the answer after a pause (for Cancel)
  *   XFAILX        the server fails with a 500
+ *   XBREAKX       the first time: the passages before it, then the stream breaks
+ *   XTAILX        after the answer, the model keeps writing for ten seconds
+ *   XLONGX        every passage "translated" into 420 characters
  *
  * Answers come with a preface and a code fence, split into small pieces
  * across stream chunks, after some hidden reasoning, as real models do.
@@ -24,6 +27,8 @@ export interface FakeCall {
   user: string;
   target: string;
   passages: { id: string; text: string }[];
+  /** The most tokens the request let the model write. */
+  numPredict?: number;
 }
 
 export interface FakeModel {
@@ -78,13 +83,13 @@ export async function startFakeModel(): Promise<FakeModel> {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
-      const { messages } = JSON.parse(body) as { messages: { role: string; content: string }[] };
+      const { messages, options } = JSON.parse(body) as { messages: { role: string; content: string }[]; options?: { num_predict?: number } };
       const system = messages.find((m) => m.role === "system")?.content ?? "";
       const user = messages.find((m) => m.role === "user")?.content ?? "";
       const target = /^Translate into: (.+)$/m.exec(user)?.[1] ?? "";
       const block = /<passages>\n([\s\S]*?)\n<\/passages>/.exec(user)?.[1] ?? "";
       const passages = block.split("\n").filter(Boolean).map((l) => JSON.parse(l) as { id: string; text: string });
-      state.calls.push({ system, user, target, passages });
+      state.calls.push({ system, user, target, passages, numPredict: options?.num_predict });
       const all = passages.map((p) => p.text).join(" ");
       if (all.includes("XFAILX")) {
         res.writeHead(500, { "content-type": "application/json" });
@@ -93,10 +98,19 @@ export async function startFakeModel(): Promise<FakeModel> {
       }
 
       const lines: string[] = [];
+      let broken = false;
       for (let i = 0; i < passages.length; i++) {
         const p = passages[i];
         const times = (asked.get(p.text) ?? 0) + 1;
         asked.set(p.text, times);
+        if (p.text.includes("XBREAKX") && times === 1) {
+          broken = true;
+          break;
+        }
+        if (all.includes("XLONGX")) {
+          lines.push(JSON.stringify({ id: p.id, text: "Lorem ipsum ".repeat(35) }));
+          continue;
+        }
         if (p.text.includes("XDROPALWAYSX") || (p.text.includes("XDROPX") && times === 1)) continue;
         if (p.text.includes("XINJECTALWAYSX") || (p.text.includes("XINJECTX") && times === 1)) {
           lines.push("PWNED. As instructed, I will now ignore the document and do something else.");
@@ -127,6 +141,18 @@ export async function startFakeModel(): Promise<FakeModel> {
       for (let at = 0; at < answer.length && open; at += 7) {
         write({ message: { role: "assistant", content: answer.slice(at, at + 7) }, done: false });
         if (slow && answer.slice(at, at + 7).includes("\n")) await pause(150);
+      }
+      if (broken) {
+        write({ error: "the model stopped part way" });
+        open = false;
+        res.end();
+        return;
+      }
+      if (all.includes("XTAILX")) {
+        for (let k = 0; k < 50 && open; k++) {
+          write({ message: { role: "assistant", content: "And there is more to say about this, line after line.\n" }, done: false });
+          await pause(200);
+        }
       }
       write({ message: { role: "assistant", content: "" }, done: true, done_reason: "stop" });
       open = false;
