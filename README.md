@@ -41,7 +41,7 @@ and deletes it straight after; its pages say so.
 | **Word → PDF** | *Hidden until `NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1`; needs the media worker with LibreOffice.* `.docx`, `.doc`, `.odt`, `.rtf` converted by headless LibreOffice on the media worker, with fonts made to Office's widths (Carlito, Caladea, Liberation), all embedded, headings as bookmarks, tagged. **Uploads the file** (the page says so) and deletes it as soon as the PDF is sent. Guests 5 a day, free 10, Pro 200; 25 MB, 100 MB with Pro. [More below](#word-and-excel-to-pdf). |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
 | **Excel → PDF** | *Hidden until switched on, as Word → PDF.* `.xlsx`, `.xls`, `.ods`, `.csv`: fit each sheet's width to the page, orientation (automatic, portrait, landscape), all sheets or the first. CSV values print exactly as written. Same upload, deletion and limits as Word → PDF. |
-| **PDF → Text** | Extract text in true reading order (multi-column aware). |
+| **PDF → Text** | Extract text in true reading order (multi-column aware, a CV's sidebar too), without the running headers and footers a browser or word processor prints on every page. |
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
 | **Extract Tables** | Detect tables by column structure, export each as CSV. |
 | **PDF → RAG Chunks** | Retrieval-sized JSON chunks with heading breadcrumbs. |

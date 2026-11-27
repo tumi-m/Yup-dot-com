@@ -861,6 +861,33 @@ export async function readPageText(page: PDFPageProxy): Promise<PageText> {
   };
 }
 
+/** How near the top or bottom edge a running header or footer sits: a share of the page's height. */
+const EDGE = 0.06;
+
+/**
+ * Running headers and footers: small lines at the very top or bottom of the
+ * page that repeat on most pages, numbers aside (a browser's date, title,
+ * address and "1/2"; a report's title or "Confidential"). They would
+ * otherwise sit between the paragraphs of the body, and split one running
+ * on over the page break. A page number on its own line is kept where it is.
+ */
+function runningLines(pages: { lines: ParsedLine[]; height: number }[], bodySize: number): Set<ParsedLine> {
+  const found = new Set<ParsedLine>();
+  if (pages.length < 2) return found;
+  const key = (line: ParsedLine) => line.text.replace(/\d+/g, "#").toLowerCase();
+  const atEdge = (line: ParsedLine, height: number) =>
+    height > 0 && line.fontSize <= bodySize * 1.05 && !PAGE_NUMBER.test(line.text) && (line.y > height * (1 - EDGE) || line.y < height * EDGE);
+  const seen = new Map<string, number>();
+  for (const { lines, height } of pages) {
+    for (const k of new Set(lines.filter((l) => atEdge(l, height)).map(key))) seen.set(k, (seen.get(k) ?? 0) + 1);
+  }
+  const often = Math.max(2, Math.ceil(pages.length / 2));
+  for (const { lines, height } of pages) {
+    for (const line of lines) if (atEdge(line, height) && (seen.get(key(line)) ?? 0) >= often) found.add(line);
+  }
+  return found;
+}
+
 /** Parse a PDF into a structured document tree. */
 export async function parseDocument(
   data: Uint8Array,
@@ -873,7 +900,7 @@ export async function parseDocument(
   const pdfjsLib = await getPdfjs();
   const doc = await pdfjsLib.getDocument({ data: data.slice(), isEvalSupported: false }).promise;
 
-  const perPage: { lines: ParsedLine[]; page: number }[] = [];
+  const perPage: { lines: ParsedLine[]; page: number; height: number }[] = [];
   const allSizes: number[] = [];
   let totalChars = 0;
   let scannedPages = 0;
@@ -885,7 +912,7 @@ export async function parseDocument(
       throw abortError();
     }
     const page = await doc.getPage(p);
-    const { lines, chars } = await readPageText(page);
+    const { lines, chars, height } = await readPageText(page);
     totalChars += chars;
     // A scanned page: next to no text of its own, and a picture. A slide or
     // certificate with a short title has no picture, or more text. Pictures
@@ -903,7 +930,7 @@ export async function parseDocument(
         page.cleanup();
       }
     }
-    perPage.push({ lines, page: p });
+    perPage.push({ lines, page: p, height });
 
     for (const line of lines) {
       // Weight by character count so body text dominates the median.
@@ -915,9 +942,10 @@ export async function parseDocument(
   }
 
   const bodySize = median(allSizes);
+  const running = runningLines(perPage, bodySize);
   const blocks: Block[] = [];
   for (const { lines, page } of perPage) {
-    const pageBlocks = buildBlocks(lines, bodySize, page);
+    const pageBlocks = buildBlocks(lines.filter((line) => !running.has(line)), bodySize, page);
     // A sentence that runs on over the page break is one paragraph, kept on
     // the page it starts on. Page numbers between the two halves stay where they are.
     const isNumber = (b: Block | undefined) => b?.type === "paragraph" && PAGE_NUMBER.test(b.text);

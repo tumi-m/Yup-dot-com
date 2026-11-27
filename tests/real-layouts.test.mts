@@ -117,6 +117,32 @@ const check = (name: string, ok: boolean, detail = "") => {
   check("headings with space between stay apart", headings.includes("Afrikaans") && headings.includes("isiZulu"), JSON.stringify(headings));
 }
 
+// 4. A report printed from a browser: its date and title at the top of each
+// page, its address and page count at the foot. They aren't part of the
+// text, and a paragraph running on over the page break is one paragraph.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const b = await d.embedFont(StandardFonts.HelveticaBold);
+  const body = "Load-shedding schedules change often so check the official schedule before you plan and";
+  for (let n = 1; n <= 3; n++) {
+    const p = d.addPage([595, 842]);
+    p.drawText(`11/27/26, 10:0${n} PM`, { x: 24, y: 820, size: 8, font: f });
+    p.drawText("How to plan for load-shedding | Example News", { x: 260, y: 820, size: 8, font: f });
+    p.drawText("https://news.example/energy/load-shedding", { x: 24, y: 17, size: 8, font: f });
+    p.drawText(`${n}/3`, { x: 560, y: 17, size: 8, font: f });
+    // A slide-like title at the top of each page is the page's own.
+    p.drawText(`Part ${n} of the guide`, { x: 40, y: 770, size: 20, font: b });
+    for (let i = 0; i < 40; i++) p.drawText(i === 39 && n < 3 ? body : `${body} more.`, { x: 40, y: 740 - i * 16, size: 11, font: f });
+    if (n > 1) p.drawText("continues on this page with the rest of the sentence.", { x: 40, y: 788, size: 11, font: f });
+  }
+  const doc = await parseDocument(await d.save());
+  const md = toMarkdown(doc);
+  check("the browser's header and footer are left out", !/PM|Example News|news\.example|\b\d\/3\b/.test(md), md.match(/.*(PM|Example News|news\.example).*/)?.[0]);
+  check("each page's own title stays", [1, 2, 3].every((n) => md.includes(`Part ${n} of the guide`)));
+  check("a sentence over the page break is one paragraph", md.includes("before you plan and continues on this page"), md.slice(md.indexOf("Part 2") - 300, md.indexOf("Part 2")));
+}
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
