@@ -133,7 +133,7 @@ export function authFailure(err: unknown): string {
   if (!(err instanceof Error)) return "Something went wrong. Try again.";
   const { status, code, reasons } = err as { status?: number; code?: string; reasons?: unknown };
   if (unreachable(err)) return "Couldn't reach PDF Wizard. Check your connection and try again.";
-  if (typeof status === "number" && status >= 500) return "Sign-in isn't working right now. Try again in a few minutes.";
+  if (typeof status === "number" && status >= 500) return "Logging in isn't working right now. Try again in a few minutes.";
   if (status === 429 && RATE_LIMIT_SITE.test(err.message)) {
     return "Too many emails were sent just now. Wait a few minutes, then try again.";
   }

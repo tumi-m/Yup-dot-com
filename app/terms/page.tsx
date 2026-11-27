@@ -23,7 +23,7 @@ const S = {
   use: "Acceptable use",
   media: "Video and audio downloads",
   files: "Your files",
-  ai: "The AI assistant",
+  ai: "Chat with PDF",
   samples: "The Sample Finder",
   billing: "Plans, billing and renewal",
   cancel: "Cancelling and refunds",
@@ -65,7 +65,7 @@ export default function TermsPage() {
       <Section id="service" title={S.service}>
         <p>
           {b.name} offers PDF and PowerPoint tools that run in your browser, a PDF editor, a cloud library for account
-          holders, an AI assistant for PDFs, Google Slides downloads, video and audio downloads from X, TikTok and Instagram,
+          holders, Chat with PDF (an AI assistant for PDFs), Google Slides downloads, video and audio downloads from X, TikTok and Instagram,
           and a Sample Finder that shows the samples, covers and remixes connected to a song.
           Some features need an account or a paid plan.
         </p>
@@ -113,7 +113,7 @@ export default function TermsPage() {
       <Section id="files" title={S.files}>
         <p>
           Your files stay yours. Files you open in the browser tools never reach us. For files in your cloud library
-          (including PDFs you open in the editor while signed in) and text you send to the AI assistant, you let us
+          (including PDFs you open in the editor while signed in) and text you send to Chat with PDF, you let us
           store and process them only to provide the service to you. Keep your
           own copies: don&apos;t treat the library as your only backup. Our{" "}
           <Link href="/privacy">Privacy policy</Link> explains how we handle personal information.

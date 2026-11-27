@@ -88,8 +88,8 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
     title: "Daily lookups used",
     body: (t) =>
       t === "guest"
-        ? `Free account: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`
-        : `Free: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`,
+        ? `${LIMITS.free.sampleLookupsPerDay} a day with a free account, ${LIMITS.pro.sampleLookupsPerDay} with Pro.`
+        : `${LIMITS.pro.sampleLookupsPerDay} a day with Pro.`,
   },
   office: {
     title: "Daily conversion limit reached",

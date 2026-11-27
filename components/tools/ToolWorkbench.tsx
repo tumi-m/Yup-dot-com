@@ -61,6 +61,7 @@ import { friendlyFileError, friendlyPdfError } from "@/lib/pdf/errors";
 import { ErrorHelp } from "./ErrorHelp";
 import { trackToolUsed } from "@/lib/analytics";
 import { getTool } from "@/lib/tools";
+import { actionLabel } from "./action-label";
 import { HEIC_MESSAGE, looksHeic } from "@/lib/pdf/images-to-pdf/formats";
 import Link from "next/link";
 
@@ -905,7 +906,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
                       exit={HANDOFF.out}
                     >
                       <Button ref={focusRef("run")} size="lg" onClick={run} data-cast className="min-w-52 shadow-lg shadow-primary/25">
-                        <Sparkles /> Cast spell
+                        <Sparkles /> {actionLabel(slug)}
                       </Button>
                     </motion.div>
                   )}

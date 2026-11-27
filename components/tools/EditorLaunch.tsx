@@ -20,7 +20,7 @@ import { emptyMessage } from "./file-pick";
  * Opens a PDF in the editor with no account required.
  * Signed-in users get the document in their cloud library; everyone else
  * edits on-device (IndexedDB), exactly like PDFescape's free online editor.
- * Fill & Sign (`mode: "sign"`) opens the same editor, pointed at signing;
+ * Fill & Sign PDF (`mode: "sign"`) opens the same editor, pointed at signing;
  * Edit PDF text (`mode: "text"`) opens it in Edit text.
  */
 export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" | "text" }) {

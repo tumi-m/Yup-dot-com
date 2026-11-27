@@ -88,7 +88,7 @@ export async function handleRedeem(request: Request, deps: RedeemDeps): Promise<
   if (refused) return refused;
 
   const user = await deps.getUser();
-  if (!user) return answer({ error: "Sign in first." }, 401);
+  if (!user) return answer({ error: "Log in first." }, 401);
 
   const parsed = schema().safeParse(await request.json().catch(() => null));
   if (!parsed.success) return answer({ error: "Enter your tester code." }, 400);

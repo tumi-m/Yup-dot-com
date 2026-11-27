@@ -522,9 +522,9 @@ async function longPdf(pages: number): Promise<Uint8Array> {
   const privacy = readFileSync("./app/privacy/page.tsx", "utf8");
   const tool = readFileSync("./components/tools/TranslateTool.tsx", "utf8");
   const about = readFileSync("./components/tools/TranslateAbout.tsx", "utf8");
-  check("the privacy summary names Translate PDF", /<li>The AI assistant and Translate PDF send a document&apos;s text, not the file, to our AI provider\.<\/li>/.test(privacy));
+  check("the privacy summary names Translate PDF", /<li>Chat with PDF and Translate PDF send a document&apos;s text, not the file, to our AI provider\.<\/li>/.test(privacy));
   check("its AI section says what Translate PDF sends, to whom, and that nothing is stored", /When you use Translate PDF[\s\S]{0,400}passes it to Ollama to translate[\s\S]{0,200}We don&apos;t store the text or the translations/.test(privacy) && /id="ai"/.test(privacy));
-  check("the processor list includes the translations", /Ollama<\/strong>: AI assistant answers and Translate PDF translations/.test(privacy));
+  check("the processor list includes the translations", /Ollama<\/strong>: Chat with PDF answers and Translate PDF translations/.test(privacy));
   check("the page says the text goes to the AI provider, with the same caution, and links the policy", /our AI provider, the one Chat with PDF uses/.test(tool) && /aren&apos;t allowed to share with a third party/.test(tool) && /href="\/privacy#ai"/.test(tool));
   check("the questions say the same", /our AI provider, the one Chat with PDF uses/.test(about) && /aren't allowed to share with a third party/.test(about) && !/Nothing is kept|our translation service/.test(about));
 }

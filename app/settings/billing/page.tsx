@@ -20,7 +20,7 @@ import { getPriceDisplay } from "@/lib/local-prices";
 import { loginHref } from "@/components/auth-redirect";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Billing" };
+export const metadata = { title: "Billing", robots: { index: false, follow: false } };
 
 export default async function BillingPage({
   searchParams,

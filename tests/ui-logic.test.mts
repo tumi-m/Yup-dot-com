@@ -139,7 +139,7 @@ for (const [q, slug] of finds) check(`search "${q}" finds ${slug}`, found(q).inc
 check("search: 'word' doesn't find the password tools", found("word")[0] === "pdf-to-word" && !found("word").some((s) => s === "protect-pdf" || s === "unlock-pdf"), found("word"));
 check("search: 'remove password' is only Unlock PDF", found("remove password").join() === "unlock-pdf", found("remove password"));
 // The tool a search names comes first; the others keep catalogue order.
-check("search: 'sign' lists Fill & Sign first", found("sign")[0] === "sign-pdf", found("sign"));
+check("search: 'sign' lists Fill & Sign PDF first", found("sign")[0] === "sign-pdf", found("sign"));
 check("search: 'edit' lists the Edit tools first", found("edit").slice(0, 2).join() === "edit-pptx,edit-pdf", found("edit"));
 check("search: 'ppt to pdf' lists PPTX to PDF before PDF to PPTX", found("ppt to pdf").join() === "pptx-to-pdf,pdf-to-pptx", found("ppt to pdf"));
 check("search: 'pdf-to-jpg' lists PDF to JPG first", found("pdf-to-jpg")[0] === "pdf-to-jpg", found("pdf-to-jpg"));

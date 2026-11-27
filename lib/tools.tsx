@@ -408,7 +408,7 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "translate-pdf",
     name: "Translate PDF",
     title: "Translate PDF: translate a document into another language",
-    description: "Translate a PDF into another language, as a Word file and, for most languages, a PDF.",
+    description: "Translate a PDF, as a Word file and, for most languages, a PDF.",
     icon: Languages,
     category: "convert",
     tint: "bg-gradient-to-br from-sky-100 to-violet-100 text-sky-800",
@@ -506,14 +506,15 @@ const ALL_TOOLS: ToolMeta[] = [
   },
   {
     slug: "chat-with-pdf",
-    name: "AI Assistant",
-    title: "Chat with PDF: summarize and ask questions",
+    name: "Chat with PDF",
+    title: "Chat with PDF: summarise and ask questions",
     description: "Summarise a PDF and ask questions.",
     icon: MessagesSquare,
     category: "extract",
     tint: "bg-gradient-to-br from-violet-100 to-fuchsia-100 text-violet-700",
     badge: "AI",
     custom: "assistant",
+    aliases: ["AI Assistant", "Ask PDF", "Summarise PDF", "Summarize PDF"],
   },
   {
     slug: "ocr-pdf",
@@ -568,7 +569,7 @@ const ALL_TOOLS: ToolMeta[] = [
   },
   {
     slug: "watermark-pdf",
-    name: "Watermark",
+    name: "Watermark PDF",
     title: "Watermark PDF: stamp text over every page",
     description: "Stamp text across every page.",
     icon: Stamp,
@@ -611,7 +612,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "edit-pdf-text",
     name: "Edit PDF Text",
-    title: "Edit PDF text: change the existing text in a PDF",
+    title: "Edit PDF Text: change the existing text in a PDF",
     description: "Click a line and change its text, size or colour.",
     icon: TextCursor,
     category: "edit",
@@ -624,14 +625,15 @@ const ALL_TOOLS: ToolMeta[] = [
   },
   {
     slug: "sign-pdf",
-    name: "Fill & Sign",
-    title: "Sign PDF: fill forms and add your signature",
+    name: "Fill & Sign PDF",
+    title: "Fill & Sign PDF: fill in forms and add your signature",
     description: "Fill in forms and sign.",
     icon: Signature,
     category: "edit",
     tint: "bg-cyan-100 text-cyan-700",
     editor: true,
     keywords: "esign signature",
+    aliases: ["Sign PDF", "Fill PDF Form"],
   },
   {
     slug: "youtube-to-mp4",
@@ -648,7 +650,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-1080p",
     name: "YouTube 1080p",
-    title: "YouTube 1080p Downloader: Full HD MP4",
+    title: "YouTube 1080p: Full HD MP4 downloader",
     description: "Full HD MP4 with sound.",
     icon: MonitorPlay,
     category: "media",
@@ -660,8 +662,8 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-720p",
     name: "YouTube 720p",
-    title: "YouTube 720p Downloader: free HD MP4",
-    description: "HD MP4, free.",
+    title: "YouTube 720p: free HD MP4 downloader",
+    description: "Save a video in HD as MP4.",
     icon: MonitorPlay,
     category: "media",
     tint: "bg-rose-100 text-rose-700",
@@ -683,7 +685,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-playlist",
     name: "YouTube Playlist",
-    title: "YouTube Playlist Downloader: MP4, MP3 and CSV",
+    title: "YouTube Playlist: download as MP4, MP3 or CSV",
     description: "Download a whole playlist, or export its list.",
     icon: ListVideo,
     category: "media",
@@ -693,7 +695,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "x-to-mp4",
     name: "X (Twitter) to MP4",
-    title: "X (Twitter) Video Downloader: save as MP4",
+    title: "X (Twitter) to MP4: X video downloader",
     description: "Save an X video as MP4.",
     icon: Film,
     category: "media",
@@ -717,7 +719,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "tiktok-to-mp4",
     name: "TikTok to MP4",
-    title: "TikTok Video Downloader: save TikToks as MP4",
+    title: "TikTok to MP4: TikTok video downloader",
     description: "Save a TikTok as MP4.",
     icon: Video,
     category: "media",
@@ -741,7 +743,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "instagram-to-mp4",
     name: "Instagram to MP4",
-    title: "Instagram Reels Downloader: save Reels and videos as MP4",
+    title: "Instagram to MP4: Reels and video downloader",
     description: "Save a Reel or video post as MP4.",
     icon: Instagram,
     category: "media",
@@ -766,7 +768,7 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "sample-finder",
     name: "Sample Finder",
     title: "Sample Finder: see what samples a song uses",
-    description: "Paste a YouTube or TikTok link, or type a song.",
+    description: "See which songs a track samples, from a link or its name.",
     icon: Disc3,
     category: "media",
     tint: "bg-violet-100 text-violet-800",
@@ -876,3 +878,24 @@ export function relatedTools(slug: string): ToolMeta[] {
 }
 
 export const WORKBENCH_TOOLS = TOOLS.filter((t) => !t.editor);
+
+/**
+ * Tools that send something to a server: the text to the AI, a link to
+ * fetch, or the file itself to convert. Every other tool runs in the
+ * browser; the editor does too, but saves to the cloud library when signed in.
+ */
+const SENDS: ReadonlySet<ToolMeta["custom"]> = new Set(["assistant", "media", "playlist", "slides-import", "samples", "translate", "office", "web-to-pdf"]);
+
+/** Whether a tool's files stay on the visitor's device, whoever they are. */
+export function staysOnDevice(tool: ToolMeta): boolean {
+  return !tool.editor && !SENDS.has(tool.custom);
+}
+
+/**
+ * A tool page's search description: its card line, then what it costs and,
+ * where true for everyone, that the file isn't uploaded.
+ */
+export function metaDescription(tool: ToolMeta): string {
+  if (tool.badge === "Pro") return `${tool.description} Part of PDF Wizard Pro, nothing to install.`;
+  return `${tool.description} Free online, no sign-up, ${staysOnDevice(tool) ? "and your files stay on your device" : "nothing to install"}.`;
+}

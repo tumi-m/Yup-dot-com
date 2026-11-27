@@ -27,7 +27,7 @@ export default function OpengraphImage() {
           <path d="M12 7.6l.62 1.45 1.55.18-1.16 1.05.35 1.53-1.36-.8-1.36.8.35-1.53-1.16-1.05 1.55-.18L12 7.6Z" fill="#fbbf24" />
         </svg>
         <div style={{ marginTop: 40, fontSize: 96, fontWeight: 700, letterSpacing: -2 }}>PDF Wizard</div>
-        <div style={{ marginTop: 12, fontSize: 40, opacity: 0.85 }}>PDFs, slides and video. In your browser.</div>
+        <div style={{ marginTop: 12, fontSize: 40, opacity: 0.85 }}>PDFs, slides and video. Free, no sign-up.</div>
       </div>
     ),
     size

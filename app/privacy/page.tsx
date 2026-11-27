@@ -55,7 +55,7 @@ export default function PrivacyPage() {
         <ul>
           <li>Most tools run in your browser. Those files never reach us.</li>
           <li>We store files only in your cloud library, which needs an account.</li>
-          <li>The AI assistant and Translate PDF send a document&apos;s text, not the file, to our AI provider.</li>
+          <li>Chat with PDF and Translate PDF send a document&apos;s text, not the file, to our AI provider.</li>
           <li>Paystack handles payments. We never see your card number.</li>
           <li>Analytics cookies stay off unless you accept them.</li>
           <li>We don&apos;t sell your personal information.</li>
@@ -109,11 +109,11 @@ export default function PrivacyPage() {
         <h3>Tester codes</h3>
         <p>If you use a tester code: which code you used and when, and when your free tester time ends.</p>
 
-        <h3 id="ai">The AI assistant and Translate PDF</h3>
+        <h3 id="ai">Chat with PDF and Translate PDF</h3>
         <p>
           When you use Chat with PDF, your browser extracts the document&apos;s text and sends it, with the file name and
           your questions, to our server, which passes them to Ollama, our AI provider, to write the answer. We don&apos;t
-          store the text, your questions or the answers. Don&apos;t use the assistant on documents you aren&apos;t
+          store the text, your questions or the answers. Don&apos;t use Chat with PDF on documents you aren&apos;t
           allowed to share with a third party.
         </p>
         <p>
@@ -248,7 +248,7 @@ export default function PrivacyPage() {
             <strong>Paystack</strong>: payments, subscriptions and refunds.
           </li>
           <li>
-            <strong>Ollama</strong>: AI assistant answers and Translate PDF translations (document text, questions and the
+            <strong>Ollama</strong>: Chat with PDF answers and Translate PDF translations (document text, questions and the
             chosen languages only).
           </li>
           <li>

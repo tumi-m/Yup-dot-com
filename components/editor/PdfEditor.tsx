@@ -260,7 +260,7 @@ export function PdfEditor({
             fieldsAnnounced.current = true;
             const n = fillableCount(fields);
             if (n) toast(`${n} fillable field${n === 1 ? "" : "s"} detected`, "info");
-            // Opened from Fill & Sign: what to do, once it is known whether there is anything to fill in.
+            // Opened from Fill & Sign PDF: what to do, once it is known whether there is anything to fill in.
             if (new URLSearchParams(window.location.search).get("sign") === "1") {
               toast(n ? "Fill in the fields, then choose Signature to sign." : "Choose Signature to sign.", "info");
             }
@@ -868,7 +868,7 @@ export function PdfEditor({
     setLive(`Page ${next + 1} of ${numPages}`);
   };
 
-  // Opened from Fill & Sign: show where Signature is (off the side of a
+  // Opened from Fill & Sign PDF: show where Signature is (off the side of a
   // phone's toolbar). Nothing opens by itself; the load says what to do.
   const signHinted = useRef(false);
   useEffect(() => {

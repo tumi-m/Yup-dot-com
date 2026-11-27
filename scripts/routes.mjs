@@ -37,6 +37,7 @@ export const PUBLIC_ROUTES = [
   "/api/ai/chat", // GET: the visitor's own answers left today
   "/api/ai/translate", // GET: whether translation runs, and the visitor's own characters left today
   "/api/prices",
+  "/apple-icon",
   "/icon.svg",
   "/opengraph-image",
   "/robots.txt",

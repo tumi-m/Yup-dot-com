@@ -36,7 +36,7 @@ interface LoadedDoc {
 }
 
 const SUGGESTIONS = [
-  "Summarize",
+  "Summarise",
   "Key numbers and dates",
   "Action items",
 ];
@@ -444,7 +444,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
         {error && (
           <InlineError key="error" message={error.message} className="mx-5 mb-3 py-2.5">
             {error.needsLogin && (
-              <Link href="/login?redirect=/tools/chat-with-pdf" className="font-semibold underline">Sign in</Link>
+              <Link href="/login?redirect=/tools/chat-with-pdf" className="font-semibold underline">Log in</Link>
             )}
           </InlineError>
         )}

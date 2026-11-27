@@ -218,7 +218,7 @@ const translatedOf = (events: Event[]) => new Map(events.filter((e) => e.type ==
   check("Pro, once spent: no upgrade prompt", proSpent.status === 429 && proSpent.json.upgrade === false, proSpent);
   check("Pro has more than Free, and Free more than a guest", LIMITS.pro.translateCharsPerDay > LIMITS.free.translateCharsPerDay && LIMITS.free.translateCharsPerDay > LIMITS.guest.translateCharsPerDay && LIMITS.team.translateCharsPerDay === LIMITS.pro.translateCharsPerDay);
   const none = await post(deps({ env: { TRANSLATE_LIMIT_GUEST_DAY: "0" } }), { target: "fr", segments: segs("Hello") });
-  check("guest allowance 0: sign in first", none.status === 401 && /Sign in/.test(none.json.error ?? ""));
+  check("guest allowance 0: sign in first", none.status === 401 && /Log in/.test(none.json.error ?? ""));
 }
 {
   // Burst: two a minute; a refused request gives back the characters it took.

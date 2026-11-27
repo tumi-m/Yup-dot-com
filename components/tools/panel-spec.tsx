@@ -50,7 +50,7 @@ const SCAN_HEIGHT = [
 
 /** Rendered heights of each kind of tool panel before a file is chosen. */
 export function placeholderSize(kind: PanelSpec["kind"], mode?: "sign" | "text"): string {
-  // Fill & Sign and Edit PDF text have no Blank page button under Choose PDF on phones.
+  // Fill & Sign PDF and Edit PDF Text have no Blank page button under Choose PDF on phones.
   if (kind === "editor") return mode ? "h-[244px]" : "h-[296px] sm:h-[244px]";
   if (kind === "assistant") return "h-[300px] sm:h-[272px]";
   if (kind === "media" || kind === "playlist" || kind === "samples") return "h-[206px] sm:h-[150px]";

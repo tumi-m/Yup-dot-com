@@ -9,6 +9,8 @@ import { PricingCards } from "@/components/PricingCards";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import { getPriceDisplay } from "@/lib/local-prices";
+import { OFFICE_ENABLED } from "@/lib/office";
+import { HTML_TO_PDF_ENABLED } from "@/lib/web-pdf";
 
 // Its own title and description on shared links too, not the home page's.
 export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
@@ -80,6 +82,19 @@ export default async function PricingPage({
 
 const FAQ = [
   { q: "Do I need an account?", a: "No. Every tool works without one." },
-  { q: "Are my files uploaded?", a: "No. PDF tools run in your browser. Signed in, the editor saves to your private library." },
+  { q: "Are my files uploaded?", a: uploadAnswer() },
   { q: "Can I cancel anytime?", a: "Yes, from the Billing page." },
 ];
+
+/**
+ * Most tools never upload, but some do, as the privacy policy says: the
+ * answer names them, with the converters only while they are switched on.
+ */
+function uploadAnswer(): string {
+  const sends = [
+    "Chat with PDF and Translate PDF send only a document's text",
+    ...(OFFICE_ENABLED ? ["Word and Excel to PDF upload the file and delete it once converted"] : []),
+    ...(HTML_TO_PDF_ENABLED ? ["HTML to PDF sends the page's address or HTML"] : []),
+  ];
+  return `Most tools run in your browser, so your files stay on your device. ${sends.join(". ")}. Logged in, the editor saves to your private library.`;
+}
