@@ -3,6 +3,7 @@ import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS, SECURITY_EMAIL } from "@/lib/business";
 import { LegalPage, Section } from "@/components/legal/LegalPage";
+import { OFFICE_ENABLED } from "@/lib/office";
 
 // Its own title and description on shared links too, not the home page's.
 export function generateMetadata(_: unknown, parent: ResolvingMetadata) {
@@ -26,6 +27,12 @@ export default function SecurityPage() {
       <Section id="files" title="Your files">
         <ul>
           <li>Most tools run in your browser. Files you open in them are never uploaded.</li>
+          {OFFICE_ENABLED && (
+            <li>
+              Word to PDF and Excel to PDF upload the file to our conversion server, which checks it, converts it with
+              macros off and no links followed, and deletes it with the PDF as soon as the PDF is sent back.
+            </li>
+          )}
           <li>
             Your cloud library (only when you&apos;re signed in) is kept in private storage. Database rules let each
             account reach only its own documents and files.

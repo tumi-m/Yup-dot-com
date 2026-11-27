@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { Cloud, Crown, Disc3, Film, Infinity as InfinityIcon, Languages, Sparkles, Stamp, X, Zap } from "lucide-react";
+import { Cloud, Crown, Disc3, FileType, Film, Infinity as InfinityIcon, Languages, Sparkles, Stamp, X, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import { useLocalPrices } from "@/components/LocalPrice";
 import { DUR, ENTER_T, NUDGE_DELAY_MS, SPRING, SUCCESS, staggerDelay } from "@/components/motion/tokens";
 import { signupHref } from "@/components/auth-redirect";
 
-export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples";
+export type UpsellReason = "file-size" | "batch" | "pages" | "redact-pages" | "ai" | "translate" | "translate-size" | "save" | "nudge" | "quality" | "downloads" | "edits" | "samples" | "office" | "office-size";
 
 const characters = (n: number) => `${n.toLocaleString("en-US")} characters`;
 
@@ -84,6 +84,17 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
         ? `Free account: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`
         : `Free: ${LIMITS.free.sampleLookupsPerDay} a day. Pro: ${LIMITS.pro.sampleLookupsPerDay}.`,
   },
+  office: {
+    title: "Daily conversion limit reached",
+    body: (t) =>
+      t === "guest"
+        ? `${LIMITS.free.officeConversionsPerDay} Word and Excel files a day with a free account, ${LIMITS.pro.officeConversionsPerDay} with Pro.`
+        : `${LIMITS.pro.officeConversionsPerDay} Word and Excel files a day with Pro.`,
+  },
+  "office-size": {
+    title: "File too large",
+    body: (t) => `Word and Excel files up to ${formatLimitBytes(LIMITS[t].officeMaxBytes)} free, ${formatLimitBytes(LIMITS.pro.officeMaxBytes)} with Pro.`,
+  },
   save: {
     title: "Save to the cloud",
     body: () => "Open your documents on any device.",
@@ -118,6 +129,12 @@ const TRANSLATE_BENEFITS = [
   { icon: Sparkles, text: "More AI answers" },
 ];
 
+const OFFICE_BENEFITS = [
+  { icon: FileType, text: `${LIMITS.pro.officeConversionsPerDay} Word and Excel files a day, up to ${formatLimitBytes(LIMITS.pro.officeMaxBytes)}` },
+  { icon: InfinityIcon, text: "Bigger files and batches" },
+  { icon: Sparkles, text: "More AI answers" },
+];
+
 const BENEFITS = [
   { icon: Cloud, text: "Cloud library" },
   { icon: InfinityIcon, text: "Bigger files and batches" },
@@ -145,7 +162,7 @@ export function UpgradeDialog({
   const guest = tier === "guest";
   // Guests are first offered the free account, unless it wouldn't help
   // (Free has the same file size, batch, quality and edit limits).
-  const offerFreeAccount = guest && !["file-size", "batch", "quality", "edits"].includes(reason);
+  const offerFreeAccount = guest && !["file-size", "batch", "quality", "edits", "office-size"].includes(reason);
   const signup = signupHref(returnTo);
   const prices = useLocalPrices(open);
   const pro = PLANS.pro.priceMonthly;
@@ -192,7 +209,9 @@ export function UpgradeDialog({
                   ? SAMPLE_BENEFITS
                   : reason === "translate" || reason === "translate-size"
                     ? TRANSLATE_BENEFITS
-                    : BENEFITS
+                    : reason === "office" || reason === "office-size"
+                      ? OFFICE_BENEFITS
+                      : BENEFITS
             ).map((b, i) => (
               <motion.li
                 key={b.text}
