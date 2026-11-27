@@ -37,6 +37,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import yt_dlp
 
+import office  # Word and Excel to PDF (office.py)
+
 SECRET = os.environ.get("MEDIA_WORKER_SECRET", "").encode()
 PORT = int(os.environ.get("PORT", "8080"))
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("MEDIA_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
@@ -554,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.cors()
         self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", f"Content-Type, {office.TOKEN_HEADER}")
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
@@ -573,6 +575,7 @@ class Handler(BaseHTTPRequestHandler):
                 "proxy": bool(PROXY),
                 "cookies": bool(COOKIES),
                 "playlists": True,
+                "office": office.health(),
             })
         m = re.fullmatch(r"/jobs/([\w-]{16,64})(/file)?", path)
         if not m:
@@ -642,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        if office.handles(path):
+            return office.handle(self, refs, jobs_lock)
         m = re.fullmatch(r"/refs/([\w-]{8,64})/void", path)
         if m:
             # Server to server, before a refund: from now on this grant can't

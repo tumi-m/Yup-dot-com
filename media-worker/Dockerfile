@@ -5,6 +5,21 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# ---- Word and Excel to PDF (office.py) --------------------------------------
+# LibreOffice Writer and Calc without the desktop parts, the UNO bridge for
+# the system Python (office.py runs LibreOffice through /usr/bin/python3),
+# and fonts made to the same widths as Office's own, so lines and pages break
+# where they did: Carlito (Calibri), Caladea (Cambria), Liberation (Arial,
+# Times New Roman, Courier New), with DejaVu and Noto for other scripts.
+# Licences: THIRD_PARTY_NOTICES.md. Roughly 500-650 MB more image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libreoffice-writer-nogui libreoffice-calc-nogui python3-uno \
+      fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation2 \
+      fonts-dejavu-core fonts-noto-core \
+ && rm -rf /var/lib/apt/lists/*
+# ---- end of Word and Excel to PDF -------------------------------------------
+
 WORKDIR /app
 COPY requirements.txt .
 # YouTube breaks old yt-dlp releases often. Change this value (or pass
@@ -14,6 +29,8 @@ RUN echo "yt-dlp refresh: $YTDLP_REFRESH" \
  && pip install --no-cache-dir -U -r requirements.txt \
  && deno --version
 COPY worker.py .
+# Word and Excel to PDF.
+COPY office.py .
 
 # Run as an unprivileged user.
 RUN useradd --create-home worker
