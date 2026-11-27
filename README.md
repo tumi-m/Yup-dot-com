@@ -45,7 +45,7 @@ and deletes it straight after; its pages say so.
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
 | **Extract Tables** | Detect tables by column structure, export each as CSV. |
 | **PDF → RAG Chunks** | Retrieval-sized JSON chunks with heading breadcrumbs. |
-| **OCR PDF** | Make scans searchable (invisible text layer) or extract text. 7 languages, on-device. |
+| **OCR PDF** | Make scans searchable (invisible text layer) or extract text. 7 languages, on-device. A scanned page lying sideways or upside down is read the right way up and turned to match; the result names it. |
 | **AI Assistant** | Summarize a PDF and ask questions; answers cite pages. *Guests get 3 answers/day; needs an API key.* |
 | **Protect PDF** | Encrypt with a password; choose print/copy permissions. |
 | **Unlock PDF** | Remove a password you know. |

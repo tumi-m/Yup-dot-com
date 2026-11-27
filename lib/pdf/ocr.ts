@@ -2,7 +2,7 @@
 
 import { loadForRender } from "./render";
 import { canvasToJpeg } from "../jpeg-encode/off-thread";
-import { lineWords, looksGarbled, newWords, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
+import { lineWords, looksGarbled, newWords, readQuality, readsBadly, readsBetter, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 
 /** Engine, WebAssembly core, and language models are all self-hosted. */
@@ -42,6 +42,12 @@ export interface OcrOptions {
   newWordsOnly?: boolean;
   /** Stops the run at once: Cancel, a new file, or leaving the tool. */
   signal?: AbortSignal;
+  /**
+   * A page with no text of its own that reads as noise is read again turned
+   * (upside down, then each way sideways), and kept as it reads best: its
+   * OcrText says how it was turned. Scanner feeders take pages in any way up.
+   */
+  turnPages?: boolean;
 }
 
 const abortError = () => new DOMException("Cancelled.", "AbortError");
@@ -155,33 +161,59 @@ export async function ocrDocument(
       // past what Safari will draw. Word boxes are measured against
       // canvas.width/height below.
       await until(loaded.renderPage(i, canvas, RENDER_SCALE, { pixelRatio: 1 }));
-      // Tesseract waits forever on a canvas the browser couldn't draw.
-      const image = await until(new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")));
-      if (!image) throw new Error(`Page ${i} is too large to read on this device.`);
-
-      const { data } = await until(worker.recognize(image, {}, { blocks: true, text: true }));
-      const words: OcrWord[] = [];
-      for (const block of data.blocks ?? []) {
-        for (const para of block.paragraphs) {
-          for (const line of para.lines) words.push(...lineWords(line));
+      const read = async (from: HTMLCanvasElement) => {
+        // Tesseract waits forever on a canvas the browser couldn't draw.
+        const image = await until(new Promise<Blob | null>((resolve) => from.toBlob(resolve, "image/png")));
+        if (!image) throw new Error(`Page ${i} is too large to read on this device.`);
+        const { data } = await until(worker.recognize(image, {}, { blocks: true, text: true }));
+        const words: OcrWord[] = [];
+        for (const block of data.blocks ?? []) {
+          for (const para of block.paragraphs) {
+            for (const line of para.lines) words.push(...lineWords(line));
+          }
+        }
+        return words;
+      };
+      let shown = canvas;
+      let words = await read(canvas);
+      let turn: OcrText["turn"];
+      const pieces = own.get(i);
+      if (opts.turnPages && !(pieces && textLength(pieces) >= HAS_TEXT)) {
+        let best = readQuality(words);
+        if (readsBadly(best)) {
+          for (const by of [180, 90, 270] as const) {
+            const turned = turnCanvas(canvas, by);
+            const again = await read(turned);
+            const q = readQuality(again);
+            if (readsBetter(q, best)) {
+              if (shown !== canvas) shown.width = shown.height = 0;
+              [shown, words, turn, best] = [turned, again, by, q];
+              // Upside down and read well: no need to try sideways.
+              if (by === 180) break;
+            } else {
+              turned.width = turned.height = 0;
+            }
+          }
         }
       }
+      const sideways = turn === 90 || turn === 270;
 
       const text: OcrText = {
-        widthPt: vp.baseWidth,
-        heightPt: vp.baseHeight,
-        imageWidth: canvas.width,
-        imageHeight: canvas.height,
+        widthPt: sideways ? vp.baseHeight : vp.baseWidth,
+        heightPt: sideways ? vp.baseWidth : vp.baseHeight,
+        imageWidth: shown.width,
+        imageHeight: shown.height,
         words,
+        ...(turn ? { turn } : {}),
       };
-      if (newOnly) {
-        const pieces = own.get(i)!;
+      if (newOnly && pieces) {
         // A text layer that doesn't say what the page shows: read every page.
         if (i === sample && !textAgrees(words, pieces.map((t) => t.text).join(" "))) toRead.push(...plain);
         text.words = newWords(text, pieces);
         text.known = words.length - text.words.length;
       }
-      pages[i - 1] = opts.images ? { ...text, imageType: "jpeg", image: await canvasToJpeg(canvas, 0.85) } : text;
+      pages[i - 1] = opts.images ? { ...text, imageType: "jpeg", image: await canvasToJpeg(shown, 0.85) } : text;
+      if (shown !== canvas) shown.width = shown.height = 0;
       canvas.width = canvas.height = 0;
     }
   } finally {
@@ -192,6 +224,22 @@ export async function ocrDocument(
 }
 
 const textLength = (pieces: OwnText[]) => pieces.reduce((n, t) => n + t.text.length, 0);
+
+/** A copy of the canvas turned `by` degrees clockwise. */
+function turnCanvas(from: HTMLCanvasElement, by: 90 | 180 | 270): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  const sideways = by !== 180;
+  out.width = sideways ? from.height : from.width;
+  out.height = sideways ? from.width : from.height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return out;
+  if (by === 90) ctx.translate(out.width, 0);
+  else if (by === 180) ctx.translate(out.width, out.height);
+  else ctx.translate(0, out.height);
+  ctx.rotate((by * Math.PI) / 180);
+  ctx.drawImage(from, 0, 0);
+  return out;
+}
 
 /** Plain text from OCR results, one block per page. */
 export function ocrText(pages: (OcrText | null)[]): string {

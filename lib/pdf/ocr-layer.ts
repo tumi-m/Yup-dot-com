@@ -62,7 +62,7 @@ export interface OcrLine {
  * ascenders, so "problem" sat lower and "a" smaller than "Boil", and copied
  * text came out in the wrong order. A bullet read as a sign or a stray
  * letter ("©", or an unsure "eo"), well apart from the words after it,
- * becomes "•", so the copied text is a list.
+ * becomes "•", so the copied text is a list (specks of dust stay specks).
  */
 export function lineWords(line: OcrLine): OcrWord[] {
   const box = line.bbox;
@@ -76,7 +76,7 @@ export function lineWords(line: OcrLine): OcrWord[] {
     const next = line.words[i + 1];
     const t = w.text.trim();
     const stray = /^[^\p{L}\p{N}]{1,2}$/u.test(t) || (/^\p{L}{1,2}$/u.test(t) && w.confidence < 80);
-    const bullet = i === 0 && !!next && stray && next.bbox.x0 - w.bbox.x1 > size;
+    const bullet = i === 0 && !!next && stray && next.bbox.x0 - w.bbox.x1 > size && /[\p{L}\p{N}]/u.test(next.text);
     return {
       text: bullet ? "•" : w.text,
       confidence: bullet ? 100 : w.confidence,
@@ -98,6 +98,39 @@ export interface OcrText {
   words: OcrWord[];
   /** Words read but left out because the page's own text already has them. */
   known?: number;
+  /**
+   * Degrees clockwise the page was turned to be read (it lay sideways or upside
+   * down): the words, sizes and render are of the page turned so.
+   */
+  turn?: 90 | 180 | 270;
+}
+
+const letters = (text: string) => text.match(/\p{L}/gu)?.length ?? 0;
+
+/**
+ * How a page read: its letters, and those in words read with confidence. A
+ * page lying sideways or upside down reads as noise, with next to no sure
+ * letters.
+ */
+export function readQuality(words: { text: string; confidence: number }[]) {
+  let all = 0;
+  let sure = 0;
+  for (const w of words) {
+    const n = letters(w.text);
+    all += n;
+    if (w.confidence >= 70) sure += n;
+  }
+  return { all, sure };
+}
+
+/** Worth reading turned: text was there, but few of its letters were sure. */
+export function readsBadly(q: { all: number; sure: number }) {
+  return q.all >= 20 && q.sure < q.all * 0.4;
+}
+
+/** The turned read is the page's: far more sure letters, and mostly sure. */
+export function readsBetter(turned: { all: number; sure: number }, upright: { all: number; sure: number }) {
+  return turned.sure >= 20 && turned.sure >= upright.sure * 2 && turned.sure >= turned.all * 0.5;
 }
 
 /** The rendered page itself: JPEG or PNG bytes, or lossless pixels ready for the PDF. */

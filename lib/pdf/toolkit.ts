@@ -753,10 +753,11 @@ export async function ocrTool(
   };
   const { signal } = ctx;
   if (opts.output === "text") {
-    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal });
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, turnPages: true });
     return {
       blob: new Blob([ocrText(pages)], { type: "text/plain" }),
       filename: `${base}-ocr.txt`,
+      note: turnedNote(pages, "read turned the right way up"),
     };
   }
 
@@ -766,18 +767,33 @@ export async function ocrTool(
   const original = await openForTextLayer(bytes);
   const { addTextLayer, buildSearchablePdf } = await import("./ocr-layer");
   if (!original) {
-    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, images: true });
+    const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, images: true, turnPages: true });
     ctx.progress?.(1, "Building searchable PDF…");
-    return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf` };
+    return { blob: pdfBlob(await buildSearchablePdf(pages)), filename: `${base}-searchable.pdf`, note: turnedNote(pages) };
   }
-  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, newWordsOnly: true });
+  const pages = await ocrDocument(bytes, { lang: opts.lang, onProgress, signal, newWordsOnly: true, turnPages: true });
   if (!pages.some((p) => p?.words.length)) {
     // Pages left unread, or words left out, mean the text is there already.
     const there = pages.some((p) => !p || p.known);
     throw new Error(there ? "This PDF can already be searched and copied. To get its text, use PDF to Text." : "No text found in this PDF.");
   }
   ctx.progress?.(1, "Building searchable PDF…");
-  return { blob: pdfBlob(await addTextLayer(original, pages)), filename: `${base}-searchable.pdf` };
+  // A page read turned is turned in the file too, so it shows the right way up.
+  original.getPages().forEach((page, i) => {
+    const turn = pages[i]?.turn;
+    if (turn) page.setRotation(degrees((page.getRotation().angle + turn) % 360));
+  });
+  return { blob: pdfBlob(await addTextLayer(original, pages)), filename: `${base}-searchable.pdf`, note: turnedNote(pages) };
+}
+
+/** Names the pages that lay sideways or upside down, if any did. */
+export function turnedNote(pages: ({ turn?: number } | null)[], done = "turned the right way up"): string | undefined {
+  const turned = pages.flatMap((p, i) => (p?.turn ? [i + 1] : []));
+  if (!turned.length) return undefined;
+  const list = turned.length === 1 ? `${turned[0]}` : `${turned.slice(0, -1).join(", ")} and ${turned[turned.length - 1]}`;
+  const upsideDown = turned.filter((n) => pages[n - 1]?.turn === 180).length;
+  const how = upsideDown === turned.length ? "upside down" : upsideDown ? "sideways or upside down" : "sideways";
+  return `${turned.length === 1 ? "Page" : "Pages"} ${list} ${turned.length === 1 ? "was" : "were"} ${how}: ${done}.`;
 }
 
 // ---------------------------------------------------------------------------
