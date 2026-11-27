@@ -102,6 +102,9 @@ check("media invalid → none", mediaActions("https://vimeo.com/123").length ===
   check("paused: a video in a playlist → that video's samples, without the list", inList.length === 1 && !inList[0].href.includes("list"), inList);
   check("paused: a playlist-only link → nothing, and a hint", mediaActions(`https://www.youtube.com/playlist?list=${PL}`, false).length === 0 &&
     mediaHint(`https://www.youtube.com/playlist?list=${PL}`, false) === "Paste one song's link to find its samples.");
+  check("a story pasted on the homepage says stories can't be saved",
+    /^Stories can't be saved/.test(mediaHint("https://www.instagram.com/stories/someone/3456789012345678901/", false)) &&
+      mediaHint("https://example.com/v.mp4", false) === "Paste a YouTube, X, TikTok or Instagram video link.");
   check("no note when YouTube is on, or for other sites", mediaNote("https://youtu.be/dQw4w9WgXcQ", true) === null && mediaNote("https://x.com/NASA/status/1790866466429911046", false) === null);
   check("Shorts links work too", mediaActions("https://www.youtube.com/shorts/dQw4w9WgXcQ", false)[0]?.label === "Find samples");
 }

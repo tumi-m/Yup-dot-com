@@ -15,6 +15,8 @@
  * Responses the proxy doesn't see (files under /_next/static and /vendor,
  * and the site icon) keep the plainer policy in next.config.ts.
  */
+import { workerUrl } from "./media";
+
 const GOOGLE_ANALYTICS = [
   "https://*.google-analytics.com",
   "https://*.analytics.google.com",
@@ -45,10 +47,16 @@ export function cspSettings(): CspSettings {
   return {
     dev: process.env.NODE_ENV === "development",
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    mediaWorkerUrl: process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1" ? process.env.MEDIA_WORKER_URL : undefined,
+    // As the download links give it (a scheme added, http made https), origin only.
+    mediaWorkerUrl: process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1" ? workerOrigin(process.env.MEDIA_WORKER_URL) : undefined,
     analytics: !!process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim(),
     turnstile: !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim(),
   };
+}
+
+function workerOrigin(raw: string | undefined): string | undefined {
+  const url = workerUrl(raw);
+  return url ? new URL(url).origin : undefined;
 }
 
 export function contentSecurityPolicy(nonce: string, settings: CspSettings = cspSettings()): string {

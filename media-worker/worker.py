@@ -251,13 +251,25 @@ def summarize(info: dict) -> dict:
     }
 
 
-def extract_info(url: str) -> dict:
-    with yt_dlp.YoutubeDL(base_opts()) as ydl:
-        return summarize(first_entry(ydl.extract_info(url, download=False)))
-
-
 class LinkError(Exception):
     """A problem with the link itself, safe to show to the visitor as-is."""
+
+
+def refuse_live(info: dict) -> None:
+    """A stream that is still live has no end to download, and one that
+    hasn't started has nothing yet: say so instead of recording for hours."""
+    status = info.get("live_status")
+    if status == "is_upcoming":
+        raise LinkError("This stream hasn't started yet. Try again once it has ended.")
+    if info.get("is_live") or status == "is_live":
+        raise LinkError("This stream is still live. Try again once it has ended.")
+
+
+def extract_info(url: str) -> dict:
+    with yt_dlp.YoutubeDL(base_opts()) as ydl:
+        info = first_entry(ydl.extract_info(url, download=False))
+    refuse_live(info)
+    return summarize(info)
 
 
 def playlist_entry(e: dict) -> dict:
@@ -396,6 +408,7 @@ def run_job(job_id: str, payload: dict):
         # One extraction, reused for the download: YouTube rate-limits extractions.
         with yt_dlp.YoutubeDL(download_opts(kind, out_dir, job)) as ydl:
             info = first_entry(ydl.extract_info(payload["u"], download=False))
+            refuse_live(info)
             if (info.get("duration") or 0) > MAX_DURATION:
                 raise ValueError(f"Videos up to {MAX_DURATION // 3600} hours are supported.")
             if kind == "mp4":
@@ -419,7 +432,7 @@ def run_job(job_id: str, payload: dict):
             job.update(status="error", error=friendly_error(str(e), phase="job", kind=kind))
         else:
             print(f"job {job_id[:8]} failed: {type(e).__name__}: {e}", flush=True)
-            job.update(status="error", error=str(e) if isinstance(e, ValueError) else "Download failed.")
+            job.update(status="error", error=str(e) if isinstance(e, (ValueError, LinkError)) else "Download failed.")
     finally:
         job["finished"] = time.time()
         slots.release()
@@ -430,7 +443,8 @@ BOT_MESSAGE = "YouTube is blocking downloads right now. Try again later."
 
 def is_bot_check(message: str) -> bool:
     m = message.lower()
-    return "not a bot" in m or "sign in to confirm" in m
+    # "Sign in to confirm your age" is the video's age limit, not the bot check.
+    return "not a bot" in m or ("sign in to confirm" in m and "your age" not in m)
 
 
 def friendly_error(message: str, subject: str = "video", phase: str = "info", kind: str = "mp4") -> str:
@@ -440,6 +454,18 @@ def friendly_error(message: str, subject: str = "video", phase: str = "info", ki
         print("YouTube bot check: give the worker a residential proxy (YTDLP_PROXY) "
               "or cookies (YTDLP_COOKIES_FILE); see media-worker/README.md.", flush=True)
         return BOT_MESSAGE
+    if "confirm your age" in m or "age-restricted" in m or "inappropriate for some users" in m:
+        return f"This {subject} is age-restricted, so it can't be downloaded."
+    # YouTube's rate limit reads "Video unavailable. This content isn't available, try
+    # again later." (yt-dlp adds "rate-limited"); a bare "try again later" is any error.
+    if ("content isn't available, try again later" in m or "content isn’t available, try again later" in m
+            or "rate-limited" in m or "http error 429" in m):
+        print("YouTube rate-limited the worker's address; it lifts within the hour.", flush=True)
+        return "YouTube is limiting downloads right now. Try again later."
+    if "live event will begin" in m or "premieres in" in m or "premiere will begin" in m:
+        return "This video hasn't started yet. Try again once it's out."
+    if "members-only" in m or "join this channel" in m:
+        return f"This {subject} is for channel members only, so it can't be downloaded."
     if "requested format is not available" in m:
         return "That quality isn't available for this video. Pick another."
     if "http error 403" in m:
@@ -447,7 +473,7 @@ def friendly_error(message: str, subject: str = "video", phase: str = "info", ki
         return "YouTube refused this one. Try again."
     if "private" in m:
         return f"This {subject} is private."
-    if "sign in" in m or "confirm your age" in m or "bot" in m:
+    if "sign in" in m or "bot" in m:
         return f"The platform asked for a sign-in to access this {subject}, so it can't be downloaded."
     if phase == "job" and "http error 404" in m:
         # A stream URL that died mid-download, not a missing video.

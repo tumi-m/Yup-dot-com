@@ -36,8 +36,11 @@ import { settleSlot, useFocusNext, useHeightLock } from "@/components/motion/foc
 import { UpgradeDialog, type UpsellReason } from "@/components/upsell/Upsell";
 import {
   linkIn,
+  mediaLinkProblem,
   parseMediaUrl,
+  PHOTO_POST_SOUND,
   parsePlaylistUrl,
+  PLATFORM_ASK,
   PLATFORM_LABEL,
   PLATFORM_PLACEHOLDER,
   YOUTUBE_ENABLED,
@@ -50,7 +53,7 @@ import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
 import { canEncodeH264, MAX_IN_MEMORY, shortBytes } from "@/lib/video-quality";
 import { readToBlob } from "@/lib/read-response";
-import { finderForLink, SAMPLE_FINDER_PATH, songQuery } from "@/lib/samples/links";
+import { finderForLink, SAMPLE_FINDER_PATH, songQuery, tiktokPhotoLink } from "@/lib/samples/links";
 import { markSent } from "@/lib/journey";
 
 export interface MediaToolConfig {
@@ -173,6 +176,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [kind, setKind] = useState<MediaKind>(config.kind);
   const [height, setHeight] = useState<number>(config.defaultHeight ?? 720);
   const [error, setError] = useState<string | null>(null);
+  /** A link that goes with one error message (shown only while that message is). */
+  const [errorLink, setErrorLink] = useState<{ message: string; href: string } | null>(null);
   /** `detail` replaces the stage's label on screen (not for screen readers, who hear stage changes only). */
   const [progress, setProgress] = useState<{ value: number; stage: string; detail?: string }>({ value: 0, stage: "queued" });
   const [file, setFile] = useState<SavedFile | null>(null);
@@ -181,7 +186,11 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [wantedLocked, setWantedLocked] = useState(false);
   /** Set after a quota 429: the day's downloads are spent. */
   const [limit, setLimit] = useState<{ upgrade: boolean } | null>(null);
+  /** Downloads left today, as the last download link said. */
+  const [left, setLeft] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
+  /** A thumbnail that failed to load, so the box stays plain instead of showing a broken image. */
+  const [badThumb, setBadThumb] = useState<string | null>(null);
   /** "Smaller file": re-encode in this tab. Offered only where the browser can make H.264. */
   const [canShrink, setCanShrink] = useState(false);
   const [smaller, setSmaller] = useState(false);
@@ -193,6 +202,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       live = false;
     };
   }, []);
+  /** Set when a link lookup has run a few seconds. */
+  const [slowLookup, setSlowLookup] = useState(false);
+  useEffect(() => {
+    if (phase !== "loading") return;
+    const timer = window.setTimeout(() => setSlowLookup(true), 4000);
+    return () => {
+      window.clearTimeout(timer);
+      setSlowLookup(false);
+    };
+  }, [phase]);
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
   const blobUrl = useRef<string | null>(null);
@@ -264,7 +283,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     const parsed = parseMediaUrl(target);
     if (!parsed) {
       // A playlist link is offered the playlist tool instead (see below the input).
-      if (!playlist) setError(`Paste a ${PLATFORM_LABEL[config.platform]} video link.`);
+      if (!playlist) {
+        const problem = mediaLinkProblem(target, kind);
+        setError(problem ?? PLATFORM_ASK[config.platform]);
+        // A photo post's sound: the Sample Finder reads it, so the message links there.
+        const photo = problem === PHOTO_POST_SOUND ? tiktokPhotoLink(target) : null;
+        if (photo) setErrorLink({ message: problem!, href: finderForLink(`https://www.tiktok.com/@${photo.user}/photo/${photo.id}`) });
+      }
       return;
     }
     const seq = ++lookupSeq.current;
@@ -377,6 +402,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       else setError(data?.error ?? (res ? "Couldn't start the download." : "You're offline. Check your connection."));
       return;
     }
+    setLeft(typeof data.remaining === "number" ? data.remaining : null);
     const ctl = new AbortController();
     op.current = ctl;
     setProgress({ value: 0, stage: data.mode === "worker" ? "queued" : data.mode === "convert" ? "fetching" : "downloading" });
@@ -551,7 +577,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       if (!alive.current || signal.aborted) return;
       if (Date.now() > deadline) {
         cancelJob();
-        return fail("This download is taking too long. Try a lower quality.");
+        return fail(kind === "mp3" ? "This download is taking too long. Try again later." : "This download is taking too long. Try a lower quality.");
       }
       const r = await fetch(`${workerUrl}/jobs/${created.id}`, { cache: "no-store", signal }).catch(() => null);
       const s = await r?.json().catch(() => null);
@@ -717,6 +743,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 {loading ? "Reading link…" : "Get video"}
               </Button>
             </div>
+            {/* A slow answer (a waking download server, a busy site) says what it's waiting for. */}
+            <div aria-live="polite">
+              <AnimatePresence initial={false}>
+                {loading && slowLookup && (
+                  <motion.p key="slow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={FADE_EXIT} transition={NOTICE_T} className="mt-2 text-xs text-muted-foreground" data-testid="lookup-slow">
+                    Still waiting for {PLATFORM_LABEL[detected?.platform ?? config.platform]}. This can take up to a minute.
+                  </motion.p>
+                )}
+              </AnimatePresence>
+            </div>
             <AnimatePresence>
               {playlist && (
                 <motion.div
@@ -788,9 +824,16 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
           >
             <div className="flex gap-3 p-4 sm:gap-4 sm:p-5">
               <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-xl bg-secondary sm:h-24 sm:w-40">
-                {info.thumbnail && (
+                {info.thumbnail && info.thumbnail !== badThumb && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={info.thumbnail} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                  <img
+                    src={info.thumbnail}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    // Signed CDN links expire and some refuse other sites: the grey box stays.
+                    onError={() => setBadThumb(info.thumbnail ?? null)}
+                    className="h-full w-full object-cover"
+                  />
                 )}
                 {duration(info.duration) && (
                   <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1.5 py-0.5 text-[11px] font-medium text-white sm:bottom-1.5 sm:right-1.5">
@@ -804,14 +847,17 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                 </p>
                 {info.uploader && <p className="mt-1 truncate text-sm text-muted-foreground">{info.uploader}</p>}
                 {info.music && !info.music.original ? (
-                  <p className="mt-1 truncate text-xs text-muted-foreground" data-testid="media-music">
-                    <span aria-hidden>♪ </span>
-                    {info.music.title}
-                    {info.music.author ? ` — ${info.music.author}` : ""} ·{" "}
+                  // On a narrow screen the link goes under the song rather than out of sight.
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground" data-testid="media-music">
+                    <span className="max-w-full truncate">
+                      <span aria-hidden>♪ </span>
+                      {info.music.title}
+                      {info.music.author ? ` — ${info.music.author}` : ""}
+                    </span>
                     <Link
                       href={musicHref(info.music)}
                       onClick={() => info.music && markSent(musicHref(info.music))}
-                      className={cn("rounded font-semibold text-primary hover:underline", focusRing)}
+                      className={cn("-my-1 shrink-0 whitespace-nowrap rounded py-1 font-semibold text-primary hover:underline", focusRing)}
                     >
                       Find samples
                     </Link>
@@ -849,7 +895,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       }}
                       onKeyDown={radioKeys}
                       className={cn(
-                        "relative flex h-11 items-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors disabled:opacity-40",
+                        "relative flex h-11 items-center gap-1.5 whitespace-nowrap rounded-lg px-4 text-sm font-medium transition-colors disabled:opacity-40 max-[359px]:px-3",
                         focusRing,
                         kind === k ? "text-foreground" : "text-muted-foreground"
                       )}
@@ -859,7 +905,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                       )}
                       {/* Above every pill, so the pill never covers a label it passes. */}
                       <span className="relative z-[1] flex items-center gap-1.5">
-                        {k === "mp4" ? <Film className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
+                        {/* Left out on the narrowest phones, so both labels fit on one line. */}
+                        {k === "mp4" ? <Film className="h-4 w-4 max-[359px]:hidden" /> : <Music2 className="h-4 w-4 max-[359px]:hidden" />}
                         {k.toUpperCase()} {k === "mp4" ? "video" : "audio"}
                       </span>
                     </button>
@@ -899,7 +946,7 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
                               }
                               title={!q.available ? "Not available for this video" : q.locked ? "Pro" : undefined}
                               className={cn(
-                                "relative flex flex-col items-center justify-center rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-35",
+                                "relative flex flex-col items-center justify-center whitespace-nowrap rounded-xl border px-2 text-sm font-semibold tabular-nums transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-35 max-[359px]:px-1",
                                 sized ? "h-14" : "h-11",
                                 focusRing,
                                 // Same sliding pill as the format toggle; the
@@ -1106,12 +1153,18 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
             <h2 ref={focusRef("ready")} tabIndex={-1} className="mx-auto mt-5 rounded-lg px-2 text-2xl font-bold outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Your download has started
             </h2>
-            <p className="mx-auto mt-1 max-w-sm truncate text-sm text-muted-foreground">
+            <p className="mx-auto mt-1 w-full max-w-sm truncate text-sm text-muted-foreground">
               {file.name}
               {file.size ? ` · ${formatBytes(file.size)}` : ""}
               {file.size && file.was ? ` · ${Math.round((1 - file.size / file.was) * 100)}% smaller` : ""}
             </p>
             {file.note && <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">{file.note}</p>}
+            {/* Said before the day's last one is used, not only once it's gone. */}
+            {left !== null && left <= 2 && (
+              <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground" data-testid="downloads-left">
+                {left === 0 ? "No downloads left today." : `${left} ${left === 1 ? "download" : "downloads"} left today.`}
+              </p>
+            )}
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Button size="lg" variant="outline" onClick={saveAgain} disabled={starting}>
                 {starting ? <Loader2 className="motion-safe:animate-spin" /> : <Download />} Download again
@@ -1125,7 +1178,31 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       </AnimatePresence>
       </div>
 
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <AnimatePresence>
+        {error && (
+          <InlineError
+            key="error"
+            message={
+              errorLink?.message === error ? (
+                // In the sentence's flow, so a narrow screen keeps the message wide.
+                <>
+                  {error}{" "}
+                  <Link
+                    href={errorLink.href}
+                    // Sent from this site: the Sample Finder starts by itself.
+                    onClick={() => markSent(errorLink.href)}
+                    className={cn("rounded font-semibold underline", focusRing)}
+                  >
+                    Find its song
+                  </Link>
+                </>
+              ) : (
+                error
+              )
+            }
+          />
+        )}
+      </AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">Only download videos you have permission to use.</p>
 

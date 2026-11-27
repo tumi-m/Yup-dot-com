@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { maxHeightFor, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
+import { maxHeightFor, mediaLinkProblem, parseMediaUrl, QUALITIES, YOUTUBE_ENABLED } from "@/lib/media";
 import { sealToken, signingSecret, signToken, WORKER_CONFIG_HELP, workerConfig } from "@/lib/media-server";
 import { limitsFor } from "@/lib/limits";
 import { resolveTier } from "@/lib/tier";
@@ -41,7 +41,10 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request." }, { status: 400 });
   const media = parseMediaUrl(parsed.data.url);
-  if (!media) return Response.json({ error: "Paste an X, TikTok or Instagram video link." }, { status: 400 });
+  if (!media) {
+    const error = mediaLinkProblem(parsed.data.url, parsed.data.kind) ?? (YOUTUBE_ENABLED ? "Paste a YouTube, X, TikTok or Instagram video link." : "Paste an X, TikTok or Instagram video link.");
+    return Response.json({ error }, { status: 400 });
+  }
   if (media.platform === "youtube" && !YOUTUBE_ENABLED) {
     return Response.json({ error: "YouTube downloads are paused for now. X, TikTok and Instagram work." }, { status: 503 });
   }

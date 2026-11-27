@@ -21,6 +21,7 @@ USER worker
 
 ENV PORT=8080
 EXPOSE 8080
-HEALTHCHECK CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/health')" || exit 1
+# Hosts that set their own PORT get it checked there.
+HEALTHCHECK CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT','8080'))" || exit 1
 # YTDLP_AUTO_UPDATE=1 upgrades yt-dlp at every start, between rebuilds.
 CMD ["sh", "-c", "if [ \"$YTDLP_AUTO_UPDATE\" = 1 ]; then pip install --user --no-cache-dir -qU 'yt-dlp[default,deno]' || true; fi; exec python worker.py"]

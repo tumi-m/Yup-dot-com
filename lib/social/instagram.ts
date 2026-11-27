@@ -22,7 +22,7 @@
  * limiting downloads and to try again later; nothing else would get through.
  * Each failed resolve logs one line with every step's outcome.
  */
-import { cleanTitle } from "../media";
+import { cleanTitle, parseMediaUrl } from "../media";
 import type { XVariant } from "../x-video";
 import { DirectResolveError, type DirectVideo, type Fetcher } from "./types";
 
@@ -258,6 +258,47 @@ function fromEmbed(media: Json): Json {
   };
 }
 
+/** When a resolve that starts now must be done by: the routes allow 30 seconds. */
+export const instagramDeadline = () => Date.now() + BUDGET_MS;
+
+/**
+ * Follows an app share link (instagram.com/share/…) to the post it shares
+ * (its shortcode, and ?img_index= when it names a slide), over https on
+ * instagram.com only. A login wall or a limit on the way is Instagram
+ * refusing the server, as for posts. `deadline` is shared with the resolve
+ * that follows, so the two together keep inside one budget.
+ */
+export async function expandInstagramShare(
+  link: string,
+  fetcher: Fetcher = fetch,
+  deadline: number = instagramDeadline()
+): Promise<{ code: string; index: number | null }> {
+  let current = link;
+  try {
+    for (let hop = 0; hop < 3; hop++) {
+      const left = deadline - Date.now();
+      if (left < 1_000) throw new DirectResolveError("unreachable");
+      const res = await fetcher(current, { headers: PAGE_HEADERS, redirect: "manual", signal: AbortSignal.timeout(Math.min(REQUEST_MS, left)), cache: "no-store" });
+      await res.body?.cancel().catch(() => {});
+      if (refusal(res)) throw new DirectResolveError("blocked");
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) throw new DirectResolveError(res.ok || res.status === 404 ? "not-found" : "unreachable");
+      const next = new URL(location, current);
+      // No downgrade to http, no other port, no credentials, no other host.
+      if (next.protocol !== "https:" || next.port || next.username || next.password || !/^(www\.)?instagram\.com$/.test(next.hostname)) {
+        throw new DirectResolveError("not-found");
+      }
+      const post = parseMediaUrl(next.toString());
+      if (post?.platform === "instagram" && !post.short) return { code: post.id, index: post.index ?? null };
+      current = next.toString();
+    }
+  } catch (err) {
+    if (err instanceof DirectResolveError) throw err;
+    throw new DirectResolveError("unreachable");
+  }
+  throw new DirectResolveError("not-found");
+}
+
 /** One step's outcome, for the log line. */
 interface Step {
   step: string;
@@ -265,12 +306,16 @@ interface Step {
   reason: string;
 }
 
-export async function resolveInstagram(shortcode: string, fetcher: Fetcher = fetch, index?: number | null): Promise<DirectVideo> {
+export async function resolveInstagram(
+  shortcode: string,
+  fetcher: Fetcher = fetch,
+  index?: number | null,
+  deadline: number = instagramDeadline()
+): Promise<DirectVideo> {
   if (!SHORTCODE.test(shortcode)) throw new DirectResolveError("not-found");
   const pk = shortcodeToPk(shortcode);
   const postUrl = `https://www.instagram.com/p/${shortcode}/`;
   const jar = new Map<string, string>();
-  const deadline = Date.now() + BUDGET_MS;
   const steps: Step[] = [];
   // What the answers so far say: Instagram refused (login wall, limit, error
   // page); the post exists but is withheld logged out; or a final verdict.

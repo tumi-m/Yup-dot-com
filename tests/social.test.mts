@@ -9,8 +9,8 @@ import { createHash } from "node:crypto";
 import { parseMediaUrl } from "../lib/media.ts";
 import { resolveTikTok, resolveTikTokMusic, solveChallenge, isAllowedTikTokUrl, tiktokMusic, universalData } from "../lib/social/tiktok.ts";
 import { tiktokMusicSlug } from "../lib/samples/parse.ts";
-import { resolveInstagram, shortcodeToPk, isAllowedInstagramUrl, lsdToken, embedMedia, pageMedia } from "../lib/social/instagram.ts";
-import { DirectResolveError, directFilename, failureMessage, grantHeaders, isAllowedMediaUrl } from "../lib/social/direct.ts";
+import { expandInstagramShare, resolveInstagram, shortcodeToPk, isAllowedInstagramUrl, lsdToken, embedMedia, pageMedia } from "../lib/social/instagram.ts";
+import { DirectResolveError, directFilename, failureMessage, grantHeaders, isAllowedMediaUrl, resolveDirect } from "../lib/social/direct.ts";
 
 const results: boolean[] = [];
 const check = (name: string, ok: boolean, extra = "") => {
@@ -52,6 +52,13 @@ check("instagram reel", JSON.stringify(p("https://www.instagram.com/reel/C4Hm4z2
 check("instagram post with img_index + username path", p("instagram.com/natgeo/p/CnLyXxRuCiK/?img_index=3")?.index === 3 && p("instagram.com/natgeo/p/CnLyXxRuCiK/?img_index=3")?.id === "CnLyXxRuCiK");
 check("instagram tv and reels", p("https://www.instagram.com/tv/BlOFzmNAk6E/")?.id === "BlOFzmNAk6E" && p("https://instagram.com/reels/C4Hm4z2oEVp")?.id === "C4Hm4z2oEVp");
 check("instagram profile/stories rejected", p("https://www.instagram.com/natgeo/") === null && p("https://www.instagram.com/stories/natgeo/123/") === null);
+// The app's share links carry their own code, not the post's; /reels/audio/ is a sound's page.
+check("instagram share links are short links, not posts",
+  JSON.stringify(p("https://www.instagram.com/share/reel/BAEBrWYmM/?igsh=x")) === JSON.stringify({ platform: "instagram", id: "BAEBrWYmM", short: true, canonical: "https://www.instagram.com/share/reel/BAEBrWYmM/" }) &&
+    p("https://www.instagram.com/share/p/BAJxyz12/")?.canonical === "https://www.instagram.com/share/p/BAJxyz12/" &&
+    p("https://instagram.com/share/_Fh9sZ3Ka")?.canonical === "https://www.instagram.com/share/_Fh9sZ3Ka/",
+  JSON.stringify(p("https://www.instagram.com/share/reel/BAEBrWYmM/")));
+check("instagram sound pages aren't posts", p("https://www.instagram.com/reels/audio/1234567890123/") === null && p("https://www.instagram.com/reel/audio123/")?.id === "audio123");
 check("look-alike hosts rejected", p("https://tiktok.com.evil.com/@a/video/12345678901") === null && p("https://notinstagram.com/p/C4Hm4z2oEVp/") === null);
 
 // ---------- TikTok ----------
@@ -334,6 +341,44 @@ async function logged(p: Promise<unknown>) {
   const timeout = (async () => { throw new DOMException("timed out", "TimeoutError"); }) as never;
   const slow = await logged(resolveInstagram(CODE, timeout));
   check("instagram: timeouts → unreachable, logged as timeout", slow.k === "unreachable" && slow.lines[0]?.includes("page timeout"), slow.lines[0]);
+  // Share links: followed to the post, on instagram.com only.
+  const share = (location: string | null, status = 302) =>
+    fakeFetch((u) => (igPath(u).startsWith("/share/") ? (location ? { status, headers: [["location", location]] } : { status }) : "throw"));
+  const SHARE = "https://www.instagram.com/share/reel/BAEBrWYmM/";
+  const expanded = await expandInstagramShare(SHARE, share(`https://www.instagram.com/reel/${CODE}/?igsh=abc`).f);
+  check("instagram share link → the post it redirects to", expanded.code === CODE && expanded.index === null, JSON.stringify(expanded));
+  const slide = await expandInstagramShare(SHARE, share(`https://www.instagram.com/p/${CODE}/?img_index=3`).f);
+  check("instagram share link keeps the slide it names", slide.code === CODE && slide.index === 3, JSON.stringify(slide));
+  check("instagram share link: a redirect off instagram.com is refused", (await kind(expandInstagramShare(SHARE, share("https://evil.example.com/reel/C4Hm4z2oEVp/").f))) === "not-found");
+  for (const off of [`http://www.instagram.com/reel/${CODE}/`, `https://www.instagram.com:4731/reel/${CODE}/`, `https://u:p@www.instagram.com/reel/${CODE}/`]) {
+    check(`instagram share link: no downgrade, other port or credentials (${off})`, (await kind(expandInstagramShare(SHARE, share(off).f))) === "not-found");
+  }
+  // One budget for the share link and the post: a slow Instagram can't take the route past its 30 s.
+  {
+    const slowHops = fakeFetch(() => ({ status: 302, headers: [["location", "https://www.instagram.com/share/next/"]] }));
+    const lagging = (async (url: string, init?: RequestInit) => {
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, 700);
+        init?.signal?.addEventListener("abort", () => (clearTimeout(t), reject(init.signal!.reason)));
+      });
+      return (slowHops.f as unknown as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+    }) as never;
+    const t0 = Date.now();
+    const k = await kind(expandInstagramShare(SHARE, lagging, Date.now() + 1_900));
+    const took = Date.now() - t0;
+    check("instagram share link: stops at the shared deadline", k === "unreachable" && took < 2_000, `${k} after ${took} ms`);
+    const none = fakeFetch(() => "throw");
+    const late = await logged(resolveInstagram(CODE, none.f, null, Date.now() + 500));
+    check("instagram: a resolve whose deadline the share link used up asks nothing", late.k === "unreachable" && none.calls.length === 0, `${late.k}, ${none.calls.length} calls`);
+  }
+  check("instagram share link: login wall → blocked", (await kind(expandInstagramShare(SHARE, share("https://www.instagram.com/accounts/login/").f))) === "blocked");
+  check("instagram share link: no redirect → not-found", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", share(null, 200).f))) === "not-found");
+  check("instagram share link: network down → unreachable", (await kind(expandInstagramShare("https://www.instagram.com/share/reel/BAEBrWYmM/", fakeFetch(() => "throw").f))) === "unreachable");
+  {
+    const both = fakeFetch((u) => (igPath(u).startsWith("/share/") ? { status: 302, headers: [["location", `https://www.instagram.com/reel/${CODE}/`]] } : igPath(u) === `/p/${CODE}/` ? { body: postPage() } : "throw"));
+    const v = await resolveDirect(parseMediaUrl("https://www.instagram.com/share/reel/BAEBrWYmM/")!, both.f);
+    check("instagram share link resolves as the post", v.id === CODE && v.variants.length > 0 && both.calls.some((c) => igPath(c.url) === `/p/${CODE}/`));
+  }
   check("instagram: bad shortcode → not-found, no request", (await kind(resolveInstagram("bad/../code", fakeFetch(() => "throw").f))) === "not-found");
 }
 check("instagram: embed shapes read directly", embedMedia(embedPage(embedVideo))?.video_url === embedVideo.video_url && embedMedia(brokenEmbed) === null && pageMedia(postPage())?.code === CODE && pageMedia(errorPage) === null);

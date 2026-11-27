@@ -14,6 +14,33 @@ export type MediaPlatform = "youtube" | "x" | "tiktok" | "instagram";
 export const YOUTUBE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1";
 export type MediaKind = "mp4" | "mp3";
 
+/** A plain host name, IPv4 address or bracketed IPv6 address: nothing a CSP would read as a wildcard or a new directive. */
+const PLAIN_HOST = /^(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[[0-9a-f:.]+\])$/;
+
+/**
+ * MEDIA_WORKER_URL as browsers are sent to it, or null when it isn't a URL.
+ * Values pasted into a hosting dashboard often lack a scheme or say http;
+ * the site is served over https, which blocks requests to http origins, so
+ * anything but localhost becomes https. The download links (lib/media-server.ts)
+ * and the pages' CSP (lib/csp.ts) both use this, so a page may reach the
+ * address its links name. Its host goes into the CSP, so a wildcard, a
+ * space or a ";" makes it no URL at all.
+ */
+export function workerUrl(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value || /\s/.test(value)) return null;
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || !PLAIN_HOST.test(url.hostname)) return null;
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol === "http:" && !local) url.protocol = "https:";
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
 export interface ParsedMediaUrl {
   platform: MediaPlatform;
   id: string;
@@ -23,7 +50,7 @@ export interface ParsedMediaUrl {
   index?: number;
   /** TikTok: the @username in the link, if any. */
   user?: string;
-  /** TikTok: a vm/vt/t short link, expanded on the server. `canonical` is the short link. */
+  /** TikTok: a vm/vt/t short link; Instagram: a /share/ link. Expanded on the server; `canonical` is the short link. */
   short?: boolean;
 }
 
@@ -75,14 +102,20 @@ export function parseMediaUrl(input: string): ParsedMediaUrl | null {
     return e ? { platform: "tiktok", id: e[1], canonical: `https://www.tiktok.com/@_/video/${e[1]}` } : null;
   }
   if (host === "instagram.com") {
-    const m = url.pathname.match(/^\/(?:[\w.]{1,30}\/)?(?:p|reels?|tv)\/([A-Za-z0-9_-]{5,60})\/?/);
-    if (!m) return null;
+    // The app's share links (/share/reel/…, /share/p/…, /share/…) carry their
+    // own code, not the post's: they're followed on the server, like TikTok's.
+    const share = url.pathname.match(/^\/share\/(?:(p|reels?)\/)?([A-Za-z0-9_-]{5,60})\/?$/);
+    if (share) {
+      return { platform: "instagram", id: share[2], short: true, canonical: `https://www.instagram.com/share/${share[1] ? `${share[1]}/` : ""}${share[2]}/` };
+    }
+    const code = instagramPostCode(url.pathname);
+    if (!code) return null;
     const n = Number(url.searchParams.get("img_index"));
     const index = Number.isInteger(n) && n >= 1 && n <= 20 ? n : undefined;
     return {
       platform: "instagram",
-      id: m[1],
-      canonical: `https://www.instagram.com/p/${m[1]}/${index ? `?img_index=${index}` : ""}`,
+      id: code,
+      canonical: `https://www.instagram.com/p/${code}/${index ? `?img_index=${index}` : ""}`,
       ...(index ? { index } : {}),
     };
   }
@@ -98,6 +131,15 @@ export function parseMediaUrl(input: string): ParsedMediaUrl | null {
     };
   }
   return null;
+}
+
+/**
+ * The shortcode in an Instagram post's path: /p/, /reel/, /reels/ or /tv/,
+ * after an optional username. Not "share" (the app's short links) and not
+ * /reels/audio/ (a sound's page).
+ */
+export function instagramPostCode(pathname: string): string | null {
+  return pathname.match(/^\/(?!share\/)(?:[\w.]{1,30}\/)?(?:p|reels?|tv)\/(?!audio\/)([A-Za-z0-9_-]{5,60})\/?/)?.[1] ?? null;
 }
 
 function yt(id: string): ParsedMediaUrl {
@@ -176,6 +218,56 @@ export const PLATFORM_LABEL: Record<MediaPlatform, string> = {
   tiktok: "TikTok",
   instagram: "Instagram",
 };
+
+/** A TikTok photo post on an MP3 page. */
+export const PHOTO_POST_SOUND = "That's a photo post, so its sound can't be saved. The Sample Finder can still name its song.";
+
+/** What a downloader asks for when the box holds something else. */
+export const PLATFORM_ASK: Record<MediaPlatform, string> = {
+  youtube: "Paste a YouTube video link.",
+  x: "Paste an X (Twitter) post link.",
+  tiktok: "Paste a TikTok video link.",
+  instagram: "Paste an Instagram Reel or post link.",
+};
+
+/**
+ * Why a link the downloaders can't take was turned away, when there's more
+ * to say than "paste a video link": a story, a profile or channel, a photo
+ * post, a sound's page, a live broadcast. Null for anything else. `kind`:
+ * what the visitor is after, so an MP3 page doesn't talk about video.
+ */
+export function mediaLinkProblem(input: string, kind: MediaKind = "mp4"): string | null {
+  let url: URL;
+  try {
+    url = new URL(input.trim().replace(/^(?!https?:\/\/)/i, "https://"));
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
+  const path = url.pathname;
+  if (host === "instagram.com") {
+    if (/^\/stories\//.test(path)) return "Stories can't be saved. Paste a Reel or post link.";
+    if (/^\/reels?\/audio\//.test(path)) return "That's a sound's page. Paste a Reel or post link.";
+    if (/^\/(?!(?:reels?|explore|accounts|direct)\/?$)[\w.]{1,30}\/?$/.test(path)) return "That's a profile. Paste a Reel or post link.";
+  }
+  if (host === "tiktok.com") {
+    if (/^\/@[\w.-]+\/photo\/\d+/.test(path)) {
+      // Its sound has no file to save, but the Sample Finder can name the song (MediaDownloader links it).
+      return kind === "mp3" ? PHOTO_POST_SOUND : "That's a photo post, so it has no video.";
+    }
+    if (/^\/@[\w.-]+\/live\/?$/.test(path)) return "Live videos can't be saved.";
+    if (/^\/music\//.test(path)) return "That's a sound's page. Paste one video's link.";
+    if (/^\/@[\w.-]+\/?$/.test(path)) return "That's a profile. Paste one video's link.";
+  }
+  if (host === "x.com" || host === "twitter.com") {
+    if (/^\/i\/(?:broadcasts|spaces)\//.test(path)) return "Live broadcasts and Spaces can't be saved.";
+    if (/^\/(?!(?:home|explore|search|notifications|messages|settings|compose|i)\/?$)\w{1,15}\/?$/.test(path)) return "That's a profile. Paste one post's link.";
+  }
+  if (host === "youtube.com" && /^\/(?:@[^/]+|channel\/|c\/|user\/)/.test(path) && !url.searchParams.has("v")) {
+    return "That's a channel. Paste one video's link.";
+  }
+  return null;
+}
 
 /** What to type in the link box, per platform. */
 export const PLATFORM_PLACEHOLDER: Record<MediaPlatform, string> = {

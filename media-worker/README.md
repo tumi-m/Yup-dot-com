@@ -26,7 +26,8 @@ the health check (step 4 below) reports `"playlists": "ready"`.
 Video bytes go straight from the worker to the browser and never pass through
 Vercel. The worker only accepts downloads signed by the web app, and only for
 YouTube and X hosts. A tampered token (say, 720p edited to 1080p) is rejected,
-and each token starts one job.
+and each token starts one job. A stream that is still live, or hasn't
+started, is turned away with a message saying so rather than recorded.
 
 A download that fails or is cancelled (`DELETE /jobs/<id>`) doesn't count
 against the visitor's quota: the web app voids the grant at the worker's

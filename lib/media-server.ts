@@ -1,5 +1,6 @@
 import "server-only";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { workerUrl } from "./media";
 
 /**
  * Server-only configuration and signing for video downloads.
@@ -19,18 +20,9 @@ export function workerConfig(): WorkerConfig {
   const secret = process.env.MEDIA_WORKER_SECRET?.trim();
   if (!rawUrl) return { ok: false, reason: "missing-url" };
   if (!secret) return { ok: false, reason: "missing-secret" };
-
-  let url: URL;
-  try {
-    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`);
-  } catch {
-    return { ok: false, reason: "invalid-url" };
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return { ok: false, reason: "invalid-url" };
-  // The site is served over https; browsers block requests to http origins.
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol === "http:" && !local) url.protocol = "https:";
-  return { ok: true, url: `${url.origin}${url.pathname.replace(/\/+$/, "")}`, secret };
+  // Scheme added, http made https: the same address the pages' CSP allows.
+  const url = workerUrl(rawUrl);
+  return url ? { ok: true, url, secret } : { ok: false, reason: "invalid-url" };
 }
 
 export const WORKER_CONFIG_HELP: Record<Exclude<WorkerConfig, { ok: true }>["reason"], string> = {

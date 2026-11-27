@@ -86,6 +86,11 @@ const fixture = createServer(async (req, res) => {
     mediaHits++;
     return res.writeHead(404).end();
   }
+  // The same manifest, marked as a stream still going out (live).
+  if (reqPath === "/live.mpd") {
+    const live = readFileSync(join(dir, "manifest.mpd"), "utf8").replace(/type="static"/, 'type="dynamic"');
+    return res.writeHead(200, { "Content-Type": "application/dash+xml" }).end(live);
+  }
   const feeds: Record<string, string> = { "/short.xml": feed("Short list", 3), "/long.xml": feed("Long list", 205) };
   if (feeds[reqPath]) return res.writeHead(200, { "Content-Type": "application/rss+xml" }).end(feeds[reqPath]);
   const path = join(base, reqPath);
@@ -273,6 +278,49 @@ try {
     "non-allowlisted host rejected (no SSRF)",
     (await runJob(await signMediaToken({ u: "http://169.254.169.254/latest/meta-data", k: "mp4", h: 720 }, SECRET))).status === 400
   );
+  // A live stream: refused up front, not recorded until the browser gives up.
+  const LIVE = `http://127.0.0.1:${fixturePort}/live.mpd`;
+  const liveInfo = await fetch(`${W}/info`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ url: LIVE }),
+  });
+  const liveBody = await liveInfo.json();
+  check("/info refuses a stream that is still live", liveInfo.status === 422 && /still live/.test(liveBody.error), JSON.stringify(liveBody));
+  const liveJob = await runJob(await signMediaToken({ u: LIVE, k: "mp4", h: 720 }, SECRET));
+  check("a job for a live stream fails with the same reason", liveJob.status === 500 && /still live/.test(String(liveJob.body.error)), JSON.stringify(liveJob.body));
+  // yt-dlp's messages for videos that can't be had, as YouTube words them.
+  const said = JSON.parse(
+    execFileSync("python3", ["-c", `
+import json, sys
+sys.path.insert(0, "media-worker")
+import worker
+msgs = {
+  "age": "ERROR: [youtube] abcdefghijk: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies for the authentication.",
+  "bot": "ERROR: [youtube] abcdefghijk: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication.",
+  "rate": "ERROR: [youtube] abcdefghijk: Video unavailable. This content isn't available, try again later. The current session has been rate-limited by YouTube for up to an hour.",
+  "upcoming": "ERROR: [youtube] abcdefghijk: This live event will begin in 3 hours.",
+  "members": "ERROR: [youtube] abcdefghijk: Join this channel to get access to members-only content like this video, and other exclusive perks.",
+  "removed": "ERROR: [youtube] abcdefghijk: Video unavailable. This video has been removed by the uploader",
+  "rate_bare": "ERROR: [youtube] abcdefghijk: Video unavailable. This content isn't available, try again later.",
+  "generic": "ERROR: [youtube] abcdefghijk: Something went wrong. Please try again later.",
+}
+print(json.dumps({k: [worker.is_bot_check(m), worker.friendly_error(m)] for k, m in msgs.items()}))
+`], { env: { ...process.env, MEDIA_WORKER_SECRET: "x" }, stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim()
+      // The worker logs operator advice on its own lines first.
+      .split("\n")
+      .at(-1)!
+  );
+  check("an age-restricted video isn't taken for the bot check", said.age[0] === false && /age-restricted/.test(said.age[1]), JSON.stringify(said.age));
+  check("the bot check still reads as one", said.bot[0] === true && /blocking downloads/.test(said.bot[1]), JSON.stringify(said.bot));
+  check("YouTube's rate limit says to try later, not that the video is gone", /limiting downloads/.test(said.rate[1]), JSON.stringify(said.rate));
+  check("a stream or premiere not out yet says so", /hasn't started/.test(said.upcoming[1]), JSON.stringify(said.upcoming));
+  check("a members-only video says so", /members only/.test(said.members[1]), JSON.stringify(said.members));
+  check("YouTube's rate-limit wording alone still reads as one", /limiting downloads/.test(said.rate_bare[1]), JSON.stringify(said.rate_bare));
+  check("any other \"try again later\" isn't taken for YouTube's rate limit", !/limiting downloads/.test(said.generic[1]), JSON.stringify(said.generic));
+  check("a removed video is still unavailable", said.removed[1] === "This video is unavailable.", JSON.stringify(said.removed));
   const noAuth = await fetch(`${W}/info`, { method: "POST", body: JSON.stringify({ url: MPD }) });
   check("/info requires the shared secret", noAuth.status === 401);
   const info = await fetch(`${W}/info`, {
