@@ -296,9 +296,10 @@ export function TeamSeats({
         )}
       </div>
       <ul ref={listRef} className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
-        <li className="flex items-center justify-between px-5 py-3 text-sm">
-          <span>{ownerEmail}</span>
-          <span className="text-muted-foreground">Owner</span>
+        {/* Long emails wrap, so Remove stays inside the card on a phone. */}
+        <li className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+          <span className="min-w-0 break-all">{ownerEmail}</span>
+          <span className="shrink-0 text-muted-foreground">Owner</span>
         </li>
         <AnimatePresence initial={false} mode="popLayout">
           {members.map((m) => (
@@ -309,12 +310,13 @@ export function TeamSeats({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, x: 24, transition: EXIT_T }}
               transition={{ ...ENTER_T, layout: SPRING_LAYOUT }}
-              className="flex items-center justify-between px-5 py-3 text-sm"
+              className="flex items-center justify-between gap-3 px-5 py-3 text-sm"
             >
-              <span>{m}</span>
+              <span className="min-w-0 break-all">{m}</span>
               <Button
                 variant="ghost"
                 size="sm"
+                className="shrink-0"
                 aria-label={`Remove ${m}`}
                 data-member={m}
                 // aria-disabled, not disabled: a disabled button drops the focus it has.
