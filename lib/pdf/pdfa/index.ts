@@ -85,6 +85,12 @@ export function pdfaLines(result: PdfaResult): ReportLine[] {
   const { facts, checks } = result;
   const lines: ReportLine[] = [];
   const name = `PDF/A-${facts.part}b`;
+  if (!result.labelled) {
+    lines.push({
+      text: `Not ${name}: our check found rules not met (below), so this copy doesn't call itself PDF/A. It has the other fixes; don't hand it in where ${name} is required.`,
+      warn: true,
+    });
+  }
   for (const c of checks) {
     lines.push(
       c.ok

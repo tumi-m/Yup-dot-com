@@ -97,6 +97,8 @@ export interface ToolProcessor {
   preview?: "resize";
   /** What is wrong with the options as they stand, if anything (see OptionProblem). */
   problem?: (options: Record<string, string>) => OptionProblem | null;
+  /** The field a failed cast's message is about (a password asked for), so it is said there. */
+  errorField?: (message: string) => string | undefined;
   run: (
     files: File[],
     options: Record<string, string>,
@@ -412,6 +414,7 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
       },
     ],
     note: "Works on a copy. Fonts are embedded, scripts removed, and the result is checked.",
+    errorField: (message) => (/password/i.test(message) ? "password" : undefined),
     run: async (files, o, ctx) => (await kit()).pdfaTool(files, { part: o.part, password: o.password }, ctx),
   },
   "compress-pdf": {

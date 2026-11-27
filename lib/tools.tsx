@@ -319,7 +319,8 @@ const ALL_TOOLS: ToolMeta[] = [
     category: "convert",
     tint: "bg-slate-200 text-slate-800",
     keywords: "text plain notepad log code notes csv tsv json xml yaml",
-    aliases: ["Text to PDF", "Log to PDF", "CSV to PDF"],
+    // CSV is named by Excel to PDF, which lays it out as a table; here it is found by its words.
+    aliases: ["Text to PDF", "Log to PDF"],
   },
   {
     slug: "markdown-to-pdf",
@@ -449,7 +450,7 @@ const ALL_TOOLS: ToolMeta[] = [
     badge: "New",
     custom: "office",
     keywords: "xlsx xls ods csv spreadsheet sheet sheets workbook microsoft office calc table libreoffice openoffice budget invoice",
-    aliases: ["XLSX to PDF", "XLS to PDF", "ODS to PDF", "Spreadsheet to PDF", "Sheet to PDF"],
+    aliases: ["XLSX to PDF", "XLS to PDF", "ODS to PDF", "CSV to PDF", "Spreadsheet to PDF", "Sheet to PDF"],
   },
   {
     slug: "pdf-to-pptx",
@@ -814,12 +815,13 @@ export function getTool(slug: string): ToolMeta | undefined {
  * Compare at reading and editing the text it found, the two editors at each
  * other and at Redact PDF, which removes what covering only hides,
  * Translate at the other tools that read a document's text, Word and
- * Excel to PDF at each other and the way back, and HTML to PDF at
- * Markdown and what's done with a saved page next.
+ * Excel to PDF at each other and the way back (and the way back at them),
+ * HTML to PDF at Markdown and what's done with a saved page next, and
+ * Compress and Repair at PDF/A, the archival copy.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
-  "markdown-to-pdf": ["txt-to-pdf", "pdf-to-markdown", "pdf-to-text", "merge-pdf"],
+  "markdown-to-pdf": ["txt-to-pdf", "html-to-pdf", "pdf-to-markdown", "pdf-to-text", "merge-pdf"],
   "jpg-to-pdf": ["png-to-pdf", "heic-to-pdf", "tiff-to-pdf", "compress-pdf"],
   "png-to-pdf": ["jpg-to-pdf", "webp-to-pdf", "svg-to-pdf", "compress-pdf"],
   "webp-to-pdf": ["jpg-to-pdf", "png-to-pdf", "svg-to-pdf", "compress-pdf"],
@@ -828,7 +830,12 @@ const RELATED: Record<string, string[]> = {
   "svg-to-pdf": ["png-to-pdf", "jpg-to-pdf", "webp-to-pdf", "merge-pdf"],
   "crop-pdf": ["resize-pdf", "rotate-pdf", "organize-pdf", "split-pdf"],
   "resize-pdf": ["crop-pdf", "rotate-pdf", "organize-pdf", "compress-pdf"],
-  "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "merge-pdf"],
+  "repair-pdf": ["compress-pdf", "unlock-pdf", "ocr-pdf", "pdf-to-pdfa", "merge-pdf"],
+  "compress-pdf": ["repair-pdf", "pdf-to-pdfa", "protect-pdf", "merge-pdf"],
+  // Each way of a conversion offers the other first (a hidden tool is passed over).
+  "pdf-to-word": ["word-to-pdf", "pdf-to-excel", "ocr-pdf", "translate-pdf", "compress-pdf"],
+  "pdf-to-excel": ["excel-to-pdf", "extract-tables", "pdf-to-word", "ocr-pdf"],
+  "pptx-to-pdf": ["word-to-pdf", "excel-to-pdf", "edit-pptx", "pdf-to-pptx", "compress-pdf"],
   "compare-pdf": ["pdf-to-text", "pdf-to-word", "ocr-pdf", "edit-pdf"],
   "redact-pdf": ["protect-pdf", "flatten-pdf", "compress-pdf", "ocr-pdf"],
   "scan-to-pdf": ["ocr-pdf", "jpg-to-pdf", "merge-pdf", "compress-pdf"],

@@ -9,6 +9,7 @@ process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/b
 //
 // Set PDFA_OUT to a folder to keep the results (to check them with veraPDF).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFStream, PDFString, StandardFontEmbedder, StandardFonts, degrees, rgb } from "pdf-lib";
 import { PDFDocument as SecurePDFDocument } from "@cantoo/pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
@@ -43,6 +44,8 @@ const { convertToPdfa, pdfaLines, PasswordError, NEEDS_PASSWORD, WRONG_PASSWORD 
 const { nameToText, baseName } = await import("../lib/pdf/pdfa/glyph-names.ts");
 const { TrueTypeFont, writeSubset } = await import("../lib/pdf/pdfa/truetype.ts");
 const { jpxOk } = await import("../lib/pdf/pdfa/colour.ts");
+const { readContent } = await import("../lib/pdf/pdfa/content.ts");
+const { isEmbedded } = await import("../lib/pdf/pdfa/fonts.ts");
 
 const OUT = process.env.PDFA_OUT;
 if (OUT) mkdirSync(OUT, { recursive: true });
@@ -141,6 +144,10 @@ async function common(label: string, input: Uint8Array, result: Awaited<ReturnTy
   check(`${label}: XMP says PDF/A-${part}b`, i.xmp);
   check(`${label}: file identifier, not encrypted, header ${i.header}`, i.id && !i.encrypted && /^%PDF-1\.[0-7]$/.test(i.header));
   check(`${label}: every font that draws is embedded`, !i.notEmbedded.length, i.notEmbedded);
+  // Read as readers draw it: every font that shows letters, on pages and in comments' and fields' pictures.
+  const shown = [...readContent(i.doc).fonts.values()].filter((u) => u.shown.size && !isEmbedded(u.dict));
+  check(`${label}: no visible text in a font left out (appearances too)`, !shown.length, shown.map((u) => u.dict.lookup(N("BaseFont"))?.toString()));
+  check(`${label}: labelled PDF/A`, result.labelled);
   check(`${label}: no scripts`, !i.scripts && !i.openAction, i.scripts);
   check(`${label}: our own check passes`, result.checks.every((c) => c.ok), result.checks.filter((c) => !c.ok));
   const before = await read(opts.password ? await (async () => {
@@ -289,6 +296,41 @@ function jp2(channels: number): Uint8Array {
   check("scripts: open action, document script and page action removed, and counted", result.facts.objects.scripts >= 3 && !i.doc.getPage(0).node.has(N("AA")), result.facts.objects);
 }
 
+// --- Fields and free text drawn with fonts pdf-lib only writes on saving --------------------
+{
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const field = doc.getForm().createTextField("city");
+  field.addToPage(page, { x: 50, y: 700, width: 200, height: 24 });
+  field.setText("Gqeberha");
+  const ctx = doc.context;
+  const free = ctx.register(ctx.obj({ Type: "Annot", Subtype: "FreeText", Rect: [50, 600, 300, 640], Contents: PDFString.of("Signed in Gqeberha"), DA: PDFString.of("/Helv 11 Tf 0 g"), F: 4 }));
+  (page.node.lookup(N("Annots")) as PDFArray).push(free);
+  const input = await doc.save();
+  const result = await convert(input);
+  const { after, i } = await common("field and free text pictures", input, result);
+  const annots = i.doc.getPage(0).node.lookup(N("Annots"));
+  const kept = annots instanceof PDFArray ? (annots.lookup(0) as PDFDict) : undefined;
+  check("field and free text: the value reads, the comment keeps a picture of its own, nothing became a picture", after.text[0].includes("Gqeberha") && kept?.lookup(N("Subtype")) === N("FreeText") && kept.lookup(N("AP")) instanceof PDFDict && !result.facts.pictures.length, after.text[0]);
+}
+
+// --- A rule our check finds unmet: the copy doesn't call itself PDF/A ----------------------
+{
+  const doc = await PDFDocument.create();
+  // Wider than the 14,400 units PDF/A allows a page.
+  doc.addPage([20000, 600]).drawText("A banner", { x: 40, y: 300, size: 40, font: await doc.embedFont(StandardFonts.Helvetica) });
+  const input = await doc.save();
+  const result = await convert(input);
+  const meta = (await PDFDocument.load(result.bytes)).catalog.lookup(N("Metadata"));
+  const xmp = meta instanceof PDFStream ? new TextDecoder().decode((meta as unknown as { contents: Uint8Array }).contents) : "";
+  check("unmet rule: our check says which", result.checks.some((c) => c.id === "content" && !c.ok && c.pages?.join() === "1"), result.checks);
+  check("unmet rule: no PDF/A identification is written", !result.labelled && !xmp.includes("pdfaid") && xmp.includes("xmp:CreateDate"));
+  const lines = pdfaLines(result);
+  check("unmet rule: the report starts by saying it isn't PDF/A", lines[0].warn === true && lines[0].text.startsWith("Not PDF/A-2b"), lines[0]);
+  const { PROCESSORS } = await import("../components/tools/processors.ts");
+  check("a password error is said under the password field, others in the usual place", PROCESSORS["pdf-to-pdfa"].errorField?.(NEEDS_PASSWORD) === "password" && PROCESSORS["pdf-to-pdfa"].errorField?.("This file isn't a readable PDF.") === undefined);
+}
+
 // --- Attachments: removed in 2b, kept in 3b -----------------------------------------------
 {
   const doc = await PDFDocument.create();
@@ -404,6 +446,23 @@ function lzw(text: string): Uint8Array {
   check("more tools offer the next steps", relatedTools("pdf-to-pdfa").map((t) => t.slug).includes("compress-pdf"));
   const fields = PROCESSORS["pdf-to-pdfa"].fields;
   check("options: PDF/A-2b first, 3b offered, a password field", fields[0].default === "2" && fields[0].options!.map((o) => o.value).join() === "2,3" && fields.some((f) => f.type === "password"));
+}
+
+// --- More tools and search, with Word, Excel and HTML to PDF on and off ----------------------
+{
+  const run = (on: boolean) => {
+    const env = { ...process.env, NEXT_PUBLIC_ENABLE_OFFICE_CONVERT: on ? "1" : "", NEXT_PUBLIC_ENABLE_HTML_TO_PDF: on ? "1" : "" };
+    const r = spawnSync(process.execPath, ["--import", "tsx", "tests/fakes/related.mts"], { env, encoding: "utf8" });
+    return JSON.parse(r.stdout.trim().split("\n").at(-1)!) as { shown: string[]; related: Record<string, string[]>; search: Record<string, string[]> };
+  };
+  const on = run(true);
+  const off = run(false);
+  check("on: PDF to Word, PDF to Excel and PPTX to PDF lead back to Word and Excel to PDF", on.related["pdf-to-word"][0] === "word-to-pdf" && on.related["pdf-to-excel"][0] === "excel-to-pdf" && on.related["pptx-to-pdf"].slice(0, 2).join() === "word-to-pdf,excel-to-pdf", on.related);
+  check("on: Markdown to PDF offers HTML to PDF; Compress and Repair offer PDF/A", on.related["markdown-to-pdf"].includes("html-to-pdf") && on.related["compress-pdf"].includes("pdf-to-pdfa") && on.related["repair-pdf"].includes("pdf-to-pdfa"), on.related);
+  const dead = Object.values(off.related).flat().filter((s) => !off.shown.includes(s));
+  check("off: no link to a hidden tool, and each page still offers four", !dead.length && Object.values(off.related).every((l) => l.length === 4), { dead, related: off.related });
+  check("search: excel finds both ways, csv to pdf finds Excel to PDF first, pdf a finds PDF/A", on.search.excel.slice(0, 2).sort().join() === "excel-to-pdf,pdf-to-excel" && on.search["csv to pdf"][0] === "excel-to-pdf" && on.search["pdf a"][0] === "pdf-to-pdfa" && on.search["pdf a"].length === 1, on.search);
+  check("search off: csv to pdf still finds TXT to PDF, pdf a still PDF/A", off.search["csv to pdf"][0] === "txt-to-pdf" && off.search["pdf a"][0] === "pdf-to-pdfa", off.search);
 }
 
 if (OUT) writeFileSync(`${OUT}/list.txt`, saved.join("\n"));

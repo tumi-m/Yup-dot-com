@@ -41,10 +41,10 @@ for (const [q, first] of [
   ["pdf to word", "pdf-to-word"],
   ["pdf to excel", "pdf-to-excel"],
   ["word", "pdf-to-word"],
-  ["csv to pdf", "txt-to-pdf"],
+  ["csv to pdf", "excel-to-pdf"],
 ]) check(`search '${q}' lists ${first} first`, found(q)[0] === first, found(q));
 check("search 'word' finds both directions", found("word").slice(0, 2).join() === "pdf-to-word,word-to-pdf", found("word"));
-check("search 'csv' finds Excel to PDF too", found("csv to pdf").includes("excel-to-pdf"));
+check("search 'csv' finds TXT to PDF too", found("csv to pdf").includes("txt-to-pdf"));
 check("related: each other, PPTX to PDF and the way back", relatedTools("word-to-pdf").map((t) => t.slug).join() === "excel-to-pdf,pptx-to-pdf,pdf-to-word,merge-pdf" && relatedTools("excel-to-pdf").map((t) => t.slug).join() === "word-to-pdf,pptx-to-pdf,pdf-to-excel,merge-pdf");
 
 // Switched off.

@@ -345,7 +345,8 @@ export async function pdfaTool(files: File[], opts: { part: string; password: st
   const part = opts.part === "3" ? 3 : 2;
   try {
     const result = await convertToPdfa(files[0], { part, password: opts.password || undefined, progress: ctx.progress, signal: ctx.signal });
-    return { blob: pdfBlob(result.bytes), filename: suffixed(files[0], `pdfa-${part}b`), report: pdfaLines(result) };
+    // A copy our check found short of the standard is named for what it is.
+    return { blob: pdfBlob(result.bytes), filename: suffixed(files[0], result.labelled ? `pdfa-${part}b` : "not-pdfa"), report: pdfaLines(result) };
   } catch (err) {
     // Its own messages already say what happened, plainly.
     if (isAbort(err) || err instanceof PasswordError) throw err;

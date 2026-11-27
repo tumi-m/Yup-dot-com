@@ -473,7 +473,11 @@ one the file had, and gives DeviceCMYK a default colour space (the usual
 CMYK-to-RGB formula) where needed; it also checks ICC profiles and JPEG 2000
 pictures. `metadata.ts` writes the XMP and Info alike, and the trailer ID.
 `check.ts` reads the saved file back and checks those rules; the report says
-it is our own check and points to veraPDF. PDF/A-1b isn't offered: it forbids
+it is our own check and points to veraPDF. When a rule isn't met the copy is
+written again without the PDF/A identification, named `-not-pdfa.pdf`, and the
+report opens by saying so: it keeps the other fixes but never claims to be
+PDF/A. Fonts pdf-lib draws new field and comment pictures with are written
+into the file before the pages are read, so they are embedded like the rest. PDF/A-1b isn't offered: it forbids
 transparency and wants CharSet and CIDSet lists for every font subset, which
 would need Type 1 and CFF font parsing this tool doesn't have, so many pages
 would become pictures. The tests (`tests/pdf-to-pdfa.test.mts`) also save
