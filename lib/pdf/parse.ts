@@ -712,6 +712,8 @@ function buildBlocks(
   let widest = 0;
   let listItems: string[] = [];
   let listOrdered = false;
+  // The line the last heading ended on.
+  let headingLine = -1;
   // Where the current list item's words start, after its marker.
   let itemText: number | null = null;
 
@@ -748,7 +750,18 @@ function buildBlocks(
 
     if (heading) {
       flushAll();
-      blocks.push({ type: "heading", level: heading, text: line.text, page });
+      // A long heading wrapped onto a second line is one heading.
+      const last = blocks[blocks.length - 1];
+      const above = lines[i - 1];
+      if (
+        last?.type === "heading" && last.level === heading && headingLine === i - 1 &&
+        Math.abs(above.fontSize - line.fontSize) < 0.5 && above.y - line.y <= line.fontSize * 1.6
+      ) {
+        last.text = joinLines([last.text, line.text]);
+      } else {
+        blocks.push({ type: "heading", level: heading, text: line.text, page });
+      }
+      headingLine = i;
       continue;
     }
 
