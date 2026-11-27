@@ -49,7 +49,14 @@ export async function drawFields(
   try {
     for (const field of form.getFields()) {
       try {
-        if (field.needsAppearancesUpdate()) field.defaultUpdateAppearances(font);
+        if (field.needsAppearancesUpdate()) {
+          const putBack = fitMultiline(form, field, font);
+          try {
+            field.defaultUpdateAppearances(font);
+          } finally {
+            putBack();
+          }
+        }
       } catch {
         if (paint && (await drawAsPicture(form, field, paint))) continue;
         undrawn = true;
@@ -62,6 +69,71 @@ export async function drawFields(
     undrawn = true;
   }
   if (undrawn) form.acroForm.dict.set(PDFName.of("NeedAppearances"), PDFBool.True);
+}
+
+/** The most an auto-sized multi-line field's text is drawn at, as Acrobat does. */
+const AUTO_MAX = 12;
+
+/**
+ * Gives an auto-sized multi-line text field (/DA size 0) the largest size up
+ * to 12 pt at which its text, wrapped, fits its box. pdf-lib's own guess
+ * grows the text until a line runs out of height, past the box's width, so a
+ * filled-in reason or address showed two huge words and lost the rest. The
+ * /DA pdf-lib writes the size into is put back after, so the field stays
+ * auto-sized for the next reader. Returns what puts it back.
+ */
+function fitMultiline(form: PDFForm, field: PDFField, font: PDFFont): () => void {
+  if (!(field instanceof PDFTextField) || !field.isMultiline()) return () => {};
+  const widgets = field.acroField.getWidgets();
+  if (!widgets.length || daFontSize(defaultAppearance(form, field, widgets[0]))) return () => {};
+  const own = field.acroField.getDefaultAppearance();
+  const theirs = widgets.map((w) => w.getDefaultAppearance());
+  // pdf-lib's box: inside the border and a point of padding.
+  const rect = widgets[0].getRectangle();
+  const inset = 2 * ((widgets[0].getBorderStyle()?.getWidth() ?? 0) + 1);
+  const turned = Math.abs(widgets[0].getAppearanceCharacteristics()?.getRotation() ?? 0) % 180 === 90;
+  const width = (turned ? rect.height : rect.width) - inset;
+  const height = (turned ? rect.width : rect.height) - inset;
+  const text = field.getText() ?? "";
+  let size = AUTO_MAX;
+  for (; size > 4; size -= 0.5) {
+    const lineHeight = font.heightAtSize(size) * 1.2;
+    if (wrappedLines(text, font, size, width) * lineHeight <= height) break;
+  }
+  const sized = (da: string | undefined) =>
+    da && /Tf/.test(da) ? da.replace(/(\/[^\s/]+\s+)-?\d*\.?\d+(\s+Tf)/, `$1${size}$2`) : `/Helv ${size} Tf ${da ?? "0 g"}`;
+  field.acroField.setDefaultAppearance(sized(own));
+  widgets.forEach((w, i) => theirs[i] !== undefined && w.setDefaultAppearance(sized(theirs[i])));
+  return () => {
+    if (own === undefined) field.acroField.dict.delete(PDFName.of("DA"));
+    else field.acroField.setDefaultAppearance(own);
+    widgets.forEach((w, i) => (theirs[i] === undefined ? w.dict.delete(PDFName.of("DA")) : w.setDefaultAppearance(theirs[i]!)));
+  };
+}
+
+/** Lines `text` takes wrapped at word breaks to `width` (a word wider than that takes its own). */
+function wrappedLines(text: string, font: PDFFont, size: number, width: number): number {
+  let lines = 0;
+  for (const paragraph of text.split(/\r\n|\r|\n/)) {
+    lines++;
+    let used = 0;
+    for (const word of paragraph.split(" ")) {
+      let w: number;
+      try {
+        w = font.widthOfTextAtSize(word, size);
+      } catch {
+        w = size * word.length * 0.6;
+      }
+      const space = used ? font.widthOfTextAtSize(" ", size) : 0;
+      if (used && used + space + w > width) {
+        lines++;
+        used = w;
+      } else {
+        used += space + w;
+      }
+    }
+  }
+  return lines;
 }
 
 /** The colour a /DA sets (`g` or `rg`), as #rrggbb. */
