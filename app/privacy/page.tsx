@@ -95,13 +95,17 @@ export default function PrivacyPage() {
         <h3>Payments</h3>
         <p>
           Paystack collects your card or bank details on its own checkout page. We keep your Paystack customer and
-          subscription codes, your plan, its status and renewal or end date, and payment references. Paystack keeps the
-          full payment record. We use these to give you what you paid for, handle renewals, cancellations and refunds,
+          subscription codes, your plan, its status and renewal or end date, and payment references, and for a
+          subscription a one-way fingerprint of the card authorization it started with (it can&apos;t be used to charge
+          you; it tells your subscription apart from someone else&apos;s). Paystack keeps the full payment record. We use these to give you what you paid for, handle renewals, cancellations and refunds,
           and keep the records South African tax law requires.
         </p>
 
         <h3>Team seats</h3>
         <p>If you own a Team plan: the email addresses you add, so those people get your plan when they sign in.</p>
+
+        <h3>Tester codes</h3>
+        <p>If you use a tester code: which code you used and when, and when your free tester time ends.</p>
 
         <h3>The AI assistant</h3>
         <p>
@@ -317,8 +321,16 @@ export default function PrivacyPage() {
         <h3>Always on (needed for the site to work)</h3>
         <ul>
           <li>
-            <strong>sb-…-auth-token</strong> cookies (Supabase) keep you signed in. They last up to 400 days and are
-            removed when you sign out.
+            <strong>sb-…-auth-token</strong> cookies (Supabase) keep you signed in. They last 30 days after your last
+            visit and are removed when you sign out.
+          </li>
+          <li>
+            <strong>pw-email-link</strong> (a cookie) holds the link from a sign-up or password reset email, for up to an hour,
+            until you press Continue.
+          </li>
+          <li>
+            <strong>pdfw-tester-code</strong> (browser storage, that tab only) keeps the code from a tester link until
+            you use it.
           </li>
           <li>
             <strong>pdfw-consent</strong> (browser storage) remembers your cookie choice.
