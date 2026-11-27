@@ -350,6 +350,18 @@ export default function PrivacyPage() {
             <strong>pdf-wizard</strong> (browser database) holds files you&apos;re editing without an account and files
             passed between tools. It stays on your device.
           </li>
+          <li>
+            <strong>pdf-wizard:sent</strong> (browser storage, that tab only) lets a tool you were sent to from the
+            home page start by itself. It&apos;s cleared when the tool opens.
+          </li>
+          <li>
+            <strong>pw.media.smaller</strong> (browser storage) remembers whether you chose Smaller file for video
+            downloads.
+          </li>
+          <li>
+            <strong>pw.editor.shortcuts</strong> (browser storage) remembers whether the editor&apos;s one-key shortcuts
+            are on.
+          </li>
         </ul>
         {GA_ID ? (
           <>
