@@ -270,7 +270,8 @@ export function DashboardClient({
               <div className="mt-4 flex gap-2">
                 <Button asChild className="h-11 flex-1">
                   <Link href={`/editor/${doc.id}`}>
-                    <Pencil /> Edit
+                    {/* Named by its document, like Delete, so a list of links reads Edit report.pdf, not Edit, Edit. */}
+                    <Pencil /> Edit<span className="sr-only"> {doc.name}</span>
                   </Link>
                 </Button>
                 <Button
