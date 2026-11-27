@@ -1,3 +1,4 @@
+import type { Metadata, ResolvingMetadata } from "next";
 import { MarketingNav } from "@/components/MarketingNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { ToolGrid } from "@/components/ToolGrid";
@@ -6,8 +7,18 @@ import { AfterHero, FinalCta, Hero, HeroFlow } from "@/components/landing/Sectio
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import type { Tier } from "@/lib/limits";
+import { siteUrl } from "@/lib/site";
+import { siteJsonLd } from "@/lib/structured-data";
+import { JsonLd } from "@/components/JsonLd";
 
-export const metadata = { alternates: { canonical: "/" } };
+// The site's own title, description and image (app/layout.tsx), at its own address.
+export async function generateMetadata(_: unknown, parent: ResolvingMetadata): Promise<Metadata> {
+  const og = (await parent).openGraph;
+  return {
+    alternates: { canonical: "/" },
+    openGraph: { type: "website", title: og?.title?.absolute, description: og?.description, images: og?.images, url: "/" },
+  };
+}
 
 export default async function HomePage() {
   const user = await getCurrentUser();
@@ -39,6 +50,7 @@ export default async function HomePage() {
         </HeroFlow>
       </main>
       <SiteFooter />
+      <JsonLd data={siteJsonLd(siteUrl())} />
     </div>
   );
 }

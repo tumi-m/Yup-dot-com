@@ -5,7 +5,10 @@ import { ArrowLeft } from "lucide-react";
 import { MarketingNav } from "@/components/MarketingNav";
 import { ToolPanel } from "@/components/tools/ToolPanel";
 import { panelSpec, placeholderSize, ToolPlaceholder } from "@/components/tools/panel-spec";
-import { TOOLS, getTool } from "@/lib/tools";
+import { TOOLS, getTool, metaDescription } from "@/lib/tools";
+import { toolJsonLd } from "@/lib/structured-data";
+import { siteUrl } from "@/lib/site";
+import { JsonLd } from "@/components/JsonLd";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/profile";
 import type { Tier } from "@/lib/limits";
@@ -46,7 +49,7 @@ export async function generateMetadata(
   const { slug } = await params;
   const tool = getTool(slug);
   if (!tool) return { title: "Tool not found" };
-  return pageMetadata({ title: tool.title, description: tool.description, path: `/tools/${tool.slug}` }, parent);
+  return pageMetadata({ title: tool.title, description: metaDescription(tool), path: `/tools/${tool.slug}` }, parent);
 }
 
 export default async function ToolPage({
@@ -106,6 +109,7 @@ export default async function ToolPage({
           {tool.slug === "pdf-to-pdfa" && <PdfaAbout />}
 
           <RelatedTools slug={tool.slug} />
+          <JsonLd data={toolJsonLd(tool, siteUrl())} />
         </div>
       </main>
       <SiteFooter />
