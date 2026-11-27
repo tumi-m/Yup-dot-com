@@ -132,5 +132,25 @@ for (const group of [[0], [1], [2], [3], [0, 1], [0, 2, 3], [3, 0], [0, 1, 2, 3]
 }
 check("the source is left as it was", (await read(await src.save())) === (await read(source)));
 
+// Each part saved without waiting on anything, so "Every page separately"
+// held the page in one task until the end: 3.4 s on a 300-page file on a
+// slow phone, with the progress bar and Cancel frozen. Timers now get a turn.
+{
+  const bytes = await textPdf(300);
+  let ticks = 0;
+  let done = false;
+  const tick = () => {
+    if (done) return;
+    ticks++;
+    setTimeout(tick, 20);
+  };
+  setTimeout(tick, 20);
+  const started = performance.now();
+  const parts = (await splitTool([file(bytes, "long.pdf")], { mode: "every", ranges: "" })) as ToolFile[];
+  const took = performance.now() - started;
+  done = true;
+  check("a long split lets timers run while it works", parts.length === 300 && (took < 100 || ticks >= Math.floor(took / 100)), { took: Math.round(took), ticks });
+}
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

@@ -195,7 +195,15 @@ export async function splitTool(
   const extract = extractorFor(src);
   const results: ToolFile[] = [];
   const used = new Map<string, number>();
+  let paused = performance.now();
   for (let g = 0; g < groups.length; g++) {
+    // Each small part saves without waiting on anything, so without a pause
+    // a 300-page split held the page for seconds: no progress, no Cancel.
+    // A pause every 50 ms or so; one per part made the split far slower.
+    if (performance.now() - paused > 50) {
+      await new Promise((r) => setTimeout(r, 0));
+      paused = performance.now();
+    }
     stopIfAborted(ctx.signal);
     if (groups.length > 1) ctx.progress?.(g / groups.length, `File ${g + 1} of ${groups.length}`);
     // The document keeps its form, title, bookmarks, links and tags for the
