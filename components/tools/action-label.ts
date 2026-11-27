@@ -28,7 +28,7 @@ const ACTION: Record<string, string> = {
   "pdf-to-word": "Convert to Word",
   "pdf-to-pptx": "Convert to PPTX",
   "pdf-to-excel": "Convert to Excel",
-  "ocr-pdf": "Make searchable",
+  "ocr-pdf": "Run OCR",
   "protect-pdf": "Protect PDF",
   "unlock-pdf": "Unlock PDF",
   "flatten-pdf": "Flatten PDF",
