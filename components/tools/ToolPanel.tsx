@@ -1,67 +1,122 @@
 "use client";
 
-import { lazy, Suspense, type ReactNode } from "react";
+import { Component, lazy, Suspense, useState, type ReactNode } from "react";
+import { RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { isLoadError, loadErrorMessage } from "@/lib/load-error";
 import type { Tier } from "@/lib/limits";
 import { placeholderSize, ToolPlaceholder, type PanelSpec } from "./panel-spec";
 
 // Each panel is its own chunk, so a tool page only downloads its own tool.
-const EditorLaunch = lazy(() => import("./EditorLaunch").then((m) => ({ default: m.EditorLaunch })));
-const PdfAssistant = lazy(() => import("./PdfAssistant").then((m) => ({ default: m.PdfAssistant })));
-const MediaDownloader = lazy(() => import("./MediaDownloader").then((m) => ({ default: m.MediaDownloader })));
-const PlaylistDownloader = lazy(() => import("./PlaylistDownloader").then((m) => ({ default: m.PlaylistDownloader })));
-const PptxToPdf = lazy(() => import("./PptxToPdf").then((m) => ({ default: m.PptxToPdf })));
-const PptxEditor = lazy(() => import("./PptxEditor").then((m) => ({ default: m.PptxEditor })));
-const SampleFinder = lazy(() => import("./SampleFinder").then((m) => ({ default: m.SampleFinder })));
-const SlidesImporter = lazy(() => import("./SlidesImporter").then((m) => ({ default: m.SlidesImporter })));
-const PageOrganizer = lazy(() => import("./PageOrganizer").then((m) => ({ default: m.PageOrganizer })));
-const CropTool = lazy(() => import("./CropTool").then((m) => ({ default: m.CropTool })));
-const CompareTool = lazy(() => import("./CompareTool").then((m) => ({ default: m.CompareTool })));
-const RedactTool = lazy(() => import("./RedactTool").then((m) => ({ default: m.RedactTool })));
-const ScanTool = lazy(() => import("./ScanTool").then((m) => ({ default: m.ScanTool })));
-const TranslateTool = lazy(() => import("./TranslateTool").then((m) => ({ default: m.TranslateTool })));
-const OfficeToPdf = lazy(() => import("./OfficeToPdf").then((m) => ({ default: m.OfficeToPdf })));
-const WebToPdf = lazy(() => import("./WebToPdf").then((m) => ({ default: m.WebToPdf })));
-const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
+// React keeps a lazy component's failed load for good, so after a failure
+// (offline, a flaky connection, a deploy that replaced the chunk) Try again
+// makes a fresh set that asks for the chunk again.
+function makePanels() {
+  return {
+    EditorLaunch: lazy(() => import("./EditorLaunch").then((m) => ({ default: m.EditorLaunch }))),
+    PdfAssistant: lazy(() => import("./PdfAssistant").then((m) => ({ default: m.PdfAssistant }))),
+    MediaDownloader: lazy(() => import("./MediaDownloader").then((m) => ({ default: m.MediaDownloader }))),
+    PlaylistDownloader: lazy(() => import("./PlaylistDownloader").then((m) => ({ default: m.PlaylistDownloader }))),
+    PptxToPdf: lazy(() => import("./PptxToPdf").then((m) => ({ default: m.PptxToPdf }))),
+    PptxEditor: lazy(() => import("./PptxEditor").then((m) => ({ default: m.PptxEditor }))),
+    SampleFinder: lazy(() => import("./SampleFinder").then((m) => ({ default: m.SampleFinder }))),
+    SlidesImporter: lazy(() => import("./SlidesImporter").then((m) => ({ default: m.SlidesImporter }))),
+    PageOrganizer: lazy(() => import("./PageOrganizer").then((m) => ({ default: m.PageOrganizer }))),
+    CropTool: lazy(() => import("./CropTool").then((m) => ({ default: m.CropTool }))),
+    CompareTool: lazy(() => import("./CompareTool").then((m) => ({ default: m.CompareTool }))),
+    RedactTool: lazy(() => import("./RedactTool").then((m) => ({ default: m.RedactTool }))),
+    ScanTool: lazy(() => import("./ScanTool").then((m) => ({ default: m.ScanTool }))),
+    TranslateTool: lazy(() => import("./TranslateTool").then((m) => ({ default: m.TranslateTool }))),
+    OfficeToPdf: lazy(() => import("./OfficeToPdf").then((m) => ({ default: m.OfficeToPdf }))),
+    WebToPdf: lazy(() => import("./WebToPdf").then((m) => ({ default: m.WebToPdf }))),
+    ToolWorkbench: lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench }))),
+  };
+}
+let panels = makePanels();
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
-  return <Suspense fallback={<ToolPlaceholder className={placeholderSize(spec.kind, spec.kind === "editor" ? spec.mode : undefined)} />}>{panel(spec, tier)}</Suspense>;
+  const [attempt, setAttempt] = useState(0);
+  const size = placeholderSize(spec.kind, spec.kind === "editor" ? spec.mode : undefined);
+  const retry = () => {
+    panels = makePanels();
+    setAttempt((n) => n + 1);
+  };
+  return (
+    <PanelBoundary key={attempt} size={size} onRetry={retry}>
+      <Suspense fallback={<ToolPlaceholder className={size} />}>{panel(spec, tier)}</Suspense>
+    </PanelBoundary>
+  );
+}
+
+/**
+ * A panel that failed to load or broke says so in its own place, with Try
+ * again, instead of taking the whole page down with it.
+ */
+class PanelBoundary extends Component<{ size: string; onRetry: () => void; children: ReactNode }, { error: unknown }> {
+  state = { error: null as unknown };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error(error);
+  }
+
+  render() {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div
+        role="alert"
+        className={`flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-card/60 p-6 text-center ${this.props.size}`}
+      >
+        <p className="max-w-sm text-sm text-muted-foreground">
+          {isLoadError(error) ? loadErrorMessage() : "Something went wrong with the tool. Try again."}
+        </p>
+        <Button onClick={this.props.onRetry}>
+          <RotateCcw /> Try again
+        </Button>
+      </div>
+    );
+  }
 }
 
 function panel(spec: PanelSpec, tier: Tier): ReactNode {
   switch (spec.kind) {
     case "editor":
-      return <EditorLaunch tier={tier} mode={spec.mode} />;
+      return <panels.EditorLaunch tier={tier} mode={spec.mode} />;
     case "assistant":
-      return <PdfAssistant tier={tier} />;
+      return <panels.PdfAssistant tier={tier} />;
     case "media":
-      return <MediaDownloader config={spec.media} tier={tier} />;
+      return <panels.MediaDownloader config={spec.media} tier={tier} />;
     case "playlist":
-      return <PlaylistDownloader tier={tier} />;
+      return <panels.PlaylistDownloader tier={tier} />;
     case "pptx-to-pdf":
-      return <PptxToPdf tier={tier} />;
+      return <panels.PptxToPdf tier={tier} />;
     case "pptx-editor":
-      return <PptxEditor tier={tier} />;
+      return <panels.PptxEditor tier={tier} />;
     case "slides-import":
-      return <SlidesImporter tier={tier} format={spec.format} />;
+      return <panels.SlidesImporter tier={tier} format={spec.format} />;
     case "samples":
-      return <SampleFinder tier={tier} />;
+      return <panels.SampleFinder tier={tier} />;
     case "pages":
-      return <PageOrganizer mode={spec.mode} slug={spec.slug} tier={tier} />;
+      return <panels.PageOrganizer mode={spec.mode} slug={spec.slug} tier={tier} />;
     case "crop":
-      return <CropTool slug={spec.slug} tier={tier} />;
+      return <panels.CropTool slug={spec.slug} tier={tier} />;
     case "compare":
-      return <CompareTool slug={spec.slug} tier={tier} />;
+      return <panels.CompareTool slug={spec.slug} tier={tier} />;
     case "redact":
-      return <RedactTool slug={spec.slug} tier={tier} />;
+      return <panels.RedactTool slug={spec.slug} tier={tier} />;
     case "scan":
-      return <ScanTool slug={spec.slug} tier={tier} />;
+      return <panels.ScanTool slug={spec.slug} tier={tier} />;
     case "translate":
-      return <TranslateTool slug={spec.slug} tier={tier} />;
+      return <panels.TranslateTool slug={spec.slug} tier={tier} />;
     case "office":
-      return <OfficeToPdf tool={spec.tool} tier={tier} />;
+      return <panels.OfficeToPdf tool={spec.tool} tier={tier} />;
     case "web-to-pdf":
-      return <WebToPdf slug={spec.slug} tier={tier} />;
+      return <panels.WebToPdf slug={spec.slug} tier={tier} />;
     case "workbench":
-      return <ToolWorkbench slug={spec.slug} tier={tier} />;
+      return <panels.ToolWorkbench slug={spec.slug} tier={tier} />;
   }
 }
