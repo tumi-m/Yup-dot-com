@@ -13,10 +13,21 @@ import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
 import { paymentOutcome, paymentPlanName, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
 import { focusAfterRemove } from "@/components/list-focus";
+import { loginHref } from "@/components/auth-redirect";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
   | { plan: PaidPlanId; mode: "once"; months: 1 | 12 };
+
+/**
+ * The session ended while the page was open (signed out in another tab, or
+ * it ran out), so the server answered "Sign in first.", a dead end: log in,
+ * then back to this page.
+ */
+function toLogin(): null {
+  window.location.href = loginHref(window.location.pathname + window.location.search);
+  return null;
+}
 
 /** Sends the browser to Paystack checkout. Resolves with an error message on failure. */
 export async function startCheckout(body: CheckoutRequest): Promise<string | null> {
@@ -27,6 +38,7 @@ export async function startCheckout(body: CheckoutRequest): Promise<string | nul
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) return toLogin();
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.url) return data.error || "Checkout failed.";
     window.location.href = data.url;
@@ -50,6 +62,7 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
     setError(null);
     try {
       const res = await fetch("/api/billing/manage", { method: "POST" });
+      if (res.status === 401) return void toLogin();
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) throw new Error(data.error || "Couldn't open subscription settings.");
       window.location.href = data.url;
