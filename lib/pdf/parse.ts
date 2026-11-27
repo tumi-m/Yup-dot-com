@@ -131,6 +131,12 @@ const XML_ILLEGAL =
 // searched. Other compatibility characters (², ½, ™) stay as they are.
 const PRESENTATION_FORMS = /[\uFB1D-\uFDFF\uFE70-\uFEFE]+/g;
 
+// List bullets drawn from the Symbol and Wingdings fonts (Word and LibreOffice
+// lists), which many PDFs map to private-use codes: made real bullets, so the
+// list reads as one.
+const SYMBOL_BULLETS = /[\uF0B7\uF0A7]/g;
+const BULLET_FOR: Record<string, string> = { "\uF0B7": "•", "\uF0A7": "▪" };
+
 /**
  * Spans on the page as displayed: from the CropBox's corner with /Rotate
  * applied, y up from the bottom. A landscape page stored as a portrait one
@@ -143,14 +149,19 @@ function toSpans(items: RawItem[], viewport: { transform: number[]; height: numb
   for (const item of items) {
     const text = item.str
       ?.replace(PRESENTATION_FORMS, (forms) => forms.normalize("NFKC"))
+      .replace(SYMBOL_BULLETS, (c) => BULLET_FOR[c])
       .replace(XML_ILLEGAL, "");
     if (!text || !text.trim()) continue;
-    const [a, b, , , e, f] = item.transform;
-    // The baseline's direction on the displayed page; its length is the font size.
+    const [a, b, c, d, e, f] = item.transform;
+    // The baseline's direction on the displayed page.
     const dx = va * a + vc * b;
     const dy = vb * a + vd * b;
     const size = Math.hypot(dx, dy);
-    const fontSize = size || item.height || 12;
+    // The font size is the letters' height: their width is stretched or
+    // squeezed by the text's horizontal scaling, as OCR text layers do to
+    // fit each word over its picture.
+    const tall = Math.hypot(va * c + vc * d, vb * c + vd * d);
+    const fontSize = tall || size || item.height || 12;
     // The run's extent across the page; its width is measured along the baseline.
     const run = (size ? dx / size : 1) * item.width * scale;
     const x = va * e + vc * f + ve;
@@ -539,8 +550,10 @@ function splitCells(line: ParsedLine): Cell[] {
   const groups: ParsedSpan[][] = [];
   line.spans.forEach((span, i) => {
     const prev = line.spans[i - 1];
-    // A form field's value stays with its label ("Name:", a tick box's caption), not a cell of its own.
-    if (!prev || (gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM && !prev.field && !span.field)) groups.push([]);
+    // A form field's value stays with its label ("Name:", a tick box's caption), not a cell of its own;
+    // a list's bullet stays with its item.
+    const bullet = i === 1 && /^[•▪◦‣]$/.test(prev.text.trim());
+    if (!prev || (gapBetween(prev, span) > prev.fontSize * CELL_GAP_EM && !prev.field && !span.field && !bullet)) groups.push([]);
     groups[groups.length - 1].push(span);
   });
   return groups.map((spans) => ({
@@ -653,6 +666,8 @@ function buildBlocks(
   let widest = 0;
   let listItems: string[] = [];
   let listOrdered = false;
+  // Where the current list item's words start, after its marker.
+  let itemText: number | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length) {
@@ -697,13 +712,18 @@ function buildBlocks(
       if (listItems.length && ordered !== listOrdered) flushList();
       listOrdered = ordered;
       listItems.push(line.text.replace(BULLET, "").replace(ORDERED, "").trim());
+      // Where the item's words start when the marker stands apart: its
+      // wrapped lines start there too (a hanging indent).
+      const marker = !line.rtl && line.spans.length > 1 && /^(?:[•·▪◦‣\-–—*]|\d{1,2}[.)]|[a-z][.)])$/i.test(line.spans[0].text.trim());
+      itemText = marker ? line.spans[1].x : null;
       continue;
     }
 
     // A continuation line of the current list item (indented, no marker).
     if (listItems.length) {
       const prev = lines[i - 1];
-      if (prev && Math.abs(line.x - prev.x) < 4 && line.x > lines[0].x + 4) {
+      const aligned = prev && (Math.abs(line.x - prev.x) < 4 || (itemText !== null && Math.abs(line.x - itemText) < 4));
+      if (aligned && line.x > lines[0].x + 4) {
         listItems[listItems.length - 1] = joinLines([listItems[listItems.length - 1], line.text]);
         continue;
       }

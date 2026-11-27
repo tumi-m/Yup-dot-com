@@ -2,7 +2,7 @@
 
 import { loadForRender } from "./render";
 import { canvasToJpeg } from "../jpeg-encode/off-thread";
-import { looksGarbled, newWords, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
+import { lineWords, looksGarbled, newWords, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 
 /** Engine, WebAssembly core, and language models are all self-hosted. */
@@ -163,11 +163,7 @@ export async function ocrDocument(
       const words: OcrWord[] = [];
       for (const block of data.blocks ?? []) {
         for (const para of block.paragraphs) {
-          for (const line of para.lines) {
-            for (const w of line.words) {
-              words.push({ text: w.text, confidence: w.confidence, ...w.bbox });
-            }
-          }
+          for (const line of para.lines) words.push(...lineWords(line));
         }
       }
 

@@ -41,6 +41,50 @@ export interface OcrWord {
   x1: number;
   y1: number;
   confidence: number;
+  /**
+   * The line's baseline under the word and the line's text size, in image
+   * pixels: the words of a line share them. Without, the word's own box is used.
+   */
+  baseline?: number;
+  size?: number;
+}
+
+/** What Tesseract reads of one line: the parts used here. */
+export interface OcrLine {
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+  baseline?: { x0: number; y0: number; x1: number; y1: number; has_baseline?: boolean };
+  words: { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } }[];
+}
+
+/**
+ * A line's words for the text layer, on the line's baseline at the line's
+ * size. A word's own box drops with its descenders and shrinks without
+ * ascenders, so "problem" sat lower and "a" smaller than "Boil", and copied
+ * text came out in the wrong order. A bullet read as a sign or a stray
+ * letter ("©", or an unsure "eo"), well apart from the words after it,
+ * becomes "•", so the copied text is a list.
+ */
+export function lineWords(line: OcrLine): OcrWord[] {
+  const box = line.bbox;
+  if (!box) return line.words.map((w) => ({ text: w.text, confidence: w.confidence, ...w.bbox }));
+  const b = line.baseline;
+  const sloped = b && b.has_baseline !== false && b.x1 > b.x0;
+  const baseAt = (x: number) => (sloped ? b.y0 + ((b.y1 - b.y0) * (x - b.x0)) / (b.x1 - b.x0) : box.y1 - (box.y1 - box.y0) * 0.2);
+  // The tallest letters rise about three quarters of the size above the baseline.
+  const size = Math.max(1, (baseAt((box.x0 + box.x1) / 2) - box.y0) / 0.75);
+  return line.words.map((w, i) => {
+    const next = line.words[i + 1];
+    const t = w.text.trim();
+    const stray = /^[^\p{L}\p{N}]{1,2}$/u.test(t) || (/^\p{L}{1,2}$/u.test(t) && w.confidence < 80);
+    const bullet = i === 0 && !!next && stray && next.bbox.x0 - w.bbox.x1 > size;
+    return {
+      text: bullet ? "•" : w.text,
+      confidence: bullet ? 100 : w.confidence,
+      ...w.bbox,
+      baseline: baseAt((w.bbox.x0 + w.bbox.x1) / 2),
+      size,
+    };
+  });
 }
 
 /** Words recognised on one page, measured on a render of the page as displayed. */
@@ -161,16 +205,17 @@ export function textLayer(
     const boxH = (w.y1 - w.y0) * sy;
     if (boxW <= 0 || boxH <= 0) continue;
 
-    const size = Math.max(1, boxH * 0.9);
+    const size = Math.max(1, w.size !== undefined ? w.size * sy : boxH * 0.9);
     const natural = font.widthOfTextAtSize(text, size);
     // Stretch horizontally so the selection box matches the word on the image.
     const scalePct = natural > 0 ? (boxW / natural) * 100 : 100;
+    // The line's baseline, or near the bottom of the box (~20% descender allowance).
+    const baseline = w.baseline !== undefined ? src.heightPt - w.baseline * sy : src.heightPt - w.y1 * sy + boxH * 0.2;
 
     ops.push(
       setFontAndSize(fontKey, size),
       PDFOperator.of(Ops.SetTextHorizontalScaling, [PDFNumber.of(scalePct)]),
-      // Baseline sits near the bottom of the box (~20% descender allowance).
-      setTextMatrix(1, 0, 0, 1, w.x0 * sx, src.heightPt - w.y1 * sy + boxH * 0.2),
+      setTextMatrix(1, 0, 0, 1, w.x0 * sx, baseline),
       showText(font.encodeText(text + " "))
     );
   }
