@@ -219,6 +219,9 @@ export const PLATFORM_LABEL: Record<MediaPlatform, string> = {
   instagram: "Instagram",
 };
 
+/** A TikTok photo post on an MP3 page. */
+export const PHOTO_POST_SOUND = "That's a photo post, so its sound can't be saved. The Sample Finder can still name its song.";
+
 /** What a downloader asks for when the box holds something else. */
 export const PLATFORM_ASK: Record<MediaPlatform, string> = {
   youtube: "Paste a YouTube video link.",
@@ -230,9 +233,10 @@ export const PLATFORM_ASK: Record<MediaPlatform, string> = {
 /**
  * Why a link the downloaders can't take was turned away, when there's more
  * to say than "paste a video link": a story, a profile or channel, a photo
- * post, a sound's page, a live broadcast. Null for anything else.
+ * post, a sound's page, a live broadcast. Null for anything else. `kind`:
+ * what the visitor is after, so an MP3 page doesn't talk about video.
  */
-export function mediaLinkProblem(input: string): string | null {
+export function mediaLinkProblem(input: string, kind: MediaKind = "mp4"): string | null {
   let url: URL;
   try {
     url = new URL(input.trim().replace(/^(?!https?:\/\/)/i, "https://"));
@@ -247,7 +251,10 @@ export function mediaLinkProblem(input: string): string | null {
     if (/^\/(?!(?:reels?|explore|accounts|direct)\/?$)[\w.]{1,30}\/?$/.test(path)) return "That's a profile. Paste a Reel or post link.";
   }
   if (host === "tiktok.com") {
-    if (/^\/@[\w.-]+\/photo\/\d+/.test(path)) return "That's a photo post, so it has no video.";
+    if (/^\/@[\w.-]+\/photo\/\d+/.test(path)) {
+      // Its sound has no file to save, but the Sample Finder can name the song (MediaDownloader links it).
+      return kind === "mp3" ? PHOTO_POST_SOUND : "That's a photo post, so it has no video.";
+    }
     if (/^\/@[\w.-]+\/live\/?$/.test(path)) return "Live videos can't be saved.";
     if (/^\/music\//.test(path)) return "That's a sound's page. Paste one video's link.";
     if (/^\/@[\w.-]+\/?$/.test(path)) return "That's a profile. Paste one video's link.";

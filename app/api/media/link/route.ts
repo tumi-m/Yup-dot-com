@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ error: "Invalid request." }, { status: 400 });
   const media = parseMediaUrl(parsed.data.url);
   if (!media) {
-    const error = mediaLinkProblem(parsed.data.url) ?? (YOUTUBE_ENABLED ? "Paste a YouTube, X, TikTok or Instagram video link." : "Paste an X, TikTok or Instagram video link.");
+    const error = mediaLinkProblem(parsed.data.url, parsed.data.kind) ?? (YOUTUBE_ENABLED ? "Paste a YouTube, X, TikTok or Instagram video link." : "Paste an X, TikTok or Instagram video link.");
     return Response.json({ error }, { status: 400 });
   }
   if (media.platform === "youtube" && !YOUTUBE_ENABLED) {

@@ -57,6 +57,12 @@ const post = (path: string, body: unknown) =>
     const got = mediaLinkProblem(link);
     check(`${link} → ${want ?? "nothing special"}`, want ? !!got && want.test(got) && parseMediaUrl(link) === null : got === null, String(got));
   }
+  const photo = "https://www.tiktok.com/@liftsalot/photo/7300000000000000002";
+  const forMp3 = mediaLinkProblem(photo, "mp3") ?? "";
+  check("a photo post on an MP3 page talks about its sound, not video, and points to the Sample Finder", /sound/.test(forMp3) && !/video/.test(forMp3) && /Sample Finder/.test(forMp3), forMp3);
+  const link = await import("../app/api/media/link/route.ts");
+  const refused = await link.POST(post("/api/media/link", { url: photo, kind: "mp3" }));
+  check("so does the download route for an MP3", refused.status === 400 && (await refused.json()).error === forMp3);
   check("each downloader asks with the right article", Object.values(PLATFORM_ASK).every((m) => !/\ba (?:[AEIOU]|X\b)/.test(m)), JSON.stringify(PLATFORM_ASK));
   const info = await import("../app/api/media/info/route.ts");
   const res = await info.POST(post("/api/media/info", { url: "https://www.instagram.com/stories/someone/3456789012345678901/" }));

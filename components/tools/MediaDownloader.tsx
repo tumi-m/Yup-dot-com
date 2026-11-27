@@ -38,6 +38,7 @@ import {
   linkIn,
   mediaLinkProblem,
   parseMediaUrl,
+  PHOTO_POST_SOUND,
   parsePlaylistUrl,
   PLATFORM_ASK,
   PLATFORM_LABEL,
@@ -52,7 +53,7 @@ import { cn, formatBytes } from "@/lib/utils";
 import { trackDownload, trackToolUsed } from "@/lib/analytics";
 import { canEncodeH264, MAX_IN_MEMORY, shortBytes } from "@/lib/video-quality";
 import { readToBlob } from "@/lib/read-response";
-import { finderForLink, SAMPLE_FINDER_PATH, songQuery } from "@/lib/samples/links";
+import { finderForLink, SAMPLE_FINDER_PATH, songQuery, tiktokPhotoLink } from "@/lib/samples/links";
 import { markSent } from "@/lib/journey";
 
 export interface MediaToolConfig {
@@ -175,6 +176,8 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
   const [kind, setKind] = useState<MediaKind>(config.kind);
   const [height, setHeight] = useState<number>(config.defaultHeight ?? 720);
   const [error, setError] = useState<string | null>(null);
+  /** A link that goes with one error message (shown only while that message is). */
+  const [errorLink, setErrorLink] = useState<{ message: string; href: string } | null>(null);
   /** `detail` replaces the stage's label on screen (not for screen readers, who hear stage changes only). */
   const [progress, setProgress] = useState<{ value: number; stage: string; detail?: string }>({ value: 0, stage: "queued" });
   const [file, setFile] = useState<SavedFile | null>(null);
@@ -280,7 +283,13 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
     const parsed = parseMediaUrl(target);
     if (!parsed) {
       // A playlist link is offered the playlist tool instead (see below the input).
-      if (!playlist) setError(mediaLinkProblem(target) ?? PLATFORM_ASK[config.platform]);
+      if (!playlist) {
+        const problem = mediaLinkProblem(target, kind);
+        setError(problem ?? PLATFORM_ASK[config.platform]);
+        // A photo post's sound: the Sample Finder reads it, so the message links there.
+        const photo = problem === PHOTO_POST_SOUND ? tiktokPhotoLink(target) : null;
+        if (photo) setErrorLink({ message: problem!, href: finderForLink(`https://www.tiktok.com/@${photo.user}/photo/${photo.id}`) });
+      }
       return;
     }
     const seq = ++lookupSeq.current;
@@ -1169,7 +1178,31 @@ export function MediaDownloader({ config, tier }: { config: MediaToolConfig; tie
       </AnimatePresence>
       </div>
 
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <AnimatePresence>
+        {error && (
+          <InlineError
+            key="error"
+            message={
+              errorLink?.message === error ? (
+                // In the sentence's flow, so a narrow screen keeps the message wide.
+                <>
+                  {error}{" "}
+                  <Link
+                    href={errorLink.href}
+                    // Sent from this site: the Sample Finder starts by itself.
+                    onClick={() => markSent(errorLink.href)}
+                    className={cn("rounded font-semibold underline", focusRing)}
+                  >
+                    Find its song
+                  </Link>
+                </>
+              ) : (
+                error
+              )
+            }
+          />
+        )}
+      </AnimatePresence>
 
       <p className="text-center text-xs text-muted-foreground">Only download videos you have permission to use.</p>
 
