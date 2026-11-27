@@ -397,26 +397,31 @@ function detectGutter(allSpans: ParsedSpan[], pageWidth: number): number | null 
   const lo = Math.floor(binCount * 0.28);
   const hi = Math.ceil(binCount * 0.72);
 
-  let best = { start: -1, length: 0 };
+  // Every empty run, longest first: the space after a sidebar's short lines
+  // can be wider than the gutter itself, but has nothing to its right.
+  const runs: { start: number; length: number }[] = [];
   let runStart = -1;
-  for (let i = lo; i <= hi && i < binCount; i++) {
-    if (occupancy[i] <= tolerance) {
-      if (runStart === -1) runStart = i;
-      const length = i - runStart + 1;
-      if (length > best.length) best = { start: runStart, length };
-    } else {
+  for (let i = lo; i <= hi + 1; i++) {
+    const empty = i <= hi && i < binCount && occupancy[i] <= tolerance;
+    if (empty && runStart === -1) runStart = i;
+    if (!empty && runStart !== -1) {
+      runs.push({ start: runStart, length: i - runStart });
       runStart = -1;
     }
   }
+  runs.sort((a, b) => b.length - a.length);
 
   const MIN_GUTTER_PT = 14;
-  if (best.length * BIN < MIN_GUTTER_PT) return null;
-
+  const best = runs.find((run) => {
+    if (run.length * BIN < MIN_GUTTER_PT) return false;
+    const gutter = (run.start + run.length / 2) * BIN;
+    const left = spans.filter((s) => s.x + s.width <= gutter);
+    const right = spans.filter((s) => s.x >= gutter);
+    // Both sides must carry real content for the split to be meaningful.
+    return left.length >= spans.length * 0.2 && right.length >= spans.length * 0.2;
+  });
+  if (!best) return null;
   const gutter = (best.start + best.length / 2) * BIN;
-  const left = spans.filter((s) => s.x + s.width <= gutter);
-  const right = spans.filter((s) => s.x >= gutter);
-  // Both sides must carry real content for the split to be meaningful.
-  if (left.length < spans.length * 0.2 || right.length < spans.length * 0.2) return null;
   // The space between two columns of a table looks like a gutter too:
   // linesInReadingOrder only splits runs of rows that are column text.
   return gutter;
@@ -510,7 +515,12 @@ function linesInReadingOrder(spans: ParsedSpan[], pageWidth: number): ParsedLine
     }
     const left = band.flat().filter(isLeft);
     const right = band.flat().filter((s) => !isLeft(s));
-    if (band.length >= 3 && columnText(left, pageWidth) && columnText(right, pageWidth)) {
+    // A sidebar of headings and short items beside a column of text is read
+    // after it too: its lines seldom share a baseline with the column's, as
+    // a table's cells do.
+    const both = band.filter((row) => row.some(isLeft) && row.some((s) => !isLeft(s))).length;
+    const sidebar = (columnText(left, pageWidth) || columnText(right, pageWidth)) && both * 3 <= band.length;
+    if (band.length >= 3 && left.length && right.length && ((columnText(left, pageWidth) && columnText(right, pageWidth)) || sidebar)) {
       emit(toLines(full));
       emit([...toLines(left), ...toLines(right)]);
       full = [];
