@@ -59,6 +59,17 @@ check("and nowhere else", !/https:\/\/\*(\s|$)|\shttps:(\s|$)|\*(\s|$)/.test(dir
       policy
     );
   }
+  // One entry for the worker while any tool that talks to it is on, none when all are off.
+  env.MEDIA_WORKER_URL = "https://media.example.com";
+  const flags = ["NEXT_PUBLIC_ENABLE_YOUTUBE", "NEXT_PUBLIC_ENABLE_OFFICE_CONVERT", "NEXT_PUBLIC_ENABLE_HTML_TO_PDF"];
+  for (const on of [[], ...flags.map((f) => [f]), flags]) {
+    for (const f of flags) delete env[f];
+    for (const f of on) env[f] = "1";
+    const connect = contentSecurityPolicy("x", { ...prod, mediaWorkerUrl: cspSettings().mediaWorkerUrl }).split("; ").find((d) => d.startsWith("connect-src ")) ?? "";
+    const count = connect.split(" ").filter((s) => s === "https://media.example.com").length;
+    check(`the worker is in the policy ${on.length ? "once with " + on.join(" and ") : "never with every tool off"}`, count === (on.length ? 1 : 0), connect);
+  }
+  for (const f of flags) delete env[f];
   delete env.MEDIA_WORKER_SECRET;
   delete env.MEDIA_WORKER_URL;
   delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;
