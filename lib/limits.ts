@@ -33,15 +33,23 @@ export interface TierLimits {
    * well under what Chat with PDF reads a day.
    */
   translateCharsPerDay: number;
+  /**
+   * Word and Excel to PDF: files converted a day. Each is uploaded to the
+   * media worker and run through LibreOffice, the one tool that costs server
+   * time per file.
+   */
+  officeConversionsPerDay: number;
+  /** Largest Word or Excel file uploaded for conversion. */
+  officeMaxBytes: number;
 }
 
 const MB = 1024 * 1024;
 
 export const LIMITS: Record<Tier, TierLimits> = {
-  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5, linkImportsPerDay: 20, sampleLookupsPerDay: 10, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 15_000 },
-  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 10, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10, linkImportsPerDay: 50, sampleLookupsPerDay: 30, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 60_000 },
-  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000 },
-  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000 },
+  guest: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 3, aiDocumentChars: 150_000, mediaDownloadsPerDay: 5, linkImportsPerDay: 20, sampleLookupsPerDay: 10, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 15_000, officeConversionsPerDay: 5, officeMaxBytes: 25 * MB },
+  free: { maxFileBytes: 50 * MB, maxBatchFiles: 10, aiAnswersPerDay: 10, aiDocumentChars: 300_000, mediaDownloadsPerDay: 10, linkImportsPerDay: 50, sampleLookupsPerDay: 30, editsPerDay: 1, watermark: true, comparePages: 200, redactPages: 100, translateCharsPerDay: 60_000, officeConversionsPerDay: 10, officeMaxBytes: 25 * MB },
+  pro: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000, officeConversionsPerDay: 200, officeMaxBytes: 100 * MB },
+  team: { maxFileBytes: 500 * MB, maxBatchFiles: 200, aiAnswersPerDay: 40, aiDocumentChars: 600_000, mediaDownloadsPerDay: 200, linkImportsPerDay: 500, sampleLookupsPerDay: 300, editsPerDay: Infinity, watermark: false, comparePages: 2000, redactPages: 1000, translateCharsPerDay: 400_000, officeConversionsPerDay: 200, officeMaxBytes: 100 * MB },
 };
 
 export function limitsFor(tier: Tier): TierLimits {

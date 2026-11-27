@@ -594,6 +594,19 @@ export async function claimMediaLookup(subject: string, store: UsageStore = usag
   return (await store.consume(subject, "media-lookup", MEDIA_LOOKUPS_PER_MINUTE, "minute")) >= 0;
 }
 
+/** Word and Excel to PDF upload links a minute, per person or guest IP. */
+export const OFFICE_LINKS_PER_MINUTE = 10;
+export const OFFICE_BURST_MESSAGE = "Too many files at once. Try again in a minute.";
+
+/**
+ * Counts one ask for a conversion link (/api/convert/link), granted or not,
+ * so a script can't make the route sign links (or count refusals) without
+ * end. False when this minute's are used up.
+ */
+export async function claimOfficeLink(subject: string, store: UsageStore = usageStore()): Promise<boolean> {
+  return (await store.consume(subject, "office-link", OFFICE_LINKS_PER_MINUTE, "minute")) >= 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Edits (Edit PDF, Sign PDF, Edit PPTX)                               */
 /* ------------------------------------------------------------------ */

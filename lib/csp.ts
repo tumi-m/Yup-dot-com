@@ -36,7 +36,10 @@ function origin(url: string | undefined): string | null {
 export interface CspSettings {
   dev: boolean;
   supabaseUrl?: string;
-  /** Only while YouTube downloads are on, so the worker's address isn't in every page's headers. */
+  /**
+   * Only while YouTube downloads or Word and Excel to PDF are on, so the
+   * worker's address isn't in every page's headers.
+   */
   mediaWorkerUrl?: string;
   analytics: boolean;
   turnstile: boolean;
@@ -47,8 +50,11 @@ export function cspSettings(): CspSettings {
   return {
     dev: process.env.NODE_ENV === "development",
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    // As the download links give it (a scheme added, http made https), origin only.
-    mediaWorkerUrl: process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1" ? workerOrigin(process.env.MEDIA_WORKER_URL) : undefined,
+    // As the download and upload links give it (a scheme added, http made https), origin only.
+    mediaWorkerUrl:
+      process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1" || process.env.NEXT_PUBLIC_ENABLE_OFFICE_CONVERT === "1"
+        ? workerOrigin(process.env.MEDIA_WORKER_URL)
+        : undefined,
     analytics: !!process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim(),
     turnstile: !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim(),
   };
@@ -68,7 +74,7 @@ export function contentSecurityPolicy(nonce: string, settings: CspSettings = csp
     "data:",
     supabase,
     supabase?.replace(/^http/, "ws"),
-    // YouTube downloads poll the media worker from the browser.
+    // YouTube downloads poll the media worker from the browser; Word and Excel to PDF upload to it.
     origin(settings.mediaWorkerUrl),
     ...(settings.analytics ? GOOGLE_ANALYTICS : []),
     settings.turnstile ? "https://challenges.cloudflare.com" : null,

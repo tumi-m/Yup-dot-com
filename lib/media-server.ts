@@ -15,9 +15,9 @@ export type WorkerConfig =
   | { ok: true; url: string; secret: string }
   | { ok: false; reason: "missing-url" | "missing-secret" | "invalid-url" };
 
-export function workerConfig(): WorkerConfig {
-  const rawUrl = process.env.MEDIA_WORKER_URL?.trim();
-  const secret = process.env.MEDIA_WORKER_SECRET?.trim();
+export function workerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
+  const rawUrl = env.MEDIA_WORKER_URL?.trim();
+  const secret = env.MEDIA_WORKER_SECRET?.trim();
   if (!rawUrl) return { ok: false, reason: "missing-url" };
   if (!secret) return { ok: false, reason: "missing-secret" };
   // Scheme added, http made https: the same address the pages' CSP allows.
