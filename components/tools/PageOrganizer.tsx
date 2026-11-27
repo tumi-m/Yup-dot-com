@@ -39,7 +39,7 @@ import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge"
 import { getTool } from "@/lib/tools";
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { ErrorHelp } from "./ErrorHelp";
-import { takesMessage } from "./file-pick";
+import { emptyMessage, takesMessage } from "./file-pick";
 import { DRAWN_AT_ONCE, NEAR_MARGIN, taskLimiter } from "@/lib/editor/thumbnails";
 import { useHistory } from "@/lib/editor/history";
 import type { LoadedPdf } from "@/lib/pdf/render";
@@ -187,6 +187,11 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
       fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
       return;
     }
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      fail(empty);
+      return;
+    }
     // Limits are an upgrade prompt, never a silent failure.
     if (picked.size > limits.maxFileBytes) {
       setUpsell("file-size");
@@ -237,6 +242,11 @@ export function PageOrganizer({ mode, slug, tier }: { mode: PagesMode; slug: str
     const files = Array.from(list ?? []).filter(isPdf);
     if (!files.length) {
       if (list?.length) fail(takesMessage(getTool(slug)?.name, "application/pdf", true));
+      return;
+    }
+    const empty = emptyMessage(files);
+    if (empty) {
+      fail(empty);
       return;
     }
     if (files.some((f) => f.size > limits.maxFileBytes)) {

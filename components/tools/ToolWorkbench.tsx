@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToolDropzone } from "@/components/ui/dropzone";
 import { downloadBlob } from "@/lib/download";
+import { isLoadError } from "@/lib/load-error";
 import { cn, formatBytes } from "@/lib/utils";
 import type { ToolFile } from "@/lib/pdf/toolkit";
 import {
@@ -149,6 +150,8 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
   const [moveNote, setMoveNote] = useState("");
   /** The zip for "Download all" is being built. */
   const [zipping, setZipping] = useState(false);
+  /** Why the last zip couldn't be made. */
+  const [zipFailed, setZipFailed] = useState<string | null>(null);
   const reduce = useReducedMotion();
   const nudge = useSuccessNudge(() => setUpsell("nudge"));
 
@@ -339,6 +342,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setError(null);
     setProgress(null);
     setNextFailed(null);
+    setZipFailed(null);
     const started = performance.now();
     const ctl = new AbortController();
     job.current = ctl;
@@ -421,6 +425,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
       // A second click while the zip builds would save it twice.
       if (zipping) return;
       setZipping(true);
+      setZipFailed(null);
       try {
         const JSZip = (await import("jszip")).default;
         const { zipEntryOptionsFor } = await import("@/lib/zip");
@@ -429,6 +434,14 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
         // Named after the input, so two splits don't both save as the same name.
         const base = files[0]?.name.replace(/\.pdf$/i, "");
         downloadBlob(await zip.generateAsync({ type: "blob" }), base ? `${base}-${proc.zipName}` : proc.zipName);
+      } catch (err) {
+        // The zip's code didn't arrive, or a phone couldn't hold the zip: the
+        // files are still here, each with its own Download.
+        setZipFailed(
+          isLoadError(err)
+            ? "Couldn't make the zip. Check your connection and try again, or download the files one at a time."
+            : "Couldn't make the zip on this device. Download the files one at a time."
+        );
       } finally {
         setZipping(false);
       }
@@ -472,6 +485,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
     setResults([]);
     setStatus("idle");
     setError(null);
+    setZipFailed(null);
   }
 
   /** A single result too big for the next tool on this plan: no "keep going". */
@@ -574,6 +588,7 @@ export function ToolWorkbench({ slug, tier = "guest" }: { slug: string; tier?: T
               <Button onClick={reset} variant="outline" size="lg">
                 <RotateCcw /> Start over
               </Button>
+              {zipFailed && <InlineError className="basis-full" message={zipFailed} />}
             </>
           }
           next={

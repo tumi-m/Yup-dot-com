@@ -14,6 +14,7 @@ import { ToolDropzone } from "@/components/ui/dropzone";
 import { InlineError } from "@/components/motion/primitives";
 import { UpgradeDialog } from "@/components/upsell/Upsell";
 import { ErrorHelp } from "./ErrorHelp";
+import { emptyMessage } from "./file-pick";
 
 /**
  * Opens a PDF in the editor with no account required.
@@ -47,6 +48,11 @@ export function EditorLaunch({ tier, mode }: { tier: Tier; mode?: "sign" | "text
     setFailed(null);
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setError("Please choose a PDF file.");
+      return;
+    }
+    const empty = emptyMessage([file]);
+    if (empty) {
+      setError(empty);
       return;
     }
     if (file.size > limits.maxFileBytes) {

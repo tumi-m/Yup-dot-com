@@ -71,5 +71,20 @@ for (const page of ["../components/tools/PptxToPdf.tsx", "../components/tools/Pp
   check(`${page.split("/").pop()}: imports the messages up front`, /import \{[^}]*pptxErrorMessage[^}]*\} from "@\/lib\/pptx\/errors"/.test(src));
 }
 
+// A tool's panel that didn't arrive took the whole page to "A spell
+// misfired", and Try again there showed it again even once back online:
+// React keeps a lazy component's failed load. The panel now says so in its
+// own place, and Try again asks for the chunk afresh.
+{
+  const panel = readFileSync(new URL("../components/tools/ToolPanel.tsx", import.meta.url), "utf8");
+  check("ToolPanel: panels sit inside their own error boundary", /<PanelBoundary key=\{attempt\}[^>]*onRetry=\{retry\}>/.test(panel) && /getDerivedStateFromError/.test(panel));
+  check("ToolPanel: Try again makes fresh lazy panels", /const retry = \(\) => \{\s*panels = makePanels\(\);\s*setAttempt/.test(panel));
+  check("ToolPanel: every panel renders from the current set", !/^const \w+ = lazy\(/m.test(panel) && (panel.match(/<panels\.\w+ /g) ?? []).length === 17);
+  check("ToolPanel: a load failure says to check the connection", /isLoadError\(error\) \? loadErrorMessage\(\)/.test(panel));
+  // Download all's zip: a failure was an unhandled rejection with nothing shown.
+  const bench = readFileSync(new URL("../components/tools/ToolWorkbench.tsx", import.meta.url), "utf8");
+  check("Download all: a zip that can't be made is said, the files stay", /\} catch \(err\) \{[\s\S]{0,200}setZipFailed\(/.test(bench) && /\{zipFailed && <InlineError/.test(bench));
+}
+
 console.log(`\n${pass}/${total} passed`);
 process.exit(pass === total ? 0 : 1);

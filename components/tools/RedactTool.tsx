@@ -37,7 +37,7 @@ import { dismissUpsellCard, recordTask, upsellCardDismissed } from "@/lib/nudge"
 import { friendlyPdfError } from "@/lib/pdf/errors";
 import { isAbort } from "@/lib/abort";
 import { ErrorHelp } from "./ErrorHelp";
-import { takesMessage } from "./file-pick";
+import { emptyMessage, takesMessage } from "./file-pick";
 import { getTool } from "@/lib/tools";
 import type { LoadedPdf } from "@/lib/pdf/render";
 import type { RedactReport } from "@/lib/pdf/redact/index";
@@ -290,6 +290,11 @@ export function RedactTool({ slug, tier }: { slug: string; tier: Tier }) {
     const picked = Array.from(list).find(isPdf);
     if (!picked) {
       fail(takesMessage(getTool(slug)?.name, "application/pdf", false));
+      return;
+    }
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      fail(empty);
       return;
     }
     // Limits are an upgrade prompt, never a silent failure.

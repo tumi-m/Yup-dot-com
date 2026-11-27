@@ -15,6 +15,28 @@ export const LETTERS_MESSAGE = "Some of these letters can't be drawn in this PDF
 /** A PDF with no text to read: the page workbench offers OCR PDF next to it. */
 export const SCANNED_MESSAGE = "This looks like a scanned PDF. Run OCR PDF on it first.";
 export const NO_TABLES_MESSAGE = "No tables found in this PDF.";
+/** The tab ran out of room for the file: nothing is wrong with it. */
+export const MEMORY_MESSAGE = "This device ran out of memory for this file. Close other tabs and try again, or use a computer.";
+/** The picked file is gone or changed (moved, deleted, a cloud file not downloaded). */
+export const UNREAD_MESSAGE = "Couldn't read this file. Choose it again.";
+
+// Engines when memory for an ArrayBuffer or array can't be had ("Array
+// buffer allocation failed", "Out of memory"). Not "Invalid array length" or
+// a negative typed array length, which a broken file's numbers cause, nor
+// "Maximum call stack size exceeded", which is a looping file.
+const OUT_OF_MEMORY = /allocation failed|out of memory/i;
+
+/**
+ * The browser couldn't hold or read the file, rather than the file being
+ * broken: these must never send someone to Repair PDF.
+ */
+function deviceProblem(err: unknown): string | null {
+  const name = (err as { name?: string })?.name ?? "";
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (name === "NotReadableError" || name === "NotFoundError") return UNREAD_MESSAGE;
+  if (name === "QuotaExceededError" || (name === "RangeError" && OUT_OF_MEMORY.test(message))) return MEMORY_MESSAGE;
+  return null;
+}
 
 export function friendlyPdfError(err: unknown, fileName?: string): Error {
   const name = (err as { name?: string })?.name ?? "";
@@ -23,6 +45,8 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
   // The tool's code didn't arrive (offline, flaky connection): the file is
   // fine. Asked before the TypeError check, since a failed fetch is one.
   if (isLoadError(err)) return new Error(loadErrorMessage());
+  const device = deviceProblem(err);
+  if (device) return new Error(prefix + device);
   if (ENCRYPTED.test(name) || ENCRYPTED.test(message)) {
     return new Error(prefix + ENCRYPTED_MESSAGE);
   }
@@ -48,6 +72,8 @@ export function friendlyPdfError(err: unknown, fileName?: string): Error {
  */
 export function friendlyFileError(err: unknown): Error {
   if (isLoadError(err)) return new Error(loadErrorMessage());
+  const device = deviceProblem(err);
+  if (device) return new Error(device);
   const name = (err as { name?: string })?.name ?? "";
   if (name === "TypeError" || name === "RangeError" || !(err instanceof Error) || !err.message) {
     return new Error("Something went wrong with this file. Try again, or try another file.");

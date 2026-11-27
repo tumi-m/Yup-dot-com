@@ -30,6 +30,7 @@ import { cn, formatBytes } from "@/lib/utils";
 import { isLoadError, loadErrorMessage } from "@/lib/load-error";
 import { pptxErrorMessage } from "@/lib/pptx/errors";
 import type { Deck, DeckSlide } from "@/lib/pptx/parse";
+import { emptyMessage } from "./file-pick";
 
 const SLUG = "pptx-to-pdf";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -111,6 +112,11 @@ export function PptxToPdf({ tier }: { tier: Tier }) {
     setError(null);
     if (!isPptxName(picked.name) && picked.type !== PPTX_MIME) {
       setError(/\.(ppt|pps|pot|odp|key)$/i.test(picked.name) ? "Save it as .pptx first." : "Choose a .pptx file.");
+      return;
+    }
+    const empty = emptyMessage([picked]);
+    if (empty) {
+      setError(empty);
       return;
     }
     if (picked.size > limits.maxFileBytes) {

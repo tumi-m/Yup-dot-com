@@ -158,7 +158,7 @@ export function SuccessCard({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={at(SUCCESS.actions)}
-        className="relative mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row"
+        className="relative mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap"
       >
         {actions}
       </motion.div>

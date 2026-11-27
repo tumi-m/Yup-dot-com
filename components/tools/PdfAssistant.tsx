@@ -18,6 +18,7 @@ import { trackToolUsed } from "@/lib/analytics";
 import { fitHistory, MAX_MESSAGE_CHARS } from "@/lib/ai/history";
 import { documentToSend, fitSentDocument } from "@/lib/ai/document";
 import { parseMarkdown, type MdBlock } from "@/lib/ai/markdown";
+import { emptyMessage } from "./file-pick";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -164,6 +165,11 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setError({ message: "Please choose a PDF file." });
+      return;
+    }
+    const empty = emptyMessage([file]);
+    if (empty) {
+      setError({ message: empty });
       return;
     }
     const limits = limitsFor(tier);
