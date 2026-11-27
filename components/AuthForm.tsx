@@ -55,6 +55,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // The button is only aria-disabled while this runs, so Enter can still submit.
+    if (loading) return;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -183,6 +185,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
+              aria-describedby={error ? "auth-error" : undefined}
             />
           </div>
           {!isReset && (
@@ -197,7 +200,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={isSignup ? MIN_PASSWORD_LENGTH : undefined}
-                aria-describedby={isSignup ? "auth-password-hint" : undefined}
+                aria-describedby={[isSignup && "auth-password-hint", error && "auth-error"].filter(Boolean).join(" ") || undefined}
                 autoComplete={isSignup ? "new-password" : "current-password"}
               />
               {isSignup && (
@@ -219,7 +222,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
           )}
 
           {error && (
-            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-rise">
+            <p id="auth-error" role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-rise">
               {error}
             </p>
           )}
@@ -231,7 +234,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
 
           {configured && <Captcha onToken={setCaptchaToken} resetKey={captchaReset} />}
 
-          <Button type="submit" className="h-11 w-full" disabled={loading || !configured || (!!TURNSTILE_SITE_KEY && !captchaToken)}>
+          {/* aria-disabled while working, not disabled: a disabled button drops
+              the focus it has, and keyboard users would start again from the top. */}
+          <Button
+            type="submit"
+            className="h-11 w-full"
+            disabled={!configured || (!!TURNSTILE_SITE_KEY && !captchaToken)}
+            aria-disabled={loading || undefined}
+          >
             {loading && <Loader2 className="motion-safe:animate-spin" />}
             {isSignup ? "Sign up" : isReset ? "Send link" : "Log in"}
           </Button>

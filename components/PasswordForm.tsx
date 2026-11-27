@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
 import { MIN_PASSWORD_LENGTH, PASSWORD_HINT, authFailure } from "@/components/auth-redirect";
 
+const MISMATCH = "The passwords don't match.";
+
 /**
  * Sets a new password for the signed-in account (after a reset link, too),
  * then links on to `next` when logging in started somewhere.
@@ -23,10 +25,11 @@ export function PasswordForm({ next }: { next?: string }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setError(null);
     setSaved(false);
     if (password !== confirm) {
-      setError("The passwords don't match.");
+      setError(MISMATCH);
       return;
     }
     setBusy(true);
@@ -57,7 +60,7 @@ export function PasswordForm({ next }: { next?: string }) {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={MIN_PASSWORD_LENGTH}
-          aria-describedby="new-password-hint"
+          aria-describedby={error ? "new-password-hint password-error" : "new-password-hint"}
           autoComplete="new-password"
         />
         <p id="new-password-hint" className="mt-1.5 text-xs text-muted-foreground">
@@ -75,9 +78,13 @@ export function PasswordForm({ next }: { next?: string }) {
           required
           minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
+          aria-invalid={error === MISMATCH || undefined}
+          aria-describedby={error ? "password-error" : undefined}
         />
       </div>
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <div id="password-error">
+        <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      </div>
       {saved && (
         <p role="status" className="rounded-lg bg-accent px-3 py-2 text-sm text-accent-foreground motion-safe:animate-rise">
           Password saved.{" "}
@@ -86,7 +93,8 @@ export function PasswordForm({ next }: { next?: string }) {
           </Link>
         </p>
       )}
-      <Button type="submit" className="h-11 w-full" disabled={busy}>
+      {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+      <Button type="submit" className="h-11 w-full" aria-disabled={busy || undefined}>
         {busy && <Loader2 className="motion-safe:animate-spin" />}
         Save password
       </Button>

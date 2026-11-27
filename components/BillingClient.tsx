@@ -45,6 +45,7 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
   const [error, setError] = useState<string | null>(null);
 
   async function open() {
+    if (loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -60,7 +61,8 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
 
   return (
     <div>
-      <Button variant={variant} onClick={open} disabled={loading}>
+      {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+      <Button variant={variant} onClick={open} aria-disabled={loading || undefined}>
         {loading ? <Loader2 className="motion-safe:animate-spin" /> : <ExternalLink />}
         {label}
       </Button>
@@ -75,6 +77,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
   const [error, setError] = useState<string | null>(null);
 
   async function extend(months: 1 | 12) {
+    if (loading !== null) return;
     setLoading(months);
     setError(null);
     const err = await startCheckout({ plan, mode: "once", months });
@@ -88,7 +91,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
     <div>
       <div className="flex flex-wrap items-center gap-2">
         {([1, 12] as const).map((m) => (
-          <Button key={m} variant={m === 12 ? "default" : "outline"} disabled={loading !== null} onClick={() => extend(m)}>
+          <Button key={m} variant={m === 12 ? "default" : "outline"} aria-disabled={loading !== null || undefined} onClick={() => extend(m)}>
             {loading === m && <Loader2 className="motion-safe:animate-spin" />}
             Extend {m === 1 ? "1 month" : "1 year"} · {displayPrice(display, prepaidPrice(plan, m))}
           </Button>
