@@ -215,6 +215,15 @@ export function PaymentReturn({ reference }: { reference: string }) {
             This payment belongs to a different account. Sign in with the account you paid from.
           </p>
         )}
+        {state === "second-subscription" && (
+          <p className="font-medium">
+            You already have this subscription, so this second payment wasn&apos;t used and won&apos;t renew.{" "}
+            <Link href="/contact" className="underline underline-offset-2 hover:text-primary">
+              Contact us
+            </Link>{" "}
+            for a refund, with reference <span className="break-all font-mono text-sm">{reference}</span>.
+          </p>
+        )}
         {(state === "not-applied" || state === "unknown") && (
           <p className="font-medium">
             {state === "not-applied"

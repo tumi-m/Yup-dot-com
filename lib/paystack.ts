@@ -120,6 +120,14 @@ export function verifyTransaction(cfg: PaystackConfig, reference: string) {
   return call<Record<string, unknown>>(cfg, "GET", `/transaction/verify/${encodeURIComponent(reference)}`);
 }
 
+/**
+ * Stops a subscription renewing. Paystack wants its code and email token
+ * (both come with subscription.create).
+ */
+export async function disableSubscription(cfg: PaystackConfig, code: string, emailToken: string): Promise<void> {
+  await call<unknown>(cfg, "POST", "/subscription/disable", { code, token: emailToken });
+}
+
 /** Hosted page where the customer updates their card or cancels. */
 export function subscriptionManageLink(cfg: PaystackConfig, subscriptionCode: string) {
   return call<{ link: string }>(cfg, "GET", `/subscription/${encodeURIComponent(subscriptionCode)}/manage/link`);

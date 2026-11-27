@@ -190,7 +190,24 @@ function paidStatus(billing: BillingSummary): string[] {
   return lines;
 }
 
-export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "retry" | "unknown";
+/** How long a subscription checkout link is handed out again instead of a new one. */
+export const CHECKOUT_REUSE_MS = 30 * 60 * 1000;
+
+/**
+ * Whether the account's last checkout link answers this request: the same
+ * plan and term, made under CHECKOUT_REUSE_MS ago, on Paystack's checkout.
+ */
+export function reusableCheckout(
+  pending: { request: string; url: string; reference: string; created_at: string } | null | undefined,
+  request: string,
+  now: Date
+): boolean {
+  if (!pending || pending.request !== request) return false;
+  const age = now.getTime() - new Date(pending.created_at).getTime();
+  return age >= 0 && age < CHECKOUT_REUSE_MS && /^https:\/\//.test(pending.url) && /^pw_[0-9a-f]{24}$/.test(pending.reference);
+}
+
+export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "second-subscription" | "retry" | "unknown";
 
 /**
  * Reads a /api/billing/verify response. "failed" (nothing was charged) only
@@ -201,6 +218,7 @@ export function paymentOutcome(httpStatus: number, status: unknown): PaymentOutc
     case "success":
     case "other-account":
     case "not-applied":
+    case "second-subscription":
       return status;
     case "failed":
     case "abandoned":
