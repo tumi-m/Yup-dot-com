@@ -97,6 +97,21 @@ check("our own messages still pass through", friendlyPdfError(new Error("Pick pa
 check("file tools keep their own messages", friendlyFileError(new Error("notes.md: this file is nested too deeply to lay out.")).message === "notes.md: this file is nested too deeply to lay out.");
 check("file tools: a bare library error is said plainly, not as a PDF", !/PDF/.test(friendlyFileError(new RangeError("Maximum call stack size exceeded")).message) && !/Cannot read/.test(friendlyFileError(new TypeError("Cannot read properties of undefined")).message));
 
+// The browser failing to hold or read a file is no fault of the file: a
+// RangeError from a failed allocation read "isn't a readable PDF. Try Repair
+// PDF", and a file moved after it was picked showed the browser's sentence.
+{
+  const { MEMORY_MESSAGE, UNREAD_MESSAGE } = await import("../lib/pdf/errors.ts");
+  const oom = new RangeError("Array buffer allocation failed");
+  check("out of memory: said as memory, the file named", friendlyPdfError(oom, "big.pdf").message === `big.pdf: ${MEMORY_MESSAGE}`);
+  check("out of memory: other wordings too", [new RangeError("Invalid array length"), new RangeError("Invalid typed array length: 4000000000"), new RangeError("Out of memory")].every((e) => friendlyPdfError(e).message === MEMORY_MESSAGE));
+  check("a looping file is still unreadable, not memory", friendlyPdfError(new RangeError("Maximum call stack size exceeded")).message === UNREADABLE_MESSAGE);
+  const gone = Object.assign(new Error("The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired."), { name: "NotReadableError" });
+  const moved = Object.assign(new Error("A requested file or directory could not be found at the time an operation was processed."), { name: "NotFoundError" });
+  check("a file that can't be read again: asked to choose it again", friendlyPdfError(gone).message === UNREAD_MESSAGE && friendlyPdfError(moved, "a.pdf").message === `a.pdf: ${UNREAD_MESSAGE}`);
+  check("file tools say the same", friendlyFileError(oom).message === MEMORY_MESSAGE && friendlyFileError(gone).message === UNREAD_MESSAGE);
+}
+
 // After the message, a link to the tool that can help: never to the page that failed.
 const { errorFix } = await import("../components/tools/file-pick.ts");
 const one = [{ name: "a.pdf" }];
@@ -105,6 +120,10 @@ check("an unreadable PDF points at Repair PDF", fixOf(`a.pdf: ${UNREADABLE_MESSA
 check("Repair PDF doesn't point at itself", fixOf(UNREADABLE_MESSAGE, "repair-pdf") === null);
 check("a locked PDF points at Unlock PDF, from Repair too", fixOf("This PDF is password-protected. Unlock it first.", "crop-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first, then repair it.", "repair-pdf")?.slug === "unlock-pdf" && fixOf("This PDF is password-protected. Unlock it first.", "unlock-pdf") === null);
 check("other messages get no link", fixOf("Pick pages between 1 and 5.", "split-pdf") === null && fixOf(null, "split-pdf") === null);
+{
+  const { MEMORY_MESSAGE, UNREAD_MESSAGE } = await import("../lib/pdf/errors.ts");
+  check("neither points at Repair PDF", fixOf(MEMORY_MESSAGE, "compress-pdf") === null && fixOf(`a.pdf: ${UNREAD_MESSAGE}`, "merge-pdf") === null);
+}
 // Merge names the damaged file, and that file is the one taken to Repair PDF.
 const named = errorFix(`b.pdf: ${UNREADABLE_MESSAGE}`, [{ name: "a.pdf" }, { name: "b.pdf" }], "merge-pdf");
 check("merge: the damaged file named goes to Repair PDF", named?.slug === "repair-pdf" && named.file.name === "b.pdf", named);
