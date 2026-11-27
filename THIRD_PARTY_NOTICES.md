@@ -27,10 +27,11 @@ texts ship with each package in `node_modules/<name>/`.
 
 ## Fonts
 
-Text and Markdown to PDF embed Noto Sans and Noto Sans Mono (Copyright 2022
-The Noto Project Authors, https://github.com/notofonts/latin-greek-cyrillic),
-licensed under the SIL Open Font License 1.1, from the @fontsource packages at
-version 5.3.0. The font files are served from `/vendor/noto-sans/` and
+Text and Markdown to PDF and Translate PDF embed Noto Sans and Noto Sans
+Mono (Copyright 2022 The Noto Project Authors,
+https://github.com/notofonts/latin-greek-cyrillic, and for Devanagari
+https://github.com/notofonts/devanagari), licensed under the SIL Open Font
+License 1.1, from the @fontsource packages at version 5.3.0. The font files are served from `/vendor/noto-sans/` and
 `/vendor/noto-sans-mono/` with the licence beside them (`LICENSE.txt`), and
 only the letters a document uses are embedded in its PDF.
 

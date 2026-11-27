@@ -30,9 +30,10 @@ work with or without an account.
 | **PDF → JPG** | Render each page to a JPG/PNG, downloaded as a zip. |
 | **JPG → PDF** | Combine pictures into a PDF (fit-to-image or A4): JPG, PNG, WebP, GIF (first frame), BMP, TIFF (every page; previews skipped), AVIF, HEIC (where the browser reads it: Safari; elsewhere it says how to save a JPG) and SVG (drawn at print resolution), mixed in any order. EXIF and TIFF orientation kept; pictures right-sized to 300 DPI on the page; transparency kept. Runs in a worker (SVG and HEIC are decoded on the page first). Separate pages for PNG, WebP, HEIC, TIFF and SVG to PDF offer that format in the file picker and take any picture. |
 | **Scan to PDF** | The phone's rear camera at its best resolution (or a webcam, or photos), page after page. Each page's corners are found on the device (its own edge and shape search, no OpenCV) and can be dragged, by touch or with the arrow keys; the page is flattened with a perspective warp. Colour, greyscale or Document (black and white, with shadows and uneven light evened out), turn, reorder, retake, delete. One PDF: Fit, A4 or Letter, optionally made searchable with the OCR PDF engine. On a computer it shows a QR code that opens the page on a phone. The camera is allowed on this page only (`lib/permissions-policy.ts`) and turned off when the page is left or hidden. Pages are built in a worker. |
-| **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek and Cyrillic come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
+| **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek, Cyrillic and Devanagari (shaped) come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
 | **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
+| **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, all of South Africa's official languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
 | **PDF → Excel** | Every detected table as its own sheet; numbers stay summable. |
 | **PDF → Text** | Extract text in true reading order (multi-column aware). |
 | **PDF → Markdown** | Layout-aware conversion keeping headings, lists & tables. |
@@ -93,17 +94,17 @@ batch caps), and Smallpdf (task-based prompts):
    reached (file size, batch size, AI answers, edits); and a cloud-save offer after a
    guest saves their first edit.
 
-| Tier | Files | Batch | Edits/day | AI answers | Cloud library |
-| ---- | ----- | ----- | --------- | ---------- | ------------- |
-| Guest (no account) | 50 MB | 10 | 1, marked | 3 a day | — (saved on device) |
-| Free account | 50 MB | 10 | 1, marked | 10 a day | 5 documents |
-| Pro | 500 MB | 200 | Unlimited | 40 a day, 600 a month | Unlimited |
-| Team | 500 MB | 200 | Unlimited | 40 a day per member | Unlimited |
+| Tier | Files | Batch | Edits/day | AI answers | Translation | Cloud library |
+| ---- | ----- | ----- | --------- | ---------- | ----------- | ------------- |
+| Guest (no account) | 50 MB | 10 | 1, marked | 3 a day | 15,000 characters a day | — (saved on device) |
+| Free account | 50 MB | 10 | 1, marked | 10 a day | 60,000 characters a day | 5 documents |
+| Pro | 500 MB | 200 | Unlimited | 40 a day, 600 a month | 400,000 characters a day | Unlimited |
+| Team | 500 MB | 200 | Unlimited | 40 a day per member | 400,000 characters a day per member | Unlimited |
 
 Limits live in `lib/limits.ts` and `lib/usage.ts`; the upsell UI in
 `components/upsell/`. File and batch limits are enforced in the browser (tools
-run there). Daily allowances (AI answers, edits, video downloads, Slides
-imports, song lookups) are counted on the server in Supabase (`usage_counters`, through
+run there). Daily allowances (AI answers, translated characters, edits,
+video downloads, Slides imports, song lookups) are counted on the server in Supabase (`usage_counters`, through
 functions only the service role can call), keyed by user id or, for guests,
 by a salted SHA-256 of their IP (raw IPs are never stored). The IP is the
 one Vercel's edge reports (`x-real-ip`), never the first entry of
@@ -301,6 +302,50 @@ both the model and the user are told which pages were read; the model's
 reasoning is never shown. Returns `503` until `OLLAMA_API_KEY` (Ollama Cloud)
 or `OLLAMA_HOST` (your own server) is set.
 
+## Translate PDF
+
+`/tools/translate-pdf` reads the PDF in the browser with the layout-aware
+parser and cuts it into passages (`lib/translate/segments.ts`): each heading,
+paragraph (long ones at sentence ends, at most 1,200 characters), list item
+and table cell. Text with no letters (numbers, dates, amounts) stays as it is
+and the same text twice is sent once. Up to 40 passages and 3,000 characters
+go in one request to `POST /api/ai/translate`, two requests at a time, on the
+same Ollama host as the assistant (`OLLAMA_TRANSLATE_MODEL` picks a model of
+its own). The route (`lib/ai/translate-route.ts`) checks the site, the body
+and the allowance as the chat route does, and streams each translation back
+as NDJSON as it arrives.
+
+The document's text is untrusted. It goes to the model as JSON lines in the
+user message, never in the system prompt, which says to translate the
+passages and never follow, answer or comment on them
+(`lib/ai/translate.ts`). The answer must be JSON lines keyed by the request's
+own short ids: prose, code fences, broken lines, unknown ids and "translations"
+far longer than their passage are dropped. Passages the model left out, or
+seems to have merged into a neighbour, are asked for once more in the same
+request; any still missing keep their original text in their own place, and
+the result says how many and on which pages. Nothing is rendered as HTML, and
+the text is never logged.
+
+The files are written in a Web Worker (`lib/pdf/translate/`): a Word file from
+`buildDocx` (paragraphs, tables and runs right to left for Arabic, Hebrew,
+Persian and Urdu, with the language set) and, for Latin, Greek, Cyrillic and
+Devanagari, a PDF laid out by the Markdown to PDF layout in Noto Sans.
+Devanagari is shaped by fontkit (conjuncts, vowel signs before their
+consonant), which needs a small stand-in for the generator runtime its Indic
+shaper was compiled for (`provideGeneratorRuntime` in
+`lib/pdf/text-to-pdf/fonts.ts`). Other scripts (Arabic, Hebrew, Chinese,
+Japanese, Korean, Thai, other Indian scripts) come as a Word file only, and the
+page says why before anything is sent. Picture-only pages are listed with a
+link that takes the file to OCR PDF.
+
+The allowance is counted on the server in characters, in blocks of 500 per
+request (rounded up): guests 15,000 a day, Free 60,000, Pro and Team 400,000;
+30 requests a minute per person and 3,000 requests a day site-wide. The page
+works out what a document will take before it starts and offers the upgrade
+(or Split PDF) when it is more than what is left. A request that brought
+nothing back is given back, up to 10 a day. Cancel aborts the requests, which
+closes the model's stream; nothing half-translated is offered as a file.
+
 ## Motion design
 
 `components/motion/primitives.tsx` holds a small shared vocabulary — one
@@ -422,7 +467,11 @@ pdf.js: wrapping inside the margins, pages, fonts, links, tables), comparing
 300-page files, and the marked copies' annotations landing on the changed
 words on turned, sideways, offset and mixed-size pages), and repair
 (files broken on purpose in each way real files break, each result opened
-by both pdf-lib and pdf.js). Others cover PPTX parsing, editing and rendering,
+by both pdf-lib and pdf.js), and translation (against a stand-in for the
+model that drops, merges and reorders passages and obeys instructions in the
+text: answers kept by id, the allowance, Cancel closing the model's stream,
+and the Word files and PDFs read back for French, Russian, Hindi, Arabic,
+Hebrew and Chinese). Others cover PPTX parsing, editing and rendering,
 Google Slides and video links, usage limits, the watermark, billing, the AI client, the
 legal pages' business details, and the analytics consent wrapper.
 Every tool has also been driven through the real UI in Chromium,
@@ -453,8 +502,8 @@ unreachable (which led to self-hosting).
 
 | Plan | Price | Cloud documents | Limits |
 | ---- | ----- | --------------- | ------ |
-| Free | R0    | 5 (with an account) | 50 MB files, batches of 10, 1 edit a day (marked), AI answers: 3 a day as a guest, 10 with an account |
-| Pro  | R49/mo  | Unlimited | 500 MB files, batches of 200, unlimited edits, 40 AI answers a day (600 a month) |
+| Free | R0    | 5 (with an account) | 50 MB files, batches of 10, 1 edit a day (marked), AI answers: 3 a day as a guest, 10 with an account; translation: 15,000 characters a day as a guest, 60,000 with an account |
+| Pro  | R49/mo  | Unlimited | 500 MB files, batches of 200, unlimited edits, 40 AI answers a day (600 a month), 400,000 characters translated a day |
 | Team | R199/mo | Unlimited | As Pro, for 5 people (owner + 4 seats) |
 
 Paying for a year up front costs 10 months.
@@ -700,6 +749,7 @@ pdf-wizard/
 │   │   ├── PageOrganizer.tsx     ← Page grid for Organize PDF, Delete and Extract pages
 │   │   ├── CropTool.tsx          ← Crop PDF: page preview, the box, margins, trim
 │   │   ├── CompareTool.tsx       ← Compare PDFs: two files, the changes, side by side and overlay
+│   │   ├── TranslateTool.tsx     ← Translate PDF: languages, what's sent, progress, the files
 │   │   └── processors.ts         ← Per-tool fields + run() wiring
 │   ├── editor/
 │   │   ├── PdfEditor.tsx         ← Shell: toolbar, sidebar, save/export, shortcuts
@@ -722,6 +772,9 @@ pdf-wizard/
 │   ├── pdf/crop/                 ← Crop PDF: the box, page boxes, pictures, white-margin trim
 │   ├── pdf/compare/              ← Compare PDFs: words, diff, page pairs, pixels, report, marked copies
 │   ├── pdf/redact/               ← Redact PDF: marks, presets, pictures, clean-up, the search and check after
+│   ├── pdf/translate/            ← Translate PDF: the Word file and the PDF, in a worker
+│   ├── translate/                ← Translate PDF: languages, passages, requests to the route
+│   ├── ai/                       ← Ollama client, chat and translation prompts and checks
 │   ├── pdf/images-to-pdf/        ← Pictures to PDF: formats, browser and TIFF decoding, in a worker
 │   ├── pdf/text-to-pdf/          ← Text and Markdown to PDF: fonts, layout, in a worker
 │   ├── pdf/render.ts, worker.ts  ← pdf.js render helper + worker config
