@@ -337,6 +337,23 @@ export async function repairTool(files: File[], ctx: ToolContext = {}): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// PDF/A — an archival copy, checked against the rules it puts right
+// (see lib/pdf/pdfa). Runs in a worker; pages it can't fix become pictures.
+// ---------------------------------------------------------------------------
+export async function pdfaTool(files: File[], opts: { part: string; password: string }, ctx: ToolContext = {}): Promise<ToolFile> {
+  const { convertToPdfa, pdfaLines, PasswordError } = await import("./pdfa");
+  const part = opts.part === "3" ? 3 : 2;
+  try {
+    const result = await convertToPdfa(files[0], { part, password: opts.password || undefined, progress: ctx.progress, signal: ctx.signal });
+    return { blob: pdfBlob(result.bytes), filename: suffixed(files[0], `pdfa-${part}b`), report: pdfaLines(result) };
+  } catch (err) {
+    // Its own messages already say what happened, plainly.
+    if (isAbort(err) || err instanceof PasswordError) throw err;
+    throw friendlyPdfError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PDF -> images
 // ---------------------------------------------------------------------------
 export async function pdfToImagesTool(

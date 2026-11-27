@@ -54,6 +54,7 @@ import {
   ScanLine,
   TextCursor,
   Languages,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
@@ -384,6 +385,18 @@ const ALL_TOOLS: ToolMeta[] = [
     keywords:
       "translate translation translator translating language languages foreign english afrikaans zulu isizulu xhosa isixhosa sotho sesotho tswana setswana sepedi tsonga xitsonga swati siswati venda tshivenda ndebele isindebele french portuguese spanish german arabic chinese hindi swahili document",
     aliases: ["PDF Translator", "Document Translator", "Translate Document", "Translate a PDF"],
+  },
+  {
+    slug: "pdf-to-pdfa",
+    name: "PDF to PDF/A",
+    title: "PDF to PDF/A: convert a PDF for long-term archiving",
+    description: "An archival PDF/A-2b copy, checked before you download it.",
+    icon: Archive,
+    category: "convert",
+    tint: "bg-stone-200 text-stone-800",
+    badge: "New",
+    keywords: "pdfa pdf/a pdf/a-2b pdf/a-3b pdf/a-1b 2b 3b archive archival archiving long-term preserve preservation iso 19005 court filing e-filing records compliance validate conform",
+    aliases: ["PDF/A Converter", "Archive PDF", "PDF/A-2b", "Convert to PDF/A"],
   },
   {
     slug: "pdf-to-excel",
@@ -764,6 +777,7 @@ const RELATED: Record<string, string[]> = {
   "edit-pdf-text": ["edit-pdf", "redact-pdf", "sign-pdf", "compress-pdf"],
   "edit-pdf": ["edit-pdf-text", "sign-pdf", "compress-pdf", "redact-pdf"],
   "translate-pdf": ["chat-with-pdf", "pdf-to-word", "ocr-pdf", "compress-pdf"],
+  "pdf-to-pdfa": ["compress-pdf", "repair-pdf", "ocr-pdf", "flatten-pdf"],
   // A song's samples, then its sound from the sites people find songs on.
   "sample-finder": ["youtube-to-mp3", "tiktok-to-mp3", "instagram-to-mp3", "x-to-mp3"],
 };

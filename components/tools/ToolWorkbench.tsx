@@ -87,6 +87,8 @@ const NEXT_STEPS: Record<string, string[]> = {
   "flatten-pdf": ["protect-pdf", "compress-pdf", "merge-pdf", "watermark-pdf"],
   // Pages that came back as pictures can be read again with OCR.
   "repair-pdf": ["compress-pdf", "ocr-pdf", "edit-pdf", "merge-pdf"],
+  // Changing a PDF/A file can undo it: only tools that read it.
+  "pdf-to-pdfa": ["pdf-to-text", "pdf-to-word", "chat-with-pdf", "pdf-to-jpg"],
   // An encrypted result can't be opened by the other tools.
   "protect-pdf": [],
 };
