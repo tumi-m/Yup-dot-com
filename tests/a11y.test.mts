@@ -167,7 +167,7 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("high contrast marks chosen pills, tabs and tools", /forced-colors: active[\s\S]*\[aria-pressed="true"\][\s\S]*\[role="tab"\]\[aria-selected="true"\]/.test(css));
   check("the cookie banner's room is kept below the page and focus", css.includes("var(--consent-space, 0px)"));
   const button = readFileSync(new URL("../components/ui/button.tsx", import.meta.url), "utf8");
-  check("filled buttons keep an edge in high contrast", ["bg-primary", "bg-secondary", "bg-destructive"].every((bg) => new RegExp(`border border-transparent ${bg}`).test(button)));
+  check("filled buttons keep an edge in high contrast, and only there", ["bg-primary", "bg-secondary", "bg-destructive"].every((bg) => new RegExp(`forced-colors:border ${bg}`).test(button)) && !button.includes("border-transparent"));
 }
 
 console.log(`\n${pass}/${total} passed`);
