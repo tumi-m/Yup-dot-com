@@ -42,7 +42,7 @@ export async function EditTextAbout() {
     ...FAQ,
     {
       q: "Is my file uploaded?",
-      a: `No. It is read and changed in your browser and never leaves your device. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} with Pro. Saving or downloading the changed file counts as one edit: ${LIMITS.free.editsPerDay} a day free, unlimited with Pro.`,
+      a: `No. It is read and changed in your browser and never leaves your device. Files up to ${formatLimitBytes(LIMITS.free.maxFileBytes)} free, ${formatLimitBytes(LIMITS.pro.maxFileBytes)} with Pro. Saving or downloading the changed file counts as one edit: ${LIMITS.free.editsPerDay} a day free${LIMITS.free.watermark ? ", with a small \"Made with PDF Wizard\" mark in a corner of each page" : ""}; unlimited with Pro${LIMITS.pro.watermark ? "" : ", without the mark"}.`,
     },
   ];
   const jsonLd = {

@@ -26,6 +26,8 @@ export function PropertiesPanel({
   onDelete,
   onClose,
   onCover,
+  onEditDone,
+  onEditCancel,
 }: {
   annotation: Annotation;
   pageCount: number;
@@ -35,6 +37,10 @@ export function PropertiesPanel({
   onClose: () => void;
   /** How much of the screen's bottom the sheet covers: 0 as a side panel. */
   onCover?: (px: number) => void;
+  /** Changed text: Enter in its text box is done. */
+  onEditDone?: () => void;
+  /** Changed text: Escape in its text box puts back the words it had when entered. */
+  onEditCancel?: (reverted: TextEditAnnotation) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -106,7 +112,7 @@ export function PropertiesPanel({
           </>
         )}
 
-        {annotation.type === "edit" && <EditFields annotation={annotation} onChange={onChange} />}
+        {annotation.type === "edit" && <EditFields annotation={annotation} onChange={onChange} onDone={onEditDone} onCancel={onEditCancel} />}
 
         {annotation.type === "note" && (
           <Field label="Colour" group>
@@ -358,11 +364,16 @@ const SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
 function EditFields({
   annotation,
   onChange,
+  onDone,
+  onCancel,
 }: {
   annotation: TextEditAnnotation;
   onChange: (next: Annotation, continuous?: boolean) => void;
+  onDone?: () => void;
+  onCancel?: (reverted: TextEditAnnotation) => void;
 }) {
   const run = annotation.run;
+  const start = useRef(annotation.text);
   const own = Math.round(run.size * 2) / 2;
   const sizes = [...new Set([...SIZES, own, annotation.fontSize])].sort((a, b) => a - b);
   const guess = guessFont(run.font, annotation.text, annotation.bold, annotation.italic);
@@ -370,6 +381,29 @@ function EditFields({
   const lost = undrawable(annotation.text);
   return (
     <>
+      {/* The words at a size to read and type, whatever the page's zoom: on a phone, they are typed here. */}
+      <Field label="Text">
+        <input
+          data-edit-field
+          value={annotation.text}
+          placeholder="Removed"
+          spellCheck={false}
+          autoComplete="off"
+          onFocus={() => (start.current = annotation.text)}
+          onChange={(e) => onChange({ ...annotation, text: e.target.value }, true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onDone?.();
+            } else if (e.key === "Escape" && onCancel) {
+              e.preventDefault();
+              e.stopPropagation();
+              onCancel({ ...annotation, text: start.current });
+            }
+          }}
+          className="h-11 w-full rounded-md border border-input bg-background px-3 text-base placeholder:italic md:h-9 md:text-sm"
+        />
+      </Field>
       <Field label="Font size">
         <select
           value={annotation.fontSize}

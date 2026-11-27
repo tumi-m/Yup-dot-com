@@ -391,7 +391,13 @@ content-stream lexer, each operation is checked to be the same one (same
 count, same codes) and cut out, leaving a number-only TJ where later text on
 the line is placed after it; the old streams leave the file. Anything that
 can't be shown safe is covered with a box in the colour sampled round the run
-on the page as drawn, and the editor says which on save. Changes are edits
+on the page as drawn, and the editor says which on save. A line drawn twice
+(bold made that way, a shadow) is one run and both copies go; one with other
+text, a picture or an opaque shape painted in the same place, or drawn fully
+transparent, is covered. Alternate text round removed words (ActualText, Alt
+and E, in marked content or the structure tree) goes with them. Covers are
+tagged, so the words under them aren't offered again, nor is the free plan's
+mark. On a phone the words are typed in the sheet's own text box. Changes are edits
 like any other: undo, redo and page moves keep them. Right-to-left and
 top-to-bottom runs are shown but locked, with a note.
 

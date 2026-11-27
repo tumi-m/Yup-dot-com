@@ -543,7 +543,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "edit-pdf",
     name: "Edit PDF",
-    title: "Edit PDF: annotate, draw, and add text",
+    title: "Edit PDF: change text, add text, draw and annotate",
     description: "Change text, add text, shapes, links and form fields.",
     icon: PenLine,
     category: "edit",
