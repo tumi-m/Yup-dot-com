@@ -15,7 +15,7 @@ Flow (the web app never proxies video bytes, so no serverless limits apply):
 Playlists are listed by POST /playlist (titles and ids only, nothing is
 downloaded); each video is then downloaded through the same flow as above.
 
-Standard library only, apart from yt-dlp.
+Standard library only, apart from yt-dlp, and Playwright for render.py.
 """
 
 import base64
@@ -38,6 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yt_dlp
 
 import office  # Word and Excel to PDF (office.py)
+import render  # Web page to PDF: render.py
 
 SECRET = os.environ.get("MEDIA_WORKER_SECRET", "").encode()
 PORT = int(os.environ.get("PORT", "8080"))
@@ -561,6 +562,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if render.handle(self, verify_token):
+            return
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
             # Uptime monitors only need to know it's up. Versions and setup
@@ -576,6 +579,7 @@ class Handler(BaseHTTPRequestHandler):
                 "cookies": bool(COOKIES),
                 "playlists": True,
                 "office": office.health(),
+                **render.health(),
             })
         m = re.fullmatch(r"/jobs/([\w-]{16,64})(/file)?", path)
         if not m:
@@ -605,6 +609,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         """Cancel a job: stops the download and frees its slot and files."""
+        if render.handle(self, verify_token):
+            return
         path = urllib.parse.urlparse(self.path).path
         m = re.fullmatch(r"/jobs/([\w-]{16,64})", path)
         job = jobs.get(m.group(1)) if m else None
@@ -644,6 +650,8 @@ class Handler(BaseHTTPRequestHandler):
         return bool(SECRET) and hmac.compare_digest(auth.encode(), b"Bearer " + SECRET)
 
     def do_POST(self):
+        if render.handle(self, verify_token):
+            return
         path = urllib.parse.urlparse(self.path).path
         if office.handles(path):
             return office.handle(self, refs, jobs_lock)
@@ -711,6 +719,7 @@ def main():
     if not SECRET:
         raise SystemExit("MEDIA_WORKER_SECRET must be set.")
     threading.Thread(target=reaper, daemon=True).start()
+    render.start()
     print(f"media worker listening on :{PORT} (yt-dlp {yt_dlp.version.__version__}, "
           f"js runtime: {DENO or 'NONE - YouTube downloads will fail'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

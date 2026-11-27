@@ -20,6 +20,7 @@ const RedactTool = lazy(() => import("./RedactTool").then((m) => ({ default: m.R
 const ScanTool = lazy(() => import("./ScanTool").then((m) => ({ default: m.ScanTool })));
 const TranslateTool = lazy(() => import("./TranslateTool").then((m) => ({ default: m.TranslateTool })));
 const OfficeToPdf = lazy(() => import("./OfficeToPdf").then((m) => ({ default: m.OfficeToPdf })));
+const WebToPdf = lazy(() => import("./WebToPdf").then((m) => ({ default: m.WebToPdf })));
 const ToolWorkbench = lazy(() => import("./ToolWorkbench").then((m) => ({ default: m.ToolWorkbench })));
 
 export function ToolPanel({ spec, tier }: { spec: PanelSpec; tier: Tier }) {
@@ -58,6 +59,8 @@ function panel(spec: PanelSpec, tier: Tier): ReactNode {
       return <TranslateTool slug={spec.slug} tier={tier} />;
     case "office":
       return <OfficeToPdf tool={spec.tool} tier={tier} />;
+    case "web-to-pdf":
+      return <WebToPdf slug={spec.slug} tier={tier} />;
     case "workbench":
       return <ToolWorkbench slug={spec.slug} tier={tier} />;
   }

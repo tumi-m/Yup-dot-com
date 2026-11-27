@@ -32,6 +32,19 @@ COPY worker.py .
 # Word and Excel to PDF.
 COPY office.py .
 
+# ---------------------------------------------------------------------------
+# HTML to PDF (render.py). Chromium's headless shell, the build the pinned
+# Playwright expects, with the system libraries it needs (and the fonts
+# Playwright adds for Chinese, Japanese, Thai and emoji). Noto for other
+# scripts comes with the Word and Excel block above. Adds about 450 MB; give
+# the worker 1 GB of memory or more (2 GB with both converters busy).
+# ---------------------------------------------------------------------------
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN python -m playwright install --with-deps --only-shell chromium \
+ && rm -rf /var/lib/apt/lists/*
+COPY render.py .
+# --------------------------------------------------------------------------- end HTML to PDF
+
 # Run as an unprivileged user.
 RUN useradd --create-home worker
 USER worker

@@ -56,10 +56,12 @@ import {
   Languages,
   FileType,
   FileSpreadsheet,
+  Globe,
   type LucideIcon,
 } from "lucide-react";
 import { YOUTUBE_ENABLED, type MediaPlatform } from "./media";
 import { OFFICE_ENABLED } from "./office";
+import { HTML_TO_PDF_ENABLED } from "./web-pdf";
 import type { PagesMode } from "./pdf/pages/plan";
 
 export type ToolCategory =
@@ -86,7 +88,7 @@ export interface ToolMeta {
   /** If set, this tool opens the full editor instead of the workbench. */
   editor?: boolean;
   /** Renders a bespoke interface instead of the generic workbench. */
-  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate" | "office";
+  custom?: "assistant" | "media" | "playlist" | "pptx-to-pdf" | "pptx-editor" | "slides-import" | "samples" | "pages" | "crop" | "compare" | "redact" | "scan" | "translate" | "office" | "web-to-pdf";
   /** Page grid settings: what the picked pages are for. */
   pages?: { mode: PagesMode };
   /** Google Slides import settings: which file the deck is fetched as. */
@@ -328,6 +330,19 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-indigo-100 text-indigo-700",
     keywords: "md readme notes documentation github",
     aliases: ["MD to PDF"],
+  },
+  {
+    slug: "html-to-pdf",
+    name: "HTML to PDF",
+    title: "HTML to PDF: save a web page as a PDF",
+    description: "Save a web page, an HTML file or pasted HTML as a PDF.",
+    icon: Globe,
+    category: "convert",
+    tint: "bg-sky-100 text-sky-900",
+    badge: "New",
+    custom: "web-to-pdf",
+    keywords: "html htm xhtml url link address web page webpage website site article blog receipt print save convert download offline archive",
+    aliases: ["URL to PDF", "Webpage to PDF", "Web Page to PDF", "Website to PDF", "Save Web Page as PDF", "Link to PDF"],
   },
   {
     slug: "pdf-to-text",
@@ -763,14 +778,17 @@ const isYoutubeTool = (t: ToolMeta) => t.media?.platform === "youtube" || t.cust
 /**
  * The tools shown with these switches: YouTube's while it isn't paused
  * (lib/media.ts), Word and Excel to PDF once the media worker converts
- * (lib/office.ts). Hidden tools have no page and aren't listed anywhere.
+ * (lib/office.ts), HTML to PDF once it renders (lib/web-pdf.ts). Hidden
+ * tools have no page and aren't listed anywhere.
  */
-export function shownTools(on: { youtube: boolean; office: boolean }): ToolMeta[] {
-  return ALL_TOOLS.filter((t) => (on.youtube || !isYoutubeTool(t)) && (on.office || t.custom !== "office"));
+export function shownTools(on: { youtube: boolean; office: boolean; html?: boolean }): ToolMeta[] {
+  return ALL_TOOLS.filter(
+    (t) => (on.youtube || !isYoutubeTool(t)) && (on.office || t.custom !== "office") && (!!on.html || t.custom !== "web-to-pdf")
+  );
 }
 
 /** Every tool on the site. */
-export const TOOLS: ToolMeta[] = shownTools({ youtube: YOUTUBE_ENABLED, office: OFFICE_ENABLED });
+export const TOOLS: ToolMeta[] = shownTools({ youtube: YOUTUBE_ENABLED, office: OFFICE_ENABLED, html: HTML_TO_PDF_ENABLED });
 
 export function getTool(slug: string): ToolMeta | undefined {
   return TOOLS.find((t) => t.slug === slug);
@@ -782,8 +800,9 @@ export function getTool(slug: string): ToolMeta | undefined {
  * (not PDF to JPG, the opposite way), Crop at the other page-shape tools,
  * Compare at reading and editing the text it found, the two editors at each
  * other and at Redact PDF, which removes what covering only hides,
- * Translate at the other tools that read a document's text, and Word and
- * Excel to PDF at each other and the way back.
+ * Translate at the other tools that read a document's text, Word and
+ * Excel to PDF at each other and the way back, and HTML to PDF at
+ * Markdown and what's done with a saved page next.
  */
 const RELATED: Record<string, string[]> = {
   "txt-to-pdf": ["markdown-to-pdf", "pdf-to-text", "pdf-to-markdown", "merge-pdf"],
@@ -806,6 +825,7 @@ const RELATED: Record<string, string[]> = {
   // Office files the other way, and back again.
   "word-to-pdf": ["excel-to-pdf", "pptx-to-pdf", "pdf-to-word", "merge-pdf"],
   "excel-to-pdf": ["word-to-pdf", "pptx-to-pdf", "pdf-to-excel", "merge-pdf"],
+  "html-to-pdf": ["markdown-to-pdf", "merge-pdf", "compress-pdf", "edit-pdf"],
   // A song's samples, then its sound from the sites people find songs on.
   "sample-finder": ["youtube-to-mp3", "tiktok-to-mp3", "instagram-to-mp3", "x-to-mp3"],
 };

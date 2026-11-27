@@ -1,4 +1,5 @@
 import type { ResolvingMetadata } from "next";
+import { HTML_TO_PDF_ENABLED } from "@/lib/web-pdf";
 import { pageMetadata } from "@/lib/page-metadata";
 import Link from "next/link";
 import { BUSINESS } from "@/lib/business";
@@ -129,6 +130,19 @@ export default function PrivacyPage() {
           previews load their thumbnail straight from the site the video is on.
         </p>
 
+        {HTML_TO_PDF_ENABLED && (
+          <>
+            <h3>Web pages saved as PDF</h3>
+            <p>
+              When you use HTML to PDF, the web address you enter, or the HTML you upload or paste, goes to our media
+              server, which opens it in a browser with no cookies or sign-in, the way a signed-out visitor would, and
+              makes the PDF. The site you name sees a visit from our server, not from you. The PDF is deleted from our
+              server as soon as you download it, or after about two minutes. We don&apos;t store the address, the HTML
+              or the PDF, apart from short-lived technical logs that don&apos;t include them.
+            </p>
+          </>
+        )}
+
         <h3>Sample Finder</h3>
         <p>
           When you look up a song, the link or text you enter goes to our server. For a YouTube link, our server asks
@@ -239,7 +253,8 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Our video download host</strong>: a cloud provider that runs our YouTube download server (video
-            links only){OFFICE_ENABLED && " and our document conversion server (the Word or Excel file you convert, while it is converted)"}.
+            links only){OFFICE_ENABLED && " and our document conversion server (the Word or Excel file you convert, while it is converted)"}
+            {HTML_TO_PDF_ENABLED ? "; it also turns web pages into PDFs (the address or HTML you give it)" : ""}.
           </li>
           <li>
             <strong>Our email provider</strong>: sends account emails such as sign-up confirmations.

@@ -18,6 +18,7 @@ export type PanelSpec =
   | { kind: "scan"; slug: string }
   | { kind: "translate"; slug: string }
   | { kind: "office"; tool: OfficeTool }
+  | { kind: "web-to-pdf"; slug: string }
   | { kind: "workbench"; slug: string };
 
 export function panelSpec(tool: ToolMeta): PanelSpec {
@@ -36,6 +37,7 @@ export function panelSpec(tool: ToolMeta): PanelSpec {
   if (tool.custom === "scan") return { kind: "scan", slug: tool.slug };
   if (tool.custom === "translate") return { kind: "translate", slug: tool.slug };
   if (tool.custom === "office") return { kind: "office", tool: tool.slug as OfficeTool };
+  if (tool.custom === "web-to-pdf") return { kind: "web-to-pdf", slug: tool.slug };
   return { kind: "workbench", slug: tool.slug };
 }
 

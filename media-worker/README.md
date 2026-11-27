@@ -245,3 +245,154 @@ and cancel leaving no process behind, LibreOffice not running as root and
 having no network, and the route through `worker.py`'s own handler: one
 conversion per grant, refusals, busy, the browser hanging up, and the records
 a refund reads.
+
+## HTML to PDF (web pages, HTML files, pasted HTML)
+
+`render.py` opens a page in headless Chromium (driven by Playwright) and
+prints it to PDF. The web app's `/api/render/link` checks the plan, the
+daily allowance and the address, then signs a grant for exactly one page;
+the browser sends it to this worker:
+
+```
+browser ──(1) address or HTML hash, options ──▶ Next.js /api/render/link (plan, allowance,
+                                                 per-minute limit, address check, signs a grant)
+browser ──(2) grant (+ the HTML) ──▶ worker POST /render → poll GET /render/<id>
+browser ──(3) ──▶ GET /render/<id>/file   (the PDF, deleted from memory once sent)
+```
+
+The PDF lives only in the worker's memory: it is deleted as soon as it has
+been sent, or about two minutes after it was made. Addresses and HTML are
+never written to disk or to the log. Each grant makes one PDF.
+
+### What keeps a page off private networks
+
+Every connection Chromium makes (the page, redirects, pictures, scripts,
+frames, workers, websockets) goes through a SOCKS5 proxy inside the worker,
+one per job; Chromium's own DNS is switched off. The proxy looks the name up,
+refuses it if any answer is loopback, private (10/8, 172.16/12, 192.168/16,
+fc00::/7), link-local (169.254/16, fe80::/10, which holds the cloud metadata
+addresses 169.254.169.254 and fd00:ec2::254), CGNAT (100.64/10), multicast,
+reserved, or one of those inside an IPv6 address (IPv4-mapped, 6to4, NAT64,
+Teredo), and connects to the address it checked. A name's first answer is
+kept for the rest of the job, so DNS rebinding can't reach anything new.
+Ports below 1024 other than 80 and 443 are refused.
+
+On top of that: only http and https (no `file:`, `data:` pages, `chrome:`),
+no downloads, popups, service workers, websockets, WebRTC, permissions or
+extensions; video and audio aren't fetched; a fresh browser context per job
+with no cookies or credentials; up to 400 requests, 400 connections and
+50 MB of traffic per job; 20 seconds to load and 60 for the whole job; PDFs
+up to 40 MB and the plan's page limit (50 free, 300 Pro). Pasted HTML is
+served from memory under `http://html.invalid/` and can't navigate away;
+public pictures, styles and fonts load under the same rules.
+
+**Chromium's sandbox.** The worker starts Chromium with its sandbox when it
+can. That needs unprivileged user namespaces, which Docker's default seccomp
+profile blocks, so in most containers it runs without it (it says so in its
+log, and `/api/media/health` reports `"sandbox": false`). What still isolates
+a page then: it runs as the unprivileged `worker` user in the container;
+every connection still goes through the guard above, which doesn't depend
+on the sandbox; and Chromium gets none of the worker's environment
+variables. What it doesn't stop: a Chromium exploit that escapes the
+renderer would run as `worker`, could read the worker's memory (its
+`MEDIA_WORKER_SECRET`, other jobs' files) and could make its own
+connections without the proxy. So: rebuild weekly to keep Chromium current,
+set `MEDIA_SIGNING_SECRET` on the web app so X links don't share the
+worker's secret, and run the worker where it can't reach anything private
+(its own VM or network, no cloud metadata service, or one that needs a
+token). Hosts that run each container in its own VM (Fly.io, for one)
+usually allow the sandbox; `RENDER_SANDBOX=1` then refuses to render
+without it.
+
+### Deploy
+
+1. Rebuild and redeploy this folder (the Dockerfile's "HTML to PDF" block
+   installs Playwright's Chromium headless shell and the libraries it needs;
+   the Noto fonts come with the Word and Excel block). Expect the image to
+   grow by roughly 450–550 MB on top of LibreOffice (Chromium's headless
+   shell is about 260 MB unpacked, Playwright with its Node driver about
+   140 MB, plus libraries). Give the worker **at least 1 GB of memory**, 2 GB
+   with both converters in use: each page takes 200–400 MB while it renders.
+2. Optional settings on the worker:
+
+   | Variable | |
+   | -------- | - |
+   | `RENDER_MAX_CONCURRENT` | Pages rendered at once (default 2) |
+   | `RENDER_MAX_QUEUE` | Jobs waiting beyond those before "busy" (default 8) |
+   | `RENDER_MAX_SECONDS` | Longest job (default 60) |
+   | `RENDER_LOAD_SECONDS` | How long a page may load before what arrived is printed (default 20) |
+   | `RENDER_MAX_REQUESTS`, `RENDER_MAX_CONNECTIONS` | Per job (default 400 each) |
+   | `RENDER_MAX_DOWNLOAD_BYTES` | Traffic per job (default 50 MB) |
+   | `RENDER_MAX_PDF_BYTES` | Largest PDF (default 40 MB) |
+   | `RENDER_MAX_HTML_BYTES` | Largest pasted or uploaded HTML (default 5 MB; the web app's limit is 5 MB too) |
+   | `RENDER_MAX_PAGES` | Ceiling on any grant's page limit (default 500) |
+   | `RENDER_RESULT_TTL_SECONDS` | How long an unfetched PDF is kept (default 120) |
+   | `RENDER_SANDBOX` | `auto` (default), `1` (require Chromium's sandbox), `0` (never try) |
+   | `RENDER_CHROMIUM` | Only outside the Dockerfile: Chromium's binary |
+   | `RENDER_TEST_ADDRESSES` | Tests only (loopback `ip:port` pairs let through). Leave unset |
+
+3. `MEDIA_ALLOWED_ORIGINS` must name your site: the browser posts to the worker.
+4. On Vercel, with `MEDIA_WORKER_URL` and `MEDIA_WORKER_SECRET` already set,
+   add `NEXT_PUBLIC_ENABLE_HTML_TO_PDF=1` and redeploy. Until then the tool
+   is hidden everywhere and nothing calls the worker.
+5. Check it:
+
+   ```bash
+   curl -H "Authorization: Bearer $MEDIA_WORKER_SECRET" https://<your-site>/api/media/health
+   # "htmlToPdf": {"ready": true, "sandbox": false}
+   ```
+
+### Try it with curl
+
+A grant is signed with `MEDIA_WORKER_SECRET` (HMAC-SHA256, as
+`lib/media-server.ts` signs). From a checkout, with the secret in your shell:
+
+```bash
+W=https://media.your-domain.com
+render() {  # render <address>: prints the job's final state; the PDF goes to page.pdf
+  TOKEN=$(npx tsx -e '
+    import { signToken } from "./lib/media-server.ts";
+    import { webPdfGrant } from "./lib/web-pdf-route.ts";
+    import { DEFAULT_OPTIONS } from "./lib/web-pdf.ts";
+    const ref = { s: "owner", c: "manual-" + Date.now(), t: Math.floor(Date.now() / 1000) };
+    console.log(signToken(webPdfGrant({ u: process.argv.at(-1)! }, DEFAULT_OPTIONS, 50, ref), process.env.MEDIA_WORKER_SECRET!));' "$1")
+  ID=$(curl -s -H 'Content-Type: application/json' -d "{\"token\":\"$TOKEN\"}" $W/render | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+  until curl -s $W/render/$ID | grep -qv '"working"'; do sleep 1; done
+  curl -s $W/render/$ID; echo
+  curl -s -o page.pdf $W/render/$ID/file
+}
+render https://example.com/    # "status": "ready", then page.pdf
+```
+
+**Check the guard.** Each of these must end with `"status": "error"` and
+"That address is on a private or local network" (or, for a name nothing
+answers for, "We couldn't find that site"):
+
+```bash
+for u in http://169.254.169.254/latest/meta-data/ http://127.0.0.1:8080/health http://[::1]:8080/ \
+         http://2130706433:8080/ http://0x7f000001:8080/ http://metadata.google.internal/; do render $u; done
+```
+
+A page on a site you control that redirects to `http://169.254.169.254/`, or
+whose pictures point at a private address, should fail (the redirect) or
+come back with those pictures empty. `npm run test:render` does all of this
+locally against hostile test sites.
+
+### Test
+
+```bash
+PYTHON=python3 npm run test:render   # needs Playwright and its Chromium (python -m playwright install --only-shell chromium)
+```
+
+`media-worker/test_render.py` checks the address rules and the guard on
+its own (rebinding, mixed answers, caps), then real Chromium jobs against
+local sites: redirects to `127.0.0.1`, `169.254.169.254`, `[::1]`, decimal,
+hex and octal IPs, names that resolve to private addresses, a name that
+changes its answer, private subresources (pictures, scripts, frames,
+fetch, beacons, event streams, workers, video), `file:` links and
+navigations, endless redirects, a site that never answers, a page that
+never finishes, a huge page, the page cap, the request cap, popups,
+downloads, service workers, websockets, WebRTC, cookies and storage between
+jobs, sign-in prompts and low ports; every hostile listener must record no
+hit. `tests/render-worker.test.mts` runs the worker with grants built by the
+web app's own code and reads the PDFs back with pdf.js.
