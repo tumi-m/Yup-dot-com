@@ -960,7 +960,9 @@ export function PdfEditor({
   useUnsavedGuard(dirty);
 
   return (
-    <div className="flex h-dvh flex-col bg-secondary/30">
+    // A full-height app: it ends above the cookie banner while that is up
+    // (--consent-space), so the page never scrolls and the zoom bar stays clear.
+    <div className="flex h-[calc(100dvh-var(--consent-space,0px))] flex-col bg-secondary/30">
       {/* Top bar */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 sm:gap-3 sm:px-3">
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">

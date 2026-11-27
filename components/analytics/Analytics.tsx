@@ -61,9 +61,12 @@ export function Analytics({ gaId }: { gaId: string }) {
     const seen = new ResizeObserver(measure);
     seen.observe(el);
     window.addEventListener("resize", measure);
+    // The banner rises in: measure again where it comes to rest.
+    el.addEventListener("animationend", measure);
     return () => {
       seen.disconnect();
       window.removeEventListener("resize", measure);
+      el.removeEventListener("animationend", measure);
       root.style.removeProperty("--consent-space");
     };
   }, [open]);

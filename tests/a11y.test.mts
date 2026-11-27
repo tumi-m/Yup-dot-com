@@ -172,6 +172,8 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("the focus ring has 3:1 on the page", ratio(token("ring"), token("background")) >= 3);
   check("high contrast marks chosen pills, tabs and tools", /forced-colors: active[\s\S]*\[aria-pressed="true"\][\s\S]*\[role="tab"\]\[aria-selected="true"\]/.test(css));
   check("the cookie banner's room is kept below the page and focus", css.includes("var(--consent-space, 0px)"));
+  const editor = readFileSync(new URL("../components/editor/PdfEditor.tsx", import.meta.url), "utf8");
+  check("the full-height editor ends above the banner instead of scrolling the page", editor.includes("h-[calc(100dvh-var(--consent-space,0px))]") && !/className="flex h-dvh/.test(editor));
   const button = readFileSync(new URL("../components/ui/button.tsx", import.meta.url), "utf8");
   check("filled buttons keep an edge in high contrast, and only there", ["bg-primary", "bg-secondary", "bg-destructive"].every((bg) => new RegExp(`forced-colors:border ${bg}`).test(button)) && !button.includes("border-transparent"));
 }
