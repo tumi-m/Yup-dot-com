@@ -71,6 +71,15 @@ for (const s of SLUGS) {
   delete env.MEDIA_WORKER_URL;
 }
 
+// The homepage: a CSV offers Excel to PDF (as a table) and TXT to PDF while it is on.
+{
+  const { heroActions, TEXT_ACTIONS } = await import("../components/landing/hero-actions.ts");
+  const csv = [{ name: "export.CSV", type: "text/csv" }];
+  check("a dropped CSV: Excel to PDF first, then TXT to PDF", heroActions("pdf", csv, true).join() === "excel-to-pdf,txt-to-pdf", heroActions("pdf", csv, true));
+  check("switched off: the text tools as before", heroActions("pdf", csv, false) === TEXT_ACTIONS);
+  check("a .txt still goes to the text tools", heroActions("pdf", [{ name: "a.txt", type: "text/plain" }], true) === TEXT_ACTIONS);
+}
+
 // The page's checks.
 check("accept lists extensions and types", office.officeAccept("word-to-pdf").split(",").includes(".docx") && office.officeAccept("excel-to-pdf").includes("text/csv"));
 check("PDF names", office.officePdfName("Q3 Report.final.XLSX") === "Q3 Report.final.pdf" && office.officePdfName(".docx") === "document.pdf");

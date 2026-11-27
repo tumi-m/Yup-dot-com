@@ -315,7 +315,8 @@ visitor's file. Browsers can't lay out a Word or Excel file faithfully, so the
 media worker runs headless LibreOffice (`media-worker/office.py`):
 
 1. The page asks `POST /api/convert/link` (`lib/office-server.ts`) with the
-   tool, the file's name and size, and for spreadsheets the page setup. The
+   tool, the file's extension and size (never its name), and for spreadsheets
+   the page setup. The
    route refuses other sites' pages, types the tool doesn't take (by
    extension; the worker checks the bytes), empty files, files over the
    plan's limit (`officeMaxBytes`), more than ten asks a minute, and the
@@ -332,13 +333,15 @@ media worker runs headless LibreOffice (`media-worker/office.py`):
    the same response, then deletes everything.
 3. A conversion that failed, was turned away or was cancelled is given back
    through `POST /api/convert/refund`, by the worker's own record, as YouTube
-   downloads are.
+   downloads are, up to five a day per person. One that ran out of time
+   isn't.
 
 The pages say plainly, next to the drop zone and the Convert button and in
 their questions, that the file is uploaded and deleted straight after; the
 privacy policy and security page add the same while the tools are on. The
 worker side (type checks, password-protected and macro-enabled files, zip
-bombs, sandboxing, timeouts, the queue) is in
+bombs, files that link outside themselves, LibreOffice's own root, timeouts,
+the queue) is in
 [`media-worker/README.md`](media-worker/README.md#word-and-excel-to-pdf).
 
 **Switching it on:** rebuild the worker, check

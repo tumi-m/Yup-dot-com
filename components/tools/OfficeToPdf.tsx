@@ -183,7 +183,8 @@ export function OfficeToPdf({ tool, tier }: { tool: OfficeTool; tier: Tier }) {
     const res = await fetch("/api/convert/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool, name: file.name, size: file.size, ...(sheet ? { options: isCsv ? { ...options, sheets: "all" } : options } : {}) }),
+      // Only the extension: the file's name stays here.
+      body: JSON.stringify({ tool, ext: officeExtension(file.name), size: file.size, ...(sheet ? { options: isCsv ? { ...options, sheets: "all" } : options } : {}) }),
       signal: controller.signal,
     }).catch(() => null);
     const data = await res?.json().catch(() => null);
@@ -393,8 +394,15 @@ export function OfficeToPdf({ tool, tier }: { tool: OfficeTool; tier: Tier }) {
                 </motion.div>
               )}
 
-              {file && sheet && status === "ready" && (
-                <motion.fieldset initial={ENTER.initial} animate={ENTER.animate} className="rounded-2xl border border-border bg-card p-4">
+              {/* Stays (disabled) while converting, so the progress takes the Convert
+                  button's place instead of the page jumping under the header. */}
+              {file && sheet && (status === "ready" || status === "working") && (
+                <motion.fieldset
+                  initial={ENTER.initial}
+                  animate={ENTER.animate}
+                  disabled={status === "working"}
+                  className="rounded-2xl border border-border bg-card p-4 transition-opacity disabled:opacity-60"
+                >
                   <legend className="sr-only">Page setup</legend>
                   <div className="space-y-4">
                   <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">

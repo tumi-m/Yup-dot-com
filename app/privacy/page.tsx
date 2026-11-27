@@ -202,8 +202,8 @@ export default function PrivacyPage() {
           <p>
             Word to PDF and Excel to PDF are the exception: they upload the file you choose to our conversion server, where
             it is converted and then deleted, together with the PDF, as soon as the PDF has been sent back to you (or at
-            once if converting fails or you cancel). We don&apos;t keep, read or reuse it. The file&apos;s name isn&apos;t
-            sent.
+            once if converting fails or you cancel). We don&apos;t keep, read or reuse it. Its name isn&apos;t sent:
+            only its contents, its size and its type.
           </p>
         )}
       </Section>
