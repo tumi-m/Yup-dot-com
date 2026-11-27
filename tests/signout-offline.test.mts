@@ -86,6 +86,19 @@ check("Supabase doesn't answer: sign-out goes on after the wait, signed out here
   hung.res.status === 303 && hung.ms < 2000 && hung.cleared.includes("sb-127-auth-token.0"), { ms: hung.ms, cleared: hung.cleared });
 check("and back to the home page", new URL(hung.res.headers.get("location") ?? "").pathname === "/");
 
+// The route itself, as the sign-out button posts to it. Outside a Next.js
+// request its Supabase client can't even be made (no request cookies): the
+// worst case, and the session cookies still go.
+const { POST } = await import("../app/auth/signout/route.ts");
+const routed = await POST(new Request("http://localhost:3405/auth/signout", {
+  method: "POST",
+  headers: { host: "localhost:3405", origin: "http://localhost:3405", "content-type": "application/x-www-form-urlencoded", cookie: COOKIE },
+}));
+const routedCleared = routed.headers.getSetCookie().filter((c) => /Expires=Thu, 01 Jan 1970/i.test(c)).map((c) => c.slice(0, c.indexOf("=")));
+check("the sign-out route clears the session cookies when Supabase can't be used at all",
+  routed.status === 303 && routedCleared.includes("sb-127-auth-token.0") && routedCleared.includes("sb-127-auth-token.1") && !routedCleared.includes("pdfw-consent"),
+  { status: routed.status, routedCleared });
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
