@@ -36,7 +36,7 @@ function check(name: string, ok: boolean, extra?: unknown) {
 
 // Loaded dynamically: tsx gives a static import its own copy of the module,
 // and the wasm has to reach the copy the app modules use.
-const { decodeJpeg, encodeJpeg, isGray, mozQuality, useJpegWasm } = await import("../lib/image-codec.ts");
+const { decodeJpeg, encodeJpeg, isGray, mozQuality, useJpegWasm, withoutMetadata } = await import("../lib/image-codec.ts");
 const codec = "./node_modules/@jsquash/jpeg/codec/";
 await useJpegWasm({
   encoder: await WebAssembly.compile(readFileSync(codec + "enc/mozjpeg_enc.wasm")),
@@ -339,7 +339,8 @@ const consoleError = console.error;
 console.error = (...args: unknown[]) => logged.push(args);
 const [cmykOut] = await pdfImages(new Uint8Array(await (await imagesToPdfTool([file(cmyk, "cmyk.jpg", "image/jpeg")], { pageSize: "a4", margin: "0" })).blob.arrayBuffer()));
 console.error = consoleError;
-check("jpg-to-pdf: a CMYK JPEG goes in as it is, without a decode attempt", cmykOut.length === cmyk.length && cmykOut.colorSpace === "/DeviceCMYK" && !logged.length, { length: cmykOut.length, cs: cmykOut.colorSpace, logged });
+// Only its EXIF is left out (see photo-metadata.test.mts).
+check("jpg-to-pdf: a CMYK JPEG goes in as it is, without a decode attempt", cmykOut.length === withoutMetadata(cmyk).length && cmykOut.colorSpace === "/DeviceCMYK" && !logged.length, { length: cmykOut.length, cs: cmykOut.colorSpace, logged });
 
 const photoPng = makePng(photo(800, 600), 2);
 const fromPhotoPng = new Uint8Array(await (await imagesToPdfTool([file(photoPng, "photo.png", "image/png")], { pageSize: "fit", margin: "0" })).blob.arrayBuffer());

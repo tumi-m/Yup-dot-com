@@ -1,5 +1,5 @@
 import type { PDFDocument, PDFRef } from "pdf-lib";
-import { canvasPixels, decodeJpeg, encodeJpeg, isGray, type RawImage } from "../image-codec";
+import { canvasPixels, decodeJpeg, encodeJpeg, isGray, withoutMetadata, type RawImage } from "../image-codec";
 import { canvasToJpeg } from "../jpeg-encode/off-thread";
 import { downsampleTarget, resizeRgba } from "../image-fit";
 import {
@@ -132,7 +132,8 @@ export async function embedImage(
   fit?: { widthPt: number; heightPt: number }
 ): Promise<EmbeddedImage> {
   if (kind === "jpeg") {
-    const img = await doc.embedJpg(await jpegBytes(bytes, size, fit));
+    // A phone photo's EXIF says where it was taken and on what: it stays out of the PDF.
+    const img = await doc.embedJpg(withoutMetadata(await jpegBytes(bytes, size, fit)));
     return { ref: img.ref, width: img.width, height: img.height };
   }
   let choice: Choice | null = null;

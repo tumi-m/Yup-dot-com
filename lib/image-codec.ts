@@ -137,6 +137,20 @@ async function canvasEncode(image: RawImage, quality: number): Promise<Uint8Arra
  * viewer never does. Anything that doesn't parse is returned as it is.
  */
 export function withoutApp1(bytes: Uint8Array): Uint8Array {
+  return withoutSegments(bytes, [0xe1]);
+}
+
+/**
+ * The JPEG without what a camera or editor wrote about it: EXIF (where it
+ * was taken, the phone, when), XMP, IPTC and comments. A PDF viewer uses
+ * none of it; the colour profile (APP2) and Adobe's colour marker (APP14)
+ * stay. Anything that doesn't parse is returned as it is.
+ */
+export function withoutMetadata(bytes: Uint8Array): Uint8Array {
+  return withoutSegments(bytes, [0xe1, 0xed, 0xfe]);
+}
+
+function withoutSegments(bytes: Uint8Array, markers: number[]): Uint8Array {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return bytes;
   const kept: Uint8Array[] = [bytes.subarray(0, 2)];
   let i = 2;
@@ -152,7 +166,7 @@ export function withoutApp1(bytes: Uint8Array): Uint8Array {
     if (marker === 0xda || marker === 0xd9) break;
     const end = i + 2 + ((bytes[i + 2] << 8) | bytes[i + 3]);
     if (end > bytes.length) return bytes;
-    if (marker === 0xe1) {
+    if (markers.includes(marker)) {
       kept.push(bytes.subarray(start, i));
       start = end;
     }
