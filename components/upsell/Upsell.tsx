@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { formatLimitBytes, LIMITS, type Tier } from "@/lib/limits";
+import { formatLimitBytes, LIMITS, type Tier, type TierLimits } from "@/lib/limits";
 import { PLANS, formatPrice } from "@/lib/plans";
 import { displayPrice } from "@/lib/currency";
 import { useLocalPrices } from "@/components/LocalPrice";
@@ -77,6 +77,24 @@ const COPY: Record<UpsellReason, { title: string; body: (tier: Tier) => string }
   },
 };
 
+/**
+ * Pro and Team have the same limits, so at one of these there is nothing to
+ * upgrade to: they are told the limit instead. Their other limits (AI
+ * answers, downloads) come from the server, which offers no upgrade then.
+ */
+const PAID_LIMIT: Partial<Record<UpsellReason, (plan: string, limits: TierLimits) => string>> = {
+  "file-size": (plan, l) => `Files up to ${formatLimitBytes(l.maxFileBytes)} on ${plan}.`,
+  batch: (plan, l) => `Up to ${l.maxBatchFiles} files at once on ${plan}.`,
+  pages: (plan, l) => `Up to ${l.comparePages.toLocaleString("en-US")} pages a file on ${plan}.`,
+  "redact-pages": (plan, l) => `Up to ${l.redactPages.toLocaleString("en-US")} pages with marks at a time on ${plan}.`,
+};
+
+/** What the dialog tells a Pro or Team user at this limit; null for other tiers (they get the upgrade) and other reasons. */
+export function paidLimitNote(reason: UpsellReason, tier: Tier): string | null {
+  if (tier !== "pro" && tier !== "team") return null;
+  return PAID_LIMIT[reason]?.(PLANS[tier].name, LIMITS[tier]) ?? null;
+}
+
 const MEDIA_BENEFITS = [
   { icon: Film, text: "1080p downloads" },
   { icon: InfinityIcon, text: `${LIMITS.pro.mediaDownloadsPerDay} downloads a day` },
@@ -124,7 +142,10 @@ export function UpgradeDialog({
   // (Free has the same file size, batch, quality and edit limits).
   const offerFreeAccount = guest && !["file-size", "batch", "quality", "edits"].includes(reason);
   const signup = signupHref(returnTo);
-  const prices = useLocalPrices(open);
+  // Pro and Team: the limit, and nothing to buy.
+  const paid = tier === "pro" || tier === "team";
+  const paidNote = paidLimitNote(reason, tier);
+  const prices = useLocalPrices(open && !paid);
   const pro = PLANS.pro.priceMonthly;
 
   // Most callers unmount the dialog as soon as it reports closed, which
@@ -138,6 +159,8 @@ export function UpgradeDialog({
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     window.setTimeout(() => onOpenChange(false), reduce ? 0 : DUR.fast * 1000);
   }
+
+  if (paid && !paidNote) return null;
 
   return (
     <Dialog open={shown} onOpenChange={handleOpenChange}>
@@ -156,58 +179,66 @@ export function UpgradeDialog({
           </motion.div>
           <DialogHeader className="text-left">
             <DialogTitle className="text-xl text-white">{copy.title}</DialogTitle>
-            <DialogDescription className="text-white/85">{copy.body(tier)}</DialogDescription>
+            <DialogDescription className="text-white/85">{paidNote ?? copy.body(tier)}</DialogDescription>
           </DialogHeader>
         </div>
         <div className="space-y-5 px-6 pb-6">
-          <ul className="space-y-2.5 text-sm">
-            {(reason === "quality" || reason === "downloads"
-              ? MEDIA_BENEFITS
-              : reason === "edits"
-                ? EDIT_BENEFITS
-                : reason === "samples"
-                  ? SAMPLE_BENEFITS
-                  : BENEFITS
-            ).map((b, i) => (
-              <motion.li
-                key={b.text}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...ENTER_T, delay: DUR.tap + staggerDelay(i) }}
-                className="flex items-center gap-2.5"
-              >
-                <b.icon className="h-4 w-4 text-primary" /> {b.text}
-              </motion.li>
-            ))}
-          </ul>
-          <div className="flex flex-col gap-2">
-            {offerFreeAccount ? (
-              <>
-                <Button asChild size="lg">
-                  <Link href={signup}>Create free account</Link>
-                </Button>
-                <Button asChild variant="ghost" className="h-11">
-                  <Link href="/pricing">Compare plans</Link>
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button asChild size="lg">
-                  <Link href="/pricing">
-                    <Zap /> Upgrade to Pro{prices ? ` · ${displayPrice(prices, pro)}/mo` : ""}
-                  </Link>
-                </Button>
-                {prices && !prices.local && (
-                  <p className="-mt-1 text-center text-xs text-muted-foreground">Billed as {formatPrice(pro)}</p>
+          {paidNote ? (
+            <Button size="lg" className="w-full" onClick={() => handleOpenChange(false)}>
+              OK
+            </Button>
+          ) : (
+            <>
+              <ul className="space-y-2.5 text-sm">
+                {(reason === "quality" || reason === "downloads"
+                  ? MEDIA_BENEFITS
+                  : reason === "edits"
+                    ? EDIT_BENEFITS
+                    : reason === "samples"
+                      ? SAMPLE_BENEFITS
+                      : BENEFITS
+                ).map((b, i) => (
+                  <motion.li
+                    key={b.text}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...ENTER_T, delay: DUR.tap + staggerDelay(i) }}
+                    className="flex items-center gap-2.5"
+                  >
+                    <b.icon className="h-4 w-4 text-primary" /> {b.text}
+                  </motion.li>
+                ))}
+              </ul>
+              <div className="flex flex-col gap-2">
+                {offerFreeAccount ? (
+                  <>
+                    <Button asChild size="lg">
+                      <Link href={signup}>Create free account</Link>
+                    </Button>
+                    <Button asChild variant="ghost" className="h-11">
+                      <Link href="/pricing">Compare plans</Link>
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button asChild size="lg">
+                      <Link href="/pricing">
+                        <Zap /> Upgrade to Pro{prices ? ` · ${displayPrice(prices, pro)}/mo` : ""}
+                      </Link>
+                    </Button>
+                    {prices && !prices.local && (
+                      <p className="-mt-1 text-center text-xs text-muted-foreground">Billed as {formatPrice(pro)}</p>
+                    )}
+                    {guest && (
+                      <Button asChild variant="ghost" className="h-11">
+                        <Link href={signup}>Or create a free account</Link>
+                      </Button>
+                    )}
+                  </>
                 )}
-                {guest && (
-                  <Button asChild variant="ghost" className="h-11">
-                    <Link href={signup}>Or create a free account</Link>
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
