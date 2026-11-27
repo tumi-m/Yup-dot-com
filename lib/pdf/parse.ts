@@ -863,25 +863,32 @@ export async function readPageText(page: PDFPageProxy): Promise<PageText> {
 const EDGE = 0.06;
 
 /**
- * Running headers and footers: small lines at the very top or bottom of the
- * page that repeat on most pages, numbers aside (a browser's date, title,
- * address and "1/2"; a report's title or "Confidential"). They would
- * otherwise sit between the paragraphs of the body, and split one running
- * on over the page break. A page number on its own line is kept where it is.
+ * Running headers and footers: lines smaller than the body text at the very
+ * top or bottom of the page, in the same place on most pages, the same but
+ * for their numbers (a browser's date, title, address and "1/2"). They
+ * would otherwise sit between the paragraphs of the body, and split one
+ * running on over the page break. Body-size, bold and heading lines stay,
+ * however often they repeat ("Question 3", "Balance brought forward",
+ * "Initials: ____"), and so does a page number on its own line.
  */
 function runningLines(pages: { lines: ParsedLine[]; height: number }[], bodySize: number): Set<ParsedLine> {
   const found = new Set<ParsedLine>();
   if (pages.length < 2) return found;
-  const key = (line: ParsedLine) => line.text.replace(/\d+/g, "#").toLowerCase();
+  // Its words without their numbers, and where it stands, to the nearest few points.
+  const key = (line: ParsedLine) => `${line.text.replace(/\d+/g, "#").toLowerCase()}@${Math.round(line.x / 3)},${Math.round(line.y / 3)}`;
   const atEdge = (line: ParsedLine, height: number) =>
-    height > 0 && line.fontSize <= bodySize * 1.05 && !PAGE_NUMBER.test(line.text) && (line.y > height * (1 - EDGE) || line.y < height * EDGE);
+    height > 0 &&
+    line.fontSize < bodySize * 0.9 &&
+    !line.bold &&
+    !PAGE_NUMBER.test(line.text) &&
+    (line.y > height * (1 - EDGE) || line.y < height * EDGE);
   const seen = new Map<string, number>();
   for (const { lines, height } of pages) {
     for (const k of new Set(lines.filter((l) => atEdge(l, height)).map(key))) seen.set(k, (seen.get(k) ?? 0) + 1);
   }
-  const often = Math.max(2, Math.ceil(pages.length / 2));
+  const most = Math.max(2, Math.floor(pages.length / 2) + 1);
   for (const { lines, height } of pages) {
-    for (const line of lines) if (atEdge(line, height) && (seen.get(key(line)) ?? 0) >= often) found.add(line);
+    for (const line of lines) if (atEdge(line, height) && (seen.get(key(line)) ?? 0) >= most) found.add(line);
   }
   return found;
 }

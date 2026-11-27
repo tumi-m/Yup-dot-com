@@ -143,6 +143,27 @@ const check = (name: string, ok: boolean, detail = "") => {
   check("a sentence over the page break is one paragraph", md.includes("before you plan and continues on this page"), md.slice(md.indexOf("Part 2") - 300, md.indexOf("Part 2")));
 }
 
+// 5. Lines at the top and bottom of every page that are the document's own:
+// body-size, bold or saying something new on each page.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const b = await d.embedFont(StandardFonts.HelveticaBold);
+  for (let n = 1; n <= 3; n++) {
+    const p = d.addPage([595, 842]);
+    p.drawText(`Section ${n}`, { x: 40, y: 815, size: 11, font: b });
+    if (n > 1) p.drawText(`Balance brought forward ${n * 1000}.00`, { x: 40, y: 800, size: 10, font: f });
+    for (let i = 0; i < 40; i++) p.drawText(`Clause ${n}.${i} The tenant shall keep the premises clean and in good repair at all times.`, { x: 40, y: 770 - i * 16, size: 10, font: f });
+    if (n < 3) p.drawText(`Balance carried forward ${(n + 1) * 1000}.00`, { x: 40, y: 45, size: 10, font: f });
+    p.drawText("Initials: Tenant ______ Landlord ______", { x: 40, y: 30, size: 10, font: f });
+  }
+  const md = toMarkdown(await parseDocument(await d.save()));
+  const count = (s: string) => md.split(s).length - 1;
+  check("bold section titles at the top of each page stay", count("Section ") === 3, md.slice(0, 200));
+  check("balances carried and brought forward stay", count("carried forward") === 2 && count("brought forward") === 2);
+  check("a line to initial on every page stays", count("Initials: Tenant") === 3);
+}
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
