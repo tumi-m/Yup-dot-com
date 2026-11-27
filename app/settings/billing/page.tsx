@@ -3,6 +3,7 @@ import { getAccount } from "@/lib/profile";
 import { AppNav } from "@/components/AppNav";
 import { PricingCards } from "@/components/PricingCards";
 import {
+  BILLING_TITLE_ID,
   ExtendButtons,
   ManageBillingButton,
   PaymentReturn,
@@ -56,7 +57,10 @@ export default async function BillingPage({
     <div className="min-h-screen">
       <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <main id="main" className="container max-w-5xl py-10">
-        <h1 className="text-3xl font-bold tracking-tight">Billing</h1>
+        {/* Focus lands here when the payment notice is dismissed (its button goes with it). */}
+        <h1 id={BILLING_TITLE_ID} tabIndex={-1} className="text-3xl font-bold tracking-tight outline-none">
+          Billing
+        </h1>
 
         {reference && <PaymentReturn key={reference} reference={reference} />}
 

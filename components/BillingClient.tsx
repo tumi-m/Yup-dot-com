@@ -108,6 +108,9 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
 
 type VerifyState = "checking" | "pending" | Exclude<PaymentOutcome, "retry">;
 
+/** The Billing page's heading. */
+export const BILLING_TITLE_ID = "billing-title";
+
 /**
  * Shown on return from Paystack (?ref=…). Confirms the payment server-side,
  * says which plan is in use now, then refreshes the page so it shows there.
@@ -157,6 +160,8 @@ export function PaymentReturn({ reference }: { reference: string }) {
   }, [reference, router]);
 
   function dismiss() {
+    // The notice and its button go: focus the page's heading, not the top of the page.
+    document.getElementById(BILLING_TITLE_ID)?.focus({ preventScroll: true });
     router.replace("/settings/billing", { scroll: false });
   }
 

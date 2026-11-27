@@ -119,6 +119,10 @@ const once = (ref: string, plan = "pro", months = 1, amount = 4900) => ({
   check("PaymentReturn takes no plan name from the server render",
     /export function PaymentReturn\(\{ reference \}: \{ reference: string \}\)/.test(client) &&
       /plan = paymentPlanName\(data\.plan\)/.test(client));
+  // Dismissing the notice took its button away and left focus on the page itself.
+  const page = readFileSync(new URL("../app/settings/billing/page.tsx", import.meta.url), "utf8");
+  check("Dismiss hands focus to the Billing heading",
+    /id=\{BILLING_TITLE_ID\} tabIndex=\{-1\}/.test(page) && /getElementById\(BILLING_TITLE_ID\)\?\.focus\(/.test(client));
   const route = readFileSync(new URL("../app/api/billing/verify/route.ts", import.meta.url), "utf8");
   check("verify answers pending while the webhook writes, and names the plan",
     /confirmCharge\(/.test(route) && /status: "pending" \}, 202/.test(route) && /plan: result\.plan/.test(route));
