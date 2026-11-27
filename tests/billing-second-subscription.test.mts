@@ -34,7 +34,8 @@ function setup() {
     start_authorization: null,
   };
   const events = new Set<string>();
-  const seconds = new Map<string, DuplicateStart & { code: string | null }>();
+  let clock = new Date("2026-11-01T08:00:00Z");
+  const seconds = new Map<string, DuplicateStart & { code: string | null; at: number }>();
   const store: BillingStore = {
     async claimEvent(k) { if (events.has(k)) return false; events.add(k); return true; },
     async releaseEvent(k) { events.delete(k); },
@@ -43,15 +44,14 @@ function setup() {
       return (by.customerCode && by.customerCode === row.paystack_customer_code) || (by.subscriptionCode && by.subscriptionCode === row.paystack_subscription_code) ? USER : null;
     },
     async updateRow(_id, p: BillingPatch) { const { plan: _p, ...rest } = p; Object.assign(row, rest); },
-    async recordDuplicateStart(d) { seconds.set(d.reference, { ...d, code: null }); },
-    async findDuplicateStart(userId, plan) {
-      return [...seconds.values()].find((d) => d.userId === userId && d.plan === plan && !d.code)?.reference ?? null;
+    async recordDuplicateStart(d) { seconds.set(d.reference, { ...d, code: null, at: clock.getTime() }); },
+    async findDuplicateStart(userId, plan, since) {
+      return [...seconds.values()].find((d) => d.userId === userId && d.plan === plan && !d.code && d.at >= since.getTime())?.reference ?? null;
     },
     async isDuplicateStart(reference) { return seconds.get(reference)?.reason !== "refunded" && seconds.has(reference); },
     async resolveDuplicateStart(reference, code) { seconds.get(reference)!.code = code; },
   };
   const stopped: string[] = [];
-  let clock = new Date("2026-11-01T08:00:00Z");
   const deps: EventDeps = {
     store, planForCode: codes, checkoutSecret: SECRET, now: () => clock,
     paystack: {
@@ -178,6 +178,35 @@ const renewal = (reference: string, paidAt: string) => ({ status: "success", ref
   s.deps.paystack!.disableSubscription = realStop;
   const retried = await s.deliver("subscription.create", create("SUB_6", "2026-12-01T08:01:00Z"));
   check("…and the retry stops it", retried.status === "ignored" && JSON.stringify(s.stopped) === '["SUB_6/tok_SUB_6"]', s.stopped);
+}
+
+// ---------- A kept start whose create never came, then a new subscription months later ----------
+// Kept starts used to match with no age limit, so this one stopped the new,
+// legitimate subscription and left the account without a code. Only starts
+// kept within Paystack's ~72-hour retry window match now.
+{
+  const s = setup();
+  await s.deliver("charge.success", first(ref("r"), "2026-11-01T08:00:00Z"));
+  await s.deliver("subscription.create", create("SUB_R", "2026-12-01T08:00:00Z"));
+  await s.deliver("charge.success", first(ref("s"), "2026-11-01T08:02:00Z"));
+  check("the second start is kept", s.seconds.get(ref("s"))?.code === null);
+  await s.deliver("subscription.disable", { subscription_code: "SUB_R", status: "complete", customer });
+  s.at("2027-03-01T08:00:00Z");
+  const c = await s.deliver("subscription.create", create("SUB_NEW", "2027-04-01T08:00:00Z"));
+  const ch = await s.deliver("charge.success", first(ref("t"), "2027-03-01T08:00:00Z"));
+  const again = await s.deliver("subscription.create", create("SUB_NEW", "2027-04-01T08:00:00Z"));
+  check("months later, the new subscription isn't stopped by the old kept start",
+    s.stopped.length === 0 && ch.status === "applied" && again.status === "applied" && s.row.paystack_subscription_code === "SUB_NEW",
+    { c, ch, again, stopped: s.stopped, code: s.row.paystack_subscription_code });
+}
+{
+  const s = setup();
+  await s.deliver("charge.success", first(ref("u"), "2026-11-01T08:00:00Z"));
+  await s.deliver("subscription.create", create("SUB_U", "2026-12-01T08:00:00Z"));
+  await s.deliver("charge.success", first(ref("v"), "2026-11-01T08:02:00Z"));
+  s.at("2026-11-03T20:00:00Z");
+  const late = await s.deliver("subscription.create", create("SUB_V", "2026-12-01T08:02:00Z"));
+  check("within the window (60 hours on), the kept start's create is still stopped", late.status === "ignored" && JSON.stringify(s.stopped) === '["SUB_V/tok_SUB_V"]', { late, stopped: s.stopped });
 }
 
 // ---------- Stopped in Paystack, but noting it failed ----------

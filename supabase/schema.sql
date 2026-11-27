@@ -283,6 +283,12 @@ create table if not exists public.duplicate_subscription_starts (
   stopped_at timestamptz
 );
 
+-- A table from an earlier run of this file gets the columns added since.
+alter table public.duplicate_subscription_starts
+  add column if not exists reason text not null default 'second' check (reason in ('second', 'refunded')),
+  add column if not exists subscription_code text,
+  add column if not exists stopped_at timestamptz;
+
 create index if not exists duplicate_subscription_starts_user_idx on public.duplicate_subscription_starts (user_id);
 
 alter table public.duplicate_subscription_starts enable row level security;

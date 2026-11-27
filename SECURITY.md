@@ -82,7 +82,10 @@ existed), and never the subscription the account holds
 person's customer can at most get their own subscription stopped. A refund
 ends access only when Paystack confirms the payment was refunded in full and
 it is the charge recorded as paying the current period
-(`tests/billing-refunds.test.mts`).
+(`tests/billing-refunds.test.mts`). A subscription created by hand in
+Paystack on a customer who already has a live subscription is answered 503
+(retried) by the webhook, then dropped when Paystack gives up: it never
+replaces the account's own.
 
 ## Why the MyBroadband-style hacks don't apply here
 

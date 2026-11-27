@@ -93,13 +93,14 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       if (MISSING_TABLE.has(error?.code)) return missingTable("duplicate_subscription_starts");
       fail("record second subscription", error);
     },
-    async findDuplicateStart(userId: string, plan: PaidPlanId) {
+    async findDuplicateStart(userId: string, plan: PaidPlanId, since: Date) {
       const { data, error } = await admin
         .from("duplicate_subscription_starts")
         .select("reference")
         .eq("user_id", userId)
         .eq("plan", plan)
         .is("subscription_code", null)
+        .gte("created_at", since.toISOString())
         .order("created_at", { ascending: true })
         .limit(1);
       if (MISSING_TABLE.has(error?.code)) return null;

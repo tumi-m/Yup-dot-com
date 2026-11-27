@@ -41,11 +41,11 @@ function setup() {
     },
     async updateRow(_id, p: BillingPatch) { const { plan: _p, ...rest } = p; Object.assign(row, rest); },
     async isDuplicateStart(r) { return kept.some((k) => k.reference === r && k.reason !== "refunded"); },
-    async recordDuplicateStart(d) { kept.push({ ...d, code: null }); },
-    async findDuplicateStart(u, plan) { return kept.find((k) => k.userId === u && k.plan === plan && !k.code)?.reference ?? null; },
+    async recordDuplicateStart(d) { kept.push({ ...d, code: null, at: clock.getTime() }); },
+    async findDuplicateStart(u, plan, since) { return kept.find((k) => k.userId === u && k.plan === plan && !k.code && k.at >= since.getTime())?.reference ?? null; },
     async resolveDuplicateStart(r, code) { kept.find((k) => k.reference === r)!.code = code; },
   };
-  const kept: (DuplicateStart & { code: string | null })[] = [];
+  const kept: (DuplicateStart & { code: string | null; at: number })[] = [];
   const refundsMade = new Map<string, number[]>();
   /** Other customers' refunds on the same page (set per case). */
   let others: Record<string, unknown>[] = [];

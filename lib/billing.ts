@@ -357,8 +357,11 @@ export interface BillingStore {
    * refunded before its subscription was created.
    */
   recordDuplicateStart?(start: DuplicateStart): Promise<void>;
-  /** The oldest kept start for this account and plan whose subscription isn't stopped yet. */
-  findDuplicateStart?(userId: string, plan: PaidPlanId): Promise<string | null>;
+  /**
+   * The oldest kept start for this account and plan, kept since `since`,
+   * whose subscription isn't stopped yet. Older ones count as closed.
+   */
+  findDuplicateStart?(userId: string, plan: PaidPlanId, since: Date): Promise<string | null>;
   /** Whether a reference is a kept second start (its refund changes nothing). */
   isDuplicateStart?(reference: string): Promise<boolean>;
   /** Notes the subscription stopped for a kept second start. */
@@ -617,6 +620,9 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
   }
 }
 
+/** How long a kept start waits for its subscription.create: Paystack retries a webhook for about 72 hours. */
+export const KEPT_START_WINDOW_MS = 72 * 60 * 60 * 1000;
+
 /** applyCharge's reason for a second subscription's first charge, kept for a refund. */
 export const DUPLICATE_START = "second subscription: kept for a refund";
 
@@ -765,7 +771,9 @@ export async function handlePaystackEvent(
       // Matched by this account's customer and the plan, whatever the card:
       // the only harm in stopping one on this customer is to whoever pays it.
       if (create && plan && !(waitingForCode(row) && plan === row.subscription_plan && card !== null && card === row.start_authorization)) {
-        const kept = await deps.store.findDuplicateStart?.(userId, plan);
+        // Only starts kept within Paystack's retry window: one whose create
+        // never came must not stop a subscription started months later.
+        const kept = await deps.store.findDuplicateStart?.(userId, plan, new Date(now.getTime() - KEPT_START_WINDOW_MS));
         if (kept) return await stopSecondSubscription(data, code, kept, key, deps);
       }
       const refused = unboundSubscription(create, row, plan ?? null, card, now);
