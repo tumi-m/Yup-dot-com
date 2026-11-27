@@ -20,7 +20,7 @@ export interface Photo {
   blob: Blob;
   width: number;
   height: number;
-  /** Where the paper is: found, or a box a little in from the edges. */
+  /** Where the paper is: found, or the whole photo. */
   quad: Quad;
   found: boolean;
 }

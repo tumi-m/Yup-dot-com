@@ -1331,7 +1331,7 @@ function PageEditor({
           <span className="font-normal text-muted-foreground"> of {count}</span>
         </h2>
         <p className="text-xs text-muted-foreground">
-          {page.photo.found ? "Edges found. Drag a corner if it's off." : "Edges not found: drag the corners to the page's corners."}
+          {page.photo.found ? "Edges found. Drag a corner if it's off." : "Edges not found, so the whole photo is kept. Drag the corners onto the page's if it shows more."}
         </p>
       </div>
 

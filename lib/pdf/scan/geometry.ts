@@ -18,8 +18,13 @@ export type Quad = [Point, Point, Point, Point];
 
 export const CORNER_NAMES = ["top-left", "top-right", "bottom-right", "bottom-left"] as const;
 
-/** The whole photo, a little in from each edge: where the corners start when none are found. */
-export function insetQuad(inset = 0.06): Quad {
+/**
+ * The whole photo, `inset` in from each edge. Corners start at the photo's
+ * own corners when the paper's edges aren't found: most often the page
+ * fills the photo (or it is a screenshot), and a box in from the edges cut
+ * off its title and the ends of its lines.
+ */
+export function insetQuad(inset = 0): Quad {
   const a = inset;
   const b = 1 - inset;
   return [

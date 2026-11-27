@@ -328,6 +328,8 @@ function camera(w: number, h: number, rx: number, ry: number, rz: number, f: num
     { x: 0.1, y: 0.9 },
   ];
   check("a folded shape isn't convex", !geo.isConvex(bowtie) && geo.isConvex(geo.insetQuad()));
+  // Edges not found (a page filling the photo, a screenshot): nothing is cut off until a corner is moved.
+  check("corners start at the photo's corners", geo.insetQuad().map((p) => `${p.x},${p.y}`).join(" ") === "0,0 1,0 1,1 0,1");
 
   const q = geo.insetQuad(0.1);
   const right = geo.nudgeCorner(q, 0, { key: "ArrowRight" })!;
