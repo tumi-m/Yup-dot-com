@@ -14,10 +14,12 @@ import { useFocusNext } from "@/components/motion/focus";
 import { cn, formatBytes } from "@/lib/utils";
 import { formatLimitBytes, LIMITS, limitsFor, type Tier } from "@/lib/limits";
 import { acceptFor, ALL_FORMATS } from "@/lib/pdf/images-to-pdf/formats";
+import { HTML_TO_PDF_ENABLED } from "@/lib/web-pdf";
 import { handoffType, heroActions, MIXED_ACTIONS, MULTI_ACTIONS, PPTX_TYPE, TAKES_ALL, TWO_ACTIONS, tooBigFor } from "./hero-actions";
 
 const ACCEPT = {
-  pdf: `application/pdf,${acceptFor(ALL_FORMATS)},text/plain,text/markdown,.txt,.md,.markdown`,
+  // HTML files too while HTML to PDF is on: they're handed to it.
+  pdf: `application/pdf,${acceptFor(ALL_FORMATS)},text/plain,text/markdown,.txt,.md,.markdown${HTML_TO_PDF_ENABLED ? ",.html,.htm,text/html" : ""}`,
   pptx: `.pptx,${PPTX_TYPE}`,
 };
 

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { LIMITS } from "@/lib/limits";
 import { formatHtmlLimit } from "@/lib/web-pdf";
+import { WEB_PDF_REFUNDS_PER_DAY } from "@/lib/web-pdf-route";
 
 /** Server-rendered copy under HTML to PDF: how it works and questions. */
 
@@ -37,7 +38,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "How many can I save?",
-    a: `As a guest, ${LIMITS.guest.webPdfsPerDay} pages a day; with a free account, ${LIMITS.free.webPdfsPerDay}; with Pro or Team, ${LIMITS.pro.webPdfsPerDay}. Each PDF has up to ${LIMITS.free.webPdfPages} pages free, ${LIMITS.pro.webPdfPages} with Pro. Each try counts, even when the site doesn't answer.`,
+    a: `As a guest, ${LIMITS.guest.webPdfsPerDay} pages a day; with a free account, ${LIMITS.free.webPdfsPerDay}; with Pro or Team, ${LIMITS.pro.webPdfsPerDay}. Each PDF has up to ${LIMITS.free.webPdfPages} pages free, ${LIMITS.pro.webPdfPages} with Pro. A try that never opens the page (an address we can't open, a site that isn't found or turns us away, an error page) isn't counted, up to ${WEB_PDF_REFUNDS_PER_DAY} a day; one that loaded, or kept our browser waiting for an answer, is.`,
   },
 ];
 
