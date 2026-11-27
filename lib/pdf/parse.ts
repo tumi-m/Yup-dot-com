@@ -152,16 +152,12 @@ function toSpans(items: RawItem[], viewport: { transform: number[]; height: numb
       .replace(SYMBOL_BULLETS, (c) => BULLET_FOR[c])
       .replace(XML_ILLEGAL, "");
     if (!text || !text.trim()) continue;
-    const [a, b, c, d, e, f] = item.transform;
-    // The baseline's direction on the displayed page.
+    const [a, b, , , e, f] = item.transform;
+    // The baseline's direction on the displayed page; its length is the font size.
     const dx = va * a + vc * b;
     const dy = vb * a + vd * b;
     const size = Math.hypot(dx, dy);
-    // The font size is the letters' height: their width is stretched or
-    // squeezed by the text's horizontal scaling, as OCR text layers do to
-    // fit each word over its picture.
-    const tall = Math.hypot(va * c + vc * d, vb * c + vd * d);
-    const fontSize = tall || size || item.height || 12;
+    const fontSize = size || item.height || 12;
     // The run's extent across the page; its width is measured along the baseline.
     const run = (size ? dx / size : 1) * item.width * scale;
     const x = va * e + vc * f + ve;
@@ -343,7 +339,9 @@ function toLines(spans: ParsedSpan[]): ParsedLine[] {
     const ordered = [...group].sort((p, q) => (rtl ? q.x - p.x : p.x - q.x));
     // A field's value is drawn at whatever size its box allows: the label's size is the line's.
     const printed = ordered.filter((s) => !s.field);
-    const fontSize = median((printed.length ? printed : ordered).map((s) => s.fontSize));
+    // Weighed by letters: a bullet an OCR text layer stretched over its
+    // picture doesn't make its line a heading.
+    const fontSize = median((printed.length ? printed : ordered).flatMap((s) => Array(Math.max(1, s.text.trim().length)).fill(s.fontSize)));
     return {
       text: joinSpans(ordered, rtl).replace(/\s+/g, " ").trim(),
       x: Math.min(...ordered.map((s) => s.x)),
