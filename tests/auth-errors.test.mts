@@ -101,6 +101,18 @@ for (const [what, answer] of [
 ] as [string, Answer][]) {
   check(`Sign-up, ${what}: the usual message`, (await formSays("signup", answer)) === NEUTRAL, await formSays("signup", answer));
 }
+// A gateway's error page or a timeout while a real account's email was being
+// sent is an answer too: only a request that got no answer at all is said.
+for (const [what, answer] of [
+  ["a gateway's error page", { status: 502, body: "<html><h1>Bad gateway</h1></html>" }],
+  ["a gateway timeout", { status: 504, body: {} }],
+  ["a page that isn't Supabase's", { status: 500, body: "<html>oops</html>" }],
+] as [string, Answer][]) {
+  check(`Forgot password, ${what}: the usual message`, (await formSays("reset", answer)) === NEUTRAL, await formSays("reset", answer));
+  check(`Sign-up, ${what}: the usual message`, (await formSays("signup", answer)) === NEUTRAL, await formSays("signup", answer));
+}
+check("log in, a gateway timeout: says to check the connection", (await formSays("login", { status: 504, body: {} })) === OFFLINE);
+
 // Refusals made before the email is looked up are said, in plain words.
 const before: [AuthMode, string, Answer, string][] = [
   ["login", "the security check ran out", goTrue(400, "captcha_failed", "captcha protection: request disallowed (timeout-or-duplicate)"), "The security check ran out. Wait for it to finish again, then try again."],
@@ -117,6 +129,13 @@ for (const [mode, what, answer, said] of before) {
 }
 check("an answer nobody planned for: a plain sentence, not Supabase's words",
   (await formSays("login", goTrue(400, "something_new", "internal: flow_state not found"))) === "Something went wrong. Try again.");
+
+// Sign-up's usual message also says what to do when no email comes.
+{
+  const { readFileSync } = await import("node:fs");
+  const form = readFileSync(new URL("../components/AuthForm.tsx", import.meta.url), "utf8");
+  check("sign-up's check-email message says to try again if nothing comes", (form.match(/Didn't get it\? Try again in a minute\./g) ?? []).length === 2);
+}
 
 // ---------- The new password page ----------
 const anon = createClient("http://127.0.0.1:54321", "anon-key", { auth: { persistSession: false, autoRefreshToken: false } }).auth;

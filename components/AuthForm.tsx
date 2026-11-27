@@ -98,8 +98,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
         // open another: their tester link brings it back.
         const checkEmail =
           redirectTo === "/redeem"
-            ? "Check your email to confirm your account. Then open your tester link again."
-            : "Check your email to confirm your account, then log in.";
+            ? "Check your email to confirm your account. Then open your tester link again. Didn't get it? Try again in a minute."
+            : "Check your email to confirm your account, then log in. Didn't get it? Try again in a minute.";
         if (error) {
           // An email that already has an account gets the same answer as a new one.
           if (!revealsAccount(error, "signup")) throw error;

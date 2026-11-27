@@ -103,9 +103,18 @@ const BEFORE_LOOKUP = new Set([
  */
 export function revealsAccount(err: unknown, mode: AuthMode): boolean {
   if (!(err instanceof Error) || mode === "login") return false;
-  const { status, code } = err as { status?: number; code?: string };
+  const { code } = err as { status?: number; code?: string };
   if (mode === "signup" && (code === "user_already_exists" || /already registered/i.test(err.message))) return true;
-  return typeof status === "number" && status > 0 && !unreachable(err) && !BEFORE_LOOKUP.has(code ?? "");
+  // Only a request that never got an answer is said as such: a gateway's
+  // error page or a timeout while a real account's email was sent is an
+  // answer too, and would tell.
+  return !noAnswer(err) && !BEFORE_LOOKUP.has(code ?? "");
+}
+
+/** The request got no answer at all: the browser's fetch failed (supabase-js gives status 0). */
+function noAnswer(err: Error): boolean {
+  const { status } = err as { status?: number };
+  return (err.name === "AuthRetryableFetchError" && !status) || /^(Failed to fetch|Load failed|NetworkError)/i.test(err.message);
 }
 
 const PASSWORD_RULE = `Use ${PASSWORD_HINT.charAt(0).toLowerCase()}${PASSWORD_HINT.slice(1)}`;
