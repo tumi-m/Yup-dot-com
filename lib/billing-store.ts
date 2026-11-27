@@ -54,17 +54,21 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       await admin.from("billing_events").delete().eq("id", key);
     },
     async getRow(userId) {
-      const [{ data, error }, start] = await Promise.all([
+      const [{ data, error }, start, period] = await Promise.all([
         admin.from("profiles").select(COLUMNS).eq("id", userId).maybeSingle(),
         admin.from("subscription_starts").select("authorization_hash").eq("user_id", userId).maybeSingle(),
+        admin.from("subscription_periods").select("reference").eq("user_id", userId).maybeSingle(),
       ]);
       fail("read profile", error);
       // Without the table (migration not run yet) no first charge is waiting:
       // renewals and cancels go on, and a new subscription's first charge
       // fails (so Paystack sends it again) until it is run.
       if (!MISSING_TABLE.has(start.error?.code)) fail("read subscription start", start.error);
+      // Without it (migration not run yet) no refund ends a subscription period.
+      if (MISSING_TABLE.has(period.error?.code)) missingTable("subscription_periods");
+      else fail("read subscription period", period.error);
       if (!data) return null;
-      return { ...(data as BillingRow), start_authorization: start.data?.authorization_hash ?? null };
+      return { ...(data as BillingRow), start_authorization: start.data?.authorization_hash ?? null, period_reference: period.data?.reference ?? null };
     },
     async findUserId(by) {
       const [column, value] = by.subscriptionCode
@@ -82,19 +86,19 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
         plan: start.plan,
         authorization_hash: start.card,
         amount: start.amount,
+        reason: start.reason ?? "second",
       });
       // Without the table (migration not run yet) the charge is still not
       // applied, and the log line names it for a refund.
       if (MISSING_TABLE.has(error?.code)) return missingTable("duplicate_subscription_starts");
       fail("record second subscription", error);
     },
-    async findDuplicateStart(userId: string, plan: PaidPlanId, card: string) {
+    async findDuplicateStart(userId: string, plan: PaidPlanId) {
       const { data, error } = await admin
         .from("duplicate_subscription_starts")
         .select("reference")
         .eq("user_id", userId)
         .eq("plan", plan)
-        .eq("authorization_hash", card)
         .is("subscription_code", null)
         .order("created_at", { ascending: true })
         .limit(1);
@@ -103,7 +107,7 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       return (data?.[0]?.reference as string) ?? null;
     },
     async isDuplicateStart(reference: string) {
-      const { data, error } = await admin.from("duplicate_subscription_starts").select("reference").eq("reference", reference).limit(1);
+      const { data, error } = await admin.from("duplicate_subscription_starts").select("reference").eq("reference", reference).eq("reason", "second").limit(1);
       if (MISSING_TABLE.has(error?.code)) return false;
       fail("read second subscription", error);
       return !!data?.length;
@@ -117,7 +121,14 @@ export function supabaseBillingStore(admin: Admin = createAdminClient()): Billin
       fail("note stopped subscription", error);
     },
     async updateRow(userId, patch: BillingPatch) {
-      const { start_authorization: card, ...profile } = patch;
+      const { start_authorization: card, period_reference: periodRef, ...profile } = patch;
+      if (periodRef) {
+        const { error } = await admin
+          .from("subscription_periods")
+          .upsert({ user_id: userId, reference: periodRef, updated_at: new Date().toISOString() });
+        if (MISSING_TABLE.has(error?.code)) missingTable("subscription_periods");
+        else fail("record subscription period", error);
+      }
       // The card first: a row the profile shows waiting always has it.
       if (card !== undefined) {
         const starts = admin.from("subscription_starts");

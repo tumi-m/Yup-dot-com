@@ -4,7 +4,7 @@ import { siteUrl } from "@/lib/site";
 import { payOnceBlock, subscribeBlock } from "@/lib/billing-ui";
 import { billingContext, json } from "@/lib/billing-route";
 import { getPendingCheckout, savePendingCheckout } from "@/lib/billing-store";
-import { reusableCheckout } from "@/lib/billing-ui";
+import { checkoutStillOpen, reusableCheckout } from "@/lib/billing-ui";
 import { refuseCrossSite } from "@/lib/cross-site";
 import { PLANS, prepaidPrice, toSubunit } from "@/lib/plans";
 import {
@@ -14,6 +14,7 @@ import {
   initializeTransaction,
   newReference,
   planCodes,
+  verifyTransaction,
 } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
@@ -79,7 +80,11 @@ export async function POST(request: Request) {
       console.error("read checkout link failed", err);
       return null;
     });
-    if (reusableCheckout(pending, asked, new Date())) return json({ url: pending!.url, reference: pending!.reference });
+    if (reusableCheckout(pending, asked, new Date())) {
+      // Only while nobody has paid on it or been declined: then a new one.
+      const status = await verifyTransaction(paystack, pending!.reference).then((tx) => tx.status, () => null);
+      if (checkoutStillOpen(status)) return json({ url: pending!.url, reference: pending!.reference });
+    }
   }
 
   try {

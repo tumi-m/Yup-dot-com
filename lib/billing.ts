@@ -55,6 +55,12 @@ export interface BillingRow {
    * subscription.create must carry the same one.
    */
   start_authorization?: string | null;
+  /**
+   * From public.subscription_periods (not a profile column): the reference of
+   * the charge that paid the current subscription period. Only a full refund
+   * of that charge ends the period (applyRefund).
+   */
+  period_reference?: string | null;
   /** From public.tester_access (not a profile column), when the user has a row there. */
   tester?: TesterAccess | null;
 }
@@ -345,10 +351,14 @@ export interface BillingStore {
   getRow(userId: string): Promise<BillingRow | null>;
   findUserId(by: { customerCode?: string; subscriptionCode?: string }): Promise<string | null>;
   updateRow(userId: string, patch: BillingPatch): Promise<void>;
-  /** Keeps a second subscription's first charge, paid while the first was live, for the owner to refund. */
+  /**
+   * Keeps a subscription start whose subscription must not renew: a second
+   * one paid while the first was live (for the owner to refund), or one
+   * refunded before its subscription was created.
+   */
   recordDuplicateStart?(start: DuplicateStart): Promise<void>;
-  /** The reference of a kept second start for this account, plan and card whose subscription isn't stopped yet. */
-  findDuplicateStart?(userId: string, plan: PaidPlanId, card: string): Promise<string | null>;
+  /** The oldest kept start for this account and plan whose subscription isn't stopped yet. */
+  findDuplicateStart?(userId: string, plan: PaidPlanId): Promise<string | null>;
   /** Whether a reference is a kept second start (its refund changes nothing). */
   isDuplicateStart?(reference: string): Promise<boolean>;
   /** Notes the subscription stopped for a kept second start. */
@@ -364,14 +374,20 @@ export interface DuplicateStart {
   card: string | null;
   /** In cents. */
   amount: number;
+  /** "second": paid beside a live subscription, to refund. "refunded": refunded already. */
+  reason?: "second" | "refunded";
 }
 
 /** What the webhook asks Paystack itself. */
 export interface PaystackActions {
   /** A transaction as Paystack's verify answers it. */
   transaction(reference: string): Promise<Json>;
-  /** Stops a subscription renewing. */
+  /** Stops a subscription renewing. Stopping one that's stopped already succeeds. */
   disableSubscription(code: string, emailToken: string): Promise<void>;
+  /** A subscription as Paystack has it now (status, next_payment_date). */
+  subscription?(code: string): Promise<Json>;
+  /** The refunds made on a transaction so far. */
+  refunds?(reference: string): Promise<Json[]>;
 }
 
 export interface EventDeps {
@@ -508,6 +524,7 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
 
   const key = `charge:${tx.reference}`;
   if (!(await deps.store.claimEvent(key, "charge.success"))) return { status: "duplicate", key };
+  let startKey: string | null = null;
   try {
     const row = await deps.store.getRow(userId);
     if (!row) throw new Error(`No profile for ${userId}`);
@@ -516,8 +533,14 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     // the first was paid. Applying it would leave two subscriptions charging
     // every month. It is kept for the owner to refund, and its subscription
     // is stopped when its subscription.create comes. The event stays claimed.
-    if (sold?.mode === "subscription" && hasLiveSubscription(row, now)) {
-      await deps.store.recordDuplicateStart?.({ reference: tx.reference, userId, plan: kind.plan, card: cardOf(tx), amount });
+    // Two first charges at the same moment both read a row with nothing
+    // live: only one may start, the other is a second start. Keyed by the
+    // state they saw, so a later start (after this one ends) gets its own key.
+    startKey = sold?.mode === "subscription"
+      ? `start:${userId}:${row.subscription_status ?? "none"}:${row.current_period_end ?? "none"}:${row.paystack_subscription_code ?? "none"}`
+      : null;
+    if (sold?.mode === "subscription" && (hasLiveSubscription(row, now) || !(await deps.store.claimEvent(startKey!, "subscription.start")))) {
+      await deps.store.recordDuplicateStart?.({ reference: tx.reference, userId, plan: kind.plan, card: cardOf(tx), amount, reason: "second" });
       console.error(
         `Billing: a second ${kind.plan} subscription was paid while one is live (account ${userId}). ` +
           `Its charge ${tx.reference} wasn't applied: refund it in Paystack. Its subscription is stopped when Paystack creates it.`
@@ -568,6 +591,11 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
       // A new subscription renews a month after its first charge, whatever
       // an older, ended one ran to.
       patch.current_period_end = firstCharge ? end : later(row.current_period_end, end);
+      // The charge that paid this period: a first charge, or a renewal that
+      // moves the period on by more than a week. A second charge the same
+      // month (charged twice) leaves the one that paid it.
+      const moved = time(patch.current_period_end) - time(row.current_period_end);
+      if (firstCharge || Number.isNaN(moved) || moved > 7 * 24 * 60 * 60 * 1000) patch.period_reference = tx.reference;
       const st = row.subscription_status;
       if (firstCharge || st === null || st === "active" || st === "attention") {
         patch.subscription_status = "active";
@@ -584,6 +612,7 @@ export async function applyCharge(tx: Json, deps: EventDeps): Promise<EventResul
     return { status: "applied", userId, key };
   } catch (err) {
     await deps.store.releaseEvent(key);
+    if (startKey) await deps.store.releaseEvent(startKey);
     throw err;
   }
 }
@@ -691,10 +720,14 @@ export async function handlePaystackEvent(
       subscriptionChange(data, deps.store, () => ({
         subscription_status: statusOf(data.status) === "complete" ? "complete" : "cancelled",
       })),
-    "invoice.payment_failed": async () =>
-      subscriptionChange(data.subscription ?? {}, deps.store, (row) => (paidSince(data, row) ? null : { subscription_status: "attention" }), data.customer),
-    "invoice.update": async () =>
-      subscriptionChange(data.subscription ?? {}, deps.store, (row) => {
+    "invoice.payment_failed": async () => {
+      const failing = await stillFailing(data.subscription, deps);
+      return subscriptionChange(data.subscription ?? {}, deps.store, () => (failing ? { subscription_status: "attention" } : null), data.customer);
+    },
+    "invoice.update": async () => {
+      const unpaid = !(data.paid === true || data.status === "success") && data.subscription?.status === "attention";
+      const failing = unpaid && (await stillFailing(data.subscription, deps));
+      return subscriptionChange(data.subscription ?? {}, deps.store, (row) => {
         const sub = data.subscription ?? {};
         if (data.paid === true || data.status === "success") {
           return {
@@ -702,9 +735,10 @@ export async function handlePaystackEvent(
             current_period_end: later(row.current_period_end, sub.next_payment_date ?? null),
           };
         }
-        if (sub.status === "attention" && !paidSince(data, row)) return { subscription_status: "attention" };
+        if (failing) return { subscription_status: "attention" };
         return null;
-      }, data.customer),
+      }, data.customer);
+    },
   };
 
   const handler = handlers[type];
@@ -726,10 +760,13 @@ export async function handlePaystackEvent(
     if (known !== code) {
       const card = create ? cardOf(data) : null;
       const now = deps.now?.() ?? new Date();
-      // The subscription of a second start (see applyCharge): stopped, so it never renews.
-      if (create && plan && card && !(waitingForCode(row) && plan === row.subscription_plan && card === row.start_authorization)) {
-        const second = await deps.store.findDuplicateStart?.(userId, plan, card);
-        if (second) return await stopSecondSubscription(data, code, second, key, deps);
+      // A kept start's subscription (a second one paid beside this account's,
+      // or one refunded before it was created): stopped, so it never renews.
+      // Matched by this account's customer and the plan, whatever the card:
+      // the only harm in stopping one on this customer is to whoever pays it.
+      if (create && plan && !(waitingForCode(row) && plan === row.subscription_plan && card !== null && card === row.start_authorization)) {
+        const kept = await deps.store.findDuplicateStart?.(userId, plan);
+        if (kept) return await stopSecondSubscription(data, code, kept, key, deps);
       }
       const refused = unboundSubscription(create, row, plan ?? null, card, now);
       if (refused) {
@@ -764,11 +801,9 @@ async function stopSecondSubscription(data: Json, code: string, reference: strin
     await deps.store.releaseEvent(key);
     throw err;
   }
-  console.error(`Billing: stopped the second subscription ${code} (charge ${reference}) so it never renews. Refund ${reference} in Paystack.`);
+  console.error(`Billing: stopped subscription ${code} (kept start ${reference}) so it never renews. See duplicate_subscription_starts for whether it still needs a refund.`);
   return { status: "ignored", reason: "second subscription: stopped" };
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * A refund Paystack made (refund.processed). The refund policy gives money
@@ -793,7 +828,19 @@ export async function applyRefund(data: Json, deps: EventDeps): Promise<EventRes
   // The refund names only the payment: Paystack says what it was.
   const tx = await deps.paystack.transaction(reference);
   const paid = Number(tx.amount);
-  const refunded = Number(data.amount);
+  // Several partial refunds can add up to the whole payment: Paystack lists them.
+  let refunded = Number(data.amount) || 0;
+  if (deps.paystack.refunds) {
+    try {
+      const all = await deps.paystack.refunds(reference);
+      const total = (Array.isArray(all) ? all : [])
+        .filter((r) => !r?.status || r.status === "processed")
+        .reduce((sum, r) => sum + (Number(r?.amount) || 0), 0);
+      refunded = Math.max(refunded, total);
+    } catch (err) {
+      console.error("paystack refunds lookup failed; going by this refund alone", reference, err instanceof Error ? err.message : err);
+    }
+  }
   if (!(paid > 0) || !(refunded >= paid)) {
     console.info("paystack refund: partial, access unchanged", reference, refunded, paid);
     return { status: "ignored", reason: "partial refund: access unchanged" };
@@ -811,6 +858,14 @@ export async function applyRefund(data: Json, deps: EventDeps): Promise<EventRes
     // Refunded before its charge was applied (that webhook still on its
     // way): taking the charge's key means it never will be.
     if (await deps.store.claimEvent(`charge:${reference}`, "charge.success")) {
+      // A subscription's first charge: its subscription, created later, is stopped.
+      if (sold?.mode === "subscription") {
+        await deps.store.recordDuplicateStart?.({ reference, userId, plan: sold.plan, card: cardOf(tx), amount: paid, reason: "refunded" });
+        // The create finds the account by its customer, as the charge would have recorded it.
+        if (customerCode && !(await deps.store.findUserId({ customerCode }))) {
+          await deps.store.updateRow(userId, { paystack_customer_code: customerCode });
+        }
+      }
       return { status: "ignored", reason: "refunded before it was applied: it won't be" };
     }
     const row = await deps.store.getRow(userId);
@@ -826,23 +881,25 @@ export async function applyRefund(data: Json, deps: EventDeps): Promise<EventRes
       }
     } else if (meta.mode !== "once") {
       const plan = sold?.plan ?? deps.planForCode(planCodeOf(tx));
-      const paidAt = time(tx.paid_at);
-      const end = time(row.current_period_end);
-      // The charge that paid the current period: its month reaches the period's end.
-      const current = !!plan && plan === row.subscription_plan && !Number.isNaN(paidAt) && !Number.isNaN(end) &&
-        addMonths(new Date(paidAt), 1).getTime() >= end - DAY_MS;
+      // Only the charge recorded as paying the current period (applyCharge)
+      // ends it: a renewal doesn't say which subscription it came from, so a
+      // second charge the same month, or any other, changes no access.
+      const current = !!plan && plan === row.subscription_plan && !!row.period_reference && row.period_reference === reference;
       if (current) {
         patch = { current_period_end: iso(now), subscription_status: "cancelled" };
         // One that won't renew (cancelled already) isn't charged again: nothing to stop.
         const renews = row.subscription_status === "active" || row.subscription_status === "attention";
         if (renews && row.paystack_subscription_code && row.paystack_email_token) {
           stop = { code: row.paystack_subscription_code, token: row.paystack_email_token };
+        } else if (renews && !row.paystack_subscription_code && sold) {
+          // Its subscription isn't created yet: stop it when it is.
+          await deps.store.recordDuplicateStart?.({ reference, userId, plan: sold.plan, card: cardOf(tx), amount: paid, reason: "refunded" });
         }
       }
     }
     if (!patch) {
-      console.info("paystack refund: an earlier charge, access unchanged", reference);
-      return { status: "ignored", reason: "refund of an earlier charge: access unchanged" };
+      console.info("paystack refund: not the charge paying for what the account has now, access unchanged; change it by hand if you mean to", reference);
+      return { status: "ignored", reason: "refund of another charge: access unchanged" };
     }
     if (stop) await deps.paystack.disableSubscription(stop.code, stop.token);
     await deps.store.updateRow(userId, patch);
@@ -854,15 +911,23 @@ export async function applyRefund(data: Json, deps: EventDeps): Promise<EventRes
 }
 
 /**
- * A failed invoice whose period the row has already been paid past: Paystack
- * delivered it late (a webhook it retried), after a renewal that went
- * through. Marking the account past due then would tell a paying customer
- * their payment failed. Without a period_end it counts, as before.
+ * Whether a subscription a failed invoice names is still past due. Paystack
+ * retries a webhook for days, so a failure can arrive after the renewal went
+ * through (the card was updated), and would tell a paying customer their
+ * payment failed. So Paystack is asked how the subscription stands now; when
+ * it can't be asked, or doesn't say, the failure counts, as a real one must.
  */
-function paidSince(invoice: Json, row: BillingRow): boolean {
-  const end = time(typeof invoice.period_end === "string" ? invoice.period_end : null);
-  const paidTo = time(row.current_period_end);
-  return !Number.isNaN(end) && !Number.isNaN(paidTo) && end <= paidTo;
+async function stillFailing(sub: Json | undefined, deps: EventDeps): Promise<boolean> {
+  const code = typeof sub?.subscription_code === "string" ? sub.subscription_code : null;
+  if (!code || !deps.paystack?.subscription) return true;
+  try {
+    const now = await deps.paystack.subscription(code);
+    const status = statusOf(now?.status);
+    return status === null || status === "attention";
+  } catch (err) {
+    console.error("paystack subscription lookup failed; counting the failure", code, err instanceof Error ? err.message : err);
+    return true;
+  }
 }
 
 function statusOf(s: unknown): SubscriptionStatus | null {
@@ -903,16 +968,15 @@ function unboundSubscription(
     if (card !== null && card === row.start_authorization) return null;
     // Paystack's create carries the card it charges (data.authorization). A
     // distinct reason, so the account's own create, if it ever came without
-    // it, can be found in the logs and its code stored by hand.
-    return { status: "ignored", reason: "not paid with its first charge's card" };
+    // it, can be found in the logs and its code stored by hand. Sent again:
+    // it may be a second checkout's, whose charge is still on its way.
+    return { status: "retry", reason: "not paid with its first charge's card" };
   }
-  // Paid with the card this account's subscription started with, while that
-  // one is live: a second checkout's subscription whose first charge hasn't
-  // come yet. It is sent again, and stopped once that charge is kept.
-  if (!waiting && card !== null && card === row.start_authorization && plan === row.subscription_plan && hasLiveSubscription(row, now)) {
-    return { status: "retry", reason: "maybe a second subscription, its charge still coming" };
-  }
-  if (waiting || hasLiveSubscription(row, now)) return { status: "ignored", reason: "not this account's subscription" };
+  // While this account has a subscription, any other create on its customer
+  // may be a second checkout's (any card) whose first charge hasn't come
+  // yet: it is sent again, and stopped once that charge is kept. One that
+  // never turns out to be is dropped by Paystack after its retries.
+  if (waiting || hasLiveSubscription(row, now)) return { status: "retry", reason: "not this account's subscription, unless a second start's charge is still coming" };
   // No first charge here is waiting for a code: it may still be on its way.
   return { status: "retry", reason: "no first charge waiting for it" };
 }

@@ -1,7 +1,7 @@
 import { handlePaystackEvent, verifyPaystackSignature } from "@/lib/billing";
 import { isAdminConfigured, supabaseBillingStore } from "@/lib/billing-store";
 import { json } from "@/lib/billing-route";
-import { disableSubscription, planForCode, verifyTransaction } from "@/lib/paystack";
+import { disableSubscription, fetchSubscription, listRefunds, planForCode, verifyTransaction } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
 
@@ -36,10 +36,13 @@ export async function POST(request: Request) {
       store: supabaseBillingStore(),
       planForCode: (c) => planForCode(c),
       checkoutSecret: secret,
-      // Refunds look the payment up; a second subscription is stopped.
+      // Refunds look the payment up, a second subscription is stopped, and a
+      // failed invoice is checked against the subscription as it stands now.
       paystack: {
         transaction: (reference) => verifyTransaction(paystack, reference),
         disableSubscription: (code, token) => disableSubscription(paystack, code, token),
+        subscription: (code) => fetchSubscription(paystack, code),
+        refunds: (reference) => listRefunds(paystack, reference),
       },
     });
     if (result.status === "retry") {

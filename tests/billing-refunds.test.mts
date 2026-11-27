@@ -7,7 +7,7 @@
 // events come.
 import {
   addMonths, applyCharge, checkoutMetadata, handlePaystackEvent, resolveAccess, summarize,
-  type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
+  type BillingPatch, type BillingRow, type BillingStore, type DuplicateStart, type EventDeps,
 } from "../lib/billing.ts";
 
 // The handler logs what it leaves unchanged: not this test's output.
@@ -40,8 +40,13 @@ function setup() {
       return (by.customerCode && by.customerCode === row.paystack_customer_code) || (by.subscriptionCode && by.subscriptionCode === row.paystack_subscription_code) ? USER : null;
     },
     async updateRow(_id, p: BillingPatch) { const { plan: _p, ...rest } = p; Object.assign(row, rest); },
-    async isDuplicateStart() { return false; },
+    async isDuplicateStart(r) { return kept.some((k) => k.reference === r && k.reason !== "refunded"); },
+    async recordDuplicateStart(d) { kept.push({ ...d, code: null }); },
+    async findDuplicateStart(u, plan) { return kept.find((k) => k.userId === u && k.plan === plan && !k.code)?.reference ?? null; },
+    async resolveDuplicateStart(r, code) { kept.find((k) => k.reference === r)!.code = code; },
   };
+  const kept: (DuplicateStart & { code: string | null })[] = [];
+  const refundsMade = new Map<string, number[]>();
   // Paystack: the transactions it knows, and the subscriptions it was asked to stop.
   const transactions = new Map<string, Record<string, unknown>>();
   const stopped: string[] = [];
@@ -55,6 +60,7 @@ function setup() {
         return tx;
       },
       async disableSubscription(code, token) { stopped.push(`${code}/${token}`); },
+      async refunds(reference) { return (refundsMade.get(reference) ?? []).map((amount) => ({ amount, status: "processed" })); },
     },
   };
   const deliver = (event: string, data: unknown) => {
@@ -66,10 +72,12 @@ function setup() {
     transactions.set(tx.reference as string, tx);
     return apply ? deliver("charge.success", tx) : null;
   }
-  const refund = (reference: string, amount: number, extra: Record<string, unknown> = {}) =>
-    deliver("refund.processed", { status: "processed", transaction_reference: reference, amount: String(amount), currency: "ZAR", customer: { email: "u@x.co" }, ...extra });
+  const refund = (reference: string, amount: number, extra: Record<string, unknown> = {}) => {
+    if (!extra.status || extra.status === "processed") refundsMade.set(reference, [...(refundsMade.get(reference) ?? []), amount]);
+    return deliver("refund.processed", { status: "processed", transaction_reference: reference, amount: String(amount), currency: "ZAR", customer: { email: "u@x.co" }, ...extra });
+  };
   const plan = () => resolveAccess({ own: row, emailVerified: true, teamOwners: [] }, clock).plan;
-  return { row, deps, deliver, pay, refund, plan, stopped, at: (iso: string) => (clock = new Date(iso)) };
+  return { row, deps, deliver, pay, refund, plan, stopped, kept, at: (iso: string) => (clock = new Date(iso)) };
 }
 const ref = (c: string) => "pw_" + c.repeat(24);
 const once = (reference: string, plan: "pro" | "team", months: 1 | 12, amount: number, paidAt: string) => ({
@@ -185,6 +193,60 @@ const firstCharge = (reference: string, paidAt: string) => ({
   check("a refund not yet processed changes nothing", pending.status === "ignored" && s.plan() === "pro");
   const after = await s.refund(ref("j"), 4900);
   check("and once processed it applies", after.status === "applied" && s.plan() === "free", after);
+}
+
+// ---------- Charged twice: two renewals the same month, the extra refunded ----------
+// A renewal doesn't say which subscription it came from: refunding the
+// extra one ended access and stopped the real subscription. Only the charge
+// recorded as paying the current period ends it now.
+{
+  const s = setup();
+  await s.pay(firstCharge(ref("k"), "2026-11-01T08:00:00Z"));
+  await s.deliver("subscription.create", {
+    subscription_code: "SUB_k", email_token: "tok_k", status: "active", plan: { plan_code: "PLN_pro" }, customer, authorization, next_payment_date: "2026-12-01T08:00:00Z",
+  });
+  s.at("2026-12-01T09:00:00Z");
+  await s.pay({ status: "success", reference: "T_k1", amount: 4900, currency: "ZAR", paid_at: "2026-12-01T08:00:00Z", customer, plan: { plan_code: "PLN_pro" }, metadata: "" });
+  await s.pay({ status: "success", reference: "T_k2", amount: 4900, currency: "ZAR", paid_at: "2026-12-01T08:05:00Z", customer, plan: { plan_code: "PLN_pro" }, metadata: "" });
+  s.at("2026-12-03T09:00:00Z");
+  const extra = await s.refund("T_k2", 4900);
+  check("refunding the extra charge changes no access and stops nothing", extra.status === "ignored" && s.plan() === "pro" && s.row.subscription_status === "active" && s.stopped.length === 0, { extra, row: s.row, stopped: s.stopped });
+}
+
+// ---------- Refunded before Paystack created the subscription ----------
+{
+  const s = setup();
+  await s.pay(firstCharge(ref("l"), "2026-11-01T08:00:00Z"));
+  s.at("2026-11-02T08:00:00Z");
+  const r = await s.refund(ref("l"), 4900);
+  check("the first charge refunded before its create: access ends", r.status === "applied" && s.plan() === "free", r);
+  const c = await s.deliver("subscription.create", {
+    subscription_code: "SUB_l", email_token: "tok_l", status: "active", plan: { plan_code: "PLN_pro" }, customer, authorization, next_payment_date: "2026-12-01T08:00:00Z",
+  });
+  check("…and its subscription is stopped when Paystack creates it", c.status === "ignored" && JSON.stringify(s.stopped) === '["SUB_l/tok_l"]', { c, stopped: s.stopped });
+  check("…kept as refunded, so it isn't listed as one to refund", s.kept[0]?.reason === "refunded" && s.kept[0]?.code === "SUB_l");
+}
+{
+  const s = setup();
+  await s.pay(firstCharge(ref("m"), "2026-11-01T08:00:00Z"), false);
+  await s.refund(ref("m"), 4900);
+  const late = await s.deliver("charge.success", firstCharge(ref("m"), "2026-11-01T08:00:00Z"));
+  const c = await s.deliver("subscription.create", {
+    subscription_code: "SUB_m", email_token: "tok_m", status: "active", plan: { plan_code: "PLN_pro" }, customer, authorization, next_payment_date: "2026-12-01T08:00:00Z",
+  });
+  check("refunded before its charge was applied: no Pro, and its subscription is stopped",
+    late.status === "duplicate" && s.plan() === "free" && JSON.stringify(s.stopped) === '["SUB_m/tok_m"]', { late, c, stopped: s.stopped });
+}
+
+// ---------- Partial refunds that add up to the whole payment ----------
+{
+  const s = setup();
+  await s.pay(once(ref("n"), "pro", 1, 4900, "2026-11-01T08:00:00Z"));
+  s.at("2026-11-02T08:00:00Z");
+  const half = await s.refund(ref("n"), 2400, { id: 1 });
+  check("half refunded: access unchanged", half.status === "ignored" && s.plan() === "pro");
+  const rest = await s.refund(ref("n"), 2500, { id: 2 });
+  check("the rest refunded: together a full refund, the month comes off", rest.status === "applied" && s.plan() === "free", rest);
 }
 
 // The month of a term: the same calendar months it was bought for.

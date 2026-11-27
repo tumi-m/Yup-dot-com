@@ -231,6 +231,7 @@ select rlstest.expect('anon: write sample_cache',       'anon', null, 'insert in
 select rlstest.expect('anon: read subscription_starts', 'anon', null, 'select count(*) from public.subscription_starts', 'denied');
 select rlstest.expect('anon: read pending_checkouts',   'anon', null, 'select count(*) from public.pending_checkouts', 'denied');
 select rlstest.expect('anon: read duplicate_subscription_starts', 'anon', null, 'select count(*) from public.duplicate_subscription_starts', 'denied');
+select rlstest.expect('anon: read subscription_periods', 'anon', null, 'select count(*) from public.subscription_periods', 'denied');
 select rlstest.expect('anon: rpc own_plan',             'anon', null, format('select public.own_plan(%L)', :'B'), 'denied');
 select rlstest.expect('anon: rpc effective_plan',       'anon', null, format('select public.effective_plan(%L)', :'B'), 'denied');
 select rlstest.expect('anon: rpc consume_usage',        'anon', null, 'select public.consume_usage($q$x$q$, $q$y$q$, 100, $q$day$q$)', 'denied');
@@ -288,6 +289,8 @@ select rlstest.expect('A: read checkout links',        'authenticated', :'A', 's
 select rlstest.expect('A: plant a checkout link',      'authenticated', :'A', format('insert into public.pending_checkouts (user_id, request, reference, url) values (%L, %L, %L, %L)', :'A', 'pro:subscription', 'pw_' || repeat('a', 24), 'https://evil.example/pay'), 'denied');
 select rlstest.expect('A: read second subscriptions',  'authenticated', :'A', 'select count(*) from public.duplicate_subscription_starts', 'denied');
 select rlstest.expect('A: clear a second subscription', 'authenticated', :'A', 'delete from public.duplicate_subscription_starts', 'denied');
+select rlstest.expect('A: read subscription periods',  'authenticated', :'A', 'select count(*) from public.subscription_periods', 'denied');
+select rlstest.expect('A: pick the period charge',     'authenticated', :'A', format('insert into public.subscription_periods (user_id, reference) values (%L, %L)', :'A', 'T_x'), 'denied');
 select rlstest.expect('A: rpc effective_plan',          'authenticated', :'A', format('select public.effective_plan(%L)', :'A'), 'denied');
 select rlstest.expect('A: rpc refund_usage',            'authenticated', :'A', format('select public.refund_usage(%L, %L, %L)', 'u:' || :'A', 'ai', 'day'), 'denied');
 select rlstest.expect('A: rpc consume_usage',           'authenticated', :'A', 'select public.consume_usage($q$x$q$, $q$y$q$, 100, $q$day$q$)', 'denied');
@@ -366,6 +369,7 @@ select rlstest.expect('server: writes sample_cache',    'service_role', null, 'i
 select rlstest.expect('server: records a start',      'service_role', null, format('insert into public.subscription_starts (user_id, authorization_hash) values (%L, %L)', :'B', repeat('b', 64)), 'rows:1');
 select rlstest.expect('server: keeps a checkout link', 'service_role', null, format('insert into public.pending_checkouts (user_id, request, reference, url) values (%L, %L, %L, %L)', :'B', 'pro:subscription', 'pw_' || repeat('b', 24), 'https://checkout.paystack.com/x'), 'rows:1');
 select rlstest.expect('server: keeps a second start',  'service_role', null, format('insert into public.duplicate_subscription_starts (reference, user_id, plan, authorization_hash, amount) values (%L, %L, %L, %L, 4900)', 'pw_' || repeat('c', 24), :'B', 'pro', repeat('c', 64)), 'rows:1');
+select rlstest.expect('server: records a period charge', 'service_role', null, format('insert into public.subscription_periods (user_id, reference) values (%L, %L)', :'B', 'T_renew'), 'rows:1');
 select rlstest.expect('server: 3rd team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm3@example.com'), 'rows:1');
 select rlstest.expect('server: 4th team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm4@example.com'), 'rows:1');
 select rlstest.expect('server: 5th team member',        'service_role', null, format('insert into public.team_members (owner_id, email) values (%L, %L)', :'B', 'm5@example.com'), 'error:P0001:');

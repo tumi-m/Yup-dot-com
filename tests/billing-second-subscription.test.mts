@@ -44,10 +44,10 @@ function setup() {
     },
     async updateRow(_id, p: BillingPatch) { const { plan: _p, ...rest } = p; Object.assign(row, rest); },
     async recordDuplicateStart(d) { seconds.set(d.reference, { ...d, code: null }); },
-    async findDuplicateStart(userId, plan, card) {
-      return [...seconds.values()].find((d) => d.userId === userId && d.plan === plan && d.card === card && !d.code)?.reference ?? null;
+    async findDuplicateStart(userId, plan) {
+      return [...seconds.values()].find((d) => d.userId === userId && d.plan === plan && !d.code)?.reference ?? null;
     },
-    async isDuplicateStart(reference) { return seconds.has(reference); },
+    async isDuplicateStart(reference) { return seconds.get(reference)?.reason !== "refunded" && seconds.has(reference); },
     async resolveDuplicateStart(reference, code) { seconds.get(reference)!.code = code; },
   };
   const stopped: string[] = [];
@@ -133,14 +133,35 @@ const renewal = (reference: string, paidAt: string) => ({ status: "success", ref
   check("its Team subscription is stopped", JSON.stringify(s.stopped) === '["SUB_T/tok_SUB_T"]' && s.row.paystack_subscription_code === "SUB_P", s.stopped);
 }
 
-// ---------- Someone else's subscription on this customer isn't touched ----------
+// ---------- The second tab paid with another card, its create before its charge ----------
+// The create used to be ignored for good (Paystack doesn't send an ignored
+// event again), so the kept charge's subscription went on renewing. The rule
+// now: while this account has a subscription, any other create on its
+// customer is sent again until a kept start on its plan stops it (any card),
+// or Paystack gives up on it.
 {
   const s = setup();
-  await s.deliver("charge.success", first(ref("3"), "2026-11-01T08:00:00Z"));
-  await s.deliver("charge.success", first(ref("4"), "2026-11-01T08:01:00Z"));
-  await s.deliver("subscription.create", create("SUB_OWN", "2026-12-01T08:00:00Z"));
-  const other = await s.deliver("subscription.create", create("SUB_OTHER", "2026-12-01T08:00:00Z", "AUTH_someone_else"));
-  check("a create paid with another card is not stopped", other.status === "ignored" && s.stopped.length === 0, other);
+  await s.deliver("charge.success", first(ref("3"), "2026-11-01T08:00:00Z", "AUTH_X"));
+  await s.deliver("subscription.create", create("SUB_OWN", "2026-12-01T08:00:00Z", "AUTH_X"));
+  const early = await s.deliver("subscription.create", create("SUB_Y", "2026-12-01T08:02:00Z", "AUTH_Y"));
+  check("another card's create while this subscription is live: sent again, not dropped", early.status === "retry" && s.stopped.length === 0, early);
+  const charge = await s.deliver("charge.success", first(ref("4"), "2026-11-01T08:02:00Z", "AUTH_Y"));
+  const again = await s.deliver("subscription.create", create("SUB_Y", "2026-12-01T08:02:00Z", "AUTH_Y"));
+  check("…its charge is kept, and the create sent again is stopped",
+    charge.status === "ignored" && again.status === "ignored" && JSON.stringify(s.stopped) === '["SUB_Y/tok_SUB_Y"]' && s.row.paystack_subscription_code === "SUB_OWN", { charge, again, stopped: s.stopped });
+  const stranger = await s.deliver("subscription.create", create("SUB_Z", "2026-12-01T08:05:00Z", "AUTH_Z"));
+  check("a create with no kept start for it is never stopped (sent again until Paystack gives up)", stranger.status === "retry" && s.stopped.length === 1, stranger);
+}
+
+// ---------- Both first charges processed at the same moment ----------
+{
+  const s = setup();
+  const [x, y] = await Promise.all([
+    s.deliver("charge.success", first(ref("c1".slice(0, 1)), "2026-11-01T08:00:00Z")),
+    s.deliver("charge.success", first(ref("d"), "2026-11-01T08:00:01Z")),
+  ]);
+  const statuses = [x.status, y.status].sort();
+  check("two first charges at once: one starts the subscription, the other is kept", JSON.stringify(statuses) === '["applied","ignored"]' && s.seconds.size === 1, { x, y });
 }
 
 // ---------- Paystack can't stop it right now ----------
@@ -157,6 +178,22 @@ const renewal = (reference: string, paidAt: string) => ({ status: "success", ref
   s.deps.paystack!.disableSubscription = realStop;
   const retried = await s.deliver("subscription.create", create("SUB_6", "2026-12-01T08:01:00Z"));
   check("…and the retry stops it", retried.status === "ignored" && JSON.stringify(s.stopped) === '["SUB_6/tok_SUB_6"]', s.stopped);
+}
+
+// ---------- Stopped in Paystack, but noting it failed ----------
+{
+  const s = setup();
+  await s.deliver("charge.success", first(ref("p"), "2026-11-01T08:00:00Z"));
+  await s.deliver("charge.success", first(ref("q"), "2026-11-01T08:01:00Z"));
+  await s.deliver("subscription.create", create("SUB_P1", "2026-12-01T08:00:00Z"));
+  const note = s.deps.store.resolveDuplicateStart!;
+  s.deps.store.resolveDuplicateStart = async () => { throw new Error("database down"); };
+  let threw = false;
+  try { await s.deliver("subscription.create", create("SUB_Q", "2026-12-01T08:01:00Z")); } catch { threw = true; }
+  s.deps.store.resolveDuplicateStart = note;
+  // Paystack's stop is idempotent (lib/paystack.ts treats "not active" as done), so the retry stops it again and notes it.
+  const retried = await s.deliver("subscription.create", create("SUB_Q", "2026-12-01T08:01:00Z"));
+  check("saving fails after the stop: sent again, stopped again, noted", threw && retried.status === "ignored" && s.seconds.get(ref("q"))?.code === "SUB_Q", { threw, retried });
 }
 
 // ---------- The second tab's return page ----------

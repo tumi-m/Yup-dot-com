@@ -207,6 +207,15 @@ export function reusableCheckout(
   return age >= 0 && age < CHECKOUT_REUSE_MS && /^https:\/\//.test(pending.url) && /^pw_[0-9a-f]{24}$/.test(pending.reference);
 }
 
+/**
+ * Whether Paystack's status for a kept checkout says it can still be used:
+ * not paid on and not declined ("abandoned" until someone pays, "ongoing"
+ * while they do). Anything else, an unknown answer too, gets a new link.
+ */
+export function checkoutStillOpen(status: unknown): boolean {
+  return status === "abandoned" || status === "ongoing";
+}
+
 export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "second-subscription" | "retry" | "unknown";
 
 /**

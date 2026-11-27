@@ -125,7 +125,24 @@ export function verifyTransaction(cfg: PaystackConfig, reference: string) {
  * (both come with subscription.create).
  */
 export async function disableSubscription(cfg: PaystackConfig, code: string, emailToken: string): Promise<void> {
-  await call<unknown>(cfg, "POST", "/subscription/disable", { code, token: emailToken });
+  try {
+    await call<unknown>(cfg, "POST", "/subscription/disable", { code, token: emailToken });
+  } catch (err) {
+    // Stopped already (a retry after the stop went through but saving it
+    // didn't): done, not an error that would make the event fail for ever.
+    if (err instanceof PaystackError && err.status < 500 && /not active|inactive|already|cancell?ed|disabled/i.test(err.message)) return;
+    throw err;
+  }
+}
+
+/** A subscription as Paystack has it now: status ("active", "attention", …) and next_payment_date. */
+export function fetchSubscription(cfg: PaystackConfig, code: string) {
+  return call<Record<string, unknown>>(cfg, "GET", `/subscription/${encodeURIComponent(code)}`);
+}
+
+/** The refunds made on a transaction (by its reference). */
+export function listRefunds(cfg: PaystackConfig, reference: string) {
+  return call<Record<string, unknown>[]>(cfg, "GET", `/refund?transaction=${encodeURIComponent(reference)}`);
 }
 
 /** Hosted page where the customer updates their card or cancels. */

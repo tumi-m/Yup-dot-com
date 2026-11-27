@@ -138,8 +138,9 @@ function view(r: BillingRow, at = now) {
 
 // A failed renewal's event delivered late (Paystack retries a webhook for
 // days), after the card was updated and the renewal paid, marked a paying
-// customer past due: "Payment failed. Update your card". Either order now
-// ends active.
+// customer past due: "Payment failed. Update your card". Before marking it,
+// the webhook now asks Paystack how the subscription stands; when it can't,
+// the failure counts, so a real one is never missed.
 {
   function setup() {
     const db = new Map<string, BillingRow>([[USER, row({ subscription_status: null, current_period_end: null, paystack_subscription_code: null, paystack_email_token: null })]]);
@@ -157,12 +158,24 @@ function view(r: BillingRow, at = now) {
       async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
     };
     let clock = new Date("2026-11-01T08:00:00Z");
-    const deps: EventDeps = { store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock };
+    // Paystack's subscription now: set per case ("down" throws).
+    const paystackSays = { status: "attention" as string };
+    const deps: EventDeps = {
+      store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock,
+      paystack: {
+        async transaction() { throw new Error("not used"); },
+        async disableSubscription() {},
+        async subscription() {
+          if (paystackSays.status === "down") throw new Error("Payment provider unreachable.");
+          return { status: paystackSays.status, next_payment_date: "2027-01-03T08:00:00.000Z" };
+        },
+      },
+    };
     const deliver = (event: string, data: unknown) => {
       const raw = JSON.stringify({ event, data });
       return handlePaystackEvent(JSON.parse(raw), raw, deps);
     };
-    return { db, deliver, at: (iso: string) => (clock = new Date(iso)), deps };
+    return { db, deliver, at: (iso: string) => (clock = new Date(iso)), deps, paystackSays };
   }
   const customer = { customer_code: "CUS_u", email: "u@x.co" };
   const authorization = { authorization_code: "AUTH_u" };
@@ -201,6 +214,7 @@ function view(r: BillingRow, at = now) {
     const s = await started();
     s.at("2026-12-03T09:00:00Z");
     await s.deliver("charge.success", renewal);
+    s.paystackSays.status = "active";
     const late = await s.deliver("invoice.payment_failed", failedInvoice);
     const lateUpdate = await s.deliver("invoice.update", { ...failedInvoice, invoice_code: "INV_1" });
     const v = view(s.db.get(USER)!, new Date("2026-12-03T09:00:00Z"));
@@ -209,14 +223,20 @@ function view(r: BillingRow, at = now) {
       { late, lateUpdate, status: v.billing.subscription?.status });
     check("…so Billing doesn't say the payment failed", JSON.stringify(planStatus(v.billing)) === JSON.stringify(["Renews 3 Jan 2027"]), planStatus(v.billing));
   }
-  // Without a period_end, a failure counts as before.
+  // Paystack can't be asked: the failure counts, as before.
   {
     const s = await started();
-    s.at("2026-12-03T09:00:00Z");
-    await s.deliver("charge.success", renewal);
-    const { period_start: _a, period_end: _b, ...bare } = failedInvoice;
-    await s.deliver("invoice.payment_failed", bare);
-    check("a failure without its period still marks it past due", s.db.get(USER)!.subscription_status === "attention");
+    s.at("2026-12-01T09:00:00Z");
+    s.paystackSays.status = "down";
+    await s.deliver("invoice.payment_failed", failedInvoice);
+    check("Paystack can't be asked: a failure still marks it past due", s.db.get(USER)!.subscription_status === "attention");
+  }
+  // Without the lookup at all (no Paystack actions), as before too.
+  {
+    const s = await started();
+    delete (s.deps as { paystack?: unknown }).paystack;
+    await s.deliver("invoice.payment_failed", failedInvoice);
+    check("no lookup: a failure marks it past due", s.db.get(USER)!.subscription_status === "attention");
   }
 }
 

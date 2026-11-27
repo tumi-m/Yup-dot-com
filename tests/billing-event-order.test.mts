@@ -73,7 +73,7 @@ const create = (code: string) => ({
   const cancelData = { subscription_code: "SUB_B", status: "non-renewing", customer };
   const cancel = await s.deliver("subscription.not_renew", cancelData);
   check("cancel before create: sent again later, nothing written or kept", cancel.status === "retry" &&
-    s.row().subscription_status === "active" && s.row().paystack_subscription_code === null && s.events.size === 1, { cancel, row: s.row() });
+    s.row().subscription_status === "active" && s.row().paystack_subscription_code === null && [...s.events].filter((k) => !k.startsWith("start:")).length === 1, { cancel, row: s.row() });
   const late = await s.deliver("subscription.create", create("SUB_B"));
   const again = await s.deliver("subscription.not_renew", cancelData);
   check("the create, then the cancel sent again: non-renewing", late.status === "applied" && again.status === "applied" &&
@@ -151,7 +151,7 @@ for (const [event, data, status] of [
   check("event for another subscription: ignored", stale.status === "ignored" && s.row().subscription_status === "active" &&
     s.row().paystack_subscription_code === "SUB_B", stale);
   const again = await s.deliver("subscription.disable", data);
-  check("…and looked at again if delivered again", again.status === "ignored" && s.events.size === 2, { again, events: [...s.events] });
+  check("…and looked at again if delivered again", again.status === "ignored" && [...s.events].filter((k) => !k.startsWith("start:")).length === 2, { again, events: [...s.events] });
 }
 
 if (failed) {

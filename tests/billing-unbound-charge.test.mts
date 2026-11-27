@@ -126,7 +126,7 @@ const teamSub = {
       subscription_code: `SUB_att_${plan}`, status: "active", email_token: "tok_att", next_payment_date: "2026-11-04T08:00:00.000Z",
       plan: { plan_code: plan }, customer: { customer_code: "CUS_v", email: "v@x.co" },
     });
-    check(`foreign subscription.create (${plan}): ignored, the victim's subscription stays`, r.status === "ignored" &&
+    check(`foreign subscription.create (${plan}): sent again, never taken; the victim's subscription stays`, r.status === "retry" &&
       s.get(V).paystack_subscription_code === "SUB_v" && s.get(V).subscription_plan === "team" &&
       s.get(V).paystack_email_token === "tok_v" && ownPlan(s.get(V), clock) === "team", { r, row: s.get(V) });
   }
@@ -216,7 +216,7 @@ const teamSub = {
     subscription_code: "SUB_att", status: "active", next_payment_date: "2026-11-04T08:00:00.000Z",
     plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v", email: "v@x.co" },
   });
-  check("their subscription.create doesn't replace the victim's Team subscription", create.status === "ignored" &&
+  check("their subscription.create doesn't replace the victim's Team subscription", create.status === "retry" &&
     s.get(V).paystack_subscription_code === "SUB_v" && s.get(V).subscription_plan === "team" && ownPlan(s.get(V), clock) === "team",
     { create, v: s.get(V) });
 }
@@ -255,7 +255,7 @@ const teamSub = {
     plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" }, metadata: "",
   });
   check("signed subscription: first charge, its create (not another plan's), renewal",
-    first.status === "applied" && otherPlan.status === "ignored" && create.status === "applied" && renew.status === "applied" &&
+    first.status === "applied" && otherPlan.status === "retry" && create.status === "applied" && renew.status === "applied" &&
       t.get(V).paystack_subscription_code === "SUB_1" && t.get(V).current_period_end === "2026-12-04T08:30:00.000Z",
     { first, otherPlan, create, renew, row: t.get(V) });
   const signedWrongPlan = await t.deliver("charge.success", {
@@ -319,16 +319,16 @@ for (const [label, start, other] of [
   });
   const resent = await s.deliver("subscription.create", theirs);
   const noCard = await s.deliver("subscription.create", { ...theirs, subscription_code: "SUB_att2", authorization: undefined });
-  check("their create, sent again while the victim's first charge waits: ignored, writes nothing",
+  check("their create, sent again while the victim's first charge waits: sent again, writes nothing",
     before.status === "retry" && ownEarly.status === "retry" && first.status === "applied" &&
-      resent.status === "ignored" && noCard.status === "ignored" && s.get(V).paystack_subscription_code === null,
+      resent.status === "retry" && noCard.status === "retry" && s.get(V).paystack_subscription_code === null,
     { before, ownEarly, first, resent, noCard, row: s.get(V) });
   const own = await s.deliver("subscription.create", mine);
   const theirsLater = await s.deliver("subscription.create", theirs);
   const cancel = await s.deliver("subscription.not_renew", { subscription_code: "SUB_v", status: "non-renewing", customer: { customer_code: "CUS_v" } });
   const theirDisable = await s.deliver("subscription.disable", { subscription_code: "SUB_att", status: "cancelled", customer: { customer_code: "CUS_v" } });
   check("the victim's own create takes the code; their cancel applies, the other's disable is stale",
-    own.status === "applied" && theirsLater.status === "ignored" && cancel.status === "applied" && theirDisable.status === "ignored" &&
+    own.status === "applied" && theirsLater.status === "retry" && cancel.status === "applied" && theirDisable.status === "ignored" &&
       s.get(V).paystack_subscription_code === "SUB_v" && s.get(V).paystack_email_token === "tok_v" &&
       s.get(V).subscription_status === "non-renewing", { own, theirsLater, cancel, theirDisable, row: s.get(V) });
   check("the card is kept hashed, never as the authorization code", typeof s.get(V).start_authorization === "string" &&
@@ -346,7 +346,7 @@ for (const [label, start, other] of [
   const r = await s.deliver("subscription.create", {
     subscription_code: "SUB_att", status: "active", plan: { plan_code: "PLN_pro" }, customer: { customer_code: "CUS_v" },
   });
-  check("first charge without a card: a create without one doesn't match it", r.status === "ignored" &&
+  check("first charge without a card: a create without one doesn't match it", r.status === "retry" &&
     s.get(V).paystack_subscription_code === null, { r, row: s.get(V) });
 }
 
@@ -374,8 +374,8 @@ for (const [label, start, other] of [
     status: "success", reference: "T_o3", amount: 19900, currency: "ZAR", paid_at: "2026-11-04T08:30:00.000Z",
     plan: { plan_code: "PLN_team" }, customer: { customer_code: "CUS_v" }, metadata: "", authorization: VICTIM_CARD,
   });
-  check("create without its card: ignored under its own reason; other cards, no card or another plan don't renew",
-    first.status === "applied" && create.status === "ignored" && create.reason === "not paid with its first charge's card" &&
+  check("create without its card: sent again under its own reason; other cards, no card or another plan don't renew",
+    first.status === "applied" && create.status === "retry" && create.reason === "not paid with its first charge's card" &&
       other.status === "ignored" && none.status === "ignored" && team.status === "ignored" &&
       s.get(V).current_period_end === "2026-11-04T08:00:00.000Z" && s.get(V).subscription_plan === "pro",
     { first, create, other, none, team, row: s.get(V) });

@@ -74,11 +74,15 @@ that account's first charge is waiting. A cancel or invoice event for a code
 the row doesn't hold waits for that create, then applies only if its code is
 the one stored. `tests/billing-unbound-charge.test.mts` checks this.
 
-Only a subscription paid with the card the account's own one started with
-is ever stopped as a second subscription (`tests/billing-second-subscription.test.mts`),
-so nobody can stop someone else's by paying on their customer. A refund
-changes a plan only after Paystack confirms the payment it names was
-refunded in full (`tests/billing-refunds.test.mts`).
+A subscription is stopped as a second one only when it is created on the
+account's own customer, on the plan of a start kept from this account's own
+signed checkout (a second charge, or one refunded before its subscription
+existed), and never the subscription the account holds
+(`tests/billing-second-subscription.test.mts`). Someone paying on another
+person's customer can at most get their own subscription stopped. A refund
+ends access only when Paystack confirms the payment was refunded in full and
+it is the charge recorded as paying the current period
+(`tests/billing-refunds.test.mts`).
 
 ## Why the MyBroadband-style hacks don't apply here
 

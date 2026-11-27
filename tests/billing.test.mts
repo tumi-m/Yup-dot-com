@@ -9,10 +9,11 @@ import {
   resolveAccess, signPaystackBody, summarize, verifyPaystackSignature, RENEWAL_GRACE_MS,
   type BillingPatch, type BillingRow, type BillingStore, type EventDeps,
 } from "../lib/billing.ts";
+import { checkoutStillOpen } from "../lib/billing-ui.ts";
 import { formatPrice, prepaidPrice, toSubunit, PLANS, TEAM_SEATS, formatBillingDate } from "../lib/plans.ts";
 import {
   initializeTransaction, subscriptionManageLink, verifyTransaction, planForCode, isOurReference,
-  newReference, PaystackError, ONCE_OFF_CHANNELS, SUBSCRIPTION_CHANNELS, PAYSTACK_TIMEOUT_MS,
+  newReference, PaystackError, ONCE_OFF_CHANNELS, SUBSCRIPTION_CHANNELS, PAYSTACK_TIMEOUT_MS, disableSubscription,
 } from "../lib/paystack.ts";
 
 const results: boolean[] = [];
@@ -420,6 +421,24 @@ const onceTx = (ref: string, plan: string, months: number, amount: number) => ({
   }
   clearInterval(keepAlive);
   check("the wait is seconds, not minutes", PAYSTACK_TIMEOUT_MS >= 5000 && PAYSTACK_TIMEOUT_MS <= 30_000);
+  // Stopping a subscription twice (a retry after saving failed) used to fail
+  // for ever if Paystack refused the repeat: a stopped one is now done.
+  const answering = (status: number, message: string) => fake(() => ({ status, body: { status: status < 400, message } }));
+  let stopErr: unknown = null;
+  try { await disableSubscription({ ...cfg, fetch: answering(400, "Subscription is not active") }, "SUB_1", "tok"); } catch (e) { stopErr = e; }
+  check("stopping a subscription that's stopped already succeeds", stopErr === null, String(stopErr));
+  stopErr = null;
+  try { await disableSubscription({ ...cfg, fetch: answering(200, "Subscription disabled successfully") }, "SUB_1", "tok"); } catch (e) { stopErr = e; }
+  check("stopping one that runs succeeds", stopErr === null, String(stopErr));
+  stopErr = null;
+  try { await disableSubscription({ ...cfg, fetch: answering(500, "Server error") }, "SUB_1", "tok"); } catch (e) { stopErr = e; }
+  check("Paystack failing is still an error (sent again)", stopErr instanceof PaystackError);
+  stopErr = null;
+  try { await disableSubscription({ ...cfg, fetch: answering(401, "Invalid key") }, "SUB_1", "tok"); } catch (e) { stopErr = e; }
+  check("…and so is any other refusal", stopErr instanceof PaystackError);
+  // A kept checkout link is handed out again only while nobody paid on it or was declined.
+  check("a kept checkout is reused while abandoned or ongoing", checkoutStillOpen("abandoned") && checkoutStillOpen("ongoing"));
+  check("…not after a decline, a payment, or when Paystack can't say", !checkoutStillOpen("failed") && !checkoutStillOpen("success") && !checkoutStillOpen(null));
   check("plan codes map both ways only for known codes", planForCode("PLN_team", CODES) === "team" && planForCode("PLN_x", CODES) === null && planForCode(null, CODES) === null);
   check("references: ours are recognised, others not", isOurReference(ref) && !isOurReference("T_123") && !isOurReference("pw_../x"));
 }
