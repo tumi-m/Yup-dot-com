@@ -1,5 +1,6 @@
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { Flow, NoteText, PageText, Rect, TextRun } from "./marks";
+import { COVER_TAG } from "../edit-text/types";
 
 type Matrix = [number, number, number, number, number, number];
 type Point = [number, number];
@@ -13,11 +14,12 @@ export interface PageTextOptions {
   wide?: PDFPageProxy;
   /**
    * Place each letter where the font puts it, from the page's drawing
-   * operations (pdf.js's OPS, and its AnnotationMode.DISABLE). `glyphs` and
-   * `shows`, when given, are filled with the letters and the operations that
-   * drew them, for callers that need to know which operation drew what.
+   * operations (pdf.js's OPS, and its AnnotationMode.DISABLE). `glyphs`,
+   * `shows` and `paints`, when given, are filled with the letters, the
+   * operations that drew them and what else was painted after them, for
+   * callers that need to know which operation drew what and what hides it.
    */
-  exact?: { ops: Record<string, number>; noAnnotations: number; glyphs?: Glyph[]; shows?: ShowOp[] };
+  exact?: { ops: Record<string, number>; noAnnotations: number; glyphs?: Glyph[]; shows?: ShowOp[]; paints?: Paint[] };
 }
 
 /**
@@ -104,7 +106,7 @@ export async function pageText(page: PDFPageProxy, opts: PageTextOptions = {}): 
         return null;
       }
     };
-    const glyphs = glyphsOf(list.fnArray, list.argsArray, opts.exact.ops, fonts, vp.transform as Matrix, opts.exact.shows);
+    const glyphs = glyphsOf(list.fnArray, list.argsArray, opts.exact.ops, fonts, vp.transform as Matrix, { shows: opts.exact.shows, paints: opts.exact.paints });
     placeLetters(runs, glyphs);
     if (opts.exact.glyphs) for (const g of glyphs) opts.exact.glyphs.push(g);
     out.exact = true;
@@ -156,11 +158,24 @@ export interface ShowOp {
   count: number;
   /** Text rendering mode (Tr): 3 is invisible, 4 and up add the text to the clipping path. */
   mode: number;
+  /** How opaque it is drawn (the graphics state's ca, or CA for outlined text): 0 shows nothing. */
+  alpha: number;
   /** Fill and stroke colours as #rrggbb, or null for a pattern. */
   fill: string | null;
   stroke: string | null;
   /** The clipping in force, on the page as shown: none, a box, or a shape that isn't a box. */
   clip: Rect | "complex" | null;
+}
+
+/**
+ * Something painted that can hide text drawn before it: a picture, an
+ * opaque filled shape, or a cover Edit text drew over old words. `after`
+ * says how many text-showing operations came before it.
+ */
+export interface Paint {
+  kind: "image" | "fill" | "cover";
+  box: Rect;
+  after: number;
 }
 
 const hexColor = (c: ArrayLike<number> | undefined) =>
@@ -203,7 +218,15 @@ const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
  * left out: their runs keep the estimate. `shows`, when given, gets every
  * text-showing operation, vertical ones too, so its places count them all.
  */
-export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<string, number>, fonts: (name: string) => FontInfo | null, view: Matrix, shows?: ShowOp[]): Glyph[] {
+export function glyphsOf(
+  fnArray: number[],
+  argsArray: unknown[][],
+  OPS: Record<string, number>,
+  fonts: (name: string) => FontInfo | null,
+  view: Matrix,
+  sinks: { shows?: ShowOp[]; paints?: Paint[] } = {}
+): Glyph[] {
+  const { shows, paints } = sinks;
   const fresh = () => ({
     ctm: IDENTITY,
     tm: IDENTITY,
@@ -226,6 +249,8 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
     stroke: "#000000" as string | null,
     clip: null as Rect | "complex" | null,
     forms: 0,
+    fillAlpha: 1,
+    strokeAlpha: 1,
   });
   let s = fresh();
   const stack: (typeof s)[] = [];
@@ -234,6 +259,15 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
   /** The path being built, for a clip: whether it is only rectangles, and its bounds. */
   let path = { rects: true, box: null as number[] | null };
   let clipping = false;
+  /** Marked content open, innermost last: whether each is a cover Edit text drew. */
+  const marks: boolean[] = [];
+  const box = (m: Matrix, x0: number, y0: number, x1: number, y1: number): Rect => {
+    const pts = [apply(m, x0, y0), apply(m, x1, y0), apply(m, x1, y1), apply(m, x0, y1)];
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  };
+  const fills = new Set([OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
   const setFont = (name: unknown, size: unknown) => {
     const font = typeof name === "string" ? fonts(name) : null;
     const n = Number(size) || 0;
@@ -252,6 +286,10 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
     const fn = fnArray[i];
     const args = argsArray[i] ?? [];
     if (ends.has(fn)) {
+      // An opaque fill can hide text drawn before it.
+      if (paints && fills.has(fn) && path.box && s.fillAlpha >= 0.99) {
+        paints.push({ kind: marks.includes(true) ? "cover" : "fill", box: box(mul(view, s.ctm), path.box[0], path.box[1], path.box[2], path.box[3]), after: op });
+      }
       // A clip takes effect when its path is finished.
       if (clipping) s.clip = intersect(s.clip, clipBox(path, mul(view, s.ctm)));
       clipping = false;
@@ -271,9 +309,26 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
         const [kinds, , minMax] = args as [number[] | undefined, unknown, number[] | undefined];
         // One rectangle per constructPath: a second one, or curves, make a shape.
         if (path.box || !kinds || kinds.length !== 1 || kinds[0] !== OPS.rectangle) path.rects = false;
-        path.box = minMax && minMax.length === 4 ? [...minMax] : null;
+        const b = minMax && minMax.length === 4 && minMax.every(Number.isFinite) ? minMax : null;
+        path.box = b && path.box ? [Math.min(path.box[0], b[0]), Math.min(path.box[1], b[1]), Math.max(path.box[2], b[2]), Math.max(path.box[3], b[3])] : b ? [...b] : null;
         break;
       }
+      case OPS.beginMarkedContent:
+      case OPS.beginMarkedContentProps: {
+        const tag = args[0] as string | { name?: string } | undefined;
+        marks.push((typeof tag === "string" ? tag : tag?.name) === COVER_TAG);
+        break;
+      }
+      case OPS.endMarkedContent:
+        marks.pop();
+        break;
+      case OPS.setGState:
+        for (const [key, value] of (args[0] ?? []) as [string, unknown][]) {
+          if (key === "ca" && typeof value === "number") s.fillAlpha = value;
+          if (key === "CA" && typeof value === "number") s.strokeAlpha = value;
+          if (key === "Font" && Array.isArray(value)) setFont(value[0], value[1]);
+        }
+        break;
       case OPS.clip:
       case OPS.eoClip:
         clipping = true;
@@ -292,6 +347,12 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
         break;
       case OPS.setStrokeColorN:
         s.stroke = null;
+        break;
+      case OPS.paintImageXObject:
+      case OPS.paintInlineImageXObject:
+      case OPS.paintImageMaskXObject:
+        // Pictures are drawn into the unit square.
+        paints?.push({ kind: "image", box: box(mul(view, s.ctm), 0, 0, 1, 1), after: op });
         break;
       case OPS.paintFormXObjectBegin:
         stack.push({ ...s });
@@ -339,9 +400,7 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
       case OPS.setFont:
         setFont(args[0], args[1]);
         break;
-      case OPS.setGState:
-        for (const [key, value] of (args[0] ?? []) as [string, unknown][]) if (key === "Font" && Array.isArray(value)) setFont(value[0], value[1]);
-        break;
+
       case OPS.showText: {
         const hs = s.tz * s.dir;
         const items = (args[0] ?? []) as (number | { unicode?: string; width?: number; isSpace?: boolean; originalCharCode?: number })[];
@@ -354,6 +413,7 @@ export function glyphsOf(fnArray: number[], argsArray: unknown[][], OPS: Record<
           first: out.length,
           count: 0,
           mode: s.mode,
+          alpha: s.mode === 1 || s.mode === 5 ? s.strokeAlpha : s.fillAlpha,
           fill: s.fill,
           stroke: s.stroke,
           clip: s.clip,

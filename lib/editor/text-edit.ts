@@ -3,7 +3,7 @@
  * the page colour round it, moving between runs with the keys, and what to
  * tell people. Kept free of React so it can be unit tested.
  */
-import type { CoverReason, EditableRun, LockReason } from "@/lib/pdf/edit-text/types";
+import type { CoverReason, EditableRun, LockReason, Matrix } from "@/lib/pdf/edit-text/types";
 import type { TextEditReport } from "@/lib/pdf/edit-text/apply";
 import type { TextEditAnnotation } from "./types";
 
@@ -76,6 +76,52 @@ export function ringColor(rgba: ArrayLike<number>, width: number, height: number
   return `#${hex(best.r)}${hex(best.g)}${hex(best.b)}`;
 }
 
+/** Where a point on the page as shown falls in a run's own space: along its line (x) and up from its baseline (y). */
+export function toRunSpace(display: Matrix, point: [number, number]): [number, number] {
+  const [a, b, c, d, e, f] = display;
+  const det = a * d - b * c;
+  if (!det) return [0, 0];
+  const px = point[0] - e;
+  const py = point[1] - f;
+  return [(d * px - c * py) / det, (a * py - b * px) / det];
+}
+
+/** The caret position nearest `x` along a line, given where each position falls (the widths of the text before it). */
+export function nearestCaret(prefixWidths: number[], x: number): number {
+  let best = 0;
+  prefixWidths.forEach((w, i) => {
+    if (Math.abs(w - x) < Math.abs(prefixWidths[best] - x)) best = i;
+  });
+  return best;
+}
+
+/**
+ * The run a press at `point` (on the page as shown, in points) meant: the
+ * one whose box it is in or nearest to, the middle of its line breaking
+ * ties. Touch targets are made bigger than the lines, so they overlap.
+ */
+export function nearestRun(runs: Pick<EditableRun, "box">[], point: [number, number]): number {
+  let best = -1;
+  let bestKey = [Infinity, Infinity];
+  runs.forEach(({ box }, i) => {
+    const dx = Math.max(box.x - point[0], 0, point[0] - box.x - box.width);
+    const dy = Math.max(box.y - point[1], 0, point[1] - box.y - box.height);
+    const key = [Math.hypot(dx, dy), Math.abs(point[1] - (box.y + box.height / 2))];
+    if (key[0] < bestKey[0] - 1e-6 || (Math.abs(key[0] - bestKey[0]) <= 1e-6 && key[1] < bestKey[1])) {
+      best = i;
+      bestKey = key;
+    }
+  });
+  return best;
+}
+
+/** What a line is called to a screen reader: its words, or what was done to them. */
+export function runLabel(run: Pick<EditableRun, "text">, edit?: Pick<TextEditAnnotation, "text"> | null): string {
+  const cut = (t: string) => (t.length > 80 ? `${t.slice(0, 80)}…` : t);
+  if (!edit || edit.text === run.text) return cut(run.text);
+  return edit.text ? `Changed: ${cut(edit.text)}` : `Removed: ${cut(run.text)}`;
+}
+
 /** Which run a key moves to among `count` runs from `index`: the next or previous, the first or last. Null for other keys. */
 export function runStep(key: string, index: number, count: number): number | null {
   if (count <= 0) return null;
@@ -100,6 +146,7 @@ export const COVERED: Record<CoverReason | "page", string> = {
   hidden: "they are the hidden text over a scan",
   clip: "the page cuts part of them off",
   unmatched: "they couldn't be matched to how the page draws them",
+  overlap: "other text or a picture is drawn in the same place",
   page: "the page couldn't be read safely",
 };
 
@@ -113,6 +160,17 @@ const list = (pages: number[]) => {
   const p = [...new Set(pages)].sort((a, b) => a - b);
   return p.length === 1 ? `page ${p[0]}` : `pages ${p.slice(0, -1).join(", ")} and ${p[p.length - 1]}`;
 };
+
+/** Two reports as one: text changed by a page operation, then by the save. */
+export function joinReports(a: TextEditReport | null | undefined, b: TextEditReport | null | undefined): TextEditReport | undefined {
+  if (!a || !b) return a ?? b ?? undefined;
+  return {
+    removed: a.removed + b.removed,
+    covered: [...a.covered, ...b.covered],
+    fonts: [...a.fonts, ...b.fonts],
+    missing: [...new Set([...a.missing, ...b.missing])],
+  };
+}
 
 /** What to tell people after a save or download changed text, if anything: covered words, other fonts, letters left out. */
 export function textNotice(report: TextEditReport): { covered: string | null; fonts: string[]; missing: string | null } {

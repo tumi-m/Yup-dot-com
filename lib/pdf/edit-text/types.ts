@@ -4,6 +4,9 @@
  */
 
 export type Point = [number, number];
+
+/** The marked-content tag round the boxes Edit text draws over old words, so the next read knows they hide what is under them. */
+export const COVER_TAG = "PDFWizardCover";
 /** a b c d e f, as PDF and canvas write them: (x, y) → (a·x + c·y + e, b·x + d·y + f). */
 export type Matrix = [number, number, number, number, number, number];
 
@@ -45,10 +48,11 @@ export interface RemovePlan {
 /**
  * Why a run's old words can only be covered, not taken out: the operations
  * also draw text outside it, it is in a form XObject, its font is Type 3,
- * it is invisible (a scan's searchable layer), it is clipped, or its letters
- * couldn't be lined up with the operations that drew them.
+ * it is invisible (a scan's searchable layer, or fully transparent), it is
+ * clipped, its letters couldn't be lined up with the operations that drew
+ * them, or other text, a picture or a filled shape is drawn in the same place.
  */
-export type CoverReason = "shared" | "form" | "type3" | "hidden" | "clip" | "unmatched";
+export type CoverReason = "shared" | "form" | "type3" | "hidden" | "clip" | "unmatched" | "overlap";
 
 /** Why a run can't be changed here: right-to-left or top-to-bottom text. */
 export type LockReason = "rtl" | "vertical";
