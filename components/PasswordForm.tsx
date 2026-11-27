@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
-import { MIN_PASSWORD_LENGTH } from "@/components/auth-redirect";
+import { MIN_PASSWORD_LENGTH, PASSWORD_HINT, authFailure } from "@/components/auth-redirect";
 
 /**
  * Sets a new password for the signed-in account (after a reset link, too),
@@ -39,13 +39,7 @@ export function PasswordForm({ next }: { next?: string }) {
     } catch (err) {
       // With Supabase's "Secure password change" on, an older session must log in again first.
       const reauth = err instanceof Error && ((err as { code?: string }).code === "reauthentication_needed" || /reauthenticat/i.test(err.message));
-      setError(
-        reauth
-          ? "To change your password, log out and log in again first (or use Forgot password)."
-          : err instanceof Error
-            ? err.message
-            : "Something went wrong."
-      );
+      setError(reauth ? "To change your password, log out and log in again first (or use Forgot password)." : authFailure(err));
     } finally {
       setBusy(false);
     }
@@ -67,7 +61,7 @@ export function PasswordForm({ next }: { next?: string }) {
           autoComplete="new-password"
         />
         <p id="new-password-hint" className="mt-1.5 text-xs text-muted-foreground">
-          At least {MIN_PASSWORD_LENGTH} characters.
+          {PASSWORD_HINT}
         </p>
       </div>
       <div>

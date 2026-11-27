@@ -51,6 +51,12 @@ export function authErrorMessage(search: string): string | null {
 /** New passwords: at least this long (sign-up and the new password page). Supabase Auth should match it. */
 export const MIN_PASSWORD_LENGTH = 10;
 
+/**
+ * Under new password fields. The README has Supabase Auth require letters
+ * and digits too, so the hint says so before Supabase refuses one without.
+ */
+export const PASSWORD_HINT = `At least ${MIN_PASSWORD_LENGTH} characters, with letters and numbers.`;
+
 export type AuthMode = "login" | "signup" | "reset";
 
 const RATE_LIMIT_SITE = /email rate limit/i;
@@ -72,19 +78,35 @@ export function revealsAccount(err: unknown, mode: AuthMode): boolean {
 }
 
 /**
- * What to say when Supabase turns a request down. Its message for too many
- * emails is jargon. Logging in, a wrong password and an unconfirmed email
+ * What to say when Supabase turns a request down, or can't be reached. Its
+ * messages for too many emails or tries, a password without digits ("at
+ * least one character of each: abcdefghijklmnopqrstuvwxyzABCD…", which
+ * overflowed the form on a phone) and a dropped connection ("Failed to
+ * fetch") are jargon. Logging in, a wrong password and an unconfirmed email
  * get the same answer, so it can't be used to tell which accounts exist.
  */
 export function authFailure(err: unknown): string {
   if (!(err instanceof Error)) return "Something went wrong.";
-  const { status, code } = err as { status?: number; code?: string };
+  const { status, code, reasons } = err as { status?: number; code?: string; reasons?: unknown };
+  // No answer, a gateway error or a page that isn't Supabase's (supabase-js
+  // names these), or the browser's own fetch failing.
+  if (err.name === "AuthRetryableFetchError" || err.name === "AuthUnknownError" || /^(Failed to fetch|Load failed|NetworkError)/i.test(err.message)) {
+    return "Couldn't reach PDF Wizard. Check your connection and try again.";
+  }
+  if (typeof status === "number" && status >= 500) return "Sign-in isn't working right now. Try again in a few minutes.";
   if (status === 429 && RATE_LIMIT_SITE.test(err.message)) {
     return "Too many emails were sent just now. Wait a few minutes, then try again.";
   }
+  if (status === 429) return "Too many tries. Wait a few minutes, then try again.";
   if (code === "invalid_credentials" || code === "email_not_confirmed" || /^(Invalid login credentials|Email not confirmed)$/i.test(err.message)) {
     return "Wrong email or password. Just signed up? Open the link in your email first.";
   }
+  if (code === "weak_password") {
+    const why = Array.isArray(reasons) ? reasons : [];
+    if (why.includes("pwned")) return "That password has appeared in a data leak, so it's easy to guess. Choose another one.";
+    if (why.includes("characters") || /at least one character of each/i.test(err.message)) return `Use ${PASSWORD_HINT.charAt(0).toLowerCase()}${PASSWORD_HINT.slice(1)}`;
+  }
+  if (code === "same_password") return "That's your current password. Choose a new one.";
   return err.message;
 }
 

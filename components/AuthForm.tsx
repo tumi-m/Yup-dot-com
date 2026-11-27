@@ -11,6 +11,7 @@ import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
 import {
   MIN_PASSWORD_LENGTH,
+  PASSWORD_HINT,
   authErrorMessage,
   authFailure,
   authSwitchHref,
@@ -201,7 +202,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
               />
               {isSignup && (
                 <p id="auth-password-hint" className="mt-1.5 text-xs text-muted-foreground">
-                  At least {MIN_PASSWORD_LENGTH} characters.
+                  {PASSWORD_HINT}
                 </p>
               )}
               {!isSignup && (
