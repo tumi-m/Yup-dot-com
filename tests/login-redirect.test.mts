@@ -49,6 +49,26 @@ check("loginHref encodes the path", loginHref(`/settings/billing?ref=${REF}`) ==
   check("Log in on the home page goes on to the dashboard", JSON.stringify(loginLinks("/")) === '["/login"]', loginLinks("/"));
   check("not for pages that only start the same", JSON.stringify(loginLinks("/pricingx")) === '["/login"]', loginLinks("/pricingx"));
   check("a page's own loginHref still wins", JSON.stringify(loginLinks("/redeem", { loginHref: loginHref("/redeem") })) === JSON.stringify([loginHref("/redeem")]));
+
+  // The footer's "Log in" went to plain /login on every page.
+  const { SiteFooter } = await import("../components/SiteFooter.tsx");
+  const footerLogin = (pathname: string) => {
+    const html = renderToStaticMarkup(createElement(PathnameContext.Provider, { value: pathname }, createElement(SiteFooter)));
+    return [...html.matchAll(/href="([^"]*\/login[^"]*)"/g)].map((m) => m[1].replaceAll("&amp;", "&"));
+  };
+  check("the footer's Log in comes back to Pricing too", JSON.stringify(footerLogin("/pricing")) === JSON.stringify([loginHref("/pricing")]), footerLogin("/pricing"));
+  check("and to a tool", JSON.stringify(footerLogin("/tools/merge-pdf")) === JSON.stringify([loginHref("/tools/merge-pdf")]), footerLogin("/tools/merge-pdf"));
+  check("and goes on to the dashboard from the home page", JSON.stringify(footerLogin("/")) === '["/login"]', footerLogin("/"));
+}
+
+// The query came off: logging in from /pricing?currency=EUR came back to /pricing
+// in rand. The header and footer read it after load (returnLoginHref).
+{
+  const { returnLoginHref } = await import("../components/auth-redirect.ts");
+  check("the query comes along", returnLoginHref("/pricing", "?currency=EUR") === loginHref("/pricing?currency=EUR"), returnLoginHref("/pricing", "?currency=EUR"));
+  check("and an empty one adds nothing", returnLoginHref("/tools/split-pdf", "?") === loginHref("/tools/split-pdf") && returnLoginHref("/tools/split-pdf") === loginHref("/tools/split-pdf"));
+  check("elsewhere the query doesn't matter", returnLoginHref("/privacy", "?x=1") === "/login" && returnLoginHref(null, "?x=1") === "/login");
+  check("and the way back stays on this site", safeRedirect(new URLSearchParams(returnLoginHref("/pricing", "?currency=EUR").split("?")[1]).get("redirect")) === "/pricing?currency=EUR");
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { DUR, EASE_IN, EASE_OUT, SPRING_LAYOUT, STAGGER } from "@/components/motion/tokens";
 import { isNavActive } from "@/components/nav-utils";
-import { loginHref as loginHrefFor } from "@/components/auth-redirect";
+import { useLoginHref } from "@/components/LoginLink";
 import { cn } from "@/lib/utils";
 
 export interface NavLink {
@@ -249,17 +249,13 @@ const LINKS: NavLink[] = [
   { href: "/pricing", label: "Pricing" },
 ];
 
-/** Pages that "Log in" comes back to: someone logging in there was about to pay or use a tool. */
-const RETURN_AFTER_LOGIN = /^\/(pricing|tools)(\/|$)/;
-
 export function MarketingNav({ isAuthed, loginHref: login }: {
   isAuthed: boolean;
   /** Where "Log in" goes: a page that should be returned to after logging in passes loginHref(itself). */
   loginHref?: string;
 }) {
-  const pathname = usePathname();
-  // Elsewhere it goes on to the dashboard.
-  const loginHref = login ?? (pathname && RETURN_AFTER_LOGIN.test(pathname) ? loginHrefFor(pathname) : "/login");
+  // Back to Pricing or the tool, query and all; elsewhere on to the dashboard.
+  const loginHref = useLoginHref(login);
   return (
     <NavShell
       links={LINKS}

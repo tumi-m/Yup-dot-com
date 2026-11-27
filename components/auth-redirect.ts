@@ -182,6 +182,19 @@ export function loginHref(path: string): string {
   return `/login?redirect=${encodeURIComponent(path)}`;
 }
 
+/** Pages that "Log in" in the header and footer comes back to: someone logging in there was about to pay or use a tool. */
+const RETURN_AFTER_LOGIN = /^\/(pricing|tools)(\/|$)/;
+
+/**
+ * Where "Log in" in the header and footer goes from `pathname` (and its
+ * query, say ?currency=EUR): back to Pricing or the tool, else on to the
+ * dashboard.
+ */
+export function returnLoginHref(pathname: string | null | undefined, search = ""): string {
+  if (!pathname || !RETURN_AFTER_LOGIN.test(pathname)) return "/login";
+  return loginHref(pathname + (search && search !== "?" ? search : ""));
+}
+
 /** The sign-up page, coming back to `path` afterwards when there is one. */
 export function signupHref(path?: string): string {
   return path ? `/signup?redirect=${encodeURIComponent(path)}` : "/signup";

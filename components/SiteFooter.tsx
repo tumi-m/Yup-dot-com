@@ -5,6 +5,7 @@ import { groupOf, TOOL_GROUPS } from "@/components/tool-filter";
 import { CookieSettingsButton } from "@/components/analytics/CookieSettingsButton";
 import { BUSINESS } from "@/lib/business";
 import { GA_ID } from "@/lib/analytics";
+import { LoginLink } from "@/components/LoginLink";
 
 const LINK = "rounded transition-colors hover:text-foreground";
 
@@ -71,9 +72,14 @@ export function SiteFooter() {
             <ul className="flex flex-wrap justify-center">
               {BOTTOM_LINKS.map((l) => (
                 <li key={l.href}>
-                  <Link href={l.href} className={`flex h-11 items-center px-2 ${LINK}`}>
-                    {l.label}
-                  </Link>
+                  {l.href === "/login" ? (
+                    // Comes back to Pricing or the tool after logging in, as the header's does.
+                    <LoginLink className={`flex h-11 items-center px-2 ${LINK}`}>{l.label}</LoginLink>
+                  ) : (
+                    <Link href={l.href} className={`flex h-11 items-center px-2 ${LINK}`}>
+                      {l.label}
+                    </Link>
+                  )}
                 </li>
               ))}
               {GA_ID && (
