@@ -181,7 +181,7 @@ export function PdfEditor({
   /** Changed text a page turn drew into the page before saving: told with the next save or download. */
   const turnedText = useRef<TextEditReport | undefined>(undefined);
 
-  const { toasts, toast, dismiss } = useToasts();
+  const { toasts, toast, dismiss, hold, release } = useToasts();
 
   // ---- load bytes from storage ----
   useEffect(() => {
@@ -1417,7 +1417,7 @@ export function PdfEditor({
         </DialogContent>
       </Dialog>
 
-      <ToastStack toasts={toasts} onDismiss={dismiss} />
+      <ToastStack toasts={toasts} onDismiss={dismiss} onHold={hold} onRelease={release} />
 
       <UpgradeDialog
         open={upsellOpen}

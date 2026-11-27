@@ -5,6 +5,7 @@ import { annotationName, nudgeAnnotation, pageActionFocus, toolShortcut } from "
 import { DEFAULT_SETTINGS, type Annotation } from "../lib/editor/types.ts";
 import { focusAfterRemove, movedMessage } from "../components/list-focus.ts";
 import { slideProgressNote } from "../components/tools/progress-note.ts";
+import { TOAST_MS, holdClock, releaseClock, startClock } from "../components/ui/toast-timer.ts";
 
 let pass = 0;
 let total = 0;
@@ -128,6 +129,21 @@ function check(name: string, ok: boolean, extra?: unknown) {
   check("then counts quarters", said.slice(1).join(",") === "25% done,50% done,75% done", said);
   check("a one-slide deck says only the start", slideProgressNote(0, 1, "Exporting PDF…") === "Exporting PDF…" && slideProgressNote(1, 1, "Exporting PDF…") === "Exporting PDF…");
   check("finishing adds no announcement of its own", slideProgressNote(40, 40, "x") === slideProgressNote(39, 40, "x") && slideProgressNote(2, 2, "x") === slideProgressNote(1, 2, "x"));
+}
+
+// Toasts wait while pointed at or focused, then get their remaining time back (WCAG 2.2.1).
+{
+  const c = startClock(TOAST_MS.other, 1000);
+  const held = holdClock(c, 2000);
+  check("holding keeps the time left", held.startedAt === null && held.left === TOAST_MS.other - 1000, held);
+  check("holding twice changes nothing", JSON.stringify(holdClock(held, 9000)) === JSON.stringify(held));
+  const back = releaseClock(held, 60_000);
+  check("letting go restarts the rest of the time", back.ms === TOAST_MS.other - 1000 && back.clock.startedAt === 60_000, back);
+  const late = releaseClock(holdClock(c, 1000 + TOAST_MS.other + 50), 70_000);
+  check("a toast held as it was closing still gets a second", late.ms === 1000, late);
+  const running = releaseClock(c, 2000);
+  check("letting go of a running toast leaves it running", running.ms === TOAST_MS.other - 1000 && running.clock === c, running);
+  check("errors stay longer than other toasts", TOAST_MS.error > TOAST_MS.other);
 }
 
 console.log(`\n${pass}/${total} passed`);
