@@ -464,7 +464,7 @@ export function PdfAssistant({ tier = "guest" }: { tier?: Tier }) {
           maxLength={MAX_MESSAGE_CHARS}
           placeholder="Ask anything about this PDF…"
           aria-label="Your question"
-          // Grows with the question (and a wrapped placeholder) up to 8rem, so it can be read back on a phone.
+          // Grows with the question (and a wrapped placeholder) to 8rem, about five lines, then scrolls.
           className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl [field-sizing:content] border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
         />
         {draft.length > MAX_MESSAGE_CHARS * 0.9 && (
