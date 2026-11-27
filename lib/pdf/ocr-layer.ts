@@ -137,6 +137,27 @@ export function readsBetter(turned: { all: number; sure: number }, upright: { al
   return turned.sure >= 20 && turned.sure >= upright.sure * 2 && turned.sure >= turned.all * 0.5;
 }
 
+/**
+ * True when the page as it lies has words read with confidence where the
+ * turned reading has none: an upright title over a sideways table, which
+ * turning the page would lose. Upright words are mapped into the turned
+ * picture (`by` degrees clockwise, from `width` x `height`) and must fall
+ * on or beside a sure word read there.
+ */
+export function leavesBehind(upright: OcrWord[], turned: OcrWord[], by: 90 | 180 | 270, width: number, height: number): boolean {
+  const sure = turned.filter((w) => w.confidence >= 70 && letters(w.text) >= 2);
+  const at = (x: number, y: number) =>
+    by === 90 ? { x: height - y, y: x } : by === 180 ? { x: width - x, y: height - y } : { x: y, y: width - x };
+  return upright.some((w) => {
+    if (w.confidence < 85 || !/^\p{L}{3,}[.,:;]?$/u.test(w.text.trim())) return false;
+    const c = at((w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2);
+    return !sure.some((t) => {
+      const pad = (t.y1 - t.y0) * 1.5;
+      return c.x >= t.x0 - pad && c.x <= t.x1 + pad && c.y >= t.y0 - pad && c.y <= t.y1 + pad;
+    });
+  });
+}
+
 /** The rendered page itself: JPEG or PNG bytes, or lossless pixels ready for the PDF. */
 export type PageImage = { imageType: "jpeg" | "png"; image: Uint8Array } | { imageType: "flate"; image: FlateImage };
 

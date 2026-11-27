@@ -5,7 +5,7 @@ process.env.NEXT_PUBLIC_PDFJS_WORKER_SRC ||= "./node_modules/pdfjs-dist/legacy/b
 // kept, the page is turned in the file to match, and the result says so.
 import { createRequire } from "node:module";
 import { PDFDocument, rgb } from "pdf-lib";
-import { readQuality, readsBadly, readsBetter } from "../lib/pdf/ocr-layer.ts";
+import { leavesBehind, readQuality, readsBadly, readsBetter } from "../lib/pdf/ocr-layer.ts";
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail: unknown = "") => {
@@ -26,6 +26,18 @@ check("an upright page reads well", !readsBadly(upright), upright);
 check("an upside-down page reads badly", readsBadly(noise), noise);
 check("the turned read wins only when it is clearly better", readsBetter(upright, noise) && !readsBetter(noise, upright));
 check("a page with next to no text isn't turned", !readsBadly(readQuality([{ text: "x", confidence: 10 }])));
+
+// A page 600 x 800 px: an upright title at the top over a table lying
+// sideways. Turned 270°, the table reads well but the title is noise.
+const box = (text: string, confidence: number, x0: number, y0: number, x1: number, y1: number) => ({ text, confidence, x0, y0, x1, y1 });
+const title = [box("Appendix", 95, 50, 40, 200, 70), box("B", 95, 210, 40, 230, 70)];
+// The table's words in the turned picture (800 x 600): across its lower part.
+const table = [0, 1, 2, 3, 4].map((r) => box("Consulting", 95, 200, 200 + r * 60, 400, 230 + r * 60));
+check("an upright title the turned reading has nothing for keeps the page as it lies", leavesBehind(title, table, 270, 600, 800));
+// Upside down, a stray word read with confidence sits on a line the turned reading has words for.
+const stray = [box("puny", 90, 300, 400, 380, 430)];
+const lines = [box("committee", 95, 180, 360, 330, 395), box("budget", 95, 340, 360, 420, 395)];
+check("a stray sure word on a page read well upside down doesn't stop the turn", !leavesBehind(stray, lines, 180, 600, 800));
 
 // Tesseract can't start here: a stand-in reads page 2 as noise until it is turned.
 const require = createRequire(import.meta.url);

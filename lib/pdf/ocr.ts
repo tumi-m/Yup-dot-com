@@ -2,7 +2,7 @@
 
 import { loadForRender } from "./render";
 import { canvasToJpeg } from "../jpeg-encode/off-thread";
-import { lineWords, looksGarbled, newWords, readQuality, readsBadly, readsBetter, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
+import { leavesBehind, lineWords, looksGarbled, newWords, readQuality, readsBadly, readsBetter, textAgrees, type OcrPage, type OcrText, type OcrWord, type OwnText } from "./ocr-layer";
 import tesseractPkg from "tesseract.js/package.json";
 
 /** Engine, WebAssembly core, and language models are all self-hosted. */
@@ -179,6 +179,7 @@ export async function ocrDocument(
       let turn: OcrText["turn"];
       const pieces = own.get(i);
       if (opts.turnPages && !(pieces && textLength(pieces) >= HAS_TEXT)) {
+        const upright = words;
         let best = readQuality(words);
         if (readsBadly(best)) {
           for (const by of [180, 90, 270] as const) {
@@ -193,6 +194,12 @@ export async function ocrDocument(
             } else {
               turned.width = turned.height = 0;
             }
+          }
+          // Only a turn the whole page agrees with: a title read upright
+          // where the turned reading has nothing keeps the page as it lies.
+          if (turn && leavesBehind(upright, words, turn, canvas.width, canvas.height)) {
+            shown.width = shown.height = 0;
+            [shown, words, turn] = [canvas, upright, undefined];
           }
         }
       }
