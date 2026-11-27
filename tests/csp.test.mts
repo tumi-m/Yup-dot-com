@@ -45,6 +45,20 @@ check("and nowhere else", !/https:\/\/\*(\s|$)|\shttps:(\s|$)|\*(\s|$)/.test(dir
   }
   env.MEDIA_WORKER_URL = "http://localhost:8080";
   check("a local worker keeps http", cspSettings().mediaWorkerUrl === "http://localhost:8080");
+  env.MEDIA_WORKER_URL = "https://media.example.com/worker/";
+  check("the policy names the worker's origin only", cspSettings().mediaWorkerUrl === "https://media.example.com" && workerConfig().ok, String(cspSettings().mediaWorkerUrl));
+  // A value that isn't one plain host never reaches the policy: no wildcard,
+  // and no ";" or "," that would start a directive of its own.
+  for (const raw of ["*", "*.example.com", "https://*.example.com", "a;b", "a,b", "https://a;b", "media.example.com;worker-src", "https://media.example.com\thttps://evil.example"]) {
+    env.MEDIA_WORKER_URL = raw;
+    const policy = contentSecurityPolicy("x", { ...prod, mediaWorkerUrl: cspSettings().mediaWorkerUrl });
+    const connect = policy.split("; ").find((d) => d.startsWith("connect-src ")) ?? "";
+    check(
+      `a malformed worker address is left out (${JSON.stringify(raw)})`,
+      cspSettings().mediaWorkerUrl === undefined && !workerConfig().ok && policy.split(";").length === csp.split(";").length && !/\s\S*\*(?!\.(?:google|analytics|googletagmanager|g\.doubleclick))/.test(connect) && !/example\.com|evil/.test(connect),
+      policy
+    );
+  }
   delete env.MEDIA_WORKER_SECRET;
   delete env.MEDIA_WORKER_URL;
   delete env.NEXT_PUBLIC_ENABLE_YOUTUBE;

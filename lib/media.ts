@@ -14,24 +14,28 @@ export type MediaPlatform = "youtube" | "x" | "tiktok" | "instagram";
 export const YOUTUBE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_YOUTUBE === "1";
 export type MediaKind = "mp4" | "mp3";
 
+/** A plain host name, IPv4 address or bracketed IPv6 address: nothing a CSP would read as a wildcard or a new directive. */
+const PLAIN_HOST = /^(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[[0-9a-f:.]+\])$/;
+
 /**
  * MEDIA_WORKER_URL as browsers are sent to it, or null when it isn't a URL.
  * Values pasted into a hosting dashboard often lack a scheme or say http;
  * the site is served over https, which blocks requests to http origins, so
  * anything but localhost becomes https. The download links (lib/media-server.ts)
  * and the pages' CSP (lib/csp.ts) both use this, so a page may reach the
- * address its links name.
+ * address its links name. Its host goes into the CSP, so a wildcard, a
+ * space or a ";" makes it no URL at all.
  */
 export function workerUrl(raw: string | undefined): string | null {
   const value = raw?.trim();
-  if (!value) return null;
+  if (!value || /\s/.test(value)) return null;
   let url: URL;
   try {
     url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`);
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || !PLAIN_HOST.test(url.hostname)) return null;
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (url.protocol === "http:" && !local) url.protocol = "https:";
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
