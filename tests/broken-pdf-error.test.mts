@@ -140,7 +140,7 @@ check("a modifier click is left to the browser", /if \(e\.metaKey \|\| e\.ctrlKe
 // Every PDF page words a wrong file the same way.
 const organizer = readFileSync(new URL("../components/tools/PageOrganizer.tsx", import.meta.url), "utf8");
 check("page tools: a wrong file says what the tool takes", !organizer.includes("Choose a PDF file") && (organizer.match(/takesMessage\(getTool\(slug\)\?\.name, "application\/pdf"/g) ?? []).length === 2);
-// The editor, Fill & Sign and Edit PDF Text offer the same fix, as a link, for a locked or broken file.
+// The editor, Fill & Sign PDF and Edit PDF Text offer the same fix, as a link, for a locked or broken file.
 const launch = readFileSync(new URL("../components/tools/EditorLaunch.tsx", import.meta.url), "utf8");
 check("editor: the fix goes through ErrorHelp with the failed file", /<ErrorHelp message=\{error\} slug=\{sign \? "sign-pdf" : text \? "edit-pdf-text" : "edit-pdf"\} files=\{failed \? \[failed\] : \[\]\} \/>/.test(launch) && !/<button/.test(launch));
 

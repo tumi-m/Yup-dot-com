@@ -68,7 +68,7 @@ and deletes it straight after; its pages say so.
 | **Compare PDFs** | Two drop zones, the original and the changed version (swap them with one button). Every word of both is compared over the whole document, so text moved to another page shows as one move and a page added or taken out in the middle leaves the rest paired. Ligatures, odd spaces and words broken over a line end are evened out first; form values count. Changes are marked on the pages, side by side in one scroll: struck through in red where taken out, underlined in green where put in, a dashed line for moves, a dashed box for pictures, so they read without colour; on a phone one file's pages show at a time. A list with next and previous (N and P keys while focus is in the comparison), an overlay with a swipe slider and a pixel Difference view. Pages without text are compared by how they look; a tick does every page. Downloads: a report PDF and both files with the changes as comments. Up to 200 pages a file free, 2,000 with Pro. |
 | **Edit PDF** | Full editor: change the text that's there, add text, whiteout, shapes, notes, links, form fields. |
 | **Edit PDF Text** | The editor, opened in Edit text: click a line (or reach it with the keys) and change its words, size, bold, italic or colour, or remove it. Where the page draws the line on its own, the old words are taken out of the file and the new ones drawn on the same baseline; otherwise they are covered with a box in the page's colour, and the save says so and points to Redact PDF. New words use the line's own font when the file holds all of it and it has every letter, else the closest standard font, with Noto Sans for letters those lack. Turned and cropped pages work; right-to-left and top-to-bottom text can't be changed yet. Same limits as Edit PDF. |
-| **Fill & Sign** | Fill existing PDF forms and place a drawn signature. |
+| **Fill & Sign PDF** | Fill existing PDF forms and place a drawn signature. |
 
 Each tool has its own SEO-optimised, statically-generated page at
 `/tools/<slug>` and is registered in [`lib/tools.tsx`](lib/tools.tsx).
@@ -87,7 +87,7 @@ batch caps), and Smallpdf (task-based prompts):
    file and pick what to do ("Edit", "Compress", "PPTX to PDF"…) and it is
    handed to that tool without a second upload; paste a Slides, X or YouTube
    link and pick PDF, PPTX, Edit, MP4 or MP3.
-2. **The full editor works as a guest.** Edit PDF and Fill & Sign open
+2. **The full editor works as a guest.** Edit PDF and Fill & Sign PDF open
    instantly in an on-device editor (`/edit/[id]`, IndexedDB) that survives a
    reload. Opening, editing and previewing are unlimited; saving or
    downloading the result is one edit (guests and Free: 1 a day, with a small

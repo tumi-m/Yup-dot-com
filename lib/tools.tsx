@@ -408,7 +408,7 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "translate-pdf",
     name: "Translate PDF",
     title: "Translate PDF: translate a document into another language",
-    description: "Translate a PDF into another language, as a Word file.",
+    description: "Translate a PDF, as a Word file and, for most languages, a PDF.",
     icon: Languages,
     category: "convert",
     tint: "bg-gradient-to-br from-sky-100 to-violet-100 text-sky-800",
@@ -625,7 +625,7 @@ const ALL_TOOLS: ToolMeta[] = [
   },
   {
     slug: "sign-pdf",
-    name: "Fill & Sign",
+    name: "Fill & Sign PDF",
     title: "Fill & Sign PDF: fill in forms and add your signature",
     description: "Fill in forms and sign.",
     icon: Signature,
@@ -633,6 +633,7 @@ const ALL_TOOLS: ToolMeta[] = [
     tint: "bg-cyan-100 text-cyan-700",
     editor: true,
     keywords: "esign signature",
+    aliases: ["Sign PDF", "Fill PDF Form"],
   },
   {
     slug: "youtube-to-mp4",
@@ -649,7 +650,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-1080p",
     name: "YouTube 1080p",
-    title: "YouTube 1080p Downloader: Full HD MP4",
+    title: "YouTube 1080p: Full HD MP4 downloader",
     description: "Full HD MP4 with sound.",
     icon: MonitorPlay,
     category: "media",
@@ -661,7 +662,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-720p",
     name: "YouTube 720p",
-    title: "YouTube 720p Downloader: free HD MP4",
+    title: "YouTube 720p: free HD MP4 downloader",
     description: "Save a video in HD as MP4.",
     icon: MonitorPlay,
     category: "media",
@@ -684,7 +685,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "youtube-playlist",
     name: "YouTube Playlist",
-    title: "YouTube Playlist Downloader: MP4, MP3 and CSV",
+    title: "YouTube Playlist: download as MP4, MP3 or CSV",
     description: "Download a whole playlist, or export its list.",
     icon: ListVideo,
     category: "media",
@@ -694,7 +695,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "x-to-mp4",
     name: "X (Twitter) to MP4",
-    title: "X (Twitter) Video Downloader: save as MP4",
+    title: "X (Twitter) to MP4: X video downloader",
     description: "Save an X video as MP4.",
     icon: Film,
     category: "media",
@@ -718,7 +719,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "tiktok-to-mp4",
     name: "TikTok to MP4",
-    title: "TikTok Video Downloader: save TikToks as MP4",
+    title: "TikTok to MP4: TikTok video downloader",
     description: "Save a TikTok as MP4.",
     icon: Video,
     category: "media",
@@ -742,7 +743,7 @@ const ALL_TOOLS: ToolMeta[] = [
   {
     slug: "instagram-to-mp4",
     name: "Instagram to MP4",
-    title: "Instagram Reels Downloader: save Reels and videos as MP4",
+    title: "Instagram to MP4: Reels and video downloader",
     description: "Save a Reel or video post as MP4.",
     icon: Instagram,
     category: "media",
@@ -767,7 +768,7 @@ const ALL_TOOLS: ToolMeta[] = [
     slug: "sample-finder",
     name: "Sample Finder",
     title: "Sample Finder: see what samples a song uses",
-    description: "Paste a YouTube or TikTok link, or type a song.",
+    description: "See which songs a track samples, from a link or its name.",
     icon: Disc3,
     category: "media",
     tint: "bg-violet-100 text-violet-800",
