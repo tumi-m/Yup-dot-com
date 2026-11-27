@@ -712,6 +712,8 @@ function buildBlocks(
   let listOrdered = false;
   // The line the last heading ended on.
   let headingLine = -1;
+  // The page's widest line: how far a line runs before it wraps.
+  const widestLine = Math.max(0, ...lines.map((l) => l.right - l.x));
   // Where the current list item's words start, after its marker.
   let itemText: number | null = null;
 
@@ -748,12 +750,16 @@ function buildBlocks(
 
     if (heading) {
       flushAll();
-      // A long heading wrapped onto a second line is one heading.
+      // A long heading wrapped onto a second line is one heading: the line
+      // above runs most of the way across, and this one isn't numbered or
+      // a list's ("1. Introduction" / "2. Findings" are two; so are a
+      // cover's short centred lines).
       const last = blocks[blocks.length - 1];
       const above = lines[i - 1];
       if (
         last?.type === "heading" && last.level === heading && headingLine === i - 1 &&
-        Math.abs(above.fontSize - line.fontSize) < 0.5 && above.y - line.y <= line.fontSize * 1.6
+        Math.abs(above.fontSize - line.fontSize) < 0.5 && above.y - line.y <= line.fontSize * 1.6 &&
+        above.right - above.x >= widestLine * 0.6 && !/^\s*(?:\d|[•·▪◦‣\-–—*]|[a-z][.)]\s)/i.test(line.text)
       ) {
         last.text = joinLines([last.text, line.text]);
       } else {

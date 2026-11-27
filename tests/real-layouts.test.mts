@@ -117,6 +117,24 @@ const check = (name: string, ok: boolean, detail = "") => {
   check("headings with space between stay apart", headings.includes("Afrikaans") && headings.includes("isiZulu"), JSON.stringify(headings));
 }
 
+// A cover's two short title lines, and numbered headings one under the other, stay apart.
+{
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  const b = await d.embedFont(StandardFonts.HelveticaBold);
+  const p = d.addPage([612, 792]);
+  p.drawText("Northern Depot", { x: 72, y: 600, size: 28, font: b });
+  p.drawText("Safety Review 2026", { x: 72, y: 566, size: 28, font: b });
+  p.drawText("Prepared by the safety committee for the board meeting in March.", { x: 72, y: 520, size: 11, font: f });
+  p.drawText("1. Introduction", { x: 72, y: 470, size: 16, font: b });
+  p.drawText("2. Findings", { x: 72, y: 448, size: 16, font: b });
+  for (let i = 0; i < 5; i++) p.drawText("The committee walked every aisle and spoke to drivers on all three shifts about near misses.", { x: 72, y: 420 - i * 14, size: 11, font: f });
+  const doc = await parseDocument(await d.save());
+  const headings = doc.blocks.filter((x) => x.type === "heading").map((x) => (x as { text: string }).text);
+  check("a cover's short title lines stay two headings", headings.includes("Northern Depot") && headings.includes("Safety Review 2026"), JSON.stringify(headings));
+  check("numbered headings one under the other stay apart", headings.includes("1. Introduction") && headings.includes("2. Findings"), JSON.stringify(headings));
+}
+
 // 4. A report printed from a browser: its date and title at the top of each
 // page, its address and page count at the foot. They aren't part of the
 // text, and a paragraph running on over the page break is one paragraph.
