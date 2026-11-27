@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
 import { detectFormFields } from "../lib/pdf/forms.ts";
 import { createCentred } from "../lib/editor/factory.ts";
@@ -144,6 +145,29 @@ function check(name: string, ok: boolean, extra?: unknown) {
   const running = releaseClock(c, 2000);
   check("letting go of a running toast leaves it running", running.ms === TOAST_MS.other - 1000 && running.clock === c, running);
   check("errors stay longer than other toasts", TOAST_MS.error > TOAST_MS.other);
+}
+
+// Colours and high contrast, read from the stylesheet and the shared button.
+{
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const token = (name: string) => {
+    const m = css.match(new RegExp(`--${name}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`));
+    if (!m) throw new Error(`--${name} not found`);
+    const [h, s, l] = [Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100];
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+    return [f(0), f(8), f(4)];
+  };
+  const lum = (rgb: number[]) => { const [r, g, b] = rgb.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a: number[], b: number[]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  check("form field edges have 3:1 contrast on the page (WCAG 1.4.11)", ratio(token("input"), token("background")) >= 3, ratio(token("input"), token("background")));
+  check("and on muted panels", ratio(token("input"), token("muted")) >= 3, ratio(token("input"), token("muted")));
+  check("muted text has 4.5:1 on the page", ratio(token("muted-foreground"), token("background")) >= 4.5);
+  check("the focus ring has 3:1 on the page", ratio(token("ring"), token("background")) >= 3);
+  check("high contrast marks chosen pills, tabs and tools", /forced-colors: active[\s\S]*\[aria-pressed="true"\][\s\S]*\[role="tab"\]\[aria-selected="true"\]/.test(css));
+  check("the cookie banner's room is kept below the page and focus", css.includes("var(--consent-space, 0px)"));
+  const button = readFileSync(new URL("../components/ui/button.tsx", import.meta.url), "utf8");
+  check("filled buttons keep an edge in high contrast", ["bg-primary", "bg-secondary", "bg-destructive"].every((bg) => new RegExp(`border border-transparent ${bg}`).test(button)));
 }
 
 console.log(`\n${pass}/${total} passed`);
