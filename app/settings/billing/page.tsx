@@ -3,6 +3,7 @@ import { getAccount } from "@/lib/profile";
 import { AppNav } from "@/components/AppNav";
 import { PricingCards } from "@/components/PricingCards";
 import {
+  BILLING_TITLE_ID,
   ExtendButtons,
   ManageBillingButton,
   PaymentReturn,
@@ -11,7 +12,7 @@ import {
 import { TesterCodeEntry } from "@/components/TesterAccess";
 import { PLANS, TEAM_SEATS, formatBillingDate, formatPrice } from "@/lib/plans";
 import { ownPlan } from "@/lib/billing";
-import { planStatus, planTitle } from "@/lib/billing-ui";
+import { planStatus, planTitle, showsMonthlyPrice } from "@/lib/billing-ui";
 import { isAdminConfigured, listTeamMembers } from "@/lib/billing-store";
 import { isOurReference } from "@/lib/paystack";
 import { displayPrice } from "@/lib/currency";
@@ -49,24 +50,28 @@ export default async function BillingPage({
   // Tester access is free: no price, and buying stays possible but tucked away.
   // The question is about when all of it ends (Pro time can follow Team time).
   const tester = billing.source === "tester" && billing.tester ? (billing.tester.then ?? billing.tester) : null;
-  const paying = billing.source === "subscription" || billing.source === "prepaid" || billing.source === null;
+  const paying = showsMonthlyPrice(billing);
   const cards = <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />;
 
   return (
     <div className="min-h-screen">
       <AppNav plan={profile.plan} email={profile.email} billing={profile.billing} />
       <main id="main" className="container max-w-5xl py-10">
-        <h1 className="text-3xl font-bold tracking-tight">Billing</h1>
+        {/* Focus lands here when the payment notice is dismissed (its button goes with it). */}
+        <h1 id={BILLING_TITLE_ID} tabIndex={-1} className="text-3xl font-bold tracking-tight outline-none">
+          Billing
+        </h1>
 
         {reference && <PaymentReturn key={reference} reference={reference} />}
 
         <section className="mt-6 rounded-2xl border border-border bg-card p-6" data-testid="current-plan">
           <p className="text-sm text-muted-foreground">Current plan</p>
           <div className="mt-1 flex items-center justify-between gap-4">
-            <div>
+            {/* min-w-0 and break-words: a Team owner's long email in "Seat on …'s team" wraps inside the card. */}
+            <div className="min-w-0">
               <p className="text-2xl font-bold">{planTitle(billing)}</p>
               {status.map((line) => (
-                <p key={line} className="text-sm text-muted-foreground">
+                <p key={line} className="break-words text-sm text-muted-foreground">
                   {line}
                 </p>
               ))}

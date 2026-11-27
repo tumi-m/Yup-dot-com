@@ -33,5 +33,43 @@ check("public pages pass through", !open.headers.get("location"));
 
 check("loginHref encodes the path", loginHref(`/settings/billing?ref=${REF}`) === `/login?redirect=%2Fsettings%2Fbilling%3Fref%3D${REF}`);
 
+// "Log in" in the header went to the dashboard afterwards, from Pricing or a
+// tool too, so someone about to pay or mid-task lost their place.
+{
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { PathnameContext } = await import("next/dist/shared/lib/hooks-client-context.shared-runtime.js");
+  const { MarketingNav } = await import("../components/MarketingNav.tsx");
+  const loginLinks = (pathname: string, props: { loginHref?: string } = {}) => {
+    const html = renderToStaticMarkup(createElement(PathnameContext.Provider, { value: pathname }, createElement(MarketingNav, { isAuthed: false, ...props })));
+    return [...new Set([...html.matchAll(/href="([^"]*\/login[^"]*)"/g)].map((m) => m[1].replaceAll("&amp;", "&")))];
+  };
+  check("Log in on Pricing comes back to Pricing", JSON.stringify(loginLinks("/pricing")) === JSON.stringify([loginHref("/pricing")]), loginLinks("/pricing"));
+  check("Log in on a tool comes back to the tool", JSON.stringify(loginLinks("/tools/compress-pdf")) === JSON.stringify([loginHref("/tools/compress-pdf")]), loginLinks("/tools/compress-pdf"));
+  check("Log in on the home page goes on to the dashboard", JSON.stringify(loginLinks("/")) === '["/login"]', loginLinks("/"));
+  check("not for pages that only start the same", JSON.stringify(loginLinks("/pricingx")) === '["/login"]', loginLinks("/pricingx"));
+  check("a page's own loginHref still wins", JSON.stringify(loginLinks("/redeem", { loginHref: loginHref("/redeem") })) === JSON.stringify([loginHref("/redeem")]));
+
+  // The footer's "Log in" went to plain /login on every page.
+  const { SiteFooter } = await import("../components/SiteFooter.tsx");
+  const footerLogin = (pathname: string) => {
+    const html = renderToStaticMarkup(createElement(PathnameContext.Provider, { value: pathname }, createElement(SiteFooter)));
+    return [...html.matchAll(/href="([^"]*\/login[^"]*)"/g)].map((m) => m[1].replaceAll("&amp;", "&"));
+  };
+  check("the footer's Log in comes back to Pricing too", JSON.stringify(footerLogin("/pricing")) === JSON.stringify([loginHref("/pricing")]), footerLogin("/pricing"));
+  check("and to a tool", JSON.stringify(footerLogin("/tools/merge-pdf")) === JSON.stringify([loginHref("/tools/merge-pdf")]), footerLogin("/tools/merge-pdf"));
+  check("and goes on to the dashboard from the home page", JSON.stringify(footerLogin("/")) === '["/login"]', footerLogin("/"));
+}
+
+// The query came off: logging in from /pricing?currency=EUR came back to /pricing
+// in rand. The header and footer read it after load (returnLoginHref).
+{
+  const { returnLoginHref } = await import("../components/auth-redirect.ts");
+  check("the query comes along", returnLoginHref("/pricing", "?currency=EUR") === loginHref("/pricing?currency=EUR"), returnLoginHref("/pricing", "?currency=EUR"));
+  check("and an empty one adds nothing", returnLoginHref("/tools/split-pdf", "?") === loginHref("/tools/split-pdf") && returnLoginHref("/tools/split-pdf") === loginHref("/tools/split-pdf"));
+  check("elsewhere the query doesn't matter", returnLoginHref("/privacy", "?x=1") === "/login" && returnLoginHref(null, "?x=1") === "/login");
+  check("and the way back stays on this site", safeRedirect(new URLSearchParams(returnLoginHref("/pricing", "?currency=EUR").split("?")[1]).get("redirect")) === "/pricing?currency=EUR");
+}
+
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

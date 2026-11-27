@@ -883,7 +883,7 @@ someone leaves or a key changes.
       shared sender.
 6. Supabase → SQL editor: run each file in `supabase/migrations/` you
    haven't run yet, once, in date order (the newest is
-   `20261113000000_subscription_starts.sql`). Then run
+   `20261127000000_second_subscriptions.sql`). Then run
    [`supabase/audit.sql`](supabase/audit.sql): it should return no rows. Run
    it again whenever you change anything by hand (a table, a bucket, a
    function, a policy). Security Advisor should show no "RLS disabled" table.
@@ -1175,8 +1175,11 @@ Paystack accounts in South Africa charge in ZAR only.
    payments. Subscriptions are card-only.
 
 The webhook handles `charge.success`, `subscription.create`,
-`subscription.not_renew`, `subscription.disable`, `invoice.payment_failed` and
-`invoice.update`. Each delivery is applied once (`billing_events` records them).
+`subscription.not_renew`, `subscription.disable`, `invoice.payment_failed`,
+`invoice.update` and `refund.processed`. Before a failed invoice marks a
+subscription past due, Paystack is asked how it stands now, since a failure
+can be delivered after the renewal went through; if Paystack can't be asked
+the failure counts. Each delivery is applied once (`billing_events` records them).
 Only payments started by this site's checkout change a plan: checkout signs
 its metadata with a key derived from the secret key (see
 [SECURITY.md](SECURITY.md#payments)). A `subscription.create` that arrives
@@ -1188,6 +1191,46 @@ run
 [`supabase/migrations/20261113000000_subscription_starts.sql`](supabase/migrations/20261113000000_subscription_starts.sql)
 before deploying (without it a new subscription's first charge isn't applied
 and Paystack keeps sending it).
+
+**Refunds.** Refund in the Paystack dashboard; its `refund.processed`
+takes the refunded time away. A full refund of a term paid once takes that
+term off the paid-until date (never before now). A full refund of the charge
+recorded as paying the current subscription period (its first charge, or
+the renewal that moved the period on, in `subscription_periods`) ends the
+plan now and stops the subscription in Paystack, so it isn't charged again.
+A renewal doesn't say which subscription it came from, so any other refund
+(say, the extra one of two charges in a month) changes no access and is
+only logged: end or shorten the plan by hand if you mean to. Partial refunds
+count once they add up to the whole payment. A first charge refunded before
+Paystack created its subscription has that subscription stopped when it is
+created.
+
+**A second subscription.** Two subscription checkouts started before either
+was paid (two tabs) could both be paid. The same subscription asked for
+again within 30 minutes gets the same checkout link, and a second one paid
+anyway isn't applied: the return page tells the customer to contact you for
+a refund, the logs say `Billing: a second … subscription was paid`, and its
+subscription is stopped in Paystack when Paystack creates it, so it never
+renews. While an account has a subscription, any other `subscription.create`
+on its customer gets a 503, so Paystack sends it again until the second
+charge is kept; it is then stopped (whatever card paid it). Two first charges
+processed at the same moment count as one start and one second. Nothing is
+refunded automatically. To find them, run in the SQL editor:
+
+```sql
+select reference, reason, user_id, plan, amount / 100.0 as rand, created_at, subscription_code, stopped_at
+  from public.duplicate_subscription_starts order by created_at desc;
+```
+
+then for each `reason = 'second'` row, in Paystack open Transactions, search
+the `reference`, and Refund it in full (its refund changes no access; refund
+only that reference, not the account's other charge). `'refunded'` rows were
+refunded already. A row whose `stopped_at` is empty after a few minutes is a
+subscription that couldn't be stopped: find it under the customer in
+Paystack and disable it there. On a project set up before this,
+run
+[`supabase/migrations/20261127000000_second_subscriptions.sql`](supabase/migrations/20261127000000_second_subscriptions.sql)
+(without it such a charge is still not applied, but only the log names it).
 
 A checkout started before this was deployed, or before a change of
 `PAYSTACK_SECRET_KEY`, isn't signed with the key in use when it is paid, so

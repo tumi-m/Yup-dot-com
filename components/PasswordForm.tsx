@@ -8,7 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InlineError } from "@/components/motion/primitives";
-import { MIN_PASSWORD_LENGTH } from "@/components/auth-redirect";
+import { MIN_PASSWORD_LENGTH, PASSWORD_HINT, newPasswordFailure } from "@/components/auth-redirect";
+
+const MISMATCH = "The passwords don't match.";
 
 /**
  * Sets a new password for the signed-in account (after a reset link, too),
@@ -19,14 +21,19 @@ export function PasswordForm({ next }: { next?: string }) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The field the error is about, marked aria-invalid. */
+  const [invalid, setInvalid] = useState<"new" | "confirm" | null>(null);
   const [saved, setSaved] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setError(null);
+    setInvalid(null);
     setSaved(false);
     if (password !== confirm) {
-      setError("The passwords don't match.");
+      setError(MISMATCH);
+      setInvalid("confirm");
       return;
     }
     setBusy(true);
@@ -37,15 +44,9 @@ export function PasswordForm({ next }: { next?: string }) {
       setPassword("");
       setConfirm("");
     } catch (err) {
-      // With Supabase's "Secure password change" on, an older session must log in again first.
-      const reauth = err instanceof Error && ((err as { code?: string }).code === "reauthentication_needed" || /reauthenticat/i.test(err.message));
-      setError(
-        reauth
-          ? "To change your password, log out and log in again first (or use Forgot password)."
-          : err instanceof Error
-            ? err.message
-            : "Something went wrong."
-      );
+      const { message, field } = newPasswordFailure(err);
+      setError(message);
+      setInvalid(field);
     } finally {
       setBusy(false);
     }
@@ -63,11 +64,12 @@ export function PasswordForm({ next }: { next?: string }) {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={MIN_PASSWORD_LENGTH}
-          aria-describedby="new-password-hint"
+          aria-invalid={invalid === "new" || undefined}
+          aria-describedby={error ? "new-password-hint password-error" : "new-password-hint"}
           autoComplete="new-password"
         />
         <p id="new-password-hint" className="mt-1.5 text-xs text-muted-foreground">
-          At least {MIN_PASSWORD_LENGTH} characters.
+          {PASSWORD_HINT}
         </p>
       </div>
       <div>
@@ -81,9 +83,13 @@ export function PasswordForm({ next }: { next?: string }) {
           required
           minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
+          aria-invalid={invalid === "confirm" || undefined}
+          aria-describedby={error ? "password-error" : undefined}
         />
       </div>
-      <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      <div id="password-error">
+        <AnimatePresence>{error && <InlineError key="error" message={error} />}</AnimatePresence>
+      </div>
       {saved && (
         <p role="status" className="rounded-lg bg-accent px-3 py-2 text-sm text-accent-foreground motion-safe:animate-rise">
           Password saved.{" "}
@@ -92,7 +98,8 @@ export function PasswordForm({ next }: { next?: string }) {
           </Link>
         </p>
       )}
-      <Button type="submit" className="h-11 w-full" disabled={busy}>
+      {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+      <Button type="submit" className="h-11 w-full" aria-disabled={busy || undefined}>
         {busy && <Loader2 className="motion-safe:animate-spin" />}
         Save password
       </Button>

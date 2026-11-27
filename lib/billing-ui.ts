@@ -144,6 +144,16 @@ export function planStatus(billing: BillingSummary): string[] {
   return lines;
 }
 
+/**
+ * Whether the Billing page shows the plan's monthly price: for a monthly
+ * subscription, and Free's R0. A prepaid term was paid once (a year is ten
+ * months' price), a Team seat and tester time cost nothing, so "R49/mo" beside
+ * them was wrong.
+ */
+export function showsMonthlyPrice(billing: BillingSummary): boolean {
+  return billing.source === "subscription" || billing.source === null;
+}
+
 /** The plan's name on the Billing page: "Pro", or "Pro (tester)" while tester access gives it. */
 export function planTitle(billing: BillingSummary): string {
   return billing.source === "tester" ? testerPlanName(billing.plan as PaidPlanId) : PLANS[billing.plan].name;
@@ -180,7 +190,33 @@ function paidStatus(billing: BillingSummary): string[] {
   return lines;
 }
 
-export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "retry" | "unknown";
+/** How long a subscription checkout link is handed out again instead of a new one. */
+export const CHECKOUT_REUSE_MS = 30 * 60 * 1000;
+
+/**
+ * Whether the account's last checkout link answers this request: the same
+ * plan and term, made under CHECKOUT_REUSE_MS ago, on Paystack's checkout.
+ */
+export function reusableCheckout(
+  pending: { request: string; url: string; reference: string; created_at: string } | null | undefined,
+  request: string,
+  now: Date
+): boolean {
+  if (!pending || pending.request !== request) return false;
+  const age = now.getTime() - new Date(pending.created_at).getTime();
+  return age >= 0 && age < CHECKOUT_REUSE_MS && /^https:\/\//.test(pending.url) && /^pw_[0-9a-f]{24}$/.test(pending.reference);
+}
+
+/**
+ * Whether Paystack's status for a kept checkout says it can still be used:
+ * not paid on and not declined ("abandoned" until someone pays, "ongoing"
+ * while they do). Anything else, an unknown answer too, gets a new link.
+ */
+export function checkoutStillOpen(status: unknown): boolean {
+  return status === "abandoned" || status === "ongoing";
+}
+
+export type PaymentOutcome = "success" | "failed" | "other-account" | "not-applied" | "second-subscription" | "retry" | "unknown";
 
 /**
  * Reads a /api/billing/verify response. "failed" (nothing was charged) only
@@ -191,6 +227,7 @@ export function paymentOutcome(httpStatus: number, status: unknown): PaymentOutc
     case "success":
     case "other-account":
     case "not-applied":
+    case "second-subscription":
       return status;
     case "failed":
     case "abandoned":

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { WizardWordmark } from "@/components/WizardLogo";
 import { DUR, EASE_IN, EASE_OUT, SPRING_LAYOUT, STAGGER } from "@/components/motion/tokens";
 import { isNavActive } from "@/components/nav-utils";
+import { useLoginHref } from "@/components/LoginLink";
 import { cn } from "@/lib/utils";
 
 export interface NavLink {
@@ -248,11 +249,13 @@ const LINKS: NavLink[] = [
   { href: "/pricing", label: "Pricing" },
 ];
 
-export function MarketingNav({ isAuthed, loginHref = "/login" }: {
+export function MarketingNav({ isAuthed, loginHref: login }: {
   isAuthed: boolean;
   /** Where "Log in" goes: a page that should be returned to after logging in passes loginHref(itself). */
   loginHref?: string;
 }) {
+  // Back to Pricing or the tool, query and all; elsewhere on to the dashboard.
+  const loginHref = useLoginHref(login);
   return (
     <NavShell
       links={LINKS}

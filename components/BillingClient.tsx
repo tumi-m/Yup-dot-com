@@ -13,10 +13,21 @@ import { displayPrice, type PriceDisplay } from "@/lib/currency";
 import { trackBeginCheckout, trackPurchase, type CheckoutChoice } from "@/lib/analytics";
 import { paymentOutcome, paymentPlanName, waitForPayment, type PaymentOutcome } from "@/lib/billing-ui";
 import { focusAfterRemove } from "@/components/list-focus";
+import { loginHref } from "@/components/auth-redirect";
 
 export type CheckoutRequest =
   | { plan: PaidPlanId; mode: "subscription" }
   | { plan: PaidPlanId; mode: "once"; months: 1 | 12 };
+
+/**
+ * The session ended while the page was open (signed out in another tab, or
+ * it ran out), so the server answered "Sign in first.", a dead end: log in,
+ * then back to this page.
+ */
+function toLogin(): null {
+  window.location.href = loginHref(window.location.pathname + window.location.search);
+  return null;
+}
 
 /** Sends the browser to Paystack checkout. Resolves with an error message on failure. */
 export async function startCheckout(body: CheckoutRequest): Promise<string | null> {
@@ -27,6 +38,7 @@ export async function startCheckout(body: CheckoutRequest): Promise<string | nul
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) return toLogin();
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.url) return data.error || "Checkout failed.";
     window.location.href = data.url;
@@ -45,10 +57,12 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
   const [error, setError] = useState<string | null>(null);
 
   async function open() {
+    if (loading) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/billing/manage", { method: "POST" });
+      if (res.status === 401) return void toLogin();
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) throw new Error(data.error || "Couldn't open subscription settings.");
       window.location.href = data.url;
@@ -60,7 +74,8 @@ export function ManageBillingButton({ label = "Manage subscription", variant = "
 
   return (
     <div>
-      <Button variant={variant} onClick={open} disabled={loading}>
+      {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+      <Button variant={variant} onClick={open} aria-disabled={loading || undefined}>
         {loading ? <Loader2 className="motion-safe:animate-spin" /> : <ExternalLink />}
         {label}
       </Button>
@@ -75,6 +90,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
   const [error, setError] = useState<string | null>(null);
 
   async function extend(months: 1 | 12) {
+    if (loading !== null) return;
     setLoading(months);
     setError(null);
     const err = await startCheckout({ plan, mode: "once", months });
@@ -88,7 +104,7 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
     <div>
       <div className="flex flex-wrap items-center gap-2">
         {([1, 12] as const).map((m) => (
-          <Button key={m} variant={m === 12 ? "default" : "outline"} disabled={loading !== null} onClick={() => extend(m)}>
+          <Button key={m} variant={m === 12 ? "default" : "outline"} aria-disabled={loading !== null || undefined} onClick={() => extend(m)}>
             {loading === m && <Loader2 className="motion-safe:animate-spin" />}
             Extend {m === 1 ? "1 month" : "1 year"} · {displayPrice(display, prepaidPrice(plan, m))}
           </Button>
@@ -104,6 +120,9 @@ export function ExtendButtons({ plan, display }: { plan: PaidPlanId; display?: P
 }
 
 type VerifyState = "checking" | "pending" | Exclude<PaymentOutcome, "retry">;
+
+/** The Billing page's heading. */
+export const BILLING_TITLE_ID = "billing-title";
 
 /**
  * Shown on return from Paystack (?ref=…). Confirms the payment server-side,
@@ -154,6 +173,8 @@ export function PaymentReturn({ reference }: { reference: string }) {
   }, [reference, router]);
 
   function dismiss() {
+    // The notice and its button go: focus the page's heading, not the top of the page.
+    document.getElementById(BILLING_TITLE_ID)?.focus({ preventScroll: true });
     router.replace("/settings/billing", { scroll: false });
   }
 
@@ -192,6 +213,15 @@ export function PaymentReturn({ reference }: { reference: string }) {
         {state === "other-account" && (
           <p className="font-medium">
             This payment belongs to a different account. Sign in with the account you paid from.
+          </p>
+        )}
+        {state === "second-subscription" && (
+          <p className="font-medium">
+            You already have this subscription, so this second payment wasn&apos;t used and won&apos;t renew.{" "}
+            <Link href="/contact" className="underline underline-offset-2 hover:text-primary">
+              Contact us
+            </Link>{" "}
+            for a refund, with reference <span className="break-all font-mono text-sm">{reference}</span>.
           </p>
         )}
         {(state === "not-applied" || state === "unknown") && (
@@ -293,9 +323,10 @@ export function TeamSeats({
         )}
       </div>
       <ul ref={listRef} className="relative mt-4 divide-y divide-border rounded-2xl border border-border bg-card">
-        <li className="flex items-center justify-between px-5 py-3 text-sm">
-          <span>{ownerEmail}</span>
-          <span className="text-muted-foreground">Owner</span>
+        {/* Long emails wrap, so Remove stays inside the card on a phone. */}
+        <li className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+          <span className="min-w-0 break-all">{ownerEmail}</span>
+          <span className="shrink-0 text-muted-foreground">Owner</span>
         </li>
         <AnimatePresence initial={false} mode="popLayout">
           {members.map((m) => (
@@ -306,12 +337,13 @@ export function TeamSeats({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, x: 24, transition: EXIT_T }}
               transition={{ ...ENTER_T, layout: SPRING_LAYOUT }}
-              className="flex items-center justify-between px-5 py-3 text-sm"
+              className="flex items-center justify-between gap-3 px-5 py-3 text-sm"
             >
-              <span>{m}</span>
+              <span className="min-w-0 break-all">{m}</span>
               <Button
                 variant="ghost"
                 size="sm"
+                className="shrink-0"
                 aria-label={`Remove ${m}`}
                 data-member={m}
                 // aria-disabled, not disabled: a disabled button drops the focus it has.
@@ -338,16 +370,24 @@ export function TeamSeats({
             required
             placeholder="colleague@company.co.za"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              // An answer about the last email isn't about this one.
+              setError(null);
+            }}
             aria-label="Member email"
+            aria-describedby={error ? "team-error" : undefined}
           />
-          <Button type="submit" disabled={busy !== null}>
+          {/* aria-disabled, not disabled: a disabled button drops the focus it has. */}
+          <Button type="submit" aria-disabled={busy !== null || undefined}>
             {busy === "add" ? <Loader2 className="motion-safe:animate-spin" /> : <UserPlus />}
             Add
           </Button>
         </form>
       )}
-      <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
+      <div id="team-error">
+        <AnimatePresence>{error && <InlineError key="error" compact message={error} className="mt-2 text-sm" />}</AnimatePresence>
+      </div>
       <p className="mt-3 text-xs text-muted-foreground">
         {ended
           ? "Your Team plan has ended. These emails get Team again if you renew it, so remove any you no longer want."

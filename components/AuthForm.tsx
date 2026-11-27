@@ -11,12 +11,14 @@ import { WizardWordmark } from "@/components/WizardLogo";
 import { Aurora, Starfield } from "@/components/landing/HeroScene";
 import {
   MIN_PASSWORD_LENGTH,
+  PASSWORD_HINT,
   authErrorMessage,
   authFailure,
   authSwitchHref,
   resetLinkTarget,
   revealsAccount,
   safeRedirect,
+  submitState,
 } from "@/components/auth-redirect";
 import { Captcha, TURNSTILE_SITE_KEY } from "@/components/Captcha";
 import { track } from "@/lib/analytics";
@@ -52,8 +54,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     if (linkError) setError(linkError);
   }, [otherPage]);
 
+  const configured = isSupabaseConfigured();
+  const submit = submitState({ configured, loading, captcha: !!TURNSTILE_SITE_KEY, token: captchaToken });
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // The button is only aria-disabled while this runs or the check waits, so Enter can still submit.
+    if (submit.blocked) return;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -91,8 +98,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
         // open another: their tester link brings it back.
         const checkEmail =
           redirectTo === "/redeem"
-            ? "Check your email to confirm your account. Then open your tester link again."
-            : "Check your email to confirm your account, then log in.";
+            ? "Check your email to confirm your account. Then open your tester link again. Didn't get it? Try again in a minute."
+            : "Check your email to confirm your account, then log in. Didn't get it? Try again in a minute.";
         if (error) {
           // An email that already has an account gets the same answer as a new one.
           if (!revealsAccount(error, "signup")) throw error;
@@ -127,7 +134,6 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
     }
   }
 
-  const configured = isSupabaseConfigured();
   const field = "h-11";
 
   return (
@@ -182,6 +188,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
+              aria-describedby={error ? "auth-error" : undefined}
             />
           </div>
           {!isReset && (
@@ -196,12 +203,12 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={isSignup ? MIN_PASSWORD_LENGTH : undefined}
-                aria-describedby={isSignup ? "auth-password-hint" : undefined}
+                aria-describedby={[isSignup && "auth-password-hint", error && "auth-error"].filter(Boolean).join(" ") || undefined}
                 autoComplete={isSignup ? "new-password" : "current-password"}
               />
               {isSignup && (
                 <p id="auth-password-hint" className="mt-1.5 text-xs text-muted-foreground">
-                  At least {MIN_PASSWORD_LENGTH} characters.
+                  {PASSWORD_HINT}
                 </p>
               )}
               {!isSignup && (
@@ -218,7 +225,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
           )}
 
           {error && (
-            <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-rise">
+            <p id="auth-error" role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-rise">
               {error}
             </p>
           )}
@@ -230,7 +237,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" | "reset" }) {
 
           {configured && <Captcha onToken={setCaptchaToken} resetKey={captchaReset} />}
 
-          <Button type="submit" className="h-11 w-full" disabled={loading || !configured || (!!TURNSTILE_SITE_KEY && !captchaToken)}>
+          {/* aria-disabled while working or waiting for the security check (see submitState). */}
+          <Button type="submit" className="h-11 w-full" disabled={submit.disabled} aria-disabled={submit.ariaDisabled || undefined}>
             {loading && <Loader2 className="motion-safe:animate-spin" />}
             {isSignup ? "Sign up" : isReset ? "Send link" : "Log in"}
           </Button>

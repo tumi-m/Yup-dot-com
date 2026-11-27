@@ -1,7 +1,7 @@
 import { handlePaystackEvent, verifyPaystackSignature } from "@/lib/billing";
 import { isAdminConfigured, supabaseBillingStore } from "@/lib/billing-store";
 import { json } from "@/lib/billing-route";
-import { planForCode } from "@/lib/paystack";
+import { disableSubscription, fetchSubscription, listRefunds, planForCode, verifyTransaction } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * Paystack retry, so failures to record return 500, and an event that can't
  * apply yet (a subscription.create before its first charge, or another event
  * before its subscription.create) 503; anything we deliberately ignore
- * returns 200.
+ * returns 200. A refund.processed takes the refunded time away (applyRefund).
  */
 export async function POST(request: Request) {
   const secret = process.env.PAYSTACK_SECRET_KEY?.trim();
@@ -31,10 +31,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    const paystack = { secretKey: secret };
     const result = await handlePaystackEvent(event, raw, {
       store: supabaseBillingStore(),
       planForCode: (c) => planForCode(c),
       checkoutSecret: secret,
+      // Refunds look the payment up, a second subscription is stopped, and a
+      // failed invoice is checked against the subscription as it stands now.
+      paystack: {
+        transaction: (reference) => verifyTransaction(paystack, reference),
+        disableSubscription: (code, token) => disableSubscription(paystack, code, token),
+        subscription: (code) => fetchSubscription(paystack, code),
+        refunds: (reference) => listRefunds(paystack, reference),
+      },
     });
     if (result.status === "retry") {
       console.info("paystack event deferred", event.event, result.reason);

@@ -136,6 +136,110 @@ function view(r: BillingRow, at = now) {
       JSON.stringify(planStatus(back.billing)) === JSON.stringify(["Renews 1 Dec 2026"]), back.billing);
 }
 
+// A failed renewal's event delivered late (Paystack retries a webhook for
+// days), after the card was updated and the renewal paid, marked a paying
+// customer past due: "Payment failed. Update your card". Before marking it,
+// the webhook now asks Paystack how the subscription stands; when it can't,
+// the failure counts, so a real one is never missed.
+{
+  function setup() {
+    const db = new Map<string, BillingRow>([[USER, row({ subscription_status: null, current_period_end: null, paystack_subscription_code: null, paystack_email_token: null })]]);
+    const events = new Set<string>();
+    const store: BillingStore = {
+      async claimEvent(k) { if (events.has(k)) return false; events.add(k); return true; },
+      async releaseEvent(k) { events.delete(k); },
+      async getRow(id) { return { ...db.get(id)! }; },
+      async findUserId(by) {
+        for (const r of db.values()) {
+          if (by.subscriptionCode ? r.paystack_subscription_code === by.subscriptionCode : r.paystack_customer_code === by.customerCode) return r.id;
+        }
+        return null;
+      },
+      async updateRow(id, p: BillingPatch) { const { plan: _p, ...rest } = p; db.set(id, { ...db.get(id)!, ...rest }); },
+    };
+    let clock = new Date("2026-11-01T08:00:00Z");
+    // Paystack's subscription now: set per case ("down" throws).
+    const paystackSays = { status: "attention" as string };
+    const deps: EventDeps = {
+      store, planForCode: (c) => (c === "PLN_pro" ? "pro" : null), checkoutSecret: "sk_test", now: () => clock,
+      paystack: {
+        async transaction() { throw new Error("not used"); },
+        async disableSubscription() {},
+        async subscription() {
+          if (paystackSays.status === "down") throw new Error("Payment provider unreachable.");
+          return { status: paystackSays.status, next_payment_date: "2027-01-03T08:00:00.000Z" };
+        },
+      },
+    };
+    const deliver = (event: string, data: unknown) => {
+      const raw = JSON.stringify({ event, data });
+      return handlePaystackEvent(JSON.parse(raw), raw, deps);
+    };
+    return { db, deliver, at: (iso: string) => (clock = new Date(iso)), deps, paystackSays };
+  }
+  const customer = { customer_code: "CUS_u", email: "u@x.co" };
+  const authorization = { authorization_code: "AUTH_u" };
+  const failedInvoice = {
+    period_start: "2026-12-01T08:00:00.000Z", period_end: "2027-01-01T08:00:00.000Z", paid: false, status: "pending",
+    subscription: { subscription_code: "SUB_A", status: "attention", next_payment_date: "2026-12-01T08:00:00.000Z" }, customer,
+  };
+  const renewal = { status: "success", reference: "T_renew", amount: 4900, currency: "ZAR", paid_at: "2026-12-03T08:00:00.000Z", plan: { plan_code: "PLN_pro" }, customer, metadata: "" };
+  async function started() {
+    const s = setup();
+    await applyCharge({
+      status: "success", reference: "pw_first", amount: 4900, currency: "ZAR", paid_at: "2026-11-01T08:00:00.000Z",
+      plan: "PLN_pro", customer, authorization, metadata: checkoutMetadata("pw_first", { user_id: USER, plan: "pro", mode: "subscription" }, "sk_test"),
+    }, s.deps);
+    await s.deliver("subscription.create", {
+      subscription_code: "SUB_A", email_token: "tok", status: "active", next_payment_date: "2026-12-01T08:00:00.000Z",
+      plan: { plan_code: "PLN_pro" }, customer, authorization,
+    });
+    return s;
+  }
+
+  // In order: the renewal fails, then the card is updated and it's paid.
+  {
+    const s = await started();
+    s.at("2026-12-01T09:00:00Z");
+    const failedFirst = await s.deliver("invoice.payment_failed", failedInvoice);
+    check("a renewal that fails on its date: past due", failedFirst.status === "applied" && s.db.get(USER)!.subscription_status === "attention");
+    s.at("2026-12-03T09:00:00Z");
+    await s.deliver("charge.success", renewal);
+    const v = view(s.db.get(USER)!, new Date("2026-12-03T09:00:00Z"));
+    check("…then paid: active, renewing a month on", v.billing.subscription?.status === "active" && !v.billing.subscription.pastDue &&
+      JSON.stringify(planStatus(v.billing)) === JSON.stringify(["Renews 3 Jan 2027"]), planStatus(v.billing));
+  }
+  // Late: the paid renewal first, then the failure's delivery.
+  {
+    const s = await started();
+    s.at("2026-12-03T09:00:00Z");
+    await s.deliver("charge.success", renewal);
+    s.paystackSays.status = "active";
+    const late = await s.deliver("invoice.payment_failed", failedInvoice);
+    const lateUpdate = await s.deliver("invoice.update", { ...failedInvoice, invoice_code: "INV_1" });
+    const v = view(s.db.get(USER)!, new Date("2026-12-03T09:00:00Z"));
+    check("the failure delivered after the paid renewal changes nothing",
+      late.status === "ignored" && lateUpdate.status === "ignored" && v.billing.subscription?.status === "active" && !v.billing.subscription.pastDue,
+      { late, lateUpdate, status: v.billing.subscription?.status });
+    check("…so Billing doesn't say the payment failed", JSON.stringify(planStatus(v.billing)) === JSON.stringify(["Renews 3 Jan 2027"]), planStatus(v.billing));
+  }
+  // Paystack can't be asked: the failure counts, as before.
+  {
+    const s = await started();
+    s.at("2026-12-01T09:00:00Z");
+    s.paystackSays.status = "down";
+    await s.deliver("invoice.payment_failed", failedInvoice);
+    check("Paystack can't be asked: a failure still marks it past due", s.db.get(USER)!.subscription_status === "attention");
+  }
+  // Without the lookup at all (no Paystack actions), as before too.
+  {
+    const s = await started();
+    delete (s.deps as { paystack?: unknown }).paystack;
+    await s.deliver("invoice.payment_failed", failedInvoice);
+    check("no lookup: a failure marks it past due", s.db.get(USER)!.subscription_status === "attention");
+  }
+}
+
 // The page and the manage route go by the same summary.
 {
   const page = readFileSync(new URL("../app/settings/billing/page.tsx", import.meta.url), "utf8");

@@ -77,6 +77,10 @@ export default function RefundsPage() {
             the affected payment.
           </li>
           <li>
+            A payment refunded in full stops giving you its plan when the refund is made. If it paid for the current
+            month of a subscription, the subscription ends then and doesn&apos;t renew.
+          </li>
+          <li>
             Otherwise, once you&apos;ve used paid features, payments (including pay-once plans) aren&apos;t refundable,
             and we don&apos;t refund part of a month or the unused part of a year, except where the law requires it.
           </li>

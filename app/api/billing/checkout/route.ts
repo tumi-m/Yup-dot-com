@@ -3,6 +3,8 @@ import { checkoutMetadata, type CheckoutMetadata } from "@/lib/billing";
 import { siteUrl } from "@/lib/site";
 import { payOnceBlock, subscribeBlock } from "@/lib/billing-ui";
 import { billingContext, json } from "@/lib/billing-route";
+import { getPendingCheckout, savePendingCheckout } from "@/lib/billing-store";
+import { checkoutStillOpen, reusableCheckout } from "@/lib/billing-ui";
 import { refuseCrossSite } from "@/lib/cross-site";
 import { PLANS, prepaidPrice, toSubunit } from "@/lib/plans";
 import {
@@ -12,6 +14,7 @@ import {
   initializeTransaction,
   newReference,
   planCodes,
+  verifyTransaction,
 } from "@/lib/paystack";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +71,22 @@ export async function POST(request: Request) {
     channels = ONCE_OFF_CHANNELS;
   }
 
+  // The same subscription asked for again soon (a second tab, a double
+  // tap): the same checkout link, so two can't both be paid and both renew
+  // (applyCharge keeps a second one for a refund if it happens anyway).
+  const asked = `${input.plan}:${input.mode}`;
+  if (input.mode === "subscription") {
+    const pending = await getPendingCheckout(account.user.id).catch((err) => {
+      console.error("read checkout link failed", err);
+      return null;
+    });
+    if (reusableCheckout(pending, asked, new Date())) {
+      // Only while nobody has paid on it or been declined: then a new one.
+      const status = await verifyTransaction(paystack, pending!.reference).then((tx) => tx.status, () => null);
+      if (checkoutStillOpen(status)) return json({ url: pending!.url, reference: pending!.reference });
+    }
+  }
+
   try {
     const tx = await initializeTransaction(paystack, {
       email,
@@ -79,6 +98,11 @@ export async function POST(request: Request) {
       channels,
       plan,
     });
+    if (input.mode === "subscription") {
+      await savePendingCheckout(account.user.id, { request: asked, reference, url: tx.authorization_url }).catch((err) =>
+        console.error("keep checkout link failed", err)
+      );
+    }
     return json({ url: tx.authorization_url, reference });
   } catch (err) {
     const status = err instanceof PaystackError ? err.status : 502;

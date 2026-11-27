@@ -1,4 +1,4 @@
-import { confirmCharge, parseMetadata } from "@/lib/billing";
+import { DUPLICATE_START, confirmCharge, parseMetadata } from "@/lib/billing";
 import { supabaseBillingStore } from "@/lib/billing-store";
 import { billingContext, json } from "@/lib/billing-route";
 import { isOurReference, planForCode, verifyTransaction } from "@/lib/paystack";
@@ -42,6 +42,8 @@ export async function GET(request: Request) {
       planForCode: (c) => planForCode(c),
       checkoutSecret: paystack.secretKey,
     });
+    // A second subscription, paid while the first is live: kept for a refund.
+    if (result.status === "ignored" && result.reason === DUPLICATE_START) return json({ status: "second-subscription" }, 409);
     if (result.status === "ignored") {
       // Paystack took the money but it doesn't match a plan we sell.
       console.error("payment not applied", reference, result.reason);
