@@ -24,10 +24,14 @@ export function parsePill(value: string | null | undefined): ToolPill {
 /** Words a search can leave out: "merge pdf online free" means "merge pdf". */
 const FILLER = new Set(["to", "a", "the", "and", "online", "free"]);
 
-/** Lowercase words, one trailing "s" off, so "pdfs" finds "PDF" and "covers" "cover". */
+/**
+ * Lowercase words, one trailing "s" off, so "pdfs" finds "PDF" and "covers"
+ * "cover". "PDF/A" is one word ("pdfa"): split, its "a" would be dropped.
+ */
 function words(text: string): string[] {
   return text
     .toLowerCase()
+    .replace(/\bpdf\s*[/-]\s*a(?![\p{L}\p{N}])/gu, "pdfa")
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean)
     .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w));

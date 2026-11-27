@@ -388,6 +388,32 @@ export const PROCESSORS: Record<string, ToolProcessor> = {
     note: "Works on a copy: your original stays as it is.",
     run: async (files, _o, ctx) => (await kit()).repairTool(files, ctx),
   },
+  "pdf-to-pdfa": {
+    cancellable: true,
+    accept: "application/pdf",
+    multiple: false,
+    minFiles: 1,
+    fields: [
+      {
+        key: "part",
+        label: "Standard",
+        type: "select",
+        default: "2",
+        options: [
+          { value: "2", label: "PDF/A-2b", hint: "Recommended: what most archives, courts and universities ask for. Attached files are removed." },
+          { value: "3", label: "PDF/A-3b", hint: "Like PDF/A-2b, and attached files are kept, such as an invoice's data." },
+        ],
+      },
+      {
+        key: "password",
+        label: "Password (only if the PDF needs one to open)",
+        type: "password",
+        default: "",
+      },
+    ],
+    note: "Works on a copy. Fonts are embedded, scripts removed, and the result is checked.",
+    run: async (files, o, ctx) => (await kit()).pdfaTool(files, { part: o.part, password: o.password }, ctx),
+  },
   "compress-pdf": {
     cancellable: true,
     reportsSizeChange: true,

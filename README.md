@@ -35,6 +35,7 @@ and deletes it straight after; its pages say so.
 | **TXT → PDF** | A text file (UTF-8, UTF-16 or Windows-1252) laid out on A4 or Letter pages: words wrapped, long words broken, new pages as they fill, a form feed starts a page. Margins, text size (9–14 pt), Sans or Monospace (indents and columns kept), page numbers. Embedded Noto Sans / Noto Sans Mono, so accented Latin, Greek, Cyrillic and Devanagari (shaped) come out right; letters the font lacks (Chinese, Japanese, Korean, Arabic, Hebrew, emoji) are left out and the result says how many. Runs in a worker. |
 | **Markdown → PDF** | The same layout for `.md`: headings, bold, italic, strikethrough, inline code, clickable links (web and mail only), numbered, bulleted, task and nested lists, quotes, code blocks, rules and GitHub tables (header repeated on each page). HTML is never rendered: tags are dropped and their words kept. Images aren't fetched; their description is shown. |
 | **HTML to PDF** | A web page by its address, an `.html` file or pasted HTML, opened by Chromium on the media worker and printed: A4, Letter or one long page, portrait or landscape, margins, backgrounds, as on screen or the site's print version. Text stays selectable and links work. Pages are opened signed out, with no cookies; private and local addresses are refused on every request the page makes. The PDF is deleted from the worker once downloaded. *Hidden until `NEXT_PUBLIC_ENABLE_HTML_TO_PDF=1`; needs the media worker. Guests 5 a day, free 15, Pro 200.* [More below](#html-to-pdf). |
+| **PDF → PDF/A** | An archival copy, PDF/A-2b (or 3b, which keeps attached files): fonts that aren't in the file embedded from free look-alikes with the same letter widths (Arimo, Tinos, Cousine), an sRGB output intent, XMP metadata matching the document's details, a file identifier; scripts, forbidden actions, multimedia, LZW, transfer functions, external streams and (in 2b) attachments taken out; encryption removed (asks for the password when one is needed to open); form fields flattened; comments given their own appearance and print flag. Pages that can't be fixed in place become pictures with their text kept searchable, and are named. Then our own check of those rules, shown plainly as ours, with a pointer to veraPDF for formal proof. Runs in a worker. [More below](#pdf-to-pdfa). |
 | **PDF → Word** | Editable DOCX with real heading styles, lists, and tables. |
 | **Translate PDF** | The document's text (never the file) translated by the language model behind the AI Assistant into one of 91 languages, South Africa's 11 official written languages among them: a Word file with headings, lists and tables kept (right to left for Arabic, Hebrew, Persian and Urdu), and a PDF for Latin, Greek, Cyrillic and Devanagari scripts. Progress by passage, Cancel, a preview. Scanned pages are named and sent to OCR PDF. *Guests 15,000 characters a day; needs the AI settings.* [More below](#translate-pdf). |
 | **Word → PDF** | *Hidden until `NEXT_PUBLIC_ENABLE_OFFICE_CONVERT=1`; needs the media worker with LibreOffice.* `.docx`, `.doc`, `.odt`, `.rtf` converted by headless LibreOffice on the media worker, with fonts made to Office's widths (Carlito, Caladea, Liberation), all embedded, headings as bookmarks, tagged. **Uploads the file** (the page says so) and deletes it as soon as the PDF is sent. Guests 5 a day, free 10, Pro 200; 25 MB, 100 MB with Pro. [More below](#word-and-excel-to-pdf). |
@@ -435,6 +436,39 @@ what it counted; nothing half-translated is offered as a file.
 Translate PDF isn't among the tools the homepage offers for a dropped PDF:
 those twelve fill three rows of four above the fold, and a thirteenth sat
 alone below it.
+
+## PDF to PDF/A
+
+`/tools/pdf-to-pdfa` (`lib/pdf/pdfa/`) works in a Web Worker on pdf-lib, with
+no server and no Ghostscript. `convert.ts` runs the steps: open (decrypting as
+Unlock PDF does), flatten form fields with Flatten PDF's code (checkboxes
+whose mark is a ZapfDingbats letter are redrawn as lines first),
+`annotations.ts`, `objects.ts` (actions, attachments, streams, graphics state,
+odd hex strings and numbers, optional content), then `content.ts` reads every
+content stream (pages, forms, appearances, Type 3 glyphs, patterns, soft
+masks) with the compress lexer: which fonts draw which codes visibly, operators
+PDF doesn't define (cut out), inline images and q/Q nesting PDF/A forbids.
+
+Fonts that draw visible text but aren't embedded get a substitute
+(`fonts.ts`, `truetype.ts`): each code's glyph name (from its encoding and
+`glyph-names.ts`) or ToUnicode gives the letter, found in Arimo, Tinos or
+Cousine (@fontsource, OFL, served from `/vendor`), and a small symbolic
+TrueType font of just those glyphs is written with each glyph as wide as the
+PDF already draws it, so nothing moves and the widths agree. A letter that
+can't be found, or whose natural width is more than 5% of the size away, makes
+that font's pages pictures instead: drawn by pdf.js at 200 DPI on the page
+(`pictures.ts`), with the page's text invisible over them, then put in place
+(`splice.ts`; links are kept and moved). `colour.ts` adds the sRGB output
+intent (a CC0 ICC v2 profile kept in `srgb.ts`), or keeps a sound RGB or CMYK
+one the file had, and gives DeviceCMYK a default colour space (the usual
+CMYK-to-RGB formula) where needed; it also checks ICC profiles and JPEG 2000
+pictures. `metadata.ts` writes the XMP and Info alike, and the trailer ID.
+`check.ts` reads the saved file back and checks those rules; the report says
+it is our own check and points to veraPDF. PDF/A-1b isn't offered: it forbids
+transparency and wants CharSet and CIDSet lists for every font subset, which
+would need Type 1 and CFF font parsing this tool doesn't have, so many pages
+would become pictures. The tests (`tests/pdf-to-pdfa.test.mts`) also save
+their results when `PDFA_OUT` is set, to run veraPDF on them.
 
 ## Motion design
 

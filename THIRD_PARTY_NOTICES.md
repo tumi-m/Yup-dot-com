@@ -35,6 +35,22 @@ License 1.1, from the @fontsource packages at version 5.3.0. The font files are 
 `/vendor/noto-sans-mono/` with the licence beside them (`LICENSE.txt`), and
 only the letters a document uses are embedded in its PDF.
 
+PDF to PDF/A embeds Arimo, Tinos and Cousine (Copyright 2020 The Arimo
+Project Authors, https://github.com/googlefonts/arimo; Copyright 2026 The
+Tinos Project Authors, https://github.com/googlefonts/tinos; Copyright 2026 The
+Cousine Project Authors, https://github.com/googlefonts/cousine), licensed under the SIL Open Font
+License 1.1, from the @fontsource packages at version 5.3.0, served from
+`/vendor/arimo/`, `/vendor/tinos/` and `/vendor/cousine/` with their licence
+(`LICENSE.txt`). Only the letters a document draws are embedded in its PDF.
+
+## Colour profile
+
+PDF to PDF/A embeds the sRGB ICC profile `sRGB-v2-magic.icc` from Compact ICC
+Profiles by Clinton Ingram (https://github.com/saucecontrol/Compact-ICC-Profiles),
+dedicated to the public domain under CC0 1.0. It is kept, unchanged, as base64
+in `lib/pdf/pdfa/srgb.ts` (SHA-256
+af4efe28f6d311799865f325ba39184a2e978b113ca74124d60af7de22b105f4).
+
 The source code of the MPL-2.0 and GPL-licensed components is available at the
 links above, for the exact versions listed.
 

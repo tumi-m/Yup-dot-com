@@ -29,6 +29,7 @@ import { TranslateAbout } from "@/components/tools/TranslateAbout";
 import { OfficeAbout } from "@/components/tools/OfficeAbout";
 import type { OfficeTool } from "@/lib/office";
 import { WebToPdfAbout } from "@/components/tools/WebToPdfAbout";
+import { PdfaAbout } from "@/components/tools/PdfaAbout";
 
 export function generateStaticParams() {
   return TOOLS.map((t) => ({ slug: t.slug }));
@@ -102,6 +103,7 @@ export default async function ToolPage({
           {tool.slug === "translate-pdf" && <TranslateAbout />}
           {tool.custom === "office" && <OfficeAbout tool={tool.slug as OfficeTool} />}
           {tool.slug === "html-to-pdf" && <WebToPdfAbout />}
+          {tool.slug === "pdf-to-pdfa" && <PdfaAbout />}
 
           <RelatedTools slug={tool.slug} />
         </div>
