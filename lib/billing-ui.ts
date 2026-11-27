@@ -144,6 +144,16 @@ export function planStatus(billing: BillingSummary): string[] {
   return lines;
 }
 
+/**
+ * Whether the Billing page shows the plan's monthly price: for a monthly
+ * subscription, and Free's R0. A prepaid term was paid once (a year is ten
+ * months' price), a Team seat and tester time cost nothing, so "R49/mo" beside
+ * them was wrong.
+ */
+export function showsMonthlyPrice(billing: BillingSummary): boolean {
+  return billing.source === "subscription" || billing.source === null;
+}
+
 /** The plan's name on the Billing page: "Pro", or "Pro (tester)" while tester access gives it. */
 export function planTitle(billing: BillingSummary): string {
   return billing.source === "tester" ? testerPlanName(billing.plan as PaidPlanId) : PLANS[billing.plan].name;

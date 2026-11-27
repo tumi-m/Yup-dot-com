@@ -12,7 +12,7 @@ import {
 import { TesterCodeEntry } from "@/components/TesterAccess";
 import { PLANS, TEAM_SEATS, formatBillingDate, formatPrice } from "@/lib/plans";
 import { ownPlan } from "@/lib/billing";
-import { planStatus, planTitle } from "@/lib/billing-ui";
+import { planStatus, planTitle, showsMonthlyPrice } from "@/lib/billing-ui";
 import { isAdminConfigured, listTeamMembers } from "@/lib/billing-store";
 import { isOurReference } from "@/lib/paystack";
 import { displayPrice } from "@/lib/currency";
@@ -50,7 +50,7 @@ export default async function BillingPage({
   // Tester access is free: no price, and buying stays possible but tucked away.
   // The question is about when all of it ends (Pro time can follow Team time).
   const tester = billing.source === "tester" && billing.tester ? (billing.tester.then ?? billing.tester) : null;
-  const paying = billing.source === "subscription" || billing.source === "prepaid" || billing.source === null;
+  const paying = showsMonthlyPrice(billing);
   const cards = <PricingCards isAuthed currentPlan={profile.plan} billing={billing} display={display} />;
 
   return (

@@ -6,7 +6,7 @@ import {
   hasLiveSubscription, resolveAccess, summarize, type BillingRow,
 } from "../lib/billing.ts";
 import {
-  cardOffer, payOnceBlock, paymentOutcome, planStatus, subscribeBlock, verifyDelay, waitForPayment, type PaymentOutcome,
+  cardOffer, payOnceBlock, paymentOutcome, planStatus, showsMonthlyPrice, subscribeBlock, verifyDelay, waitForPayment, type PaymentOutcome,
 } from "../lib/billing-ui.ts";
 import type { PaidPlanId } from "../lib/plans.ts";
 
@@ -212,6 +212,17 @@ for (const v of [{ plan: undefined, billing: undefined }, viewer(row())]) {
   });
   check("a stopped run ends quietly", (await first) === null);
   check("another run isn't stopped with it", (await second) === "failed");
+}
+
+// Billing showed "Pro · Paid until … · R49/mo" for a year paid at once (R490).
+{
+  const prepaidYear = viewer(row({ prepaid_plan: "pro", paid_until: "2027-10-17T08:00:00Z", paystack_subscription_code: null }));
+  check("a prepaid term shows no monthly price", prepaidYear.billing.source === "prepaid" && !showsMonthlyPrice(prepaidYear.billing));
+  check("a monthly subscription does", showsMonthlyPrice(viewer(sub("pro", "active")).billing));
+  check("so does Free (R0)", showsMonthlyPrice(viewer(row({ paystack_subscription_code: null })).billing));
+  const owner = row({ subscription_plan: "team", subscription_status: "active", current_period_end: "2026-11-17T08:00:00Z" }, OWNER);
+  const seat = viewer(row({ paystack_subscription_code: null }), [owner]);
+  check("a Team seat costs its member nothing: no price", seat.billing.source === "team" && !showsMonthlyPrice(seat.billing));
 }
 
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
