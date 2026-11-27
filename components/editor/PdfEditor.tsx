@@ -1043,11 +1043,12 @@ export function PdfEditor({
           </Button>
           <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
           {/* aria-disabled while busy, as Undo: focus stays on the button. Both return early then. */}
-          <Button variant="outline" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
+          {/* Icon-only on phones, as wide as their neighbours, so the bar fits 320px without buttons overlapping. */}
+          <Button variant="outline" className="max-sm:px-2.5" onClick={handleDownload} aria-disabled={busy || !bytes} aria-label="Download">
             {working === "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Download />}
             <span className="hidden sm:inline">Download</span>
           </Button>
-          <Button onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
+          <Button className="max-sm:px-2.5" onClick={handleSave} aria-disabled={busy || !bytes} aria-label={working === "save" ? "Saving…" : "Save"}>
             {busy && working !== "download" ? <Loader2 className="motion-safe:animate-spin" /> : <Save />}
             <span className="hidden sm:inline">{working === "save" ? "Saving…" : "Save"}</span>
           </Button>
