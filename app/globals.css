@@ -19,7 +19,8 @@
     --destructive: 0 72% 44%;
     --destructive-foreground: 0 0% 100%;
     --border: 263 25% 91%;
-    --input: 263 25% 91%;
+    /* Form field edges: 3:1 against the page and cards (WCAG 1.4.11). */
+    --input: 263 12% 56%;
     --ring: 262 83% 58%;
     --radius: 0.75rem;
   }
