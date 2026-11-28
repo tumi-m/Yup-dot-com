@@ -1,7 +1,7 @@
 // The homepage offers tools for the files dropped on it. With several PDFs it
 // used to offer Compress PDF, PDF to Word and Edit PDF, which then quietly
 // kept the first file and dropped the rest.
-import { addFiles, handoffType, heroActions, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, TWO_ACTIONS, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
+import { addFiles, handoffType, heroActions, pdfPickerAccept, IMAGE_ACTIONS, MIXED_ACTIONS, MULTI_ACTIONS, PDF_ACTIONS, PPTX_ACTIONS, TAKES_ALL, TWO_ACTIONS, takePdfs, tooBigFor } from "../components/landing/hero-actions.ts";
 import { LIMITS } from "../lib/limits.ts";
 import { PROCESSORS } from "../components/tools/processors.ts";
 import { TOOLS } from "../lib/tools.tsx";
@@ -94,6 +94,17 @@ check("mixed picture formats: JPG to PDF", heroActions("pdf", [jpg, svg, { name:
 check("handoff: an untyped HEIC goes as image/heic", handoffType(heic) === "image/heic", handoffType(heic));
 check("handoff: an untyped TIFF goes as image/tiff", handoffType({ name: "scan.TIFF", type: "" }) === "image/tiff");
 check("handoff: JPG to PDF takes what it is handed", ["image/heic", "image/tiff", "image/svg+xml", "image/webp"].every((t) => PROCESSORS["jpg-to-pdf"].accept.includes(t)));
+
+// The PDF branch's file picker offered HTML files while HTML to PDF was on,
+// but not Word and Excel files while their tools were, though a drop hands
+// all of them on.
+{
+  const off = pdfPickerAccept({ office: false, html: false }).split(",");
+  const on = pdfPickerAccept({ office: true, html: true }).split(",");
+  check("picker: PDFs, pictures and text whatever is switched on", ["application/pdf", "image/jpeg", ".txt", ".md"].every((t) => off.includes(t) && on.includes(t)), off);
+  check("picker: no Word, Excel or HTML while their tools are off", ![".docx", ".xlsx", ".csv", ".html"].some((t) => off.includes(t)), off);
+  check("picker: Word, Excel and HTML files while their tools are on", [".docx", ".doc", ".odt", ".rtf", ".xlsx", ".xls", ".ods", ".html", ".htm"].every((t) => on.includes(t)), on);
+}
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

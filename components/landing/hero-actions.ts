@@ -2,9 +2,26 @@
 
 import { fileKind, MARKDOWN_NAME } from "@/lib/journey";
 import { limitsFor, type Tier } from "@/lib/limits";
-import { OFFICE_ENABLED } from "@/lib/office";
+import { OFFICE_ENABLED, officeAccept } from "@/lib/office";
+import { HTML_TO_PDF_ENABLED } from "@/lib/web-pdf";
+import { acceptFor, ALL_FORMATS } from "@/lib/pdf/images-to-pdf/formats";
 
 export const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/**
+ * What the PDF branch's file picker offers: PDFs, pictures and text, and
+ * the Word, Excel and HTML files that are handed to their tools while those
+ * are on, as a drop on the homepage is.
+ */
+export function pdfPickerAccept(on: { office: boolean; html: boolean } = { office: OFFICE_ENABLED, html: HTML_TO_PDF_ENABLED }): string {
+  return [
+    "application/pdf",
+    acceptFor(ALL_FORMATS),
+    "text/plain,text/markdown,.txt,.md,.markdown",
+    ...(on.office ? [officeAccept("word-to-pdf"), officeAccept("excel-to-pdf")] : []),
+    ...(on.html ? [".html,.htm,text/html"] : []),
+  ].join(",");
+}
 
 export const PDF_ACTIONS = [
   "edit-pdf",
