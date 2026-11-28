@@ -17,7 +17,7 @@ texts ship with each package in `node_modules/<name>/`.
 | Tesseract.js and core | 7.0.0 | Apache-2.0 | https://github.com/naptha/tesseract.js |
 | JSZip | 3.10.2 | MIT (chosen from MIT or GPL-3.0) | https://github.com/Stuk/jszip |
 | docx | 9.15.2 | MIT | https://github.com/dolanmiu/docx |
-| Motion | 12.43.0 | MIT | https://github.com/motiondivision/motion |
+| Motion | 14.14.0 | MIT | https://github.com/motiondivision/motion |
 | marked (Markdown to PDF) | 18.1.2 | MIT | https://github.com/markedjs/marked |
 | fontkit, pdf-lib build (Text and Markdown to PDF) | 1.1.1 | MIT | https://github.com/Hopding/fontkit |
 | UTIF.js, as utif2 (TIFF to PDF) | 4.1.0 | MIT | https://github.com/photopea/UTIF.js |
