@@ -12,10 +12,12 @@ sites like iLovePDF and Smallpdf) with a full editor and a freemium SaaS layer.
 
 ## Tools (the spellbook)
 
-All tools run **entirely in the browser** — files are never uploaded — so they
-work with or without an account. The one exception is Word and Excel to PDF
-(hidden until switched on), which uploads the file to our conversion server
-and deletes it straight after; its pages say so.
+The PDF tools run **entirely in the browser** — files are never uploaded — so
+they work with or without an account. The exceptions: Word and Excel to PDF
+and HTML to PDF (hidden until switched on) send the file, the HTML or the web
+address to our conversion server, which deletes what it made straight after,
+and Chat with PDF and Translate PDF send the document's text, never the file;
+their pages say so. The video tools and the Sample Finder send the link.
 
 | Tool | What it does |
 | ---- | ------------ |
