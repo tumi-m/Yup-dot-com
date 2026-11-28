@@ -1,6 +1,6 @@
 # "default" adds yt-dlp-ejs (YouTube challenge solver scripts); "deno" adds the
 # JavaScript runtime that runs them. Without both, YouTube downloads fail.
-yt-dlp[default,deno]>=2026.10.26
+yt-dlp[default,deno]>=2026.11.23
 # HTML to PDF (render.py): Playwright drives headless Chromium, and the
 # Dockerfile installs the Chromium build this exact version expects.
 # Apache-2.0; greenlet and pyee (its dependencies) are MIT.
