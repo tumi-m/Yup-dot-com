@@ -104,6 +104,8 @@ function vorbisPrivate() {
 /**
  * A VP8 WebM as MediaRecorder writes it: SimpleBlocks with no frame
  * durations and a cluster a second. With `vorbis`, it has Vorbis sound.
+ * Frames are added with no duration: given one, mediabunny's muxer
+ * (1.65) writes it on the last frame of each cluster.
  */
 async function recordingLike(frames: number, { fps = 30, vorbis = false } = {}): Promise<Blob> {
   const target = new BufferTarget();
@@ -118,7 +120,7 @@ async function recordingLike(frames: number, { fps = 30, vorbis = false } = {}):
     const key = i % fps === 0;
     // A VP8 frame tag (key or inter frame, shown), then a key frame's start code and size.
     const data = key ? new Uint8Array([0x10, 0, 0, 0x9d, 0x01, 0x2a, W & 255, W >> 8, H & 255, H >> 8]) : new Uint8Array([0x11, 0, 0, i & 255]);
-    await video.add(new EncodedPacket(data, key ? "key" : "delta", i / fps, 1 / fps), i ? undefined : { decoderConfig: { codec: "vp8", codedWidth: W, codedHeight: H } });
+    await video.add(new EncodedPacket(data, key ? "key" : "delta", i / fps, 0), i ? undefined : { decoderConfig: { codec: "vp8", codedWidth: W, codedHeight: H } });
     for (; audio && heard * FRAMES <= ((i + 1) / fps) * RATE; heard++) {
       const meta = heard ? undefined : { decoderConfig: { codec: "vorbis", sampleRate: RATE, numberOfChannels: 2, description: vorbisPrivate() } };
       await audio.add(new EncodedPacket(new Uint8Array([0]), "key", (heard * FRAMES) / RATE, FRAMES / RATE), meta);
