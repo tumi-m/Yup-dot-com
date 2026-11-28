@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { ResolvingMetadata } from "next";
+import { pageMetadata } from "@/lib/page-metadata";
 import { getAccount } from "@/lib/profile";
 import { AppNav } from "@/components/AppNav";
 import { MarketingNav } from "@/components/MarketingNav";
@@ -6,10 +7,15 @@ import { RedeemFlow } from "@/components/TesterAccess";
 import { loginHref } from "@/components/auth-redirect";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = {
-  title: "Tester access",
-  robots: { index: false, follow: false },
-};
+// A tester link is sent to people: its preview names the page, not the home
+// page. Kept out of search results.
+export async function generateMetadata(_: unknown, parent: ResolvingMetadata) {
+  return {
+    ...(await pageMetadata({ title: "Tester access", description: "Use your PDF Wizard tester code to get free Pro or Team.", path: "/redeem" }, parent)),
+    alternates: {},
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * Where a tester link lands: /redeem#K7QM-8XRP-2D4N-W9HC. The code is only

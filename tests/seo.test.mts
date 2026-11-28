@@ -96,6 +96,14 @@ const ALL = shownTools({ youtube: true, office: true, html: true });
     check(`${path}: noindex, no canonical link, own description on shared links`,
       robots?.index === false && robots.follow === true && !!md.description && og.title === md.title && og.description === md.description && !md.alternates?.canonical, md);
   }
+  {
+    const page = await import("../app/redeem/page.tsx");
+    const md = await page.generateMetadata({}, parent);
+    const robots = md.robots as { index?: boolean; follow?: boolean };
+    const og = md.openGraph as { title?: string; description?: string };
+    check("/redeem: noindex, no canonical link, its own title and description on a shared tester link",
+      robots?.index === false && md.title === "Tester access" && !!md.description && og.title === md.title && og.description === md.description && !md.alternates?.canonical, md);
+  }
   for (const file of ["dashboard/page.tsx", "settings/billing/page.tsx", "settings/password/page.tsx", "editor/[id]/page.tsx"]) {
     const src = readFileSync(new URL(`../app/${file}`, import.meta.url), "utf8");
     check(`${file}: noindex`, /robots:\s*\{\s*index:\s*false/.test(src));
